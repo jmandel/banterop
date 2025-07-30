@@ -1,0 +1,17 @@
+## Overview
+
+This is a Language-First Interoperability Scenario Builder implementing schema v2.4 specification. It's a full-stack Bun.js application leveraging Bun's built-in capabilities for SQLite, testing, and static web hosting. The architecture separates concerns between a backend API server and a frontend static server, both powered by Bun's runtime.
+
+Use Bun builtins and idiomatic JS
+
+Keep unit tets upd todate
+
+update progress-log.md as you go
+
+you do not use "any" when we have proper types available.
+
+when debuggin gtests, instrument code with consol elogs, run specific testa, dn clean up the code whne done.
+
+please don't implement timeouts to "make tests pass", that's not a good way to test event driven systems.
+
+

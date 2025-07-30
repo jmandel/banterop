@@ -1,0 +1,33 @@
+{
+  "name": "agent-communication-platform",
+  "version": "1.0.0",
+  "description": "Agentic Communication Testing Platform with WebSocket and REST API support",
+  "type": "module",
+  "scripts": {
+    "//--- DEVELOPMENT ---": "",
+    "dev:backend": "bun --watch src/backend/index.ts",
+    "dev:frontend": "bun --port 3000 src/frontend/dashboard/index.html src/frontend/trace-viewer/index.html src/frontend/scenario-builder/index.html src/frontend/executor/index.html src/frontend/external-executor/index.html",
+
+    "//--- PRODUCTION ---": "",
+    "build": "bun build ./src/frontend/**/*.tsx --outdir ./dist --target browser",
+    "start": "NODE_ENV=production bun src/backend/index.ts",
+    "serve": "bun --port 8080 ./dist",
+
+    "//--- OTHER ---": "",
+    "demo": "bun src/demos/multi-agent-demo.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "events": "^3.3.0",
+    "hono": "^4.8.9",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/uuid": "^10.0.0",
+    "@types/node": "^24.1.0",
+    "bun-types": "^1.2.19"
+  },
+  "peerDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,33 @@
+# --- Dependencies ---
+node_modules/
+browser/node_modules/
+
+# --- Build artifacts / bundles ---
+browser/dist/
+# Tailwind compiled CSS
+browser/src/styles/output.css
+
+# --- Bun / lock files ---
+bun.lock*
+
+# --- Databases & generated data ---
+*.sqlite*
+*.db
+output*/
+progress/
+
+# --- Logs ---
+*.log
+
+# --- Environment ---
+.env
+.env.*
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+
+dist
+dashboard/dist
+dashboard/public
+debug
