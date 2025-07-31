@@ -6,6 +6,7 @@ import {
   AgentConfig, AgentInterface,
   ScenarioDrivenAgentConfig,
   SequentialScriptConfig,
+  ScenarioConfiguration,
 } from '$lib/types.js';
 import type { LLMProvider } from 'src/types/llm.types.js';
 import { ScenarioDrivenAgent } from './scenario-driven.agent.js';
@@ -17,14 +18,26 @@ import { ToolSynthesisService } from './services/tool-synthesis.service.js';
 export function createAgent(
   config: AgentConfig, 
   client: OrchestratorClient,
-  // Injected system-level dependencies:
-  db: ConversationDatabase,
-  llmProvider: LLMProvider,
-  toolSynthesisService: ToolSynthesisService 
+  // Group all dependencies into a single object
+  dependencies: {
+    db: ConversationDatabase;
+    llmProvider: LLMProvider;
+    toolSynthesisService: ToolSynthesisService;
+    scenario?: ScenarioConfiguration; // Optional, as not all agents need it
+  }
 ): AgentInterface {
   switch (config.strategyType) {
     case 'scenario_driven':
-      return new ScenarioDrivenAgent(config as ScenarioDrivenAgentConfig, client, db, llmProvider, toolSynthesisService);
+      if (!dependencies.scenario) {
+        throw new Error('ScenarioDrivenAgent requires a scenario configuration to be provided via dependencies.');
+      }
+      return new ScenarioDrivenAgent(
+        config as ScenarioDrivenAgentConfig, 
+        client, 
+        dependencies.scenario, // Pass the scenario object directly
+        dependencies.llmProvider, 
+        dependencies.toolSynthesisService
+      );
     case 'sequential_script':
       return new SequentialScriptAgent(config as SequentialScriptConfig, client);
     default:

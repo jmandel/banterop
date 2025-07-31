@@ -13,7 +13,8 @@ import {
   ConversationEvent, TurnShell, OrchestratorConversationState,
   UserQueryRequest, UserQueryResponse, StartTurnRequest, StartTurnResponse, AddTraceEntryRequest,
   CompleteTurnRequest, SubscriptionOptions, ThoughtEntry,
-  ToolCallEntry, ScenarioDrivenAgentConfig, FormattedUserQuery, UserQueryRow
+  ToolCallEntry, ScenarioDrivenAgentConfig, FormattedUserQuery, UserQueryRow,
+  ScenarioConfiguration
 } from '$lib/types.js';
 
 interface InProgressTurnState {
@@ -167,13 +168,29 @@ export class ConversationOrchestrator {
       try {
         console.log(`[Orchestrator] Creating ${agentConfig.strategyType} agent: ${agentConfig.agentId.label}`);
         
+        let scenarioForAgent: ScenarioConfiguration | undefined = undefined;
+
+        if (agentConfig.strategyType === 'scenario_driven') {
+          const scenarioConfig = agentConfig as ScenarioDrivenAgentConfig;
+          const loadedScenario = this.db.findScenarioByIdAndVersion(scenarioConfig.scenarioId, scenarioConfig.scenarioVersionId);
+          
+          if (!loadedScenario) {
+            console.error(`[Orchestrator] CRITICAL: Failed to load scenario ${scenarioConfig.scenarioId} for agent ${agentConfig.agentId.label}. Skipping agent.`);
+            continue; // Skip provisioning this agent
+          }
+          scenarioForAgent = loadedScenario;
+        }
+        
         const client = createClient('in-process', this);
         const agent = createAgent(
           agentConfig, 
           client,
-          this.db,
-          this.llmProvider,
-          this.toolSynthesisService
+          { // Pass the new dependencies object
+            db: this.db,
+            llmProvider: this.llmProvider,
+            toolSynthesisService: this.toolSynthesisService,
+            scenario: scenarioForAgent // Pass the pre-loaded scenario
+          }
         );
         
         // Get the token for this agent

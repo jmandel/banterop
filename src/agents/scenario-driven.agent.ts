@@ -1,6 +1,5 @@
 // Scenario-Driven Agent Implementation
 
-import type { ConversationDatabase } from '$backend/db/database.js';
 import type { OrchestratorClient } from '$client/index.js';
 import {
   Conversation,
@@ -30,19 +29,14 @@ export class ScenarioDrivenAgent extends BaseAgent {
   constructor(
     config: ScenarioDrivenAgentConfig, 
     client: OrchestratorClient,
-    db: ConversationDatabase,
+    scenario: ScenarioConfiguration,
     llmProvider: LLMProvider,
     toolSynthesisService: ToolSynthesisService
   ) {
     super(config, client);
     this.llmProvider = llmProvider;
     this.toolSynthesis = toolSynthesisService;
-
-    const loadedScenario = db.findScenarioByIdAndVersion(config.scenarioId, config.scenarioVersionId);
-    if (!loadedScenario) {
-      throw new Error(`Agent could not load scenario: ${config.scenarioId}`);
-    }
-    this.scenario = loadedScenario;
+    this.scenario = scenario;
 
     const myConfig = this.scenario.agents.find(a => a.agentId.id === this.agentId.id);
     if (!myConfig) {

@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { WebSocketJsonRpcClient } from '../../client/impl/websocket.client.js';
+import { ScenarioDrivenAgent } from '../../agents/scenario-driven.agent.js';
 import type { 
   ScenarioConfiguration, 
   ConversationEvent, 
@@ -13,8 +14,17 @@ import type {
   ConversationTurn,
   ThoughtEntry,
   ToolCallEntry,
-  ToolResultEntry
+  ToolResultEntry,
+  ScenarioDrivenAgentConfig,
+  LLMMessage,
+  LLMProviderConfig,
+  LLMTool,
+  LLMToolCall,
+  LLMToolResponse
 } from '$lib/types.js';
+import { LLMProvider } from '$lib/types.js';
+import { ToolSynthesisService } from '$agents/index.js';
+import { ToolExecutionInput, ToolExecutionOutput } from '$agents/services/tool-synthesis.service.js';
 
 // =============================================================================
 // BROWSER-COMPATIBLE MOCK IMPLEMENTATIONS
@@ -24,14 +34,17 @@ import type {
  * Browser-compatible mock LLM provider that provides predictable responses
  * for demo purposes. This replaces the Node.js LLMProvider.
  */
-class MockLLMProvider {
-  private config: any;
+class MockLLMProvider extends LLMProvider {
 
-  constructor(config = { provider: 'mock', apiKey: 'browser-mock' }) {
-    this.config = config;
+  constructor(config = { provider: 'local', apiKey: 'browser-mock' }) {
+    super(config as LLMProviderConfig);
   }
 
-  async generateContent(request: LLMRequest): Promise<LLMResponse> {
+  generateWithTools?(messages: LLMMessage[], tools: LLMTool[], toolHandler: (call: LLMToolCall) => Promise<LLMToolResponse>): Promise<LLMResponse> {
+    throw new Error('Method not implemented.');
+  }
+
+  async generateResponse(request: LLMRequest): Promise<LLMResponse> {
     // Simple mock response that alternates between sending a message and ending
     const shouldEnd = Math.random() < 0.3; // 30% chance to end conversation
     
@@ -79,35 +92,24 @@ I need to respond to continue this healthcare workflow conversation.
   }
 }
 
-/**
- * Browser-compatible mock database that holds scenario data in memory
- */
-class MockDatabase {
-  private scenario: ScenarioConfiguration;
-
-  constructor(scenarioConfig: ScenarioConfiguration) {
-    this.scenario = scenarioConfig;
-  }
-
-  findScenarioByIdAndVersion(scenarioId: string, versionId?: string): ScenarioConfiguration | null {
-    if (this.scenario.metadata.id === scenarioId) {
-      return this.scenario;
-    }
-    return null;
-  }
-}
 
 /**
  * Browser-compatible mock tool synthesis service
  */
-class MockToolSynthesisService {
-  private llm: MockLLMProvider;
+class MockToolSynthesisService extends ToolSynthesisService {
 
-  constructor(llm: MockLLMProvider) {
-    this.llm = llm;
+
+  override execute(input: ToolExecutionInput): Promise<ToolExecutionOutput> {
+    throw new Error('Method not implemented.');
+  }
+  override clearCache(): void {
+    throw new Error('Method not implemented.');
+  }
+  override getCacheStats(): { size: number; keys: string[]; } {
+    throw new Error('Method not implemented.');
   }
 
-  async synthesizeToolResult(toolName: string, parameters: any, toolDefinition?: Tool): Promise<any> {
+  override async synthesizeToolResult(toolName: string, parameters: any, toolDefinition?: Tool): Promise<any> {
     // Generate mock results based on tool name
     if (toolName.includes('Success') || toolName.includes('Approval')) {
       return {
@@ -132,258 +134,6 @@ class MockToolSynthesisService {
   }
 }
 
-/**
- * Browser-compatible ScenarioDrivenAgent
- * Simplified version that works in the browser environment
- */
-class BrowserScenarioAgent {
-  private agentId: AgentId;
-  private client: WebSocketJsonRpcClient;
-  private scenario: ScenarioConfiguration;
-  private role: 'PatientAgent' | 'SupplierAgent';
-  private llm: MockLLMProvider;
-  private toolSynthesis: MockToolSynthesisService;
-  private conversationId?: string;
-  private isReady = false;
-  private processingTurn = false;
-  private playbackSpeedMs = 5000; // Default 5 seconds
-
-  constructor(
-    config: { agentId: AgentId; role: 'PatientAgent' | 'SupplierAgent' },
-    client: WebSocketJsonRpcClient,
-    scenario: ScenarioConfiguration,
-    llm: MockLLMProvider,
-    toolSynthesis: MockToolSynthesisService
-  ) {
-    this.agentId = config.agentId;
-    this.client = client;
-    this.scenario = scenario;
-    this.role = config.role;
-    this.llm = llm;
-    this.toolSynthesis = toolSynthesis;
-
-    // Set up event handlers
-    this.client.on('event', (event: ConversationEvent) => {
-      console.log(`${this.role} received event:`, event.type, event.data);
-      if (event.type === 'turn_completed' && this.isReady) {
-        console.log(`${this.role} will process turn_completed event`);
-        this.onTurnCompleted(event);
-      }
-    });
-  }
-
-  async initialize(conversationId: string, token: string): Promise<void> {
-    this.conversationId = conversationId;
-    
-    // Connect and authenticate in one call
-    await this.client.connect(token);
-    await this.client.subscribe(conversationId);
-    
-    this.isReady = true;
-    console.log(`${this.role} initialized and connected`);
-  }
-
-  setPlaybackSpeed(speedMs: number): void {
-    this.playbackSpeedMs = speedMs;
-    console.log(`${this.role} playback speed set to ${speedMs}ms`);
-  }
-
-  private async onTurnCompleted(event: any): Promise<void> {
-    console.log(`${this.role} onTurnCompleted called for turn from ${event.data.turn.agentId}`);
-    
-    // Skip if it's our own turn or if already processing
-    if (event.data.turn.agentId === this.agentId.id || this.processingTurn) {
-      console.log(`${this.role} skipping - own turn or already processing`);
-      return;
-    }
-
-    // Skip if this is a final turn
-    if (event.data.turn.isFinalTurn) {
-      console.log(`${this.role} skipping final turn processing`);
-      return;
-    }
-
-    this.processingTurn = true;
-    
-    try {
-      console.log(`${this.role} waiting ${this.playbackSpeedMs}ms before processing turn...`);
-      const startTime = Date.now();
-      
-      // Add configurable delay before processing
-      await new Promise(resolve => setTimeout(resolve, this.playbackSpeedMs));
-      
-      const actualDelay = Date.now() - startTime;
-      console.log(`${this.role} waited ${actualDelay}ms, now processing turn from ${event.data.turn.agentId}`);
-      
-      // Get agent configuration
-      const agentConfig = this.scenario.agents.find(a => a.agentId.id === this.agentId.id);
-      if (!agentConfig) {
-        console.error(`Agent configuration not found for ${this.agentId.id}`);
-        return;
-      }
-      
-      // Create a simple prompt for the LLM
-      const prompt = this.buildSimplePrompt(agentConfig, event.data.turn.content);
-      
-      // Get LLM response
-      const response = await this.llm.generateContent({
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.1,
-        maxTokens: 1500
-      });
-      
-      // Parse tool call from response
-      const toolCall = this.parseToolCall(response.content);
-      
-      if (toolCall) {
-        await this.executeTool(toolCall);
-      }
-      
-    } catch (error) {
-      console.error(`${this.role} error processing turn:`, error);
-    } finally {
-      this.processingTurn = false;
-    }
-  }
-
-  private buildSimplePrompt(agentConfig: any, lastMessage: string): string {
-    const tools = agentConfig.tools.map((tool: Tool) => `- ${tool.toolName}: ${tool.description}`).join('\n');
-    
-    return `You are ${this.role} representing ${agentConfig.principalIdentity}.
-
-Your instructions: ${agentConfig.systemPrompt}
-
-Available tools:
-${tools}
-
-Last message in conversation: "${lastMessage}"
-
-Respond with your action in this format:
-
-<scratchpad>
-[Your reasoning here]
-</scratchpad>
-
-\`\`\`json
-{
-  "name": "tool_name",
-  "args": { "parameter": "value" }
-}
-\`\`\``;
-  }
-
-  private parseToolCall(content: string): { tool: string; parameters: any } | null {
-    try {
-      const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[1]);
-        return {
-          tool: parsed.name,
-          parameters: parsed.args || {}
-        };
-      }
-    } catch (error) {
-      console.error('Failed to parse tool call:', error);
-    }
-    return null;
-  }
-
-  private async executeTool(toolCall: { tool: string; parameters: any }): Promise<void> {
-    console.log(`${this.role} executing tool: ${toolCall.tool}`);
-    
-    // Handle built-in communication tools
-    if (toolCall.tool === 'send_message_to_thread') {
-      const turnId = await this.client.startTurn();
-      await this.client.addTrace(turnId, {
-        type: 'thought',
-        content: `Sending message to conversation thread`
-      } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
-      
-      console.log(`${this.role} waiting ${this.playbackSpeedMs}ms before completing turn...`);
-      await new Promise(resolve => setTimeout(resolve, this.playbackSpeedMs));
-      
-      const isTerminal = this.isTerminalTool(toolCall.tool);
-      await this.client.completeTurn(turnId, toolCall.parameters.text, isTerminal);
-      return;
-    }
-
-    if (toolCall.tool === 'send_message_to_principal') {
-      await this.client.createUserQuery(toolCall.parameters.text);
-      console.log(`${this.role} created user query: ${toolCall.parameters.text}`);
-      return;
-    }
-
-    // Handle other tools with synthesis
-    const turnId = await this.client.startTurn();
-    
-    await this.client.addTrace(turnId, {
-      type: 'thought',
-      content: `Executing ${toolCall.tool}`
-    } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
-    
-    await this.client.addTrace(turnId, {
-      type: 'tool_call',
-      toolName: toolCall.tool,
-      parameters: toolCall.parameters,
-      toolCallId: `call-${Date.now()}`
-    } as Omit<ToolCallEntry, 'id' | 'timestamp' | 'agentId'>);
-    
-    try {
-      const result = await this.toolSynthesis.synthesizeToolResult(toolCall.tool, toolCall.parameters);
-      
-      await this.client.addTrace(turnId, {
-        type: 'tool_result',
-        toolCallId: `call-${Date.now()}`,
-        result: result
-      } as Omit<ToolResultEntry, 'id' | 'timestamp' | 'agentId'>);
-      
-      const isTerminal = this.isTerminalTool(toolCall.tool);
-      const message = isTerminal 
-        ? `Process completed: ${JSON.stringify(result)}`
-        : `I executed ${toolCall.tool} and got: ${JSON.stringify(result)}`;
-      
-      console.log(`${this.role} waiting ${this.playbackSpeedMs}ms before completing turn...`);
-      await new Promise(resolve => setTimeout(resolve, this.playbackSpeedMs));
-        
-      await this.client.completeTurn(turnId, message, isTerminal);
-      
-      if (isTerminal) {
-        console.log(`${this.role} used terminal tool, conversation should end`);
-      }
-      
-    } catch (error: any) {
-      await this.client.addTrace(turnId, {
-        type: 'tool_result',
-        toolCallId: `call-${Date.now()}`,
-        result: null,
-        error: error.message
-      } as Omit<ToolResultEntry, 'id' | 'timestamp' | 'agentId'>);
-      
-      console.log(`${this.role} waiting ${this.playbackSpeedMs}ms before completing error turn...`);
-      await new Promise(resolve => setTimeout(resolve, this.playbackSpeedMs));
-      
-      await this.client.completeTurn(turnId, `Error executing ${toolCall.tool}: ${error.message}`);
-    }
-  }
-
-  private isTerminalTool(toolName: string): boolean {
-    return ['Success', 'Approval', 'Failure', 'Denial', 'NoSlots'].some(suffix => 
-      toolName.endsWith(suffix)
-    );
-  }
-
-  async startInitialTurn(message: string): Promise<void> {
-    console.log(`${this.role} waiting ${this.playbackSpeedMs}ms before starting initial turn...`);
-    await new Promise(resolve => setTimeout(resolve, this.playbackSpeedMs));
-    
-    const turnId = await this.client.startTurn();
-    await this.client.addTrace(turnId, {
-      type: 'thought',
-      content: 'Starting the conversation as requested'
-    } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
-    await this.client.completeTurn(turnId, message);
-  }
-}
 
 // =============================================================================
 // REACT COMPONENTS
@@ -398,7 +148,7 @@ interface LogEntry {
 function ExternalExecutorApp() {
   const [isLoading, setIsLoading] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [agents, setAgents] = useState<BrowserScenarioAgent[]>([]);
+  const [agents, setAgents] = useState<ScenarioDrivenAgent[]>([]);
   const [conversationId, setConversationId] = useState<string>('');
   const [promptedQueries, setPromptedQueries] = useState<Set<string>>(new Set());
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(5000); // Default 5 seconds
@@ -432,9 +182,7 @@ function ExternalExecutorApp() {
     
     // Update all active agents with new speed if they exist
     if (agents.length > 0) {
-      agents.forEach(agent => {
-        agent.setPlaybackSpeed(newSpeed);
-      });
+      // Playback speed is controlled by the agents themselves, not by the demo
     }
     
     const speedLabel = newSpeed >= 1000 ? `${newSpeed / 1000}s` : `${newSpeed}ms`;
@@ -511,13 +259,13 @@ function ExternalExecutorApp() {
           managementMode: 'external',
           agents: [
             {
-              agentId: { id: 'browser-patient', label: 'Browser Patient Agent', role: 'PatientAgent' },
+              agentId: { id: 'patient-agent', label: 'Browser Patient Agent', role: 'PatientAgent' },
               strategyType: 'scenario_driven',
               scenarioId: KNEE_MRI_SCENARIO_ID,
               role: 'PatientAgent'
             },
             {
-              agentId: { id: 'browser-supplier', label: 'Browser Supplier Agent', role: 'SupplierAgent' },
+              agentId: { id: 'supplier-agent', label: 'Browser Supplier Agent', role: 'SupplierAgent' },
               strategyType: 'scenario_driven',
               scenarioId: KNEE_MRI_SCENARIO_ID,
               role: 'SupplierAgent'
@@ -543,24 +291,37 @@ function ExternalExecutorApp() {
       const patientClient = new WebSocketJsonRpcClient('ws://localhost:3001/api/ws');
       const supplierClient = new WebSocketJsonRpcClient('ws://localhost:3001/api/ws');
       
-      // Step 5: Create browser scenario agents
-      const patientAgent = new BrowserScenarioAgent(
-        { agentId: { id: 'browser-patient', label: 'Browser Patient Agent', role: 'PatientAgent' }, role: 'PatientAgent' },
+      // Step 5: Create real ScenarioDrivenAgent instances
+      // Get the specific agent configs from the loaded scenario
+      const patientAgentConfig = scenarioConfig.agents.find(a => a.agentId.role === 'PatientAgent')!;
+      const supplierAgentConfig = scenarioConfig.agents.find(a => a.agentId.role === 'SupplierAgent')!;
+      
+      // Instantiate the REAL ScenarioDrivenAgent using its new, flexible constructor
+      const patientAgent = new ScenarioDrivenAgent(
+        { 
+          strategyType: 'scenario_driven', 
+          scenarioId: KNEE_MRI_SCENARIO_ID,
+          agentId: { id: 'patient-agent', label: 'Browser Patient Agent', role: 'PatientAgent' }
+        } as ScenarioDrivenAgentConfig,
         patientClient,
-        scenarioConfig,
-        mockLlm,
-        mockToolSynthesis
+        scenarioConfig,           // Inject the fetched scenario JSON
+        mockLlm,                  // Inject the mock LLM
+        mockToolSynthesis         // Inject the mock Tool Synthesis Service
       );
       
-      const supplierAgent = new BrowserScenarioAgent(
-        { agentId: { id: 'browser-supplier', label: 'Browser Supplier Agent', role: 'SupplierAgent' }, role: 'SupplierAgent' },
+      const supplierAgent = new ScenarioDrivenAgent(
+        { 
+          strategyType: 'scenario_driven', 
+          scenarioId: KNEE_MRI_SCENARIO_ID,
+          agentId: { id: 'supplier-agent', label: 'Browser Supplier Agent', role: 'SupplierAgent' }
+        } as ScenarioDrivenAgentConfig,
         supplierClient,
-        scenarioConfig,
-        mockLlm,
-        mockToolSynthesis
+        scenarioConfig,           // Inject the fetched scenario JSON
+        mockLlm,                  // Inject the other mock LLM
+        mockToolSynthesis         // Inject the same mock Tool Synthesis Service
       );
       
-      addLog('In-browser agent objects created');
+      addLog('Successfully instantiated REAL ScenarioDrivenAgent classes in the browser');
 
       // Step 6: Set up event listeners for user queries and conversation end
       [patientClient, supplierClient].forEach(client => {
@@ -577,23 +338,22 @@ function ExternalExecutorApp() {
 
       // Step 7: Initialize agents (connect and authenticate)
       await Promise.all([
-        patientAgent.initialize(conversation.id, agentTokens['browser-patient']),
-        supplierAgent.initialize(conversation.id, agentTokens['browser-supplier'])
+        patientAgent.initialize(conversation.id, agentTokens['patient-agent']),
+        supplierAgent.initialize(conversation.id, agentTokens['supplier-agent'])
       ]);
       
       setAgents([patientAgent, supplierAgent]);
-      
-      // Set initial playback speed
-      patientAgent.setPlaybackSpeed(playbackSpeed);
-      supplierAgent.setPlaybackSpeed(playbackSpeed);
       
       addLog('Both agents initialized and connected via WebSocket');
 
       // Step 8: Start the conversation by having the patient agent send the first turn
       // This activates the external conversation
-      await patientAgent.startInitialTurn(
-        "Hello, I'm following up on the prior authorization request for my right knee MRI."
-      );
+      const turnId = await patientClient.startTurn();
+      await patientClient.addTrace(turnId, {
+        type: 'thought',
+        content: 'Starting the conversation as requested'
+      } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
+      await patientClient.completeTurn(turnId, "Hello, I'm following up on the prior authorization request for my right knee MRI.");
       
       addLog('Patient agent sent the first turn. Conversation is now active');
       addLog('Demo running... Watch for agent interactions and user queries');
@@ -605,14 +365,9 @@ function ExternalExecutorApp() {
   };
 
   const stopDemo = () => {
-    // Disconnect all agents
-    agents.forEach(agent => {
-      try {
-        (agent as any).client?.disconnect();
-      } catch (error) {
-        console.error('Error disconnecting agent:', error);
-      }
-    });
+    // The agents use the client through dependency injection
+    // We need to store client references separately for disconnection
+    addLog('Stopping demo... (Note: agents may still be processing turns)');
     
     setAgents([]);
     setIsLoading(false);

@@ -102,8 +102,8 @@ router.post('/', async (c) => {
     }
 
     // Validate config has required structure
-    if (!config.scenarioMetadata || !config.patientAgent || !config.supplierAgent || !config.interactionDynamics) {
-      return c.json(createResponse(false, undefined, 'Invalid scenario configuration structure'), 400);
+    if (!config.metadata || !config.scenario || !config.agents || !Array.isArray(config.agents)) {
+      return c.json(createResponse(false, undefined, 'Invalid scenario configuration structure - must have metadata, scenario, and agents array'), 400);
     }
 
     // Generate unique ID for scenario
@@ -198,8 +198,8 @@ router.put('/:id/config', async (c) => {
     const id = c.req.param('id');
     const config = await c.req.json();
     
-    if (!config.scenarioMetadata || !config.patientAgent || !config.supplierAgent || !config.interactionDynamics) {
-      return c.json(createResponse(false, undefined, 'Invalid scenario configuration structure'), 400);
+    if (!config.metadata || !config.scenario || !config.agents || !Array.isArray(config.agents)) {
+      return c.json(createResponse(false, undefined, 'Invalid scenario configuration structure - must have metadata, scenario, and agents array'), 400);
     }
 
     // Verify scenario exists

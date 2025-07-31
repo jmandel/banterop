@@ -1,5 +1,5 @@
 import { LLMProvider, LLMMessage, LLMToolCall, LLMToolResponse } from '../types/llm.types.js';
-import { BUILDER_TOOLS, JSONPatchOperation } from '$lib/types.js';
+import { BUILDER_TOOLS, JSONPatchOperation, ScenarioConfiguration } from '$lib/types.js';
 
 // Scenario Builder specific LLM service
 export class ScenarioBuilderLLM {
@@ -16,7 +16,7 @@ export class ScenarioBuilderLLM {
   ): Promise<{
     message: string;
     patches?: JSONPatchOperation[];
-    replaceEntireScenario?: any;
+    replaceEntireScenario?: ScenarioConfiguration;
     toolCalls?: LLMToolCall[];
   }> {
     const systemPrompt = this.buildFullContextPrompt(currentScenario, conversationHistory);
@@ -93,10 +93,12 @@ YOUR ROLE:
 4. Provide clear explanations of what you're changing and why
 
 KEY PRINCIPLES:
-- The superstructure (scenarioMetadata, patientAgent, supplierAgent, interactionDynamics) is fixed
-- Flexible payloads live in clinicalSketch, behavioralParameters, operationalContext, decisionFramework
-- clinicalSketch is the ground truth for patient history - never contradict it
-- Tool names determine scenario outcomes (Success/Approval vs Denial/Failure/NoSlots)
+- The superstructure (metadata, scenario, agents[]) is fixed
+- Each agent has: agentId, principal, situation, systemPrompt, goals, tools, knowledgeBase
+- Agents can optionally have messageToUseWhenInitiatingConversation for starting conversations
+- The messageToUseWhenInitiatingConversation allows any agent to initiate a conversation
+- The knowledgeBase is the ground truth for each agent - never contradict it
+- Tools with endsConversation: true determine scenario outcomes
 - Always be helpful and explain your changes clearly
 - Prefer targeted JSON Patch updates over complete rewrites
 - Multiple small patches are better than one large replacement
@@ -109,18 +111,18 @@ You have exactly ONE tool: complete_turn
 - replaceEntireScenario (optional): Complete replacement scenario (use sparingly, only for major restructuring)
 
 JSON PATCH EXAMPLES:
-- Replace title: {"op": "replace", "path": "/scenarioMetadata/title", "value": "New Title"}
-- Add tool: {"op": "add", "path": "/patientAgent/tools/-", "value": {...toolObject}}
-- Remove tool: {"op": "remove", "path": "/patientAgent/tools/0"}
-- Update clinical data: {"op": "replace", "path": "/patientAgent/clinicalSketch/diagnosis", "value": "Type 2 Diabetes"}
+- Replace title: {"op": "replace", "path": "/metadata/title", "value": "New Title"}
+- Add tool: {"op": "add", "path": "/agents/0/tools/-", "value": {...toolObject}}
+- Remove tool: {"op": "remove", "path": "/agents/0/tools/0"}
+- Set initiation message: {"op": "add", "path": "/agents/0/messageToUseWhenInitiatingConversation", "value": "Hello, I need help with..."}
+- Update knowledge base: {"op": "replace", "path": "/agents/1/knowledgeBase/someKey", "value": "new value"}
 
 CURRENT SCENARIO STRUCTURE:
-- Title: ${currentScenario?.scenarioMetadata?.title || 'Unknown'}
-- Description: ${currentScenario?.scenarioMetadata?.description || 'No description'}
-- Patient Principal: ${currentScenario?.patientAgent?.principalIdentity || 'Unknown'}
-- Supplier Principal: ${currentScenario?.supplierAgent?.principalIdentity || 'Unknown'}
-- Patient Tools: ${currentScenario?.patientAgent?.tools?.length || 0}
-- Supplier Tools: ${currentScenario?.supplierAgent?.tools?.length || 0}
+- Title: ${currentScenario?.metadata?.title || 'Unknown'}
+- Description: ${currentScenario?.metadata?.description || 'No description'}
+- Number of agents: ${currentScenario?.agents?.length || 0}
+- Agents: ${currentScenario?.agents?.map((a: any) => a.agentId?.label || a.agentId?.id || 'Unknown').join(', ') || 'None'}
+- Total tools: ${currentScenario?.agents?.reduce((sum: number, a: any) => sum + (a.tools?.length || 0), 0) || 0}
 
 COMPLETE CURRENT SCENARIO JSON:
 \`\`\`json
@@ -128,10 +130,21 @@ ${JSON.stringify(currentScenario, null, 2)}
 \`\`\`
 
 SCHEMA VALIDATION REQUIREMENTS:
-- scenarioMetadata must have id, title, schemaVersion: "2.4", description
-- patientAgent must have principalIdentity, systemPrompt, clinicalSketch, tools (array)
-- supplierAgent must have principalIdentity, systemPrompt, operationalContext, tools (array)
-- interactionDynamics must have startingPoints with PatientAgent and SupplierAgent objectives${formattedHistory}
+- metadata must have title, schemaVersion: "2.4", description
+- scenario must have background and challenges array
+- agents must be an array where each agent has:
+  - agentId with id and label
+  - principal with name and description
+  - situation, systemPrompt, goals array, tools array, knowledgeBase object
+  - optional messageToUseWhenInitiatingConversation for conversation initiation${formattedHistory}
+
+EXAMPLE USER REQUESTS AND RESPONSES:
+- "Make the first agent start the conversation with 'Hello, I need help'"
+  → Use patch: {"op": "add", "path": "/agents/0/messageToUseWhenInitiatingConversation", "value": "Hello, I need help"}
+- "Let the supplier agent initiate by asking if the specialist is available"
+  → Find supplier agent index, then patch its messageToUseWhenInitiatingConversation
+- "Remove the initiation message from agent 2"
+  → Use patch: {"op": "remove", "path": "/agents/1/messageToUseWhenInitiatingConversation"}
 
 IMPORTANT: When using complete_turn with patches or replaceEntireScenario, changes are applied immediately in the browser but NOT saved to the backend until the user clicks "Save". Always explain what you're changing and remind users they can review changes before saving.
 
@@ -143,7 +156,7 @@ ALWAYS use the complete_turn tool for every response. Never respond without usin
       case 'complete_turn':
         const message = call.arguments.message;
         const patches = call.arguments.patches;
-        const replaceEntireScenario = call.arguments.replaceEntireScenario;
+        const replaceEntireScenario = call.arguments.replaceEntireScenario as ScenarioConfiguration;
         
         if (!message || typeof message !== 'string') {
           return {
@@ -165,7 +178,7 @@ ALWAYS use the complete_turn tool for every response. Never respond without usin
             }
             
             // Security validation: prevent modification of protected paths
-            if (patch.path.startsWith('/scenarioMetadata/id')) {
+            if (patch.path.startsWith('/metadata/id')) {
               return {
                 name: 'complete_turn',
                 content: 'Error: Cannot modify scenario ID',
@@ -186,7 +199,7 @@ ALWAYS use the complete_turn tool for every response. Never respond without usin
           }
           
           // Check required fields
-          const required = ['scenarioMetadata', 'patientAgent', 'supplierAgent', 'interactionDynamics'];
+          const required = ['metadata', 'scenario', 'agents'];
           for (const field of required) {
             if (!Object.prototype.hasOwnProperty.call(replaceEntireScenario, field)) {
               return {
@@ -195,6 +208,15 @@ ALWAYS use the complete_turn tool for every response. Never respond without usin
                 error: `Required field ${field} is missing`
               };
             }
+          }
+          
+          // Validate agents is an array
+          if (!Array.isArray(replaceEntireScenario.agents)) {
+            return {
+              name: 'complete_turn',
+              content: 'Error: agents must be an array',
+              error: 'The agents field must be an array'
+            };
           }
         }
         

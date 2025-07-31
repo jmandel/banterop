@@ -29,14 +29,20 @@ export function RawJsonEditor({ config, onChange }: RawJsonEditorProps) {
       const parsed = JSON.parse(jsonText);
       
       // Basic validation
-      if (!parsed.scenarioMetadata || !parsed.patientAgent || 
-          !parsed.supplierAgent || !parsed.interactionDynamics) {
-        throw new Error('Invalid scenario structure. Missing required top-level fields.');
+      if (!parsed.metadata || !parsed.scenario || !parsed.agents) {
+        throw new Error('Invalid scenario structure. Missing required top-level fields (metadata, scenario, agents).');
       }
 
-      // More detailed validation could go here
-      if (!parsed.scenarioMetadata.schemaVersion || parsed.scenarioMetadata.schemaVersion !== '2.4') {
-        throw new Error('Schema version must be "2.4"');
+      // Validate it's an array of agents
+      if (!Array.isArray(parsed.agents)) {
+        throw new Error('agents must be an array');
+      }
+
+      // Validate each agent has required fields
+      for (const agent of parsed.agents) {
+        if (!agent.agentId || !agent.principal || !agent.systemPrompt) {
+          throw new Error('Each agent must have agentId, principal, and systemPrompt');
+        }
       }
 
       onChange(parsed);

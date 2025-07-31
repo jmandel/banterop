@@ -58,11 +58,13 @@ export function ChatPanel({ messages, onSendMessage, isLoading }: ChatPanelProps
               fontSize: '14px',
               lineHeight: '1.8'
             }}>
-              <li>Update patient or supplier information</li>
-              <li>Add or modify tools</li>
-              <li>Change clinical details</li>
-              <li>Adjust behavioral parameters</li>
-              <li>Set success criteria or failure triggers</li>
+              <li>Update agent information (principal, goals, situation)</li>
+              <li>Add or modify tools for any agent</li>
+              <li>Change agent knowledge base entries</li>
+              <li>Set agent initiation messages (messageToUseWhenInitiatingConversation)</li>
+              <li>Configure which agent starts the conversation</li>
+              <li>Add terminal tools (with endsConversation: true)</li>
+              <li>Modify scenario background or challenges</li>
             </ul>
           </div>
         ) : (

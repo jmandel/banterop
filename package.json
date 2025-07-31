@@ -6,7 +6,7 @@
   "scripts": {
     "//--- DEVELOPMENT ---": "",
     "dev:backend": "bun --watch src/backend/index.ts",
-    "dev:frontend": "bun --port 3000 src/frontend/trace-viewer/index.html src/frontend/external-executor/index.html",
+    "dev:frontend": "bun --port 3000 src/frontend/trace-viewer/index.html src/frontend/external-executor/index.html src/frontend/**/*.html",
     "//--- PRODUCTION ---": "",
     "build": "bun build ./src/frontend/**/*.tsx --outdir ./dist --target browser",
     "start": "NODE_ENV=production bun src/backend/index.ts",
