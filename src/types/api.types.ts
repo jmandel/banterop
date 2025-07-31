@@ -7,10 +7,12 @@ export interface CreateConversationRequest {
   name?: string;
   agents: any[]; // AgentConfig[] - avoiding circular dependency
   managementMode?: 'internal' | 'external'; // defaults to 'internal'
-  initialMessage?: {
-    agentId: string;
-    content: string;
-  };
+  /** 
+   * The ID of the agent that should send the first message. 
+   * The corresponding agent's config in the `agents` array MUST have a 
+   * `messageToUseWhenInitiatingConversation` defined.
+   */
+  initiatingAgentId?: string;
 }
 
 export interface CreateConversationResponse {

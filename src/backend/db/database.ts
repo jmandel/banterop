@@ -680,7 +680,7 @@ export class ConversationDatabase {
       scenarioStmt.run(
         scenario.id,
         scenario.name,
-        scenario.config.scenarioMetadata.description,
+        scenario.config.metadata.description,
         new Date(scenario.created).toISOString(),
         new Date(scenario.modified).toISOString(),
         JSON.stringify({})

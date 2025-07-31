@@ -57,6 +57,17 @@ export class ConversationOrchestrator {
     const agentTokens: Record<string, string> = {};
     const managementMode = request.managementMode || 'internal';
 
+    // Validate initiatingAgentId if provided
+    if (request.initiatingAgentId) {
+      const initiatorConfig = request.agents.find(a => a.agentId.id === request.initiatingAgentId);
+      if (!initiatorConfig) {
+        throw new Error(`initiatingAgentId '${request.initiatingAgentId}' not found in the list of agents.`);
+      }
+      if (!initiatorConfig.messageToUseWhenInitiatingConversation) {
+        throw new Error(`Agent '${request.initiatingAgentId}' was designated as initiator but has no 'messageToUseWhenInitiatingConversation' defined.`);
+      }
+    }
+
     // Check if any agents are scenario-driven and enrich metadata
     const firstScenarioAgent = request.agents.find(
       (a) => a.strategyType === 'scenario_driven'
@@ -73,7 +84,7 @@ export class ConversationOrchestrator {
       metadata: {
         agentConfigs: request.agents,
         managementMode,
-        ...(request.initialMessage && { initialMessage: request.initialMessage }),
+        ...(request.initiatingAgentId && { initiatingAgentId: request.initiatingAgentId }),
         ...(firstScenarioAgent && {
           source: 'scenario',
           scenarioId: firstScenarioAgent.scenarioId
@@ -195,21 +206,27 @@ export class ConversationOrchestrator {
       data: {}
     });
 
-    // Handle initial message if provided in original request
-    // Note: We'll need to store the initial message in conversation metadata for this to work
-    const initialMessage = conversation.metadata?.initialMessage;
-    if (initialMessage) {
-      console.log(`[Orchestrator] Submitting initial message from ${initialMessage.agentId}`);
-      const turnId = this.startTurn({
-        conversationId,
-        agentId: initialMessage.agentId
-      }).turnId;
-      this.completeTurn({
-        conversationId,
-        turnId,
-        agentId: initialMessage.agentId,
-        content: initialMessage.content
-      });
+    // Handle initial message from metadata
+    const initiatingAgentId = conversation.metadata?.initiatingAgentId;
+    if (initiatingAgentId) {
+      const agentConfig = conversationState.agentConfigs.get(initiatingAgentId);
+      const content = agentConfig?.messageToUseWhenInitiatingConversation;
+
+      if (agentConfig && content) {
+        console.log(`[Orchestrator] Submitting initial message from agent ${initiatingAgentId} as per scenario config.`);
+        
+        const turnId = this.startTurn({
+          conversationId,
+          agentId: initiatingAgentId
+        }).turnId;
+        
+        this.completeTurn({
+          conversationId,
+          turnId,
+          agentId: initiatingAgentId,
+          content: content
+        });
+      }
     }
   }
 

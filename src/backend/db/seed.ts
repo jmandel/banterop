@@ -1,4 +1,3 @@
-// Database seeding function - migrates initial scenarios from in-memory store to SQLite
 import type { ConversationDatabase } from './database.js';
 import type { ScenarioConfiguration } from '$lib/types.js';
 
@@ -16,18 +15,58 @@ export function seedDatabase(db: ConversationDatabase): void {
   
   console.log('[Seed] Seeding database with initial scenarios...');
   
-  // Knee MRI Prior Auth scenario
   const kneeMriConfig: ScenarioConfiguration = {
-    scenarioMetadata: {
+    metadata: {
       id: "scen_knee_mri_01",
       title: "Knee MRI Prior Auth",
-      schemaVersion: "2.4",
-      description: "Tests prior auth negotiation for knee MRI with conservative therapy and network constraints."
+      description: "Tests prior auth negotiation for knee MRI with conservative therapy and network constraints.",
+      tags: ["prior-auth", "orthopedics"]
     },
-    patientAgent: {
-      principalIdentity: "Jordan Alvarez",
-      systemPrompt: "You are an AI agent representing Jordan Alvarez, a 38-year-old amateur soccer player with acute right knee injury. Your instructions are to obtain prior authorization for a right knee MRI ordered by your PCP after 16 days of conservative therapy with persistent instability. Communicate clearly, ask for concrete next steps, and provide documentation (PT notes, negative x-ray) when requested.",
-      clinicalSketch: {
+    scenario: {
+      background: "Jordan Alvarez, a 38-year-old amateur soccer player, sustained an acute right knee injury. After 16 days of conservative therapy with persistent instability, his PCP has ordered an MRI.",
+      challenges: [
+        "The insurer's policy requires ≥14 days of conservative therapy, which has been met, but documentation must be clear.",
+        "The insurer gives expedited processing for in-network providers, which must be verified."
+      ]
+    },
+    agents: [
+      {
+        agentId: { id: "patient-agent", label: "Patient Agent", role: "PatientAgent" },
+        principal: {
+          type: "individual",
+          name: "Jordan Alvarez",
+          description: "A 38-year-old amateur soccer player with an acute right knee injury."
+        },
+        situation: "You are preparing to contact the insurance company to get prior authorization for a right knee MRI for your client, Jordan Alvarez.",
+        systemPrompt: "You are an AI agent representing Jordan Alvarez. Your instructions are to obtain prior authorization for a right knee MRI. Communicate clearly, provide necessary documentation when requested, and aim for a swift approval.",
+        goals: ["Obtain MRI authorization", "Minimize delays", "Understand next steps"],
+        tools: [
+          {
+            toolName: "search_ehr_clinical_notes",
+            description: "Search EHR for patient's clinical notes and visit summaries.",
+            inputSchema: { type: "object", properties: { dateRange: { type: "string" }, searchTerms: { type: "string" } } },
+            synthesisGuidance: "Return relevant clinical notes related to knee injury, physical exam findings, and treatment history from the knowledgeBase."
+          },
+          {
+            toolName: "retrieve_imaging_reports",
+            description: "Retrieve radiology and imaging reports from the EHR.",
+            inputSchema: { type: "object", properties: { imagingType: { type: "string" }, bodyPart: { type: "string" } } },
+            synthesisGuidance: "Return X-ray reports showing no fracture and mild joint effusion as documented in the knowledgeBase."
+          },
+          {
+            toolName: "get_therapy_documentation",
+            description: "Retrieve physical therapy notes and progress reports.",
+            inputSchema: { type: "object", properties: { therapyType: { type: "string" }, dateRange: { type: "string" } } },
+            synthesisGuidance: "Return PT notes documenting daily sessions and persistent anterior instability from the knowledgeBase timeline."
+          },
+          {
+            toolName: "lookup_provider_network_status",
+            description: "Check if a provider or facility is in the patient's insurance network.",
+            inputSchema: { type: "object", properties: { providerName: { type: "string" }, providerType: { type: "string" } } },
+            synthesisGuidance: "Verify network status of the imaging facility or provider."
+          }
+        ],
+        knowledgeBase: {
         overview: "Acute right knee injury with suspected ACL tear after a pivot injury during soccer. Persistent instability despite PT.",
         timeline: [
           { date: "2024-06-01", event: "Pivot injury to right knee during soccer; swelling within hours" },
@@ -44,344 +83,221 @@ export function seedDatabase(db: ConversationDatabase): void {
           "McMurray test: Negative for meniscal involvement"
         ],
         labsAndImaging: [
-          { type: "X-ray", date: "2024-06-02", result: "Negative for fracture", location: "Urgent care" },
-          { type: "Physical therapy notes", date: "2024-06-15 to 2024-06-27", result: "Daily sessions documented", location: "HSS Physical Therapy" }
-        ]
+            { date: "2024-06-10", event: "PCP exam positive Lachman; MRI ordered if instability persists." }
+          ]
+        },
+        messageToUseWhenInitiatingConversation: "Hello, I'm following up on the prior authorization request for my right knee MRI."
       },
-      tools: [
-        {
-          toolName: "submit_mri_auth_request",
-          description: "Submit MRI prior authorization request with supporting documentation",
-          inputSchema: {
-            type: "object",
-            properties: {
-              studyType: { type: "string", description: "Type of MRI study requested" },
-              clinicalInfo: { type: "string", description: "Clinical justification" },
-              attachments: { type: "array", description: "Supporting documents" }
-            }
-          },
-          outputDescription: "Authorization request status and tracking information",
-          synthesisGuidance: "Generate realistic auth request ID and processing timeline"
+      {
+        agentId: { id: "supplier-agent", label: "Supplier Agent", role: "SupplierAgent" },
+        principal: {
+          type: "organization",
+          name: "HealthFirst Insurance",
+          description: "A national health insurance provider."
         },
-        {
-          toolName: "check_auth_status",
-          description: "Check status of prior authorization request",
-          inputSchema: {
-            type: "object",
-            properties: {
-              authRequestId: { type: "string", description: "Authorization request ID" }
-            }
+        situation: "You are a prior authorization specialist at HealthFirst Insurance, waiting for the next case in your queue.",
+        systemPrompt: "You are a prior authorization specialist. Review requests against the official medical policy. Be thorough but efficient.",
+        goals: ["Ensure medical necessity is met", "Adhere to company policy", "Provide clear decisions"],
+        tools: [
+          {
+            toolName: "mri_authorization_Success",
+            description: "Terminal tool: Approve the MRI authorization request.",
+            inputSchema: { type: "object", properties: { reason: { type: "string" } } },
+            synthesisGuidance: "Generate a final authorization number and approval confirmation.",
+            endsConversation: true
           },
-          outputDescription: "Current status and any additional requirements",
-          synthesisGuidance: "Provide status updates based on submission timeline"
-        },
-        {
-          toolName: "provide_additional_documentation",
-          description: "Submit additional documentation requested by insurer",
-          inputSchema: {
-            type: "object",
-            properties: {
-              documentType: { type: "string", description: "Type of additional document" },
-              content: { type: "string", description: "Document content or summary" }
-            }
-          },
-          outputDescription: "Confirmation of document submission",
-          synthesisGuidance: "Confirm receipt and update processing status"
-        }
-      ],
-      behavioralParameters: {
-        communicationStyle: "Direct but respectful",
-        urgencyLevel: "Moderate - affecting daily activities",
-        knowledgeLevel: "Basic healthcare literacy",
-        goals: ["Obtain MRI authorization", "Minimize delays", "Understand next steps"]
-      }
-    },
-    supplierAgent: {
-      principalIdentity: "HealthFirst Insurance Prior Auth Specialist",
-      systemPrompt: "You are a prior authorization specialist for HealthFirst Insurance. Review requests against MRI criteria requiring ≥14 days conservative therapy for non-traumatic knee pain, or immediate imaging for acute trauma with instability. Network providers get expedited processing. Be thorough but efficient in documentation review.",
-      operationalContext: {
+          {
+            toolName: "mri_authorization_Denial",
+            description: "Terminal tool: Deny the MRI authorization request.",
+            inputSchema: { type: "object", properties: { reason: { type: "string" } } },
+            synthesisGuidance: "Generate a final denial with a clear, policy-based rationale.",
+            endsConversation: true
+          }
+        ],
+        knowledgeBase: {
         workflowSteps: [
           { step: "Initial request triage", decision: "Route to appropriate reviewer" },
           { step: "Clinical documentation review", decision: "Assess conservative therapy compliance" },
           { step: "Network provider verification", decision: "Expedite if in-network" },
           { step: "Final authorization decision", decision: "Approve/deny with clear reasoning" }
         ],
-        toolsAndSystems: [
-          { name: "AuthReview System", purpose: "Case management and documentation" },
-          { name: "ProviderNetwork DB", purpose: "Verify network status for expedited processing" },
-          { name: "ClinicalCriteria DB", purpose: "MRI approval criteria and guidelines" }
-        ],
-        policies: [
-          "Knee MRI requires ≥14 days conservative therapy OR acute trauma with instability",
-          "Network providers receive expedited 24-48hr processing",
-          "Complete documentation required: timeline, imaging, therapy notes"
-        ]
-      },
-      tools: [
-        {
-          toolName: "review_auth_request",
-          description: "Review prior authorization request against clinical criteria",
-          inputSchema: {
-            type: "object",
-            properties: {
-              requestId: { type: "string", description: "Authorization request ID" },
-              clinicalJustification: { type: "string", description: "Clinical information provided" }
-            }
-          },
-          outputDescription: "Review decision and rationale",
-          synthesisGuidance: "Evaluate based on conservative therapy compliance and medical necessity"
+          policy_id: "HF-MRI-KNEE-2024",
+          criteria: [ "Knee MRI requires ≥14 days of documented conservative therapy." ]
         },
-        {
-          toolName: "request_additional_documentation",
-          description: "Request additional documentation from provider",
-          inputSchema: {
-            type: "object",
-            properties: {
-              documentType: { type: "string", description: "Type of documentation needed" },
-              reason: { type: "string", description: "Reason for additional documentation" }
-            }
-          },
-          outputDescription: "Documentation request details",
-          synthesisGuidance: "Generate realistic documentation requests based on policy requirements"
-        },
-        {
-          toolName: "mri_authorization_Success",
-          description: "Terminal tool: Successfully complete MRI authorization process",
-          inputSchema: {
-            type: "object",
-            properties: {
-              authNumber: { type: "string", description: "Final authorization number" }
-            }
-          },
-          outputDescription: "Final authorization success confirmation",
-          synthesisGuidance: "Generate final success confirmation"
-        },
-        {
-          toolName: "mri_authorization_Denial",
-          description: "Terminal tool: Deny MRI authorization request",
-          inputSchema: {
-            type: "object",
-            properties: {
-              reason: { type: "string", description: "Final denial reason" }
-            }
-          },
-          outputDescription: "Final denial confirmation",
-          synthesisGuidance: "Generate final denial with clear rationale"
-        }
-      ]
-    },
-    interactionDynamics: {
-      startingPoints: {
-        PatientAgent: { objective: "Obtain timely MRI authorization with minimal administrative burden" },
-        SupplierAgent: { objective: "Ensure medical necessity while maintaining efficient processing" }
-      },
-      criticalNegotiationPoints: [
-        {
-          moment: "Documentation review phase",
-          patientView: "All required documents provided, expect quick approval",
-          supplierView: "Must verify conservative therapy timeline and medical necessity"
-        },
-        {
-          moment: "Network provider verification",
-          patientView: "Using in-network provider should expedite approval",
-          supplierView: "Network status confirmed, can proceed with expedited timeline"
-        }
-      ]
-    }
+        messageToUseWhenInitiatingConversation: "Hello, this is HealthFirst Insurance calling regarding the prior authorization request for Jordan Alvarez. Is the PA Specialist available?"
+      }
+    ]
   };
 
-  // Cardiology Consult scenario
   const cardioConfig: ScenarioConfiguration = {
-    scenarioMetadata: {
+    metadata: {
       id: "scen_cardio_sched_01",
       title: "Cardiology Consult Scheduling",
-      schemaVersion: "2.4",
-      description: "Tests appointment scheduling for cardiology consultation with referral management and triage protocols."
+      description: "Tests appointment scheduling for cardiology consultation with referral management and triage protocols.",
+      tags: ["scheduling", "cardiology"]
     },
-    patientAgent: {
-      principalIdentity: "Maria Santos",
-      systemPrompt: "You are an AI agent representing Maria Santos, a 52-year-old teacher with stable chest pain referred for cardiology consultation. Your goal is to schedule an appropriate appointment within reasonable timeframes while providing necessary clinical information when requested.",
-      clinicalSketch: {
-        overview: "Stable chest pain with family history of CAD, referred by PCP for cardiology evaluation and stress testing.",
-        timeline: [
-          { date: "2024-06-15", event: "Onset of intermittent chest discomfort with exertion" },
-          { date: "2024-06-22", event: "PCP visit; normal EKG, stable vital signs" },
-          { date: "2024-06-25", event: "Cardiology referral placed due to family history" },
-          { date: "2024-07-01", event: "Calling for appointment scheduling" }
-        ],
-        clinicalNotes: [
-          "Chest pain: Substernal, 4/10 intensity, triggered by stairs/exertion",
-          "Family history: Father with MI at age 58, brother with CAD",
-          "EKG 6/22/24: Normal sinus rhythm, no acute changes",
-          "Risk factors: Hypertension, pre-diabetes, sedentary lifestyle"
-        ],
-        labsAndImaging: [
-          { type: "EKG", date: "2024-06-22", result: "Normal sinus rhythm", location: "PCP office" },
-          { type: "Basic metabolic panel", date: "2024-06-20", result: "Glucose 105, otherwise normal", location: "LabCorp" }
-        ]
-      },
-      behavioralParameters: {
-        communicationStyle: "Polite and patient",
-        urgencyLevel: "Low-moderate - stable symptoms",
-        knowledgeLevel: "Good healthcare literacy",
-        goals: ["Schedule timely consultation", "Understand what to expect", "Coordinate with work schedule"]
-      },
-      tools: [
-        {
-          toolName: "schedule_appointment",
-          description: "Schedule cardiology consultation appointment",
-          inputSchema: {
-            type: "object",
-            properties: {
-              preferredDate: { type: "string", description: "Preferred appointment date" },
-              timeframe: { type: "string", description: "Preferred time of day" },
-              urgency: { type: "string", description: "Clinical urgency level" }
-            }
-          },
-          outputDescription: "Appointment confirmation details",
-          synthesisGuidance: "Generate appointment based on clinical urgency and availability"
-        },
-        {
-          toolName: "provide_clinical_information",
-          description: "Provide additional clinical information for scheduling",
-          inputSchema: {
-            type: "object",
-            properties: {
-              symptoms: { type: "string", description: "Current symptoms description" },
-              riskFactors: { type: "string", description: "Cardiovascular risk factors" }
-            }
-          },
-          outputDescription: "Clinical information confirmation",
-          synthesisGuidance: "Acknowledge receipt of clinical details"
-        },
-        {
-          toolName: "cardiology_appointment_Success",
-          description: "Terminal tool: Successfully schedule cardiology appointment",
-          inputSchema: {
-            type: "object",
-            properties: {
-              appointmentDate: { type: "string", description: "Confirmed appointment date and time" }
-            }
-          },
-          outputDescription: "Final appointment confirmation",
-          synthesisGuidance: "Generate final appointment confirmation"
-        },
-        {
-          toolName: "cardiology_scheduling_NoSlots",
-          description: "Terminal tool: No available slots for requested timeframe",
-          inputSchema: {
-            type: "object",
-            properties: {
-              alternativeOptions: { type: "string", description: "Alternative scheduling options" }
-            }
-          },
-          outputDescription: "No slots available notice with alternatives",
-          synthesisGuidance: "Provide realistic alternative scheduling options"
-        }
+    scenario: {
+      background: "Maria Santos, a 52-year-old teacher with stable chest pain, has been referred by her PCP for cardiology consultation and stress testing.",
+      challenges: [
+        "The patient prefers morning appointments due to work schedule.",
+        "The practice must triage based on clinical urgency while managing limited appointment slots."
       ]
     },
-    supplierAgent: {
-      principalIdentity: "Metropolitan Cardiology Scheduler",
-      systemPrompt: "You are a scheduling coordinator for Metropolitan Cardiology Group. Triage referrals based on clinical urgency: emergent (same day), urgent (1-3 days), semi-urgent (1-2 weeks), routine (4-6 weeks). Verify referrals, collect insurance information, and provide clear pre-visit instructions.",
-      operationalContext: {
-        workflowSteps: [
-          { step: "Referral verification", decision: "Confirm referral details and authorization status" },
-          { step: "Clinical triage", decision: "Determine urgency level based on symptoms" },
-          { step: "Appointment scheduling", decision: "Offer appropriate timeframe based on triage" },
-          { step: "Pre-visit coordination", decision: "Provide instructions and confirm logistics" }
+    agents: [
+      {
+        agentId: { id: "patient-scheduling", label: "Patient Representative", role: "PatientAgent" },
+        principal: {
+          type: "individual",
+          name: "Maria Santos",
+          description: "A 52-year-old teacher with stable chest pain needing cardiology consultation."
+        },
+        situation: "You are calling to schedule a cardiology consultation appointment for Maria Santos.",
+        systemPrompt: "You are representing Maria Santos. Schedule an appropriate appointment while providing necessary clinical information when requested.",
+        goals: ["Schedule timely consultation", "Understand what to expect", "Coordinate with work schedule"],
+        tools: [
+          {
+            toolName: "retrieve_referral_details",
+            description: "Retrieve the cardiology referral details from the EHR.",
+            inputSchema: { type: "object", properties: { referralId: { type: "string" }, includeClinicalnotes: { type: "boolean" } } },
+            synthesisGuidance: "Return referral information including reason for referral, referring provider, and clinical urgency from the knowledgeBase."
+          },
+          {
+            toolName: "get_recent_vitals",
+            description: "Retrieve recent vital signs and cardiac-related test results.",
+            inputSchema: { type: "object", properties: { dateRange: { type: "string" }, includeEkg: { type: "boolean" } } },
+            synthesisGuidance: "Return normal EKG results and stable vital signs as documented in the timeline."
+          },
+          {
+            toolName: "search_medical_history",
+            description: "Search patient's medical history for cardiac risk factors and family history.",
+            inputSchema: { type: "object", properties: { categoryFilter: { type: "string" } } },
+            synthesisGuidance: "Return family history of CAD and hypertension from the knowledgeBase risk factors."
+          },
+          {
+            toolName: "retrieve_medication_list",
+            description: "Get current medication list from the EHR.",
+            inputSchema: { type: "object", properties: { includeDiscontinued: { type: "boolean" } } },
+            synthesisGuidance: "Return any cardiac-related medications if applicable."
+          },
         ],
-        toolsAndSystems: [
-          { name: "SchedulingSystem", purpose: "Appointment management and provider calendars" },
-          { name: "ReferralTracker", purpose: "Verify and track referral authorization" },
-          { name: "TriageProtocol", purpose: "Clinical urgency assessment guidelines" }
+        knowledgeBase: {
+          overview: "Stable chest pain with family history of CAD, referred by PCP for cardiology evaluation and stress testing.",
+          timeline: [
+            { date: "2024-06-15", event: "Onset of intermittent chest discomfort with exertion" },
+            { date: "2024-06-22", event: "PCP visit; normal EKG, stable vital signs" },
+            { date: "2024-06-25", event: "Cardiology referral placed due to family history" },
+            { date: "2024-07-01", event: "Calling for appointment scheduling" }
+          ],
+          referral_info: {
+            date: "2024-06-25",
+            symptoms: "Stable chest pain with exertion",
+            risk_factors: ["Family history of CAD", "Hypertension"]
+          }
+        },
+        messageToUseWhenInitiatingConversation: "Hello, I'm calling to schedule a cardiology consultation for Maria Santos. Her PCP referred her for evaluation of chest pain symptoms."
+      },
+      {
+        agentId: { id: "scheduling-coordinator", label: "Scheduling Coordinator", role: "SupplierAgent" },
+        principal: {
+          type: "organization",
+          name: "Metropolitan Cardiology Group",
+          description: "A specialty cardiology practice."
+        },
+        situation: "You are a scheduling coordinator handling incoming appointment requests.",
+        systemPrompt: "You are a scheduling coordinator. Triage referrals based on clinical urgency and available slots.",
+        goals: ["Efficiently triage and schedule", "Ensure proper authorization", "Provide clear instructions"],
+        tools: [
+          {
+            toolName: "lookup_triage_policy",
+            description: "Retrieve triage guidelines for cardiology referrals based on symptoms and urgency.",
+            inputSchema: { type: "object", properties: { symptoms: { type: "string" }, referralReason: { type: "string" } } },
+            synthesisGuidance: "Use the knowledgeBase triage_protocols to return the appropriate urgency level and scheduling timeframe. Be specific about which symptoms map to which urgency levels."
+          },
+          {
+            toolName: "retrieve_scheduling_requirements",
+            description: "Get required pre-appointment information and documentation needed for specific visit types.",
+            inputSchema: { type: "object", properties: { visitType: { type: "string" }, insurance: { type: "string" } } },
+            synthesisGuidance: "Return the scheduling requirements from knowledgeBase including required documents, pre-visit testing, insurance authorization needs, and patient preparation instructions."
+          },
+          {
+            toolName: "check_availability",
+            description: "Check available appointment slots based on urgency level and provider preferences.",
+            inputSchema: { type: "object", properties: { urgencyLevel: { type: "string" }, dateRange: { type: "string" }, timePreference: { type: "string" } } },
+            synthesisGuidance: "Return realistic appointment availability based on the urgency level from triage. Morning slots are limited. Consider the practice's scheduling patterns in the knowledgeBase."
+          },
+          {
+            toolName: "assess_insurance_requirements",
+            description: "Check if referral or prior authorization is needed for the appointment.",
+            inputSchema: { type: "object", properties: { insurancePlan: { type: "string" }, visitType: { type: "string" } } },
+            synthesisGuidance: "Use knowledgeBase insurance_requirements to determine if the patient's insurance requires referral or prior auth for cardiology consultation."
+          },
+          {
+            toolName: "confirm_appointment",
+            description: "Terminal tool: Confirm and book the appointment.",
+            inputSchema: { type: "object", properties: { dateTime: { type: "string" }, providerName: { type: "string" }, visitType: { type: "string" }, preparationInstructions: { type: "string" } } },
+            synthesisGuidance: "Generate a comprehensive appointment confirmation including date/time, provider, location, preparation instructions, and what to bring.",
+            endsConversation: true
+          },
+          {
+            toolName: "no_availability",
+            description: "Terminal tool: No appointments available within requested timeframe.",
+            inputSchema: { type: "object", properties: { reason: { type: "string" }, alternativeOptions: { type: "string" }, waitlistOption: { type: "boolean" } } },
+            synthesisGuidance: "Explain lack of availability and provide alternative options such as waitlist, different timeframes, or urgent care options if clinically appropriate.",
+            endsConversation: true
+          }
         ],
-        policies: [
-          "Stable chest pain = routine scheduling (4-6 weeks)",
-          "Active angina or concerning symptoms = urgent (1-3 days)",
-          "Referral and insurance verification required before scheduling"
-        ]
-      },
-      tools: [
-        {
-          toolName: "schedule_appointment",
-          description: "Schedule cardiology consultation appointment",
-          inputSchema: {
-            type: "object",
-            properties: {
-              preferredDate: { type: "string", description: "Preferred appointment date" },
-              timeframe: { type: "string", description: "Preferred time of day" },
-              urgency: { type: "string", description: "Clinical urgency level" }
+        knowledgeBase: {
+          triage_protocols: {
+            chest_pain: {
+              unstable: { urgency: "emergent", timeframe: "immediate ED referral", symptoms: ["crushing chest pain", "radiation to arm/jaw", "shortness of breath", "diaphoresis"] },
+              accelerated: { urgency: "urgent", timeframe: "24-48 hours", symptoms: ["new onset angina", "crescendo pattern", "rest pain"] },
+              stable: { urgency: "routine", timeframe: "2-4 weeks", symptoms: ["stable exertional chest pain", "atypical chest pain", "chest pain with risk factors"] }
+            },
+            arrhythmia: {
+              symptomatic: { urgency: "urgent", timeframe: "1-3 days", symptoms: ["syncope", "near-syncope", "sustained palpitations"] },
+              asymptomatic: { urgency: "routine", timeframe: "2-6 weeks", symptoms: ["incidental finding", "occasional palpitations"] }
             }
           },
-          outputDescription: "Appointment confirmation details",
-          synthesisGuidance: "Generate appointment based on clinical urgency and availability"
-        },
-        {
-          toolName: "provide_clinical_information",
-          description: "Provide additional clinical information for scheduling",
-          inputSchema: {
-            type: "object",
-            properties: {
-              symptoms: { type: "string", description: "Current symptoms description" },
-              riskFactors: { type: "string", description: "Cardiovascular risk factors" }
+          scheduling_requirements: {
+            new_patient_consultation: {
+              documents_needed: ["referral letter", "recent EKG", "relevant imaging", "medication list"],
+              preparation: "No caffeine 24 hours before if stress test ordered",
+              duration: "60-90 minutes",
+              insurance_check: "Most plans require PCP referral"
+            },
+            stress_test: {
+              documents_needed: ["physician order", "recent EKG"],
+              preparation: "NPO 4 hours, no caffeine 24 hours, comfortable shoes",
+              duration: "2-3 hours",
+              contraindications: ["recent MI", "unstable angina", "severe aortic stenosis"]
             }
           },
-          outputDescription: "Clinical information confirmation",
-          synthesisGuidance: "Acknowledge receipt of clinical details"
-        },
-        {
-          toolName: "cardiology_appointment_Success",
-          description: "Terminal tool: Successfully schedule cardiology appointment",
-          inputSchema: {
-            type: "object",
-            properties: {
-              appointmentDate: { type: "string", description: "Confirmed appointment date and time" }
-            }
+          insurance_requirements: {
+            medicare: { referral_required: false, prior_auth_required: false },
+            commercial_hmo: { referral_required: true, prior_auth_required: "varies by plan" },
+            commercial_ppo: { referral_required: false, prior_auth_required: "for procedures only" }
           },
-          outputDescription: "Final appointment confirmation",
-          synthesisGuidance: "Generate final appointment confirmation"
-        },
-        {
-          toolName: "cardiology_scheduling_NoSlots",
-          description: "Terminal tool: No available slots for requested timeframe",
-          inputSchema: {
-            type: "object",
-            properties: {
-              alternativeOptions: { type: "string", description: "Alternative scheduling options" }
+          appointment_patterns: {
+            morning_slots: "Limited - typically 2-3 new patient slots",
+            afternoon_slots: "More availability - 4-5 new patient slots",
+            provider_schedules: {
+              dr_chen: "Mon/Wed/Fri - interventional focus",
+              dr_patel: "Tue/Thu - general and preventive",
+              dr_williams: "Mon-Thu - electrophysiology"
             }
-          },
-          outputDescription: "No slots available notice with alternatives",
-          synthesisGuidance: "Provide realistic alternative scheduling options"
-        }
-      ]
-    },
-    interactionDynamics: {
-      startingPoints: {
-        PatientAgent: { objective: "Secure appropriate cardiology appointment with clear expectations" },
-        SupplierAgent: { objective: "Efficiently triage and schedule while ensuring proper authorization" }
-      },
-      criticalNegotiationPoints: [
-        {
-          moment: "Urgency assessment phase",
-          patientView: "Symptoms stable but need evaluation soon",
-          supplierView: "Must triage based on clinical criteria and provider availability"
+          }
         },
-        {
-          moment: "Scheduling coordination",
-          patientView: "Need appointment that works with schedule",
-          supplierView: "Must balance urgency with provider availability"
-        }
-      ]
-    }
+        messageToUseWhenInitiatingConversation: "Good morning, this is Metropolitan Cardiology Group. We received a referral for Maria Santos. I'm calling to help schedule her consultation appointment."
+      }
+    ]
   };
 
   try {
     const now = Date.now();
     
-    // Seed Knee MRI scenario
     db.insertScenario({
-      id: kneeMriConfig.scenarioMetadata.id,
-      name: kneeMriConfig.scenarioMetadata.title,
+      id: kneeMriConfig.metadata.id,
+      name: kneeMriConfig.metadata.title,
       config: kneeMriConfig,
       created: now,
       modified: now,
@@ -390,10 +306,9 @@ export function seedDatabase(db: ConversationDatabase): void {
     
     console.log(`[Seed] Created Knee MRI scenario`);
 
-    // Seed Cardiology scenario  
     db.insertScenario({
-      id: cardioConfig.scenarioMetadata.id,
-      name: cardioConfig.scenarioMetadata.title,
+      id: cardioConfig.metadata.id,
+      name: cardioConfig.metadata.title,
       config: cardioConfig,
       created: now,
       modified: now,

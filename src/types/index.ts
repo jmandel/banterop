@@ -15,6 +15,7 @@ export * from './db.types.js';
 
 // Scenario types
 export * from './scenario.types.js';
+export * from './scenario-configuration.types.js';
 
 // LLM types
 export * from './llm.types.js';

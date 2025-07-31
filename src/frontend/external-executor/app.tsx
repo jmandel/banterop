@@ -90,7 +90,7 @@ class MockDatabase {
   }
 
   findScenarioByIdAndVersion(scenarioId: string, versionId?: string): ScenarioConfiguration | null {
-    if (this.scenario.scenarioMetadata.id === scenarioId) {
+    if (this.scenario.metadata.id === scenarioId) {
       return this.scenario;
     }
     return null;
@@ -216,9 +216,11 @@ class BrowserScenarioAgent {
       console.log(`${this.role} waited ${actualDelay}ms, now processing turn from ${event.data.turn.agentId}`);
       
       // Get agent configuration
-      const agentConfig = this.role === 'PatientAgent' 
-        ? this.scenario.patientAgent 
-        : this.scenario.supplierAgent;
+      const agentConfig = this.scenario.agents.find(a => a.agentId.id === this.agentId.id);
+      if (!agentConfig) {
+        console.error(`Agent configuration not found for ${this.agentId.id}`);
+        return;
+      }
       
       // Create a simple prompt for the LLM
       const prompt = this.buildSimplePrompt(agentConfig, event.data.turn.content);

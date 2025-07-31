@@ -87,8 +87,8 @@ export class ToolSynthesisService {
         toolName: input.toolName,
         args: this.sortObject(input.args),
         role: input.role,
-        scenarioId: input.scenario.scenarioMetadata.id,
-        schemaVersion: input.scenario.scenarioMetadata.schemaVersion
+        scenarioId: input.scenario.metadata.id,
+        schemaVersion: '2.4' // Fixed version for new schema
       };
       
       const jsonString = JSON.stringify(normalized);
@@ -109,8 +109,11 @@ export class ToolSynthesisService {
   private async synthesizeWithLLM(input: ToolExecutionInput): Promise<ToolExecutionOutput> {
     const { toolName, args, role, scenario } = input;
     
-    // Find tool definition
-    const agentConfig = role === 'PatientAgent' ? scenario.patientAgent : scenario.supplierAgent;
+    // Find tool definition - using agentId instead of role
+    const agentConfig = scenario.agents.find(a => a.agentId.id === role);
+    if (!agentConfig) {
+      throw new Error(`Agent with id ${role} not found in scenario`);
+    }
     const tool = agentConfig.tools.find(t => t.toolName === toolName);
     
     if (!tool) {
@@ -217,10 +220,12 @@ export class ToolSynthesisService {
 
   // Build prompt for tool synthesis
   private buildSynthesisPrompt(tool: any, args: Record<string, unknown>, role: string, scenario: ScenarioConfiguration): string {
-    const agentConfig = role === 'PatientAgent' ? scenario.patientAgent : scenario.supplierAgent;
-    const context = role === 'PatientAgent' 
-      ? ('clinicalSketch' in agentConfig ? agentConfig.clinicalSketch : {})
-      : ('operationalContext' in agentConfig ? agentConfig.operationalContext : {});
+    const agentConfig = scenario.agents.find(a => a.agentId.id === role);
+    if (!agentConfig) {
+      throw new Error(`Agent with id ${role} not found in scenario`);
+    }
+    // Use knowledgeBase for context instead of old clinicalSketch/operationalContext
+    const context = agentConfig.knowledgeBase || {};
 
     return `You are a tool synthesis engine for healthcare interoperability scenarios. Your job is to simulate realistic tool execution results.
 
@@ -233,7 +238,7 @@ Synthesis Guidance: ${tool.synthesisGuidance}
 
 EXECUTION CONTEXT:
 Role: ${role}
-Principal: ${agentConfig.principalIdentity}
+Principal: ${agentConfig.principal.name}
 Context: ${JSON.stringify(context, null, 2)}
 
 TOOL INVOCATION:

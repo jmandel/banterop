@@ -6,26 +6,24 @@ import {
   Conversation,
   ConversationEvent,
   ConversationTurn,
-   LLMProvider, LLMMessage, LLMRequest,
-  ScenarioConfiguration,
+  LLMProvider, LLMMessage, LLMRequest,
   ScenarioDrivenAgentConfig,
-  Tool,
   TraceEntry,
   TurnCompletedEvent,
   ToolResultEntry
 } from '$lib/types.js';
+import type { ScenarioConfiguration, AgentConfiguration, Tool } from '$lib/types.js';
 import { BaseAgent } from './base.agent.js';
 import { ToolSynthesisService } from './services/tool-synthesis.service.js';
 export { type ScenarioDrivenAgentConfig } from "$lib/types.js";
 
 export class ScenarioDrivenAgent extends BaseAgent {
   private scenario: ScenarioConfiguration;
-  private role: 'PatientAgent' | 'SupplierAgent';
+  private agentConfig: AgentConfiguration;
   private llmProvider: LLMProvider;
   private toolSynthesis: ToolSynthesisService;
   private processingTurn: boolean = false;
   
-  // Local state management for stateful operation
   private turns: ConversationTurn[] = [];
   private tracesByTurnId: Map<string, TraceEntry[]> = new Map();
 
@@ -37,21 +35,23 @@ export class ScenarioDrivenAgent extends BaseAgent {
     toolSynthesisService: ToolSynthesisService
   ) {
     super(config, client);
-    this.role = config.role;
     this.llmProvider = llmProvider;
     this.toolSynthesis = toolSynthesisService;
 
-    // Agent loads its own context from the database
     const loadedScenario = db.findScenarioByIdAndVersion(config.scenarioId, config.scenarioVersionId);
     if (!loadedScenario) {
       throw new Error(`Agent could not load scenario: ${config.scenarioId}`);
     }
     this.scenario = loadedScenario;
 
-    // Augment scenario tools with built-in communication tools
+    const myConfig = this.scenario.agents.find(a => a.agentId.id === this.agentId.id);
+    if (!myConfig) {
+      throw new Error(`Agent ID ${this.agentId.id} not found in scenario ${config.scenarioId}`);
+    }
+    this.agentConfig = myConfig;
+
     const builtInTools = this.getBuiltInTools();
-    this.scenario.patientAgent.tools = [...builtInTools, ...this.scenario.patientAgent.tools];
-    this.scenario.supplierAgent.tools = [...builtInTools, ...this.scenario.supplierAgent.tools];
+    this.agentConfig.tools = [...builtInTools, ...this.agentConfig.tools];
 
     // Apply any additional parameters from the config if needed
     if (config.parameters) {
@@ -110,11 +110,11 @@ export class ScenarioDrivenAgent extends BaseAgent {
   }
 
   async onTurnCompleted(event: TurnCompletedEvent): Promise<void> {
-    console.log(`${this.role} onTurnCompleted called - ready: ${this.isReady}, turnId: ${event.data.turn.id}, conversationId: ${this.conversationId}`);
+    console.log(`${this.agentId.id} onTurnCompleted called - ready: ${this.isReady}, turnId: ${event.data.turn.id}, conversationId: ${this.conversationId}`);
     
     // Don't process if not ready - this should be checked in onConversationEvent but double-check here
     if (!this.isReady) {
-      console.log(`${this.role} ignoring turn_completed - not ready yet`);
+      console.log(`${this.agentId.id} ignoring turn_completed - not ready yet`);
       return;
     }
     
@@ -125,18 +125,18 @@ export class ScenarioDrivenAgent extends BaseAgent {
 
     // Skip if this is a final turn (terminal tool was used)
     if (event.data.turn.isFinalTurn) {
-      console.log(`${this.role} skipping final turn processing`);
+      console.log(`${this.agentId.id} skipping final turn processing`);
       return;
     }
 
     // Add mutex to prevent concurrent processing
     if (this.processingTurn) {
-      console.log(`${this.role} already processing turn, skipping this turn_completed event`);
+      console.log(`${this.agentId.id} already processing turn, skipping this turn_completed event`);
       return;
     }
     
     this.processingTurn = true;
-    console.log(`${this.role} starting turn processing for turnId: ${event.data.turn.id}`);
+    console.log(`${this.agentId.id} starting turn processing for turnId: ${event.data.turn.id}`);
 
     try {
       // Build full-context prompt with complete conversation and trace history
@@ -150,11 +150,11 @@ export class ScenarioDrivenAgent extends BaseAgent {
       await this.executeSingleToolCallWithReasoning(result);
       
     } catch (error) {
-      console.error(`ScenarioDrivenAgent error for ${this.role}:`, error);
+      console.error(`ScenarioDrivenAgent error for ${this.agentId.id}:`, error);
       await this.recordErrorTrace(error);
     } finally {
       this.processingTurn = false;
-      console.log(`${this.role} finished processing turn for turnId: ${event.data.turn.id}`);
+      console.log(`${this.agentId.id} finished processing turn for turnId: ${event.data.turn.id}`);
     }
   }
 
@@ -173,8 +173,8 @@ export class ScenarioDrivenAgent extends BaseAgent {
         const currentProcessString = this.formatCurrentProcess(currentTurnTrace);
         
         const prompt = this.constructFullPrompt({
-            agentConfig: this.role === 'PatientAgent' ? this.scenario.patientAgent : this.scenario.supplierAgent,
-            tools: (this.role === 'PatientAgent' ? this.scenario.patientAgent : this.scenario.supplierAgent).tools,
+            agentConfig: this.agentConfig,
+            tools: this.agentConfig.tools,
             conversationHistory: historyString,
             currentProcess: currentProcessString
         });
@@ -190,21 +190,12 @@ export class ScenarioDrivenAgent extends BaseAgent {
     }
   }
 
-  // Build full-context prompt with complete conversation and trace history
   private async buildPromptFromState(conversation: any): Promise<string> {
-    const agentConfig = this.role === 'PatientAgent' 
-      ? this.scenario.patientAgent 
-      : this.scenario.supplierAgent;
-    
-    const tools = agentConfig.tools;
-    
-    // Build interleaved conversation with intelligent token management
     const interleavedConversation = this.buildInterleavedConversation(conversation.turns || [], conversation.traces || {});
     
-    // Construct the full prompt
     return this.constructFullPrompt({
-      agentConfig,
-      tools,
+      agentConfig: this.agentConfig,
+      tools: this.agentConfig.tools,
       interleavedConversation
     });
   }
@@ -331,40 +322,25 @@ export class ScenarioDrivenAgent extends BaseAgent {
     }).join('\n\n');
   }
 
-  /**
-   * Formats the JSON scenario context into human-readable Markdown.
-   */
-  private formatScenarioContext(context: any): string {
-    if (!context) return "No specific context provided.";
-    let md = `**Overview:**\n${context.overview || 'N/A'}\n\n`;
-    if (context.timeline) {
-      md += `**Relevant Timeline:**\n`;
-      md += context.timeline.map((item: any) => `- **${item.date}:** ${item.event}`).join('\n') + '\n\n';
-    }
-    if (context.clinicalNotes) {
-      md += `**Key Clinical Findings:**\n`;
-      md += context.clinicalNotes.map((note: string) => `- ${note}`).join('\n');
-    }
-    return md;
-  }
 
   // Construct the full prompt for the LLM using optimal ordering and XML delimiters
   private constructFullPrompt(params: {
-    agentConfig: any;
+    agentConfig: AgentConfiguration;
     tools: Tool[];
     conversationHistory?: string;
     currentProcess?: string;
     interleavedConversation?: string;
   }): string {
     const { agentConfig, tools, conversationHistory, currentProcess, interleavedConversation } = params;
-    const scenarioContext = 'clinicalSketch' in agentConfig ? agentConfig.clinicalSketch : agentConfig.operationalContext;
 
-    // 1. System Prompt Section (Who am I?)
     const systemPromptSection = `<SYSTEM_PROMPT>
-You are an AI agent in a healthcare interoperability scenario. Your goal is to complete your assigned task by reasoning and using the available tools.
-Role: ${this.role}
-Principal: ${agentConfig.principalIdentity}
+You are an AI agent in a healthcare interoperability scenario.
+Your Principal: ${agentConfig.principal.name} (${agentConfig.principal.description})
+Your Role: ${agentConfig.agentId.label}
+Your Situation: ${agentConfig.situation}
 Your Instructions: ${agentConfig.systemPrompt}
+Your Goals:
+${agentConfig.goals.map(g => `- ${g}`).join('\n')}
 </SYSTEM_PROMPT>`;
 
     // 2. Tools Section (What can I do?)
@@ -373,11 +349,16 @@ Here are the tools you can use. You must provide all required parameters.
 ${this.formatTools(tools)}
 </TOOLS>`;
 
-    // 3. Scenario Context Section (What is the background?)
     const scenarioContextSection = `<SCENARIO_CONTEXT>
-Here is the key background information for this case:
-${this.formatScenarioContext(scenarioContext)}
+Background: ${this.scenario.scenario.background}
+Key Challenges:
+${this.scenario.scenario.challenges.map(c => `- ${c}`).join('\n')}
 </SCENARIO_CONTEXT>`;
+    
+    const knowledgeBaseSection = `<PRIVATE_KNOWLEDGE_BASE>
+This is your private information. Do not share it directly. Use your tools to act on it.
+${JSON.stringify(agentConfig.knowledgeBase, null, 2)}
+</PRIVATE_KNOWLEDGE_BASE>`;
 
     // Use new chronological format if available, otherwise fall back to old format
     let conversationHistorySection: string;
@@ -418,16 +399,16 @@ Your response MUST follow this EXACT format with no deviation:
 CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call. Do not add any text before the scratchpad or after the JSON block.
 </RESPONSE_INSTRUCTIONS>`;
 
-    // Assemble the final prompt and add a clear call to action.
     const sections = [
       systemPromptSection,
       toolsSection,
       scenarioContextSection,
+      knowledgeBaseSection,
       conversationHistorySection,
-      currentProcessSection, // Placed after history, before instructions
+      currentProcessSection,
       responseInstructionsSection,
       "Now, provide your response following the instructions above."
-    ].filter(s => s); // Remove empty strings
+    ].filter(s => s);
 
     return sections.join('\n\n');
   }
@@ -494,20 +475,20 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
     
     // Handle case where no tool call was made
     if (!toolCall) {
-      console.log(`${this.role} provided reasoning but no tool call - treating as no_response_needed`);
+      console.log(`${this.agentId.id} provided reasoning but no tool call - treating as no_response_needed`);
       return;
     }
 
     // Handle built-in communication tools
     if (toolCall.tool === 'no_response_needed') {
-      console.log(`${this.role} chose not to respond to current situation`);
+      console.log(`${this.agentId.id} chose not to respond to current situation`);
       return;
     }
 
     if (toolCall.tool === 'send_message_to_thread') {
       const { text } = toolCall.parameters;
       if (!text || typeof text !== 'string' || text.trim() === '') {
-        const error = new Error(`${this.role}: send_message_to_thread requires non-empty text parameter. Got: ${JSON.stringify(toolCall.parameters)}`);
+        const error = new Error(`${this.agentId.id}: send_message_to_thread requires non-empty text parameter. Got: ${JSON.stringify(toolCall.parameters)}`);
         console.error('Stack trace:', error.stack);
         throw error;
       }
@@ -520,12 +501,12 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
     if (toolCall.tool === 'send_message_to_principal') {
       const { text } = toolCall.parameters;
       if (!text || typeof text !== 'string' || text.trim() === '') {
-        const error = new Error(`${this.role}: send_message_to_principal requires non-empty text parameter. Got: ${JSON.stringify(toolCall.parameters)}`);
+        const error = new Error(`${this.agentId.id}: send_message_to_principal requires non-empty text parameter. Got: ${JSON.stringify(toolCall.parameters)}`);
         console.error('Stack trace:', error.stack);
         throw error;
       }
       const queryId = await this.client.createUserQuery(text);
-      console.log(`${this.role} created user query: ${queryId}`);
+      console.log(`${this.agentId.id} created user query: ${queryId}`);
       // Turn remains open, waiting for user response
       return;
     }
@@ -543,25 +524,23 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
     const toolCallId = await this.addToolCall(turnId, toolCall.tool, toolCall.parameters);
     
     try {
-      // Execute the tool using synthesis service
+      const toolDef = this.getToolDefinition(toolCall.tool);
       const synthesisResult = await this.toolSynthesis.synthesizeToolResult(
         toolCall.tool,
         toolCall.parameters,
-        this.getToolDefinition(toolCall.tool)
+        toolDef
       );
       
-      // Add tool result trace
       await this.addToolResult(turnId, toolCallId, synthesisResult);
       
-      // If this was a terminal tool, announce result and mark as final turn
-      if (this.isTerminalTool(toolCall.tool)) {
-        // First, announce the terminal result to other agents
-        const resultMessage = `Authorization ${toolCall.tool.includes('Success') ? 'approved' : 'denied'}: ${JSON.stringify(synthesisResult)}`;
+      if (toolDef?.endsConversation) {
+        const resultMessage = `Action complete. Result: ${JSON.stringify(synthesisResult)}`;
         await this.completeTurn(turnId, resultMessage, true);
         
         console.log(`Terminal tool ${toolCall.tool} used, ending conversation gracefully`);
-        // End conversation after announcing the result
-        await this.client.endConversation(this.conversationId);
+        if (this.conversationId) {
+            await this.client.endConversation(this.conversationId);
+        }
       } else {
         // Generate final response based on tool result for non-terminal tools
         const responseContent = this.formatToolResponse(toolCall.tool, synthesisResult);
@@ -579,13 +558,8 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
     }
   }
 
-  // Get tool definition from scenario configuration
   private getToolDefinition(toolName: string): Tool | undefined {
-    const agentConfig = this.role === 'PatientAgent' 
-      ? this.scenario.patientAgent 
-      : this.scenario.supplierAgent;
-    
-    return agentConfig.tools.find(tool => tool.toolName === toolName);
+    return this.agentConfig.tools.find(tool => tool.toolName === toolName);
   }
 
   // Format tool response for the conversation
@@ -601,10 +575,9 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
     }
   }
 
-  // Check if a tool is terminal (ends the conversation)
   private isTerminalTool(toolName: string): boolean {
-    const terminalSuffixes = ['Success', 'Approval', 'Failure', 'Denial', 'NoSlots'];
-    return terminalSuffixes.some(suffix => toolName.endsWith(suffix));
+    const toolDef = this.getToolDefinition(toolName);
+    return toolDef?.endsConversation ?? false;
   }
 
   // Get built-in communication tools (copied from AgentRuntime)
@@ -626,7 +599,6 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
             }
           }
         },
-        outputDescription: 'Confirmation that message was posted to thread',
         synthesisGuidance: 'Return the turn ID of the created message'
       },
       {
@@ -641,7 +613,6 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
             expectReply: { type: 'boolean' }
           }
         },
-        outputDescription: 'Confirmation that principal was prompted',
         synthesisGuidance: 'Return the turn ID of the user_query that was created'
       },
       {
@@ -649,10 +620,8 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
         description: 'Use this when no action or response is needed in the current situation',
         inputSchema: {
           type: 'object',
-          properties: {},
-          additionalProperties: false
+          properties: {}
         },
-        outputDescription: 'Acknowledgment that no response was needed',
         synthesisGuidance: 'Agent chose not to respond to the current situation'
       }
     ];

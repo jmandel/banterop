@@ -1,0 +1,104 @@
+import React, { useState, useRef, useEffect } from 'react';
+
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+}
+
+interface ChatPanelProps {
+  messages: ChatMessage[];
+  onSendMessage: (message: string) => void;
+  isLoading: boolean;
+}
+
+export function ChatPanel({ messages, onSendMessage, isLoading }: ChatPanelProps) {
+  const [input, setInput] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (input.trim() && !isLoading) {
+      onSendMessage(input.trim());
+      setInput('');
+    }
+  };
+
+  const formatTime = (timestamp: number) => {
+    return new Date(timestamp).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  return (
+    <div className="chat-panel">
+      <div className="chat-header">
+        Scenario Builder Assistant
+      </div>
+
+      <div className="chat-messages">
+        {messages.length === 0 ? (
+          <div style={{ textAlign: 'center', color: '#666', padding: '40px' }}>
+            <p>Welcome to the Scenario Builder!</p>
+            <p style={{ marginTop: '16px', fontSize: '14px' }}>
+              I can help you modify your scenario through natural conversation.
+              Try asking me to:
+            </p>
+            <ul style={{ 
+              textAlign: 'left', 
+              display: 'inline-block', 
+              marginTop: '16px',
+              fontSize: '14px',
+              lineHeight: '1.8'
+            }}>
+              <li>Update patient or supplier information</li>
+              <li>Add or modify tools</li>
+              <li>Change clinical details</li>
+              <li>Adjust behavioral parameters</li>
+              <li>Set success criteria or failure triggers</li>
+            </ul>
+          </div>
+        ) : (
+          messages.map((message) => (
+            <div key={message.id} className={`chat-message ${message.role}`}>
+              <div className="message-bubble">
+                {message.content}
+              </div>
+              <div className="message-time">
+                {formatTime(message.timestamp)}
+              </div>
+            </div>
+          ))
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      <div className="chat-input-container">
+        <form onSubmit={handleSubmit} className="chat-input-form">
+          <input
+            type="text"
+            className="chat-input"
+            placeholder="Ask me to modify the scenario..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            disabled={isLoading}
+          />
+          <button
+            type="submit"
+            className="chat-send-btn"
+            disabled={!input.trim() || isLoading}
+          >
+            Send
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}

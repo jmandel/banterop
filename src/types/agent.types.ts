@@ -62,7 +62,6 @@ export interface ScenarioDrivenAgentConfig extends BaseAgentConfig {
   strategyType: 'scenario_driven';
   scenarioId: string;
   scenarioVersionId?: string; // Optional: to pin a specific version
-  role: 'PatientAgent' | 'SupplierAgent'; // The role within the scenario
   // Flexible parameters to allow for variations within a single scenario
   parameters?: Record<string, any>; 
 }

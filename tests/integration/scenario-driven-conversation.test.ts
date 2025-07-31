@@ -338,21 +338,16 @@ describe('Integration Test: Scenario-Driven Agent Conversation', () => {
         {
           agentId: { id: 'patient-agent', label: 'Patient Agent', role: 'PatientAgent' },
           strategyType: 'scenario_driven',
-          scenarioId: kneeMriScenarioId,
-          role: 'PatientAgent'
+          scenarioId: kneeMriScenarioId
         } as ScenarioDrivenAgentConfig,
         {
           agentId: { id: 'supplier-agent', label: 'Supplier Agent', role: 'SupplierAgent' },
           strategyType: 'scenario_driven',
-          scenarioId: kneeMriScenarioId,
-          role: 'SupplierAgent'
+          scenarioId: kneeMriScenarioId
         } as ScenarioDrivenAgentConfig
       ],
-      // Provide an initial message to kick off the conversation
-      initialMessage: {
-        agentId: 'patient-agent',
-        content: "Hello, I'm following up on the prior authorization request for my right knee MRI."
-      }
+      // Use the new property:
+      initiatingAgentId: 'patient-agent'
     };
 
     // --- 2. Set up Conversation Monitoring ---
@@ -467,4 +462,68 @@ describe('Integration Test: Scenario-Driven Agent Conversation', () => {
     console.log('--- Test Passed Successfully ---');
 
   }, 15000); // 15-second timeout for the entire test
+
+  test('Knee MRI scenario can be initiated by the supplier agent', async () => {
+    console.log('\n--- Starting Supplier-Initiated Conversation Test ---');
+
+    // Use the same scenario but initiate with the supplier
+    const kneeMriScenarioId = 'scen_knee_mri_01';
+    
+    const createRequest: CreateConversationRequest = {
+      name: 'E2E Knee MRI Test - Supplier Initiated',
+      managementMode: 'internal',
+      agents: [
+        {
+          agentId: { id: 'patient-agent', label: 'Patient Agent', role: 'PatientAgent' },
+          strategyType: 'scenario_driven',
+          scenarioId: kneeMriScenarioId
+        } as ScenarioDrivenAgentConfig,
+        {
+          agentId: { id: 'supplier-agent', label: 'Supplier Agent', role: 'SupplierAgent' },
+          strategyType: 'scenario_driven',
+          scenarioId: kneeMriScenarioId
+        } as ScenarioDrivenAgentConfig
+      ],
+      initiatingAgentId: 'supplier-agent' // The only change is here
+    };
+    
+    // Set up conversation monitoring
+    let conversationEnded = false;
+    const conversationEndPromise = new Promise<void>((resolve) => {
+      orchestrator.subscribeToConversation('*', async (event: ConversationEvent) => {
+        await debugLogger.logEvent(event.type, event);
+        
+        if (event.type === 'conversation_ended') {
+          conversationEnded = true;
+          resolve();
+        }
+      });
+    });
+
+    // Create and start the conversation
+    console.log('Creating supplier-initiated conversation...');
+    const { conversation } = await orchestrator.createConversation(createRequest);
+    await orchestrator.startConversation(conversation.id);
+    console.log(`Conversation ${conversation.id} started with supplier initiation.`);
+
+    // Wait for conversation to end (with timeout)
+    await Promise.race([
+      conversationEndPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Test timeout')), 10000))
+    ]);
+
+    // Validate the outcome
+    const finalState = orchestrator.getConversation(conversation.id, true, true);
+    
+    // Check that the first turn was from the supplier-agent
+    expect(finalState.turns[0].agentId).toBe('supplier-agent');
+    expect(finalState.turns[0].content).toContain("HealthFirst Insurance calling");
+    
+    // Verify conversation completed successfully
+    expect(finalState.status).toBe('completed');
+    expect(conversationEnded).toBe(true);
+    
+    console.log(`Supplier-initiated conversation completed in ${finalState.turns.length} turns.`);
+    console.log('--- Supplier-Initiated Test Passed Successfully ---');
+  }, 15000);
 });

@@ -1,53 +1,11 @@
 // Scenario-Related Types
 // This file contains all scenario and LLM integration types
 
-// ============= Core Scenario Types (Schema v2.4) =============
-
+// **MAJOR CHANGE**: Import the definitive scenario types
+import type { ScenarioConfiguration } from './scenario-configuration.types.js';
 import { LLMMessage, LLMTool } from './llm.types.js';
 
-export interface Tool {
-  toolName: string;            // suffix encodes terminal outcome
-  description: string;
-  inputSchema: {type: string, required?: string[], properties: any, additionalProperties?: boolean};         // JSON Schema
-  outputDescription: string;   // NL description of output
-  synthesisGuidance: string;   // how to synthesize realistic results
-}
-
-export interface ScenarioConfiguration {
-  scenarioMetadata: {
-    id: string;
-    title: string;
-    schemaVersion: '2.4';
-    description: string;
-  };
-  patientAgent: {
-    principalIdentity: string; // The name of the human this agent represents (e.g., "Margaret Chen")
-    systemPrompt: string;      // The prompt defining the AI assistant's role and goals
-    clinicalSketch: Record<string, unknown>; // Ground truth for the principal - flexible payload
-    tools: Tool[];
-    behavioralParameters?: Record<string, unknown>; // flexible payload
-    successCriteria?: string[];
-    failureTriggers?: string[];
-  };
-  supplierAgent: {
-    principalIdentity: string; // The name of the human this agent represents (e.g., "Alex Rivera")
-    systemPrompt: string;
-    operationalContext: Record<string, unknown>; // Ground truth for the principal's environment - flexible payload
-    tools: Tool[];
-    decisionFramework?: Record<string, unknown>; // flexible payload
-  };
-  interactionDynamics: {
-    startingPoints: {
-      PatientAgent: { objective: string };
-      SupplierAgent: { objective: string };
-    };
-    criticalNegotiationPoints?: Array<{
-      moment: string;
-      patientView: string;
-      supplierView: string;
-    }>;
-  };
-}
+// **DELETED**: The old `Tool` and `ScenarioConfiguration` interfaces are removed from this file.
 
 // ============= Scenario Builder Types =============
 
