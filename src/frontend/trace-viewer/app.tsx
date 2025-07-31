@@ -804,7 +804,7 @@ const TraceViewer: React.FC = () => {
         onToggleMinimize={() => setEventLogMinimized(!eventLogMinimized)}
       />
 
-      <style jsx>{`
+      <style>{`
         .header {
           background: #1a1a1a;
           padding: 1rem 2rem;

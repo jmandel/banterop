@@ -1,4 +1,4 @@
-import { LLMProvider, LLMProviderConfig } from './types.js';
+import { LLMProvider, LLMProviderConfig } from '../types/llm.types.js';
 import { GoogleLLMProvider } from './providers/google.js';
 
 // Registry of available providers

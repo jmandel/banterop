@@ -1,6 +1,6 @@
 // src/backend/index.ts
 
-import { Hono } from 'hono';
+import { Hono, Context } from 'hono';
 import { cors } from 'hono/cors';
 import { ConversationOrchestrator } from './core/orchestrator.js';
 import { HonoWebSocketJsonRpcServer } from './websocket/hono-websocket-server.js';
@@ -8,7 +8,7 @@ import { seedDatabase } from './db/seed.js';
 import { createScenarioRoutes } from './api/scenarios.js';
 import { createLLMRoutes } from './api/llm.js';
 import { createLLMProvider } from '$llm/factory.js';
-import { LLMProviderConfig, LLMProvider } from '$llm/types.js';
+import { LLMProviderConfig, LLMProvider } from 'src/types/llm.types.js';
 import {
   CreateConversationRequest,
   StartTurnRequest,
@@ -17,6 +17,14 @@ import {
   UserQueryRequest,
   SubscriptionOptions
 } from '$lib/types.js';
+
+// Define context variables type for auth
+type Variables = {
+  auth: {
+    agentId: string;
+    conversationId: string;
+  };
+};
 
 // --- 1. Initialization ---
 
@@ -39,7 +47,7 @@ const orchestrator = new ConversationOrchestrator(
 seedDatabase(orchestrator.getDbInstance());
 
 // --- 2. Create the API App (routes at root level) ---
-const apiApp = new Hono();
+const apiApp = new Hono<{ Variables: Variables }>();
 
 // --- 3. Apply Middleware to API App ---
 apiApp.use('*', cors());
@@ -62,7 +70,7 @@ apiApp.use('*', async (c, next) => {
 });
 
 // --- 4. Auth middleware for protected agent endpoints ---
-const authMiddleware = async (c: any, next: any) => {
+const authMiddleware = async (c: Context<{ Variables: Variables }>, next: () => Promise<void>) => {
   const token = c.req.header('Authorization')?.replace('Bearer ', '');
   if (!token) return c.json({ error: 'No token provided' }, 401);
 

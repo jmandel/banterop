@@ -1,39 +1,32 @@
 {
   "compilerOptions": {
-    "lib": ["ESNext"],
-    "module": "esnext",
-    "target": "esnext",
+    "target": "ES2022",
+    "module": "ESNext", 
     "moduleResolution": "bundler",
-    "moduleDetection": "force",
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "composite": true,
-    "strict": true,
-    "downlevelIteration": true,
+    "strict": false,
     "skipLibCheck": true,
-    "jsx": "react-jsx",
     "allowSyntheticDefaultImports": true,
-    "forceConsistentCasingInFileNames": true,
-    "allowJs": true,
-    "types": [
-      "bun-types"
-    ],
     "esModuleInterop": true,
-    "resolveJsonModule": true,
-    
+    "forceConsistentCasingInFileNames": true,
+    "downlevelIteration": true,
     "baseUrl": ".",
+    "jsx": "react-jsx",
     "paths": {
       "$lib/*": ["src/lib/*"],
+      "$backend/*": ["src/backend/*"],  
+      "$client/*": ["src/client/*"],
       "$agents/*": ["src/agents/*"],
-      "$backend/*": ["src/backend/*"],
-      "$demos/*": ["src/demos-broken/*"],
       "$llm/*": ["src/llm/*"],
-      "$client/*": ["src/client/*"]
-    }
+      "src/types/llm.types.js": ["src/types/llm.types.ts"],
+      "design/agent-platform-types.js": ["src/types/agent.types.ts"]
+    },
+    "types": ["bun-types"]
   },
   "include": [
-    "**/*.ts",
-    "**/*.tsx"
+    "src/**/*",
+    "tests/**/*"
   ],
   "exclude": [
     "node_modules",

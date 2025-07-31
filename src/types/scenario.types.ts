@@ -3,10 +3,12 @@
 
 // ============= Core Scenario Types (Schema v2.4) =============
 
+import { LLMMessage, LLMTool } from './llm.types.js';
+
 export interface Tool {
   toolName: string;            // suffix encodes terminal outcome
   description: string;
-  inputSchema: object;         // JSON Schema
+  inputSchema: {type: string, required?: string[], properties: any, additionalProperties?: boolean};         // JSON Schema
   outputDescription: string;   // NL description of output
   synthesisGuidance: string;   // how to synthesize realistic results
 }
@@ -49,62 +51,16 @@ export interface ScenarioConfiguration {
 
 // ============= Scenario Builder Types =============
 
-export interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
-}
 
 export interface ScenarioItem {
   id: string;
   name: string;
   config: ScenarioConfiguration;
-  history: ChatMessage[];
+  history: LLMMessage[];
   created: number;
   modified: number;
 }
 
-// ============= LLM Integration Types =============
-
-export interface LLMMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
-
-export interface LLMRequest {
-  messages: LLMMessage[];
-  model?: string;
-  temperature?: number;
-  maxTokens?: number;
-}
-
-export interface LLMResponse {
-  content: string;
-  usage?: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
-  finishReason?: 'stop' | 'length' | 'tool_calls' | 'content_filter';
-}
-
-export interface LLMTool {
-  name: string;
-  description: string;
-  inputSchema: object;
-}
-
-export interface LLMToolCall {
-  name: string;
-  arguments: Record<string, unknown>;
-}
-
-export interface LLMToolResponse {
-  name: string;
-  content: string;
-  error?: string;
-}
 
 // ============= JSON Patch Types =============
 

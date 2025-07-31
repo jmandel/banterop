@@ -3,9 +3,10 @@
  * Tests complete workflow between multiple agents with user interaction
  */
 
-import { test, expect } from 'bun:test';
-import { TestEnvironment } from '../utils/test-helpers.js';
 import type { ConversationEvent, SequentialScriptConfig } from '$lib/types.js';
+import { CreateConversationResponse } from '$lib/types.js';
+import { expect, test } from 'bun:test';
+import { TestEnvironment } from '../utils/test-helpers.js';
 
 test('multi-agent workflow with user queries and tool usage', async () => {
   const testEnv = new TestEnvironment();
@@ -99,7 +100,7 @@ test('multi-agent workflow with user queries and tool usage', async () => {
     })
   });
   
-  const { conversation, agentTokens } = await createResponse.json();
+  const { conversation, agentTokens } = (await createResponse.json()) as CreateConversationResponse;
   const conversationId = conversation.id;
   
   // Start the conversation to activate agents
@@ -113,7 +114,7 @@ test('multi-agent workflow with user queries and tool usage', async () => {
   // Set up WebSocket monitoring
   const { WebSocketJsonRpcClient } = await import('$client/impl/websocket.client.js');
   const { WebSocket } = await import('ws');
-  const wsClient = new WebSocketJsonRpcClient(testEnv.wsUrl!, WebSocket);
+  const wsClient = new WebSocketJsonRpcClient(testEnv.wsUrl!);
   await wsClient.connect();
   
   const firstAgentToken = Object.values(agentTokens)[0] as string;

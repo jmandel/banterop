@@ -4,6 +4,7 @@ import { test, expect, beforeEach, afterEach } from 'bun:test';
 import { ConversationOrchestrator } from '$backend/core/orchestrator.js';
 import { InProcessOrchestratorClient } from '$client/impl/in-process.client.js';
 import { TestDataFactory, createTestOrchestrator } from '../utils/test-helpers.js';
+import type { ThoughtEntry, ToolCallEntry, ToolResultEntry } from '$lib/types.js';
 
 let orchestrator: ConversationOrchestrator;
 let client: InProcessOrchestratorClient;
@@ -21,7 +22,7 @@ beforeEach(async () => {
   });
   
   conversationId = conversation.id;
-  agentToken = Object.values(agentTokens)[0];
+  agentToken = Object.values(agentTokens)[0] as string;
 });
 
 afterEach(async () => {
@@ -61,7 +62,7 @@ test('should propagate appropriate error messages', async () => {
       expectedMessageContains: 'not found'
     },
     {
-      operation: () => client.addTrace('invalid-turn-id', { type: 'thought', content: 'test' }),
+      operation: () => client.addTrace('invalid-turn-id', { type: 'thought', content: 'test' } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>),
       expectedMessageContains: 'FOREIGN KEY constraint failed'
     },
     {
@@ -93,7 +94,7 @@ test('should maintain client state consistency during errors', async () => {
   // Cause multiple errors
   const errorOperations = [
     () => client.completeTurn('invalid-1', 'content'),
-    () => client.addTrace('invalid-2', { type: 'thought', content: 'test' }),
+    () => client.addTrace('invalid-2', { type: 'thought', content: 'test' } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>),
     () => client.respondToUserQuery('invalid-3', 'response')
   ];
   
@@ -125,7 +126,7 @@ test('should not crash on orchestrator exceptions', async () => {
   }
   
   try {
-    await client.addTrace('', { type: 'thought', content: 'empty turn id' });
+    await client.addTrace('', { type: 'thought', content: 'empty turn id' } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
   } catch (e) {
     // Expected
   }
@@ -326,12 +327,12 @@ test('should recover from error conditions', async () => {
   
   // Should be able to perform normal operations after error
   const turnId = await client.startTurn();
-  await client.addTrace(turnId, { type: 'thought', content: 'Recovery test' });
+  await client.addTrace(turnId, { type: 'thought', content: 'Recovery test' } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
   const completedTurn = await client.completeTurn(turnId, 'Recovered successfully');
   
   expect(completedTurn.content).toBe('Recovered successfully');
   expect(completedTurn.trace).toHaveLength(1);
-  expect(completedTurn.trace[0].content).toBe('Recovery test');
+  expect((completedTurn.trace[0] as ThoughtEntry).content).toBe('Recovery test');
 });
 
 test('should handle concurrent operations with errors', async () => {

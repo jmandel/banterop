@@ -3,9 +3,10 @@
 import { v4 as uuidv4 } from 'uuid';
 import { BaseAgent } from './base.agent.js';
 import type { 
-  ConversationEvent, TurnAddedEvent, SequentialScriptConfig, 
+  ConversationEvent, TurnStartedEvent, SequentialScriptConfig, 
   SequentialScriptEntry, ScriptStep, ScriptTrigger, ThoughtStep, 
-  ToolCallStep, UserQueryStep, ResponseStep, UserQueryAnsweredEvent
+  ToolCallStep, UserQueryStep, ResponseStep, UserQueryAnsweredEvent,
+  TurnCompletedEvent
 } from '$lib/types.js';
 
 /**
@@ -108,7 +109,7 @@ export class SequentialScriptAgent extends BaseAgent {
   /**
    * Check if an agent turn event matches the trigger
    */
-  private matchesAgentTurnTrigger(event: TurnAddedEvent, trigger: ScriptTrigger): boolean {
+  private matchesAgentTurnTrigger(event: TurnStartedEvent | TurnCompletedEvent, trigger: ScriptTrigger): boolean {
     // Match agent ID if specified
     if (trigger.from && event.data.turn?.agentId !== trigger.from) {
       return false;

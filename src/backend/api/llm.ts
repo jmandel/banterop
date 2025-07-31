@@ -66,20 +66,18 @@ router.post('/scenario-chat/:scenarioId', async (c) => {
       return c.json(createResponse(false, undefined, 'Scenario not found'), 404);
     }
     
-    // Get latest published version
-    const latestVersion = db.findLatestPublishedVersion(scenarioId);
-    if (!latestVersion) {
-      return c.json(createResponse(false, undefined, 'No published version found'), 404);
+    // Get latest active version  
+    const config = db.findScenarioByIdAndVersion(scenarioId);
+    if (!config) {
+      return c.json(createResponse(false, undefined, 'No active version found'), 404);
     }
-    
-    const config = JSON.parse(latestVersion.json);
     const scenario = {
       id: dbScenario.id,
-      name: dbScenario.title,
+      name: dbScenario.name,
       config,
       history: history, // Use provided chat history from frontend
-      created: dbScenario.created_at,
-      modified: dbScenario.created_at
+      created: dbScenario.created,
+      modified: dbScenario.modified
     };
     
     // Check the availability of the single, injected provider.

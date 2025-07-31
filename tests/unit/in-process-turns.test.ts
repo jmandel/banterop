@@ -4,6 +4,7 @@ import { test, expect, beforeEach, afterEach } from 'bun:test';
 import { ConversationOrchestrator } from '$backend/core/orchestrator.js';
 import { InProcessOrchestratorClient } from '$client/impl/in-process.client.js';
 import { TestDataFactory, createTestOrchestrator } from '../utils/test-helpers.js';
+import type { ThoughtEntry, ToolCallEntry, ToolResultEntry } from '$lib/types.js';
 
 let orchestrator: ConversationOrchestrator;
 let client: InProcessOrchestratorClient;
@@ -21,7 +22,7 @@ beforeEach(async () => {
   });
   
   conversationId = conversation.id;
-  agentToken = Object.values(agentTokens)[0];
+  agentToken = Object.values(agentTokens)[0] as string;
 });
 
 afterEach(async () => {
@@ -51,14 +52,15 @@ test('should add trace entries to in-progress turns', async () => {
   await client.addTrace(turnId, {
     type: 'thought',
     content: 'Thinking about the response...'
-  });
+  } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
   
   // Add a tool call trace entry
   await client.addTrace(turnId, {
     type: 'tool_call',
     toolName: 'search',
-    parameters: { query: 'test' }
-  });
+    parameters: { query: 'test' },
+    toolCallId: 'call-123'
+  } as Omit<ToolCallEntry, 'id' | 'timestamp' | 'agentId'>);
   
   // No error should be thrown - traces are added successfully
   expect(true).toBe(true);
@@ -74,7 +76,7 @@ test('should complete turns with final content', async () => {
   await client.addTrace(turnId, {
     type: 'thought',
     content: 'Processing request...'
-  });
+  } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
   
   const completedTurn = await client.completeTurn(turnId, 'Final response content');
   
@@ -84,7 +86,7 @@ test('should complete turns with final content', async () => {
   expect(completedTurn.status).toBe('completed');
   expect(completedTurn.trace).toHaveLength(1);
   expect(completedTurn.trace[0].type).toBe('thought');
-  expect(completedTurn.trace[0].content).toBe('Processing request...');
+  expect((completedTurn.trace[0] as ThoughtEntry).content).toBe('Processing request...');
 });
 
 test('should handle streaming turn errors appropriately', async () => {
@@ -113,7 +115,7 @@ test('should prevent operations on non-existent turns', async () => {
     await client.addTrace('invalid-turn-id', {
       type: 'thought',
       content: 'This should fail'
-    });
+    } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
   } catch (e) {
     traceError = e;
   }
@@ -134,7 +136,7 @@ test('should validate agent permissions for turn operations', async () => {
   await client.addTrace(turnId, {
     type: 'thought',
     content: 'This should work'
-  });
+  } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
   
   const completedTurn = await client.completeTurn(turnId, 'Completed by correct agent');
   expect(completedTurn.agentId).toBeDefined();
@@ -158,9 +160,9 @@ test('should handle concurrent streaming turns from same agent', async () => {
   
   // Add traces to different turns concurrently
   await Promise.all([
-    client.addTrace(turnId1, { type: 'thought', content: 'Working on task 1' }),
-    client.addTrace(turnId2, { type: 'thought', content: 'Working on task 2' }),
-    client.addTrace(turnId3, { type: 'thought', content: 'Working on task 3' })
+    client.addTrace(turnId1, { type: 'thought', content: 'Working on task 1' } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>),
+    client.addTrace(turnId2, { type: 'thought', content: 'Working on task 2' } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>),
+    client.addTrace(turnId3, { type: 'thought', content: 'Working on task 3' } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>)
   ]);
   
   // Complete turns in different order
@@ -185,32 +187,33 @@ test('should maintain turn state consistency', async () => {
   await client.addTrace(turnId, {
     type: 'thought',
     content: 'First thought'
-  });
+  } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
   
   await client.addTrace(turnId, {
     type: 'tool_call',
     toolName: 'calculator',
-    parameters: { operation: 'add', a: 2, b: 3 }
-  });
+    parameters: { operation: 'add', a: 2, b: 3 },
+    toolCallId: 'call-456'
+  } as Omit<ToolCallEntry, 'id' | 'timestamp' | 'agentId'>);
   
   await client.addTrace(turnId, {
     type: 'thought',
     content: 'Second thought'
-  });
+  } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
   
   const completedTurn = await client.completeTurn(turnId, 'Final result');
   
   // Verify all trace entries are preserved
   expect(completedTurn.trace).toHaveLength(3);
-  expect(completedTurn.trace[0].content).toBe('First thought');
-  expect(completedTurn.trace[1].toolName).toBe('calculator');
-  expect(completedTurn.trace[2].content).toBe('Second thought');
+  expect((completedTurn.trace[0] as ThoughtEntry).content).toBe('First thought');
+  expect((completedTurn.trace[1] as ToolCallEntry).toolName).toBe('calculator');
+  expect((completedTurn.trace[2] as ThoughtEntry).content).toBe('Second thought');
   
   // Try to add trace after completion (currently allowed - may be by design)
   await client.addTrace(turnId, {
     type: 'thought',
     content: 'Post-completion trace'
-  });
+  } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
   
   // This currently succeeds - traces can be added after completion
   // This might be intentional for retrospective logging

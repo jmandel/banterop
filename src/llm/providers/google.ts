@@ -1,5 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
-import { LLMProvider, LLMRequest, LLMResponse, LLMMessage, LLMTool, LLMToolCall, LLMToolResponse } from '$llm/types.js';
+import { LLMProvider, LLMRequest, LLMResponse, LLMMessage, LLMTool, LLMToolCall, LLMToolResponse } from 'src/types/llm.types.js';
 
 export class GoogleLLMProvider extends LLMProvider {
   private client: GoogleGenAI | null = null;

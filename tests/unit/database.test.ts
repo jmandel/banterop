@@ -141,7 +141,7 @@ describe('ConversationDatabase', () => {
     expect(allTraces).toHaveLength(1);
     expect(allTraces[0].id).toBe('trace-1');
     expect(allTraces[0].type).toBe('thought');
-    expect(allTraces[0].content).toBe('I am thinking about this problem');
+    expect((allTraces[0] as ThoughtEntry).content).toBe('I am thinking about this problem');
   });
 
   test('should create and validate agent tokens', () => {

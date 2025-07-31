@@ -6,16 +6,16 @@
   "scripts": {
     "//--- DEVELOPMENT ---": "",
     "dev:backend": "bun --watch src/backend/index.ts",
-    "dev:frontend": "bun --port 3000 src/frontend/dashboard/index.html src/frontend/trace-viewer/index.html src/frontend/scenario-builder/index.html src/frontend/executor/index.html src/frontend/external-executor/index.html",
-
+    "dev:frontend": "bun --port 3000 src/frontend/trace-viewer/index.html src/frontend/external-executor/index.html",
     "//--- PRODUCTION ---": "",
     "build": "bun build ./src/frontend/**/*.tsx --outdir ./dist --target browser",
     "start": "NODE_ENV=production bun src/backend/index.ts",
     "serve": "bun --port 8080 ./dist",
-
     "//--- OTHER ---": "",
     "demo": "bun src/demos/multi-agent-demo.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc --project tsconfig.tests.json"
   },
   "dependencies": {
     "events": "^3.3.0",
@@ -23,8 +23,9 @@
     "uuid": "^11.1.0"
   },
   "devDependencies": {
-    "@types/uuid": "^10.0.0",
+    "@types/bun": "^1.2.19",
     "@types/node": "^24.1.0",
+    "@types/uuid": "^10.0.0",
     "bun-types": "^1.2.19"
   },
   "peerDependencies": {

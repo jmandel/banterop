@@ -1,11 +1,14 @@
 // In-Process Agent for Testing
 
+import { ConversationOrchestrator } from '$backend/core/orchestrator.js';
 import {
-  AgentInterface, AgentId, AgentConfig, ConversationEvent, TurnAddedEvent,
-  TraceEntry, ThoughtEntry, ToolCallEntry, ToolResultEntry,
+  AgentConfig,
+  AgentId,
+  AgentInterface,
+  ConversationEvent,
+  ThoughtEntry, ToolCallEntry, ToolResultEntry,
   TurnCompletedEvent
 } from '$lib/types.js';
-import { ConversationOrchestrator } from '$backend/core/orchestrator.js';
 import { v4 as uuidv4 } from 'uuid';
 
 // ============= In-Process Base Agent =============

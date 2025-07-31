@@ -154,7 +154,6 @@ export interface AgentInterface {
   shutdown(): Promise<void>;
   
   // Event handling
-  onTurnAdded(event: any): Promise<void>;
   onConversationEvent(event: any): Promise<void>;
   
   // Actions - Streaming approach

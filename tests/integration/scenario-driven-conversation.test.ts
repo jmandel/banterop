@@ -10,11 +10,15 @@ import { test, expect, describe, beforeEach, afterEach } from 'bun:test';
 import { ConversationOrchestrator } from '$backend/core/orchestrator.js';
 import { ToolSynthesisService } from '$agents/services/tool-synthesis.service.js';
 import { seedDatabase } from '$backend/db/seed.js';
-import { LLMProvider, LLMRequest, LLMResponse } from '$llm/types.js';
+import { LLMProvider, LLMRequest, LLMResponse } from 'src/types/llm.types.js';
 import type { 
   CreateConversationRequest, 
   ConversationEvent, 
-  ScenarioDrivenAgentConfig 
+  ScenarioDrivenAgentConfig,
+  LLMMessage,
+  LLMTool,
+  LLMToolCall,
+  LLMToolResponse
 } from '$lib/types.js';
 import { mkdir, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
@@ -148,6 +152,9 @@ class DebugLogger {
  * - This simulates a real conversation that progresses and eventually concludes.
  */
 class TerminalAwareMockLLMProvider extends LLMProvider {
+  generateWithTools?(messages: LLMMessage[], tools: LLMTool[], toolHandler: (call: LLMToolCall) => Promise<LLMToolResponse>): Promise<LLMResponse> {
+    throw new Error('Method not implemented.');
+  }
   public lastPrompt: string = '';
   public terminalToolsUsed: string[] = [];
   private turnCount: number = 0;

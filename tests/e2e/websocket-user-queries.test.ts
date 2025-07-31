@@ -35,7 +35,7 @@ test('WebSocket clients receive user_query_created events', async () => {
   // Set up WebSocket client
   const { WebSocketJsonRpcClient } = await import('$client/impl/websocket.client.js');
   const { WebSocket } = await import('ws');
-  const wsClient = new WebSocketJsonRpcClient(testEnv.wsUrl!, WebSocket);
+  const wsClient = new WebSocketJsonRpcClient(testEnv.wsUrl!);
   await wsClient.connect();
   await wsClient.authenticate(agentToken);
   await wsClient.subscribe(conversationId);

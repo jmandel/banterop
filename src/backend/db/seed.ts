@@ -384,7 +384,8 @@ export function seedDatabase(db: ConversationDatabase): void {
       name: kneeMriConfig.scenarioMetadata.title,
       config: kneeMriConfig,
       created: now,
-      modified: now
+      modified: now,
+      history: []
     });
     
     console.log(`[Seed] Created Knee MRI scenario`);
@@ -395,7 +396,8 @@ export function seedDatabase(db: ConversationDatabase): void {
       name: cardioConfig.scenarioMetadata.title,
       config: cardioConfig,
       created: now,
-      modified: now
+      modified: now,
+      history: []
     });
     
     console.log(`[Seed] Created Cardiology scenario`);

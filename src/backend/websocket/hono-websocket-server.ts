@@ -1,6 +1,6 @@
 // Hono WebSocket JSON-RPC Server Implementation
 
-import { Hono } from 'hono';
+import { Hono, Context } from 'hono';
 import { createBunWebSocket } from 'hono/bun';
 import { v4 as uuidv4 } from 'uuid';
 import type { ServerWebSocket } from 'bun';
@@ -125,22 +125,22 @@ export class HonoWebSocketJsonRpcServer {
 
   private setupWebSocketRoute(upgradeWebSocket: any) {
     console.log('[WS Server] Setting up WebSocket route at "/"');
-    this.app.get('/', upgradeWebSocket((c) => {
+    this.app.get('/', upgradeWebSocket((c: Context) => {
       console.log('[WS Server] WebSocket upgrade requested, creating handlers');
       return {
-        onOpen: (event, ws) => {
+        onOpen: (event: Event, ws: ServerWebSocket) => {
           console.log('[WS Server] WebSocket connection opened');
           this.handleConnection(ws);
         },
-        onMessage: (event, ws) => {
+        onMessage: (event: MessageEvent, ws: ServerWebSocket) => {
           console.log('[WS Server] WebSocket message received:', event.data?.toString()?.substring(0, 100));
           this.handleMessage(ws, event.data);
         },
-        onClose: (event, ws) => {
+        onClose: (event: CloseEvent, ws: ServerWebSocket) => {
           console.log('[WS Server] WebSocket connection closed, code:', event.code, 'reason:', event.reason);
           this.handleDisconnect(ws);
         },
-        onError: (event, ws) => {
+        onError: (event: Event, ws: ServerWebSocket) => {
           console.error('[WS Server] WebSocket error:', event);
         }
       };

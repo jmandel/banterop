@@ -1,6 +1,6 @@
 // Tool Synthesis Service with deterministic caching using Bun crypto
-import type { LLMProvider } from "$llm/types.js";
-import type { ScenarioConfiguration, TraceStep } from "$lib/types.js";
+import type { LLMProvider } from "src/types/llm.types.js";
+import type { ScenarioConfiguration, TraceEntry } from "$lib/types.js";
 
 export interface ToolExecutionInput {
   toolName: string;
@@ -12,12 +12,12 @@ export interface ToolExecutionInput {
 
 export interface ToolExecutionOutput {
   output: unknown;
-  steps: TraceStep[];
+  steps: TraceEntry[];
 }
 
 interface CachedResult {
   output: unknown;
-  steps: TraceStep[];
+  steps: TraceEntry[];
   timestamp: number;
 }
 
@@ -40,10 +40,10 @@ export class ToolSynthesisService {
             ...cached.steps,
             {
               id: `cache_${Date.now()}`,
+              agentId: input.runId,
               type: 'thought',
-              timestamp: Date.now(),
-              label: 'Cache hit',
-              detail: `Using cached result for deterministic replay (key: ${cacheKey.slice(0, 8)}...)`
+              timestamp: new Date(),
+              content: `Cache hit: Using cached result for deterministic replay (key: ${cacheKey.slice(0, 8)}...)`
             }
           ]
         };
@@ -70,10 +70,10 @@ export class ToolSynthesisService {
         },
         steps: [{
           id: `error_${Date.now()}`,
+          agentId: input.runId,
           type: 'thought',
-          timestamp: Date.now(),
-          label: 'Tool synthesis failed',
-          detail: error instanceof Error ? error.message : 'Unknown error'
+          timestamp: new Date(),
+          content: `Tool synthesis failed: ${error instanceof Error ? error.message : 'Unknown error'}`
         }]
       };
     }
@@ -141,43 +141,47 @@ export class ToolSynthesisService {
           },
           steps: [{
             id: `parse_error_${Date.now()}`,
+            agentId: input.runId,
             type: 'thought',
-            timestamp: Date.now(),
-            label: 'Response parsing failed',
-            detail: parseError instanceof Error ? parseError.message : 'Unknown parsing error'
+            timestamp: new Date(),
+            content: `Response parsing failed: ${parseError instanceof Error ? parseError.message : 'Unknown parsing error'}`
           }]
         };
       }
       
       // Create execution steps
-      const steps: TraceStep[] = [
+      const toolCallId = `call_${Date.now()}`;
+      const steps: TraceEntry[] = [
         {
           id: `thought_${Date.now()}`,
+          agentId: input.runId,
           type: 'thought',
-          timestamp: Date.now(),
-          label: 'Analyzing tool request',
-          detail: `Processing ${toolName} with args: ${JSON.stringify(args)}`
+          timestamp: new Date(),
+          content: `Analyzing tool request: Processing ${toolName} with args: ${JSON.stringify(args)}`
         },
         {
           id: `tool_call_${Date.now()}`,
+          agentId: input.runId,
           type: 'tool_call',
-          timestamp: Date.now(),
-          label: toolName,
-          data: args
+          timestamp: new Date(),
+          toolName: toolName,
+          parameters: args,
+          toolCallId: toolCallId
         },
         {
           id: `tool_result_${Date.now()}`,
+          agentId: input.runId,
           type: 'tool_result',
-          timestamp: Date.now(),
-          label: 'Tool executed',
-          data: parsed.output as Record<string, unknown>
+          timestamp: new Date(),
+          toolCallId: toolCallId,
+          result: parsed.output
         },
         {
           id: `synthesis_${Date.now()}`,
-          type: 'synthesis',
-          timestamp: Date.now(),
-          label: parsed.summary || 'Tool execution completed',
-          detail: parsed.reasoning || undefined
+          agentId: input.runId,
+          type: 'thought',
+          timestamp: new Date(),
+          content: `${parsed.summary || 'Tool execution completed'}${parsed.reasoning ? ': ' + parsed.reasoning : ''}`
         }
       ];
       
@@ -191,13 +195,13 @@ export class ToolSynthesisService {
       console.error(`LLM generation failed for tool ${toolName}:`, error);
       
       // Create error steps
-      const errorSteps: TraceStep[] = [
+      const errorSteps: TraceEntry[] = [
         {
           id: `llm_error_${Date.now()}`,
+          agentId: input.runId,
           type: 'thought',
-          timestamp: Date.now(),
-          label: 'LLM generation failed',
-          detail: error instanceof Error ? error.message : 'Unknown LLM error'
+          timestamp: new Date(),
+          content: `LLM generation failed: ${error instanceof Error ? error.message : 'Unknown LLM error'}`
         }
       ];
       

@@ -1,13 +1,16 @@
 // Transport-Agnostic Base Agent Class
 
+import type { OrchestratorClient } from '$client/index.js';
 import {
-  AgentInterface, AgentId, AgentConfig, ConversationEvent, TurnAddedEvent,
-  TraceEntry, ThoughtEntry, ToolCallEntry, ToolResultEntry,
-  UserQueryEntry, UserResponseEntry,
-  StartTurnRequest, AddTraceEntryRequest, CompleteTurnRequest, TurnCompletedEvent
+  AgentConfig,
+  AgentId,
+  AgentInterface,
+  ConversationEvent,
+  ThoughtEntry, ToolCallEntry, ToolResultEntry,
+  TurnCompletedEvent,
+  TraceEntry
 } from '$lib/types.js';
 import { v4 as uuidv4 } from 'uuid';
-import type { OrchestratorClient } from '$client/index.js';
 
 export abstract class BaseAgent implements AgentInterface {
   agentId: AgentId;

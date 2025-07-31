@@ -6,6 +6,7 @@ import { InProcessOrchestratorClient } from '$client/impl/in-process.client.js';
 import { ConversationOrchestrator } from '$backend/core/orchestrator.js';
 import { TestEnvironment, TestDataFactory } from '../utils/test-helpers.js';
 import { WebSocket } from 'ws';
+import type { ThoughtEntry, ToolCallEntry, ToolResultEntry } from '$lib/types.js';
 
 let testEnv: TestEnvironment;
 let orchestrator: ConversationOrchestrator;
@@ -23,7 +24,7 @@ beforeEach(async () => {
   port = testEnv.server.port;
   
   // Create WebSocket client
-  wsClient = new WebSocketJsonRpcClient(`ws://localhost:${port}/api/ws`, WebSocket);
+  wsClient = new WebSocketJsonRpcClient(`ws://localhost:${port}/api/ws`);
   
   // Create in-process client
   inProcessClient = new InProcessOrchestratorClient(orchestrator);
@@ -195,8 +196,8 @@ test('should produce same conversation outcomes', async () => {
   const wsTurnId = await wsClient.startTurn();
   const inProcessTurnId = await inProcessClient.startTurn();
   
-  await wsClient.addTrace(wsTurnId, { type: 'thought', content: 'Test thought' });
-  await inProcessClient.addTrace(inProcessTurnId, { type: 'thought', content: 'Test thought' });
+  await wsClient.addTrace(wsTurnId, { type: 'thought', content: 'Test thought' } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
+  await inProcessClient.addTrace(inProcessTurnId, { type: 'thought', content: 'Test thought' } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
   
   const wsCompletedTurn = await wsClient.completeTurn(wsTurnId, 'Identical content');
   const inProcessCompletedTurn = await inProcessClient.completeTurn(inProcessTurnId, 'Identical content');
@@ -207,7 +208,7 @@ test('should produce same conversation outcomes', async () => {
   // Should produce equivalent results
   expect(wsCompletedTurn.content).toBe(inProcessCompletedTurn.content);
   expect(wsCompletedTurn.trace.length).toBe(inProcessCompletedTurn.trace.length);
-  expect(wsCompletedTurn.trace[0].content).toBe(inProcessCompletedTurn.trace[0].content);
+  expect((wsCompletedTurn.trace[0] as ThoughtEntry).content).toBe((inProcessCompletedTurn.trace[0] as ThoughtEntry).content);
   
   // Events should have been received
   expect(wsEvents.length).toBeGreaterThan(0);
@@ -246,8 +247,8 @@ test('should emit same events in same order', async () => {
   const wsTurnId = await wsClient.startTurn();
   const inProcessTurnId = await inProcessClient.startTurn();
   
-  await wsClient.addTrace(wsTurnId, { type: 'thought', content: 'Event order test' });
-  await inProcessClient.addTrace(inProcessTurnId, { type: 'thought', content: 'Event order test' });
+  await wsClient.addTrace(wsTurnId, { type: 'thought', content: 'Event order test' } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
+  await inProcessClient.addTrace(inProcessTurnId, { type: 'thought', content: 'Event order test' } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
   
   await wsClient.completeTurn(wsTurnId, 'Event order content');
   await inProcessClient.completeTurn(inProcessTurnId, 'Event order content');

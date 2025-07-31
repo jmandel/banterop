@@ -2,6 +2,7 @@
 
 import { test, expect, beforeEach, afterEach } from 'bun:test';
 import { TestEnvironment, WebSocketTestClient, TestDataFactory } from '../utils/test-helpers.js';
+import type { ThoughtEntry, ToolCallEntry, ToolResultEntry } from '$lib/types.js';
 
 let testEnv: TestEnvironment;
 let wsClient: WebSocketTestClient;
@@ -103,7 +104,7 @@ test('should prevent unauthenticated operations', async () => {
   // Try to perform operations without authentication
   let error: any;
   try {
-    await wsClient.addTrace('fake-turn-but-should-fail-at-auth-before-noticing-this', { type: 'thought', content: 'Event order test' });
+    await wsClient.addTrace('fake-turn-but-should-fail-at-auth-before-noticing-this', { type: 'thought', content: 'Event order test' } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
   } catch (e) {
     error = e;
   }

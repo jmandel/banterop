@@ -1,4 +1,4 @@
-import { LLMProvider, LLMMessage, LLMToolCall, LLMToolResponse } from './types.js';
+import { LLMProvider, LLMMessage, LLMToolCall, LLMToolResponse } from '../types/llm.types.js';
 import { BUILDER_TOOLS, JSONPatchOperation } from '$lib/types.js';
 
 // Scenario Builder specific LLM service

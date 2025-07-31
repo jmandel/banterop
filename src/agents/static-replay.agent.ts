@@ -5,7 +5,7 @@ import type { OrchestratorClient } from '$client/index.js';
 import { BaseAgent } from './base.agent.js';
 
 export class StaticReplayAgent extends BaseAgent {
-  private config: StaticReplayConfig;
+  declare config: StaticReplayConfig;
 
   constructor(config: StaticReplayConfig, client: OrchestratorClient) {
     super(config, client);

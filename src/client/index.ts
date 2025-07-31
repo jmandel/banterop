@@ -7,7 +7,8 @@ import { InProcessOrchestratorClient } from './impl/in-process.client.js';
 import { WebSocketJsonRpcClient } from './impl/websocket.client.js';
 import {
   ConversationEvent, SubscriptionOptions, TraceEntry,
-  ConversationTurn, CreateConversationRequest, CreateConversationResponse
+  ConversationTurn, CreateConversationRequest, CreateConversationResponse,
+  Conversation
 } from '$lib/types.js';
 
 // ============= Abstract Client Interface =============
@@ -31,7 +32,7 @@ export interface OrchestratorClient extends EventEmitter {
   
   // Turn management
   startTurn(metadata?: Record<string, any>): Promise<string>;
-  addTrace(turnId: string, entry: Omit<TraceEntry, 'id' | 'timestamp' | 'agentId'>): Promise<void>;
+  addTrace(turnId: string, entry: Partial<TraceEntry>): Promise<void>;
   completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>): Promise<ConversationTurn>;
   
   
@@ -44,7 +45,7 @@ export interface OrchestratorClient extends EventEmitter {
     includeTurns?: boolean;
     includeTrace?: boolean;
     includeInProgress?: boolean;
-  }): Promise<any>;
+  }): Promise<Conversation>;
   
   getAllConversations(options?: { 
     limit?: number; 

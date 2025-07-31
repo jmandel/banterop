@@ -1,6 +1,6 @@
-import { Hono } from 'hono';
 import type { ConversationDatabase } from '$backend/db/database.js';
-import { ScenarioConfiguration, ChatMessage, ApiResponse, ScenarioListResponse, ScenarioResponse } from '$lib/types.js';
+import { ApiResponse, ScenarioListResponse, ScenarioResponse } from '$lib/types.js';
+import { Hono } from 'hono';
 
 export function createScenarioRoutes(db: ConversationDatabase): Hono {
   const router = new Hono();

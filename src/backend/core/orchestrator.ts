@@ -4,13 +4,13 @@ import { v4 as uuidv4 } from 'uuid';
 import { ConversationDatabase } from '../db/database.js';
 import { createAgent } from '$agents/factory.js';
 import { createClient } from '$client/index.js';
-import type { LLMProvider } from '$llm/types.js';
+import type { LLMProvider } from 'src/types/llm.types.js';
 import { ToolSynthesisService } from '../../agents/services/tool-synthesis.service.js';
 import type { AgentInterface } from '$lib/types.js';
 import {
   Conversation, ConversationTurn, TraceEntry, AgentConfig,
   CreateConversationRequest, CreateConversationResponse,
-  ConversationEvent, TurnShell,
+  ConversationEvent, TurnShell, OrchestratorConversationState,
   UserQueryRequest, UserQueryResponse, StartTurnRequest, StartTurnResponse, AddTraceEntryRequest,
   CompleteTurnRequest, SubscriptionOptions, ThoughtEntry,
   ToolCallEntry, ScenarioDrivenAgentConfig, FormattedUserQuery, UserQueryRow
@@ -26,7 +26,7 @@ interface InProgressTurnState {
 export class ConversationOrchestrator {
   private db: ConversationDatabase;
   private eventListeners: Map<string, Map<string, Set<(event: ConversationEvent) => void>>>;
-  private activeConversations: Map<string, ConversationState>;
+  private activeConversations: Map<string, OrchestratorConversationState>;
   private inProgressTurns: Map<string, InProgressTurnState>;
   private llmProvider: LLMProvider;
   private toolSynthesisService: ToolSynthesisService;
@@ -491,41 +491,6 @@ export class ConversationOrchestrator {
     };
   }
 
-  /**
-   * Get pending user queries for a specific conversation
-   * @param conversationId - Conversation to check for pending queries
-   * @returns Formatted query objects ready for API consumption
-   */
-  getPendingUserQueries(conversationId: string): FormattedUserQuery[] {
-    const queries = this.db.getPendingUserQueries(conversationId);
-    return queries.map(this.formatUserQuery);
-  }
-
-  /**
-   * Get all pending user queries across the system
-   * @returns All pending queries formatted for API consumption
-   */
-  getAllPendingUserQueries(): FormattedUserQuery[] {
-    const queries = this.db.getAllPendingUserQueries();
-    return queries.map(this.formatUserQuery);
-  }
-
-  /**
-   * Format raw database query row into API-friendly object
-   */
-  private formatUserQuery = (q: any): FormattedUserQuery => {
-    return {
-      queryId: q.id,
-      conversationId: q.conversation_id,
-      agentId: q.agent_id,
-      question: q.question,
-      context: q.context ? JSON.parse(q.context) : {},
-      createdAt: q.created_at,
-      status: q.status,
-      timeout: q.timeout || 300000
-    };
-  }
-
   getConversation(conversationId: string, includeTurns = true, includeTrace = false, includeInProgress = false): any {
     const conversation = this.db.getConversation(conversationId, includeTurns, includeTrace);
     if (!conversation) return null;
@@ -749,8 +714,7 @@ export class ConversationOrchestrator {
   }
 
   // Additional query methods for API endpoints
-  
-  /**
+    /**
    * Get pending user queries for a specific conversation
    * @param conversationId - Conversation to check for pending queries
    * @returns Formatted query objects ready for API consumption
@@ -792,12 +756,5 @@ export class ConversationOrchestrator {
   close(): void {
     this.db.close();
   }
-}
-
-interface ConversationState {
-  conversation: Conversation;
-  agentConfigs: Map<string, AgentConfig>;
-  agentTokens: Record<string, string>;
-  agents?: Map<string, AgentInterface>;
 }
 

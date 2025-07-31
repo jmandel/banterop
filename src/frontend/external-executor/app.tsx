@@ -10,7 +10,10 @@ import type {
   LLMResponse,
   Tool,
   TraceEntry,
-  ConversationTurn
+  ConversationTurn,
+  ThoughtEntry,
+  ToolCallEntry,
+  ToolResultEntry
 } from '$lib/types.js';
 
 // =============================================================================
@@ -292,7 +295,7 @@ Respond with your action in this format:
       await this.client.addTrace(turnId, {
         type: 'thought',
         content: `Sending message to conversation thread`
-      });
+      } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
       
       console.log(`${this.role} waiting ${this.playbackSpeedMs}ms before completing turn...`);
       await new Promise(resolve => setTimeout(resolve, this.playbackSpeedMs));
@@ -314,21 +317,23 @@ Respond with your action in this format:
     await this.client.addTrace(turnId, {
       type: 'thought',
       content: `Executing ${toolCall.tool}`
-    });
+    } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
     
     await this.client.addTrace(turnId, {
       type: 'tool_call',
       toolName: toolCall.tool,
-      parameters: toolCall.parameters
-    });
+      parameters: toolCall.parameters,
+      toolCallId: `call-${Date.now()}`
+    } as Omit<ToolCallEntry, 'id' | 'timestamp' | 'agentId'>);
     
     try {
       const result = await this.toolSynthesis.synthesizeToolResult(toolCall.tool, toolCall.parameters);
       
       await this.client.addTrace(turnId, {
         type: 'tool_result',
+        toolCallId: `call-${Date.now()}`,
         result: result
-      });
+      } as Omit<ToolResultEntry, 'id' | 'timestamp' | 'agentId'>);
       
       const isTerminal = this.isTerminalTool(toolCall.tool);
       const message = isTerminal 
@@ -347,9 +352,10 @@ Respond with your action in this format:
     } catch (error: any) {
       await this.client.addTrace(turnId, {
         type: 'tool_result',
+        toolCallId: `call-${Date.now()}`,
         result: null,
         error: error.message
-      });
+      } as Omit<ToolResultEntry, 'id' | 'timestamp' | 'agentId'>);
       
       console.log(`${this.role} waiting ${this.playbackSpeedMs}ms before completing error turn...`);
       await new Promise(resolve => setTimeout(resolve, this.playbackSpeedMs));
@@ -372,7 +378,7 @@ Respond with your action in this format:
     await this.client.addTrace(turnId, {
       type: 'thought',
       content: 'Starting the conversation as requested'
-    });
+    } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
     await this.client.completeTurn(turnId, message);
   }
 }
@@ -790,7 +796,7 @@ function ExternalExecutorApp() {
       </div>
       
       {/* Custom styles for the slider */}
-      <style jsx>{`
+      <style>{`
         .slider::-webkit-slider-thumb {
           appearance: none;
           height: 16px;

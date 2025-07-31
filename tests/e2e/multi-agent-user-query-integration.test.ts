@@ -89,6 +89,20 @@ class E2EUserQueryOrchestrator {
   }
   
   /**
+   * Get the WebSocket URL for direct client connections
+   */
+  get wsUrl(): string {
+    return this.testEnv.wsUrl!;
+  }
+  
+  /**
+   * Get the HTTP URL for REST API calls
+   */
+  get httpUrl(): string {
+    return this.testEnv.httpUrl;
+  }
+  
+  /**
    * Wait for specific conversation events with timeout
    */
   async waitForConversationEvents(
@@ -371,7 +385,7 @@ test('complete multi-agent workflow with user queries and tool usage', async () 
   // Set up WebSocket monitoring like the basic test
   const { WebSocketJsonRpcClient } = await import('$client/impl/websocket.client.js');
   const { WebSocket } = await import('ws');
-  const wsClient = new WebSocketJsonRpcClient(e2e.testEnv.wsUrl!, WebSocket);
+  const wsClient = new WebSocketJsonRpcClient(e2e.wsUrl);
   await wsClient.connect();
   
   const firstAgentToken = Object.values(agentTokens)[0] as string;

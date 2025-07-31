@@ -6,14 +6,17 @@ import { HonoWebSocketJsonRpcServer } from '$backend/websocket/hono-websocket-se
 import { WebSocketJsonRpcClient } from '$client/impl/websocket.client.js';
 import { WebSocket } from 'ws';
 import { InProcessOrchestratorClient } from '$client/impl/in-process.client.js';
-import { LLMProvider, LLMRequest, LLMResponse } from '$llm/types.js';
+import { LLMMessage, LLMProvider, LLMRequest, LLMResponse, LLMTool, LLMToolCall, LLMToolResponse } from '../../src/types/llm.types.js';
 import {
   StaticReplayConfig, CreateConversationRequest, ConversationEvent,
-  AgentId, ConversationTurn, TraceEntry
+  AgentId, ConversationTurn, TraceEntry, ThoughtEntry, ToolCallEntry, ToolResultEntry, UserQueryEntry, UserResponseEntry
 } from '$lib/types.js';
 
 // Mock LLM Provider for testing
 export class MockLLMProvider extends LLMProvider {
+  generateWithTools?(messages: LLMMessage[], tools: LLMTool[], toolHandler: (call: LLMToolCall) => Promise<LLMToolResponse>): Promise<LLMResponse> {
+    throw new Error('Method not implemented.');
+  }
   constructor() {
     super({ provider: 'google', apiKey: 'test-key' });
   }
@@ -221,7 +224,7 @@ export class WebSocketTestClient {
   private predicateWaiters: Array<{ check: () => boolean }> = [];
 
   constructor(wsUrl: string) {
-    this.client = new WebSocketJsonRpcClient(wsUrl, WebSocket);
+    this.client = new WebSocketJsonRpcClient(wsUrl);
     this.setupEventCapture();
   }
 
@@ -358,7 +361,7 @@ export class WebSocketTestClient {
   }
 
   async completeTurn(turnId: string, content: string, metadata?: Record<string, any>): Promise<ConversationTurn> {
-    return this.client.completeTurn(turnId, content, metadata);
+    return this.client.completeTurn(turnId, content, undefined, metadata);
   }
 
   // Helper method for backward compatibility with old submitTurn pattern
@@ -367,14 +370,54 @@ export class WebSocketTestClient {
     
     // Add trace entries
     for (const entry of trace) {
-      await this.addTrace(turnId, {
-        type: entry.type,
-        content: entry.content,
-        toolName: entry.toolName,
-        parameters: entry.parameters,
-        toolCallId: entry.toolCallId,
-        result: entry.result
-      });
+      let partialEntry: Omit<TraceEntry, 'id' | 'timestamp' | 'agentId'>;
+      
+      switch (entry.type) {
+        case 'thought':
+          partialEntry = {
+            type: 'thought',
+            content: (entry as ThoughtEntry).content
+          } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>;
+          break;
+        case 'tool_call':
+          const toolCallEntry = entry as ToolCallEntry;
+          partialEntry = {
+            type: 'tool_call',
+            toolName: toolCallEntry.toolName,
+            parameters: toolCallEntry.parameters,
+            toolCallId: toolCallEntry.toolCallId
+          } as Omit<ToolCallEntry, 'id' | 'timestamp' | 'agentId'>;
+          break;
+        case 'tool_result':
+          const toolResultEntry = entry as ToolResultEntry;
+          partialEntry = {
+            type: 'tool_result',
+            toolCallId: toolResultEntry.toolCallId,
+            result: toolResultEntry.result
+          } as Omit<ToolResultEntry, 'id' | 'timestamp' | 'agentId'>;
+          break;
+        case 'user_query':
+          const userQueryEntry = entry as UserQueryEntry;
+          partialEntry = {
+            type: 'user_query',
+            queryId: userQueryEntry.queryId,
+            question: userQueryEntry.question,
+            context: userQueryEntry.context
+          } as Omit<UserQueryEntry, 'id' | 'timestamp' | 'agentId'>;
+          break;
+        case 'user_response':
+          const userResponseEntry = entry as UserResponseEntry;
+          partialEntry = {
+            type: 'user_response',
+            queryId: userResponseEntry.queryId,
+            response: userResponseEntry.response
+          } as Omit<UserResponseEntry, 'id' | 'timestamp' | 'agentId'>;
+          break;
+        default:
+          throw new Error(`Unknown trace entry type: ${(entry as any).type}`);
+      }
+      
+      await this.addTrace(turnId, partialEntry);
     }
     
     return this.completeTurn(turnId, content);
@@ -570,7 +613,7 @@ export class InProcessTestClient {
   }
 
   async completeTurn(turnId: string, content: string, metadata?: Record<string, any>): Promise<ConversationTurn> {
-    return this.client.completeTurn(turnId, content, metadata);
+    return this.client.completeTurn(turnId, content, undefined, metadata);
   }
 
   // Helper method for backward compatibility with old submitTurn pattern
@@ -579,14 +622,54 @@ export class InProcessTestClient {
     
     // Add trace entries
     for (const entry of trace) {
-      await this.addTrace(turnId, {
-        type: entry.type,
-        content: entry.content,
-        toolName: entry.toolName,
-        parameters: entry.parameters,
-        toolCallId: entry.toolCallId,
-        result: entry.result
-      });
+      let partialEntry: Omit<TraceEntry, 'id' | 'timestamp' | 'agentId'>;
+      
+      switch (entry.type) {
+        case 'thought':
+          partialEntry = {
+            type: 'thought',
+            content: (entry as ThoughtEntry).content
+          } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>;
+          break;
+        case 'tool_call':
+          const toolCallEntry = entry as ToolCallEntry;
+          partialEntry = {
+            type: 'tool_call',
+            toolName: toolCallEntry.toolName,
+            parameters: toolCallEntry.parameters,
+            toolCallId: toolCallEntry.toolCallId
+          } as Omit<ToolCallEntry, 'id' | 'timestamp' | 'agentId'>;
+          break;
+        case 'tool_result':
+          const toolResultEntry = entry as ToolResultEntry;
+          partialEntry = {
+            type: 'tool_result',
+            toolCallId: toolResultEntry.toolCallId,
+            result: toolResultEntry.result
+          } as Omit<ToolResultEntry, 'id' | 'timestamp' | 'agentId'>;
+          break;
+        case 'user_query':
+          const userQueryEntry = entry as UserQueryEntry;
+          partialEntry = {
+            type: 'user_query',
+            queryId: userQueryEntry.queryId,
+            question: userQueryEntry.question,
+            context: userQueryEntry.context
+          } as Omit<UserQueryEntry, 'id' | 'timestamp' | 'agentId'>;
+          break;
+        case 'user_response':
+          const userResponseEntry = entry as UserResponseEntry;
+          partialEntry = {
+            type: 'user_response',
+            queryId: userResponseEntry.queryId,
+            response: userResponseEntry.response
+          } as Omit<UserResponseEntry, 'id' | 'timestamp' | 'agentId'>;
+          break;
+        default:
+          throw new Error(`Unknown trace entry type: ${(entry as any).type}`);
+      }
+      
+      await this.addTrace(turnId, partialEntry);
     }
     
     return this.completeTurn(turnId, content);
@@ -644,26 +727,26 @@ export class TestDataFactory {
   }
 
   // For addTrace method (partial trace entry)
-  static createTraceEntryPartial(type: 'thought' | 'tool_call' | 'tool_result', content?: any): Omit<TraceEntry, 'id' | 'timestamp' | 'agentId'> {
+  static createTraceEntryPartial(type: 'thought' | 'tool_call' | 'tool_result', content?: any): Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'> | Omit<ToolCallEntry, 'id' | 'timestamp' | 'agentId'> | Omit<ToolResultEntry, 'id' | 'timestamp' | 'agentId'> {
     switch (type) {
       case 'thought':
         return {
           type: 'thought',
           content: content || 'Test thought entry'
-        };
+        } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>;
       case 'tool_call':
         return {
           type: 'tool_call',
           toolName: content?.toolName || 'test_tool',
           parameters: content?.parameters || { input: 'test' },
           toolCallId: content?.toolCallId || `call-${uuidv4()}`
-        };
+        } as Omit<ToolCallEntry, 'id' | 'timestamp' | 'agentId'>;
       case 'tool_result':
         return {
           type: 'tool_result',
           toolCallId: content?.toolCallId || `call-${uuidv4()}`,
           result: content?.result || 'Test result'
-        };
+        } as Omit<ToolResultEntry, 'id' | 'timestamp' | 'agentId'>;
     }
   }
 
@@ -672,7 +755,7 @@ export class TestDataFactory {
     const baseEntry = {
       id: uuidv4(),
       agentId: 'test-agent-0',
-      timestamp: new Date().toISOString()
+      timestamp: new Date()
     };
 
     switch (type) {
@@ -681,7 +764,7 @@ export class TestDataFactory {
           ...baseEntry,
           type: 'thought',
           content: content || 'Test thought entry'
-        };
+        } as ThoughtEntry;
       case 'tool_call':
         return {
           ...baseEntry,
@@ -689,14 +772,14 @@ export class TestDataFactory {
           toolName: content?.toolName || 'test_tool',
           parameters: content?.parameters || { input: 'test' },
           toolCallId: content?.toolCallId || `call-${uuidv4()}`
-        };
+        } as ToolCallEntry;
       case 'tool_result':
         return {
           ...baseEntry,
           type: 'tool_result',
           toolCallId: content?.toolCallId || `call-${uuidv4()}`,
           result: content?.result || 'Test result'
-        };
+        } as ToolResultEntry;
     }
   }
 }

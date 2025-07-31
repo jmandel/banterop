@@ -22,7 +22,7 @@ beforeEach(async () => {
   });
   
   conversationId = conversation.id;
-  agentToken = Object.values(agentTokens)[0];
+  agentToken = Object.values(agentTokens)[0] as string;
 });
 
 afterEach(async () => {

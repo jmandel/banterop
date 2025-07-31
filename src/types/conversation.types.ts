@@ -165,3 +165,67 @@ export interface UserQueryAnsweredEvent extends ConversationEvent {
     context: Record<string, any>;
   };
 }
+
+// ============= Backend Orchestrator Types =============
+
+/**
+ * Backend conversation state for orchestrator management
+ * Contains the active conversation data and agent configurations
+ */
+export interface OrchestratorConversationState {
+  conversation: Conversation;
+  agentConfigs: Map<string, any>; // AgentConfig - avoiding circular dependency
+  agentTokens: Record<string, string>;
+  agents?: Map<string, any>; // AgentInterface - avoiding circular dependency
+}
+
+// ============= Frontend Monitor Types =============
+
+/**
+ * Frontend-specific conversation state for real-time monitoring
+ * Used by the executor app for WebSocket-based conversation viewing
+ */
+export interface ConversationState {
+  turns: Turn[];
+  traces: Record<string, ExecutionTrace>;
+  version: number;
+}
+
+/**
+ * Frontend turn representation for conversation display
+ * Simplified from ConversationTurn for UI consumption
+ */
+export interface Turn {
+  id: string;
+  role: string;
+  kind: string;
+  timestamp: number;
+  content: Array<{
+    type: 'text' | 'data';
+    text?: string;
+    data?: any;
+  }>;
+  traceId?: string;
+}
+
+/**
+ * Execution trace for debugging and inspection
+ * Contains all the steps an agent took during a turn
+ */
+export interface ExecutionTrace {
+  turnId: string;
+  steps: TraceStep[];
+}
+
+/**
+ * Individual step within an execution trace
+ * Represents a single action or thought in the agent's process
+ */
+export interface TraceStep {
+  id: string;
+  type: 'thought' | 'tool_call' | 'tool_result' | 'synthesis';
+  label: string;
+  detail?: string;
+  data?: any;
+  timestamp: number;
+}

@@ -1,16 +1,22 @@
 // Scenario-Driven Agent Implementation
 
-import { BaseAgent } from './base.agent.js';
-import { 
-  ScenarioConfiguration, TurnAddedEvent, TurnCompletedEvent, 
-  TraceEntry, Tool, LLMMessage, LLMRequest, ConversationTurn,
-  ScenarioDrivenAgentConfig
-} from '$lib/types.js';
-import type { OrchestratorClient } from '$client/index.js';
 import type { ConversationDatabase } from '$backend/db/database.js';
-import { parseToolCalls } from '$lib/utils/tool-parser.js';
+import type { OrchestratorClient } from '$client/index.js';
+import {
+  Conversation,
+  ConversationEvent,
+  ConversationTurn,
+   LLMProvider, LLMMessage, LLMRequest,
+  ScenarioConfiguration,
+  ScenarioDrivenAgentConfig,
+  Tool,
+  TraceEntry,
+  TurnCompletedEvent,
+  ToolResultEntry
+} from '$lib/types.js';
+import { BaseAgent } from './base.agent.js';
 import { ToolSynthesisService } from './services/tool-synthesis.service.js';
-import type { LLMProvider } from '$llm/types.js';
+export { type ScenarioDrivenAgentConfig } from "$lib/types.js";
 
 export class ScenarioDrivenAgent extends BaseAgent {
   private scenario: ScenarioConfiguration;
@@ -435,7 +441,7 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
       maxTokens: 1500
     };
 
-    const response = await this.llmProvider.generateContent(request);
+    const response = await this.llmProvider.generateResponse(request);
     const responseContent = response.content;
 
     // Use regex to robustly extract content from within the tags
@@ -709,26 +715,17 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
   }
 
   // Format execution trace for context inclusion (used for budget calculation)
-  private formatTraceForContext(trace: any): string {
-    if (!trace.steps) return '';
-    
-    const steps = trace.steps.map((step: any) => {
-      switch (step.type) {
+  private formatTraceForContext(trace: TraceEntry): string {
+      switch (trace.type) {
         case 'thought':
-          return `THOUGHT: ${step.label}${step.detail ? ' - ' + step.detail : ''}`;
+          return `THOUGHT: ${trace.content}`
         case 'tool_call':
-          return `TOOL_CALL: ${step.label}${step.data ? ' - ' + JSON.stringify(step.data) : ''}`;
+          return `TOOL_CALL: <${trace.toolName}>${JSON.stringify(trace.parameters)}</${trace.toolName}>`
         case 'tool_result':
-          return `TOOL_RESULT: ${step.label}${step.data ? ' - ' + JSON.stringify(step.data) : ''}`;
-        case 'synthesis':
-          // Synthesis is internal - don't show to agent, it just sees the tool result
-          return '';
+          return `TOOL_RESULT: ${JSON.stringify(trace.result)}`
         default:
-          return `${(step.type as string).toUpperCase()}: ${step.label}`;
+          throw new Error("Unrecognized trace type")
       }
-    }).filter(step => step).join(' → '); // Filter out empty synthesis steps
-    
-    return `TRACE [${trace.id || 'unknown'}]: ${steps}`;
   }
 
   // Format trace entry for display (legacy method)
@@ -775,7 +772,7 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
         .join('\n');
     const scratchpadBlock = `<scratchpad>\n${thoughts || 'No thoughts recorded.'}\n</scratchpad>`;
 
-    const toolCall = turnTraces.find(e => e.type === 'tool_call') as ToolCallEntry | undefined;
+    const toolCall = turnTraces.find(e => e.type === 'tool_call')
     let toolCallBlock = '';
     let toolResultBlock = '';
 
@@ -783,7 +780,7 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
         const toolCallJson = JSON.stringify({ name: toolCall.toolName, args: toolCall.parameters }, null, 2);
         toolCallBlock = `\`\`\`json\n${toolCallJson}\n\`\`\``;
 
-        const toolResult = turnTraces.find(e => e.type === 'tool_result' && (e as any).toolCallId === toolCall.toolCallId) as ToolResultEntry | undefined;
+        const toolResult = turnTraces.find(e => e.type === 'tool_result' && e.toolCallId === toolCall.toolCallId) as ToolResultEntry
         if (toolResult) {
             const resultJson = toolResult.error ? `{ "error": "${toolResult.error}" }` : JSON.stringify(toolResult.result);
             toolResultBlock = `[TOOL_RESULT] ${resultJson}`;
@@ -812,7 +809,7 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
         .join('\n');
     const scratchpadBlock = `<scratchpad>\n${thoughts}\n</scratchpad>`;
     
-    const toolCall = currentTurnTrace.find(e => e.type === 'tool_call') as ToolCallEntry | undefined;
+    const toolCall = currentTurnTrace.find(e => e.type === 'tool_call');
     let toolCallBlock = '';
     let toolResultBlock = '';
 
@@ -832,7 +829,7 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
   }
 
   // Get conversation from client
-  private async getConversation(): Promise<any> {
+  private async getConversation(): Promise<Conversation> {
     return await this.client.getConversation(this.conversationId, {
       includeTurns: true,
       includeTrace: true

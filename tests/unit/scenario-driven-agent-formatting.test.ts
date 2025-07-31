@@ -1,6 +1,6 @@
 // Unit tests for ScenarioDrivenAgent formatting helpers
 import { test, expect, describe, beforeEach } from 'bun:test';
-import { ConversationTurn, TraceEntry, ToolCallEntry, ToolResultEntry } from '$lib/types.js';
+import { ConversationTurn, TraceEntry, ToolCallEntry, ToolResultEntry, ThoughtEntry } from '$lib/types.js';
 
 // Create a mock agent class to test the formatting methods
 class MockScenarioDrivenAgent {
@@ -120,7 +120,9 @@ describe('ScenarioDrivenAgent Formatting Helpers', () => {
         content: 'Hello, I need help with authorization.',
         timestamp: new Date('2024-07-01T10:30:15.123Z'),
         isFinalTurn: false,
-        trace: []
+        trace: [],
+        status: 'completed',
+        startedAt: new Date('2024-07-01T10:30:15.123Z')
       };
 
       const result = agent.formatOtherAgentTurn(turn);
@@ -137,21 +139,32 @@ describe('ScenarioDrivenAgent Formatting Helpers', () => {
         content: 'I will check the authorization status.',
         timestamp: new Date('2024-07-01T10:30:15.123Z'),
         isFinalTurn: false,
-        trace: []
+        trace: [],
+        status: 'completed',
+        startedAt: new Date('2024-07-01T10:30:15.123Z')
       };
 
       const traces: TraceEntry[] = [
         {
+          id: 'trace-1',
+          agentId: 'test-agent',
+          timestamp: new Date('2024-07-01T10:30:15.123Z'),
           type: 'thought',
           content: 'I need to check the patient authorization'
-        } as any,
+        } as ThoughtEntry,
         {
+          id: 'trace-2',
+          agentId: 'test-agent',
+          timestamp: new Date('2024-07-01T10:30:15.123Z'),
           type: 'tool_call',
           toolName: 'check_authorization',
           parameters: { patientId: '123' },
           toolCallId: 'call-1'
         } as ToolCallEntry,
         {
+          id: 'trace-3',
+          agentId: 'test-agent',
+          timestamp: new Date('2024-07-01T10:30:15.123Z'),
           type: 'tool_result',
           toolCallId: 'call-1',
           result: { status: 'approved' }
@@ -178,7 +191,9 @@ describe('ScenarioDrivenAgent Formatting Helpers', () => {
         content: 'Simple message without tool use.',
         timestamp: new Date('2024-07-01T10:30:15.123Z'),
         isFinalTurn: false,
-        trace: []
+        trace: [],
+        status: 'completed',
+        startedAt: new Date('2024-07-01T10:30:15.123Z')
       };
 
       const result = agent.formatOwnTurnForHistory(turn);
@@ -204,10 +219,16 @@ describe('ScenarioDrivenAgent Formatting Helpers', () => {
     test('should format current process with actions taken', () => {
       const currentTrace: TraceEntry[] = [
         {
+          id: 'trace-1',
+          agentId: 'test-agent',
+          timestamp: new Date(),
           type: 'thought',
           content: 'I am thinking about this problem'
-        } as any,
+        } as ThoughtEntry,
         {
+          id: 'trace-2',
+          agentId: 'test-agent',
+          timestamp: new Date(),
           type: 'tool_call',
           toolName: 'analyze_data',
           parameters: { data: 'sample' },
