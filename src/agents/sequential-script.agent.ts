@@ -6,7 +6,7 @@ import type {
   ConversationEvent, TurnStartedEvent, SequentialScriptConfig, 
   SequentialScriptEntry, ScriptStep, ScriptTrigger, ThoughtStep, 
   ToolCallStep, UserQueryStep, ResponseStep, UserQueryAnsweredEvent,
-  TurnCompletedEvent
+  TurnCompletedEvent, ConversationTurn
 } from '$lib/types.js';
 
 /**
@@ -48,6 +48,42 @@ export class SequentialScriptAgent extends BaseAgent {
 
     // Call parent implementation for other events like turn_completed
     await super.onConversationEvent(event);
+  }
+
+  async initializeConversation(): Promise<void> {
+    // Check for conversation_ready triggers to initiate
+    for (const scriptEntry of this.config.script) {
+      if (scriptEntry.trigger.type === 'conversation_ready') {
+        console.log(`${this.agentId.label} initiating conversation with conversation_ready trigger`);
+        await this.executeScript(scriptEntry);
+        break;
+      }
+    }
+  }
+
+  async processAndReply(previousTurn: ConversationTurn): Promise<void> {
+    // Don't start new scripts while one is running
+    if (this.isScriptRunning()) {
+      return;
+    }
+
+    // Check all script entries for agent_turn trigger matches
+    for (const scriptEntry of this.config.script) {
+      if (scriptEntry.trigger.type === 'agent_turn') {
+        // Create a mock event to check trigger
+        const mockEvent: TurnCompletedEvent = {
+          type: 'turn_completed',
+          conversationId: this.conversationId!,
+          timestamp: new Date(),
+          data: { turn: previousTurn }
+        };
+        
+        if (this.matchesAgentTurnTrigger(mockEvent, scriptEntry.trigger)) {
+          await this.executeScript(scriptEntry);
+          break;
+        }
+      }
+    }
   }
 
   /**

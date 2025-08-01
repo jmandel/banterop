@@ -208,22 +208,24 @@ export class ConversationOrchestrator {
     const initiatingAgentId = conversation.metadata?.initiatingAgentId as AgentId['id'];
     if (initiatingAgentId) {
       const agentConfig = conversationState.agentConfigs.get(initiatingAgentId);
-      const content = agentConfig?.messageToUseWhenInitiatingConversation;
-
-      if (agentConfig && content) {
-        console.log(`[Orchestrator] Submitting initial message from agent ${initiatingAgentId} as per scenario config.`);
+      
+      if (agentConfig && agentConfig.messageToUseWhenInitiatingConversation) {
+        console.log(`[Orchestrator] Triggering initial agent ${initiatingAgentId} to start conversation.`);
         
-        const turnId = this.startTurn({
-          conversationId,
-          agentId: initiatingAgentId
-        }).turnId;
-        
-        this.completeTurn({
-          conversationId,
-          turnId,
-          agentId: initiatingAgentId,
-          content: content
-        });
+        // Find the initiating agent instance
+        const initiatingAgent = conversationState.agents?.get(initiatingAgentId);
+        if (initiatingAgent) {
+          // Trigger the agent to initialize the conversation
+          setTimeout(async () => {
+            try {
+              await initiatingAgent.initializeConversation();
+            } catch (error) {
+              console.error(`[Orchestrator] Failed to trigger initial agent:`, error);
+            }
+          }, 100); // Small delay to ensure all agents are ready
+        } else {
+          console.error(`[Orchestrator] Could not find agent instance for initiatingAgentId: ${initiatingAgentId}`);
+        }
       }
     }
   }

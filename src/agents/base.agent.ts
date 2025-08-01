@@ -6,6 +6,7 @@ import {
   AgentId,
   AgentInterface,
   ConversationEvent,
+  ConversationTurn,
   ThoughtEntry, ToolCallEntry, ToolResultEntry,
   TurnCompletedEvent,
   TraceEntry
@@ -78,6 +79,12 @@ export abstract class BaseAgent implements AgentInterface {
 
   // Abstract method for subclasses to implement their core logic
   abstract onTurnCompleted(event: TurnCompletedEvent): Promise<void>;
+
+  // Abstract method for initiating a conversation (no previous turn)
+  abstract initializeConversation(): Promise<void>;
+
+  // Abstract method for processing and replying to a turn
+  abstract processAndReply(previousTurn: ConversationTurn): Promise<void>;
 
   // ============= Agent Actions (Delegated to Client) =============
 

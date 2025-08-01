@@ -6,6 +6,7 @@ import {
   AgentId,
   AgentInterface,
   ConversationEvent,
+  ConversationTurn,
   ThoughtEntry, ToolCallEntry, ToolResultEntry,
   TurnCompletedEvent
 } from '$lib/types.js';
@@ -46,6 +47,12 @@ export abstract class InProcessBaseAgent implements AgentInterface {
   }
 
   abstract onTurnCompleted(event: TurnCompletedEvent): Promise<void>;
+  
+  // Abstract method for initiating a conversation (no previous turn)
+  abstract initializeConversation(): Promise<void>;
+
+  // Abstract method for processing and replying to a turn
+  abstract processAndReply(previousTurn: ConversationTurn): Promise<void>;
 
   // ============= Direct Orchestrator Methods =============
 
@@ -201,6 +208,21 @@ export abstract class InProcessBaseAgent implements AgentInterface {
 
 export class InProcessStaticReplayAgent extends InProcessBaseAgent {
   private scriptIndex = 0;
+
+  async initializeConversation(): Promise<void> {
+    // Static replay agents don't initiate conversations
+    // They only respond to turns from other agents
+  }
+
+  async processAndReply(previousTurn: ConversationTurn): Promise<void> {
+    // This delegates to the onTurnCompleted logic
+    await this.onTurnCompleted({
+      type: 'turn_completed',
+      conversationId: this.conversationId!,
+      timestamp: new Date(),
+      data: { turn: previousTurn }
+    } as TurnCompletedEvent);
+  }
 
   async onTurnCompleted(event: TurnCompletedEvent): Promise<void> {
     // Skip if it's our own turn

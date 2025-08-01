@@ -123,6 +123,20 @@ export class ScenarioDrivenAgent extends BaseAgent {
       return;
   }
 
+  async initializeConversation(): Promise<void> {
+    // For the initiating agent, we start with the configured initial message
+    if (this.agentConfig.messageToUseWhenInitiatingConversation) {
+      const turnId = await this.startTurn();
+      await this.addThought(turnId, "Starting conversation with configured initial message");
+      await this.completeTurn(turnId, this.agentConfig.messageToUseWhenInitiatingConversation);
+    }
+  }
+
+  async processAndReply(previousTurn: ConversationTurn): Promise<void> {
+    // This delegates to the existing _processAndRespondToTurn method
+    await this._processAndRespondToTurn(previousTurn);
+  }
+
 
    async _processAndRespondToTurn(triggeringTurn: ConversationTurn): Promise<void> {
     if (this.processingTurn) return; // Prevent concurrent processing
@@ -130,8 +144,8 @@ export class ScenarioDrivenAgent extends BaseAgent {
 
     this.currentTurnId = await this.startTurn()
     let MAX_STEPS = 10;
-    let step = 0 ;
-    while (step++ < MAX_STEPS) {
+    let stepCount = 0;
+    while (stepCount++ < MAX_STEPS) {
         // This array tracks actions taken within this new turn before the LLM is called.
         const currentTurnTrace: TraceEntry[] = [];
 
@@ -160,14 +174,19 @@ export class ScenarioDrivenAgent extends BaseAgent {
         console.log("Tools paresed", result)
         await this.addThought(this.currentTurnId, result.message);
 
-        const step = await this.executeSingleToolCallWithReasoning(result);
-        if (step.completedTurn) {
+        const stepResult = await this.executeSingleToolCallWithReasoning(result);
+        if (stepResult.completedTurn) {
           break;
         }
       }
-      if (step === MAX_STEPS) {
+      if (stepCount > MAX_STEPS && this.currentTurnId) {
         console.error("MAX STEPS reaached, bailing")
-        this.completeTurn(this.currentTurnId, "Error: Max steps reached")
+        try {
+          await this.completeTurn(this.currentTurnId, "Error: Max steps reached")
+        } catch (error) {
+          // Turn might have already been completed by a terminal tool
+          console.log("Turn already completed or error completing:", error);
+        }
       }
 
       this.processingTurn = false;

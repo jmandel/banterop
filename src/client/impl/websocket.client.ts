@@ -38,6 +38,7 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
   private reconnectDelay = 1000;
   private authenticated = false;
   private authToken?: string;
+  private disconnecting = false;
 
   constructor(url: string) {
     super();
@@ -103,17 +104,25 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
   }
 
   disconnect(): void {
-   
-    setTimeout(() => {
-      
-      this.pendingRequests.forEach(({ reject }) => {
-        console.log(this.pendingRequests)
-        reject(new Error('Client disconnected'));
-      });
+    // Mark as disconnecting to prevent new requests
+    this.disconnecting = true;
+    
+    // If no pending requests, close immediately
+    if (this.pendingRequests.size === 0) {
+      this.closeWebSocket();
+    }
+    // Otherwise, let pending requests complete naturally
+    // The WebSocket will be closed when the last request is handled
+  }
 
-      this.pendingRequests.clear();
-
-    }, 1000)
+  private closeWebSocket(): void {
+    if (this.ws) {
+      this.ws.close(1000, 'Client disconnect');
+      this.ws = undefined;
+    }
+    this.authenticated = false;
+    this.authToken = undefined;
+    this.pendingRequests.clear();
   }
 
   private handleMessage(data: string | Buffer | ArrayBuffer | Blob): void {
@@ -132,6 +141,11 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
         } else {
           resolve(message.result);
         }
+        
+        // If disconnecting and no more pending requests, close now
+        if (this.disconnecting && this.pendingRequests.size === 0) {
+          this.closeWebSocket();
+        }
       } else if (message.method === 'event') {
         // Type-safe event emission - the event is a ConversationEvent
         const conversationEvent = message.params.event as ConversationEvent;
@@ -145,6 +159,11 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
 
   private sendRequest(method: string, params: any = {}): Promise<any> {
     return new Promise((resolve, reject) => {
+      if (this.disconnecting) {
+        reject(new Error('Client is disconnecting'));
+        return;
+      }
+      
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         reject(new Error('WebSocket not connected'));
         return;

@@ -184,7 +184,8 @@ class TerminalAwareMockLLMProvider extends LLMProvider {
     );
 
     let chosenTool: string;
-    const shouldTerminate = Math.random() < 0.1;
+    // Make termination more deterministic - terminate after 5 turns
+    const shouldTerminate = this.turnCount >= 5 || Math.random() < 0.2;
 
     if (shouldTerminate && terminalTools.length > 0) {
       // Pick a random terminal tool
