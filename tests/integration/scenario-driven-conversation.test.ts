@@ -256,6 +256,9 @@ Mock LLM reasoning: The random number was ${shouldTerminate ? '< 0.1' : '>= 0.1'
     const xmlToolSectionMatch = prompt.match(/<AVAILABLE_TOOLS>\s*([\s\S]*?)\s*<\/AVAILABLE_TOOLS>/);
     if (xmlToolSectionMatch && xmlToolSectionMatch[1]) {
       const toolSection = xmlToolSectionMatch[1];
+      // Log first 500 chars of tool section for debugging
+      console.log(`[MockLLM] Tool section preview: ${toolSection.substring(0, 500)}...`);
+      
       // Updated regex to match the format: • toolName(params) [TERMINAL]
       const toolNameRegex = /•\s*([^(]+)\(/g;
       const tools = [];
@@ -263,7 +266,10 @@ Mock LLM reasoning: The random number was ${shouldTerminate ? '< 0.1' : '>= 0.1'
       while ((match = toolNameRegex.exec(toolSection)) !== null) {
         tools.push(match[1].trim());
       }
-      if (tools.length > 0) return tools;
+      if (tools.length > 0) {
+        console.log(`[MockLLM] Successfully parsed ${tools.length} tools from XML format`);
+        return tools;
+      }
     }
     
     // Fallback to old format
