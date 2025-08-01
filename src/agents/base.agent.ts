@@ -92,18 +92,24 @@ export abstract class BaseAgent implements AgentInterface {
     return await this.client.startTurn(metadata);
   }
 
-  async addThought(turnId: string, thought: string): Promise<void> {
+  async addThought(turnId: string, thought: string): Promise<ThoughtEntry> {
+    const entry = this.createThought(thought);
     await this.client.addTrace(turnId, { type: 'thought', content: thought });
+    return entry;
   }
 
-  async addToolCall(turnId: string, toolName: string, parameters: any): Promise<string> {
+  async addToolCall(turnId: string, toolName: string, parameters: any): Promise<ToolCallEntry> {
     const toolCallId = uuidv4();
+    const entry = this.createToolCall(toolName, parameters);
+    entry.toolCallId = toolCallId;
     await this.client.addTrace(turnId, { type: 'tool_call', toolName, parameters, toolCallId });
-    return toolCallId;
+    return entry;
   }
 
-  async addToolResult(turnId: string, toolCallId: string, result: any, error?: string): Promise<void> {
+  async addToolResult(turnId: string, toolCallId: string, result: any, error?: string): Promise<ToolResultEntry> {
+    const entry = this.createToolResult(toolCallId, result, error);
     await this.client.addTrace(turnId, { type: 'tool_result', toolCallId, result, error });
+    return entry;
   }
 
   async completeTurn(turnId: string, content: string, isFinalTurn?: boolean): Promise<void> {

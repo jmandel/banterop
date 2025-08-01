@@ -1,13 +1,18 @@
 // Unit tests for ToolParser
 import { test, expect, describe } from 'bun:test';
-import { ToolParser } from '../../src/lib/utils/tool-parser.js';
+import { 
+  parseToolsFromResponse, 
+  hasToolCalls, 
+  extractToolNames, 
+  validateToolName,
+  parseToolCalls 
+} from '../../src/lib/utils/tool-parser.js';
 
 describe('ToolParser', () => {
-  const parser = new ToolParser();
 
   test('should parse a single tool call in a ```json code block', () => {
     const output = 'My reasoning.\n```json\n{"name": "test_tool", "args": {"p1": 1}}\n```';
-    const result = parser.parseToolsFromResponse(output);
+    const result = parseToolsFromResponse(output);
     
     expect(result.message).toBe('My reasoning.');
     expect(result.tools).toHaveLength(1);
@@ -17,7 +22,7 @@ describe('ToolParser', () => {
 
   test('should handle text after the JSON block', () => {
     const output = 'I need to search first.\n```json\n{"name": "search", "args": {"query": "test"}}\n```\nSome text after.';
-    const result = parser.parseToolsFromResponse(output);
+    const result = parseToolsFromResponse(output);
     
     expect(result.message).toBe('I need to search first.');
     expect(result.tools).toHaveLength(1);
@@ -27,7 +32,7 @@ describe('ToolParser', () => {
 
   test('should parse from a generic ``` code block', () => {
     const output = 'Let me call the API.\n```\n{"name": "api_call", "args": {"endpoint": "/users"}}\n```';
-    const result = parser.parseToolsFromResponse(output);
+    const result = parseToolsFromResponse(output);
     
     expect(result.message).toBe('Let me call the API.');
     expect(result.tools).toHaveLength(1);
@@ -37,7 +42,7 @@ describe('ToolParser', () => {
 
   test('should return empty tools array if no valid tool is found', () => {
     const output = 'Just some regular text without any tool calls.';
-    const result = parser.parseToolsFromResponse(output);
+    const result = parseToolsFromResponse(output);
     
     expect(result.message).toBe('Just some regular text without any tool calls.');
     expect(result.tools).toHaveLength(0);
@@ -45,7 +50,7 @@ describe('ToolParser', () => {
 
   test('should handle malformed JSON gracefully and fall back', () => {
     const output = 'Bad JSON:\n```json\n{"name": "test", "args": {invalid\n```\nBut good inline: {"name": "fallback", "args": {}}';
-    const result = parser.parseToolsFromResponse(output);
+    const result = parseToolsFromResponse(output);
     
     // Should fall back to legacy parsing and find the inline tool
     expect(result.tools).toHaveLength(1);
@@ -54,7 +59,7 @@ describe('ToolParser', () => {
 
   test('should parse legacy inline tool calls', () => {
     const output = 'I need to {"name": "legacy_tool", "args": {"test": true}} now';
-    const result = parser.parseToolsFromResponse(output);
+    const result = parseToolsFromResponse(output);
     
     expect(result.tools).toHaveLength(1);
     expect(result.tools[0].name).toBe('legacy_tool');
@@ -64,7 +69,7 @@ describe('ToolParser', () => {
 
   test('should handle tolerant JSON parsing with unquoted keys', () => {
     const output = 'Testing:\n```json\n{name: "unquoted_test", args: {key: "value"}}\n```';
-    const result = parser.parseToolsFromResponse(output);
+    const result = parseToolsFromResponse(output);
     
     expect(result.tools).toHaveLength(1);
     expect(result.tools[0].name).toBe('unquoted_test');
@@ -73,7 +78,7 @@ describe('ToolParser', () => {
 
   test('should handle single quotes in JSON', () => {
     const output = "Testing:\n```json\n{'name': 'single_quote_test', 'args': {'key': 'value'}}\n```";
-    const result = parser.parseToolsFromResponse(output);
+    const result = parseToolsFromResponse(output);
     
     expect(result.tools).toHaveLength(1);
     expect(result.tools[0].name).toBe('single_quote_test');
@@ -82,7 +87,7 @@ describe('ToolParser', () => {
 
   test('should handle trailing commas', () => {
     const output = 'Testing:\n```json\n{"name": "trailing_comma_test", "args": {"key": "value",}}\n```';
-    const result = parser.parseToolsFromResponse(output);
+    const result = parseToolsFromResponse(output);
     
     expect(result.tools).toHaveLength(1);
     expect(result.tools[0].name).toBe('trailing_comma_test');
@@ -90,26 +95,26 @@ describe('ToolParser', () => {
   });
 
   test('should validate tool names properly', () => {
-    expect(parser.validateToolName('valid_tool')).toBe(true);
-    expect(parser.validateToolName('valid123')).toBe(true);
-    expect(parser.validateToolName('_private')).toBe(true);
-    expect(parser.validateToolName('invalid-tool')).toBe(false);
-    expect(parser.validateToolName('invalid.tool')).toBe(false);
-    expect(parser.validateToolName('123invalid')).toBe(false);
-    expect(parser.validateToolName('')).toBe(false);
+    expect(validateToolName('valid_tool')).toBe(true);
+    expect(validateToolName('valid123')).toBe(true);
+    expect(validateToolName('_private')).toBe(true);
+    expect(validateToolName('invalid-tool')).toBe(false);
+    expect(validateToolName('invalid.tool')).toBe(false);
+    expect(validateToolName('123invalid')).toBe(false);
+    expect(validateToolName('')).toBe(false);
   });
 
   test('should detect if response has tool calls', () => {
     const withTool = 'Testing ```json\n{"name": "test", "args": {}}\n```';
     const withoutTool = 'Just regular text';
     
-    expect(parser.hasToolCalls(withTool)).toBe(true);
-    expect(parser.hasToolCalls(withoutTool)).toBe(false);
+    expect(hasToolCalls(withTool)).toBe(true);
+    expect(hasToolCalls(withoutTool)).toBe(false);
   });
 
   test('should extract tool names', () => {
     const output = 'Testing ```json\n{"name": "first_tool", "args": {}}\n```';
-    const toolNames = parser.extractToolNames(output);
+    const toolNames = extractToolNames(output);
     
     expect(toolNames).toHaveLength(1);
     expect(toolNames[0]).toBe('first_tool');
@@ -117,7 +122,7 @@ describe('ToolParser', () => {
 
   test('should handle missing args property', () => {
     const output = 'Testing ```json\n{"name": "no_args_tool"}\n```';
-    const result = parser.parseToolsFromResponse(output);
+    const result = parseToolsFromResponse(output);
     
     expect(result.tools).toHaveLength(1);
     expect(result.tools[0].name).toBe('no_args_tool');
@@ -126,7 +131,7 @@ describe('ToolParser', () => {
 
   test('should use the last JSON block when multiple exist', () => {
     const output = 'First: ```json\n{"name": "first", "args": {}}\n```\nSecond: ```json\n{"name": "second", "args": {}}\n```';
-    const result = parser.parseToolsFromResponse(output);
+    const result = parseToolsFromResponse(output);
     
     expect(result.tools).toHaveLength(1);
     expect(result.tools[0].name).toBe('second');
@@ -135,9 +140,37 @@ describe('ToolParser', () => {
 
   test('should reject invalid tool objects', () => {
     const output = 'Bad tool: ```json\n{"invalid": "object"}\n```';
-    const result = parser.parseToolsFromResponse(output);
+    const result = parseToolsFromResponse(output);
     
     expect(result.tools).toHaveLength(0);
     expect(result.message).toBe('Bad tool: ```json\n{"invalid": "object"}\n```');
+  });
+
+  test('parseToolCalls convenience function', () => {
+    const output = 'Testing ```json\n{"name": "test_tool", "args": {"param": "value"}}\n```';
+    const result = parseToolCalls(output);
+    
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      tool: 'test_tool',
+      parameters: { param: 'value' }
+    });
+  });
+
+  test('should extract content from scratchpad tags', () => {
+    const output = '<scratchpad>\nThis is my reasoning about the problem.\nI need to analyze the data.\n</scratchpad>\n```json\n{"name": "analyze", "args": {"data": "test"}}\n```';
+    const result = parseToolsFromResponse(output);
+    
+    expect(result.message).toBe('This is my reasoning about the problem.\nI need to analyze the data.');
+    expect(result.tools).toHaveLength(1);
+    expect(result.tools[0].name).toBe('analyze');
+  });
+
+  test('should handle content without scratchpad tags', () => {
+    const output = 'Direct reasoning without tags.\n```json\n{"name": "process", "args": {}}\n```';
+    const result = parseToolsFromResponse(output);
+    
+    expect(result.message).toBe('Direct reasoning without tags.');
+    expect(result.tools).toHaveLength(1);
   });
 });

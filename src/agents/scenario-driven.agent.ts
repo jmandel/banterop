@@ -9,10 +9,12 @@ import {
   ScenarioDrivenAgentConfig,
   TraceEntry,
   TurnCompletedEvent,
-  ToolResultEntry
+  ToolResultEntry,
+  ThoughtEntry,
+  ToolCallEntry
 } from '$lib/types.js';
 import type { ScenarioConfiguration, AgentConfiguration, Tool } from '$lib/types.js';
-import { ParsedResponse, ToolParser } from '$lib/utils/tool-parser.js';
+import { ParsedResponse, parseToolsFromResponse } from '$lib/utils/tool-parser.js';
 import { BaseAgent } from './base.agent.js';
 import { ToolSynthesisService } from './services/tool-synthesis.service.js';
 export { type ScenarioDrivenAgentConfig } from "$lib/types.js";
@@ -21,8 +23,6 @@ interface ToolCall {
   name: string,
   args?: Record<string,unknown>
 }
-
-const toolParser = new ToolParser();
 
 export class ScenarioDrivenAgent extends BaseAgent {
   private scenario: ScenarioConfiguration;
@@ -143,15 +143,11 @@ export class ScenarioDrivenAgent extends BaseAgent {
     this.processingTurn = true;
 
     this.currentTurnId = await this.startTurn()
+    const currentTurnTrace: TraceEntry[] = []; // Track traces locally for this turn
+    
     let MAX_STEPS = 10;
     let stepCount = 0;
     while (stepCount++ < MAX_STEPS) {
-        // This array tracks actions taken within this new turn before the LLM is called.
-        const currentTurnTrace: TraceEntry[] = [];
-
-        // OPTIONAL: Any synchronous, pre-LLM actions would be performed here,
-        // populating `currentTurnTrace`. For now, it will be empty.
-
         const historyString = this.buildConversationHistory();
         const currentProcessString = this.formatCurrentProcess(currentTurnTrace);
         
@@ -172,9 +168,10 @@ export class ScenarioDrivenAgent extends BaseAgent {
         }
 
         console.log("Tools paresed", result)
-        await this.addThought(this.currentTurnId, result.message);
+        const thoughtEntry = await this.addThought(this.currentTurnId, result.message);
+        currentTurnTrace.push(thoughtEntry);
 
-        const stepResult = await this.executeSingleToolCallWithReasoning(result);
+        const stepResult = await this.executeSingleToolCallWithReasoning(result, currentTurnTrace);
         if (stepResult.completedTurn) {
           break;
         }
@@ -428,11 +425,11 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
     const response = await this.llmProvider.generateResponse(request);
     console.log("llm response", response)
     const responseContent = response.content;
-    return toolParser.parseToolsFromResponse(responseContent)
+    return parseToolsFromResponse(responseContent)
   }
 
   // Execute single tool call with reasoning capture (following single-action constraint)
-  private async executeSingleToolCallWithReasoning(result: ParsedResponse): Promise<{completedTurn: boolean}> {
+  private async executeSingleToolCallWithReasoning(result: ParsedResponse, currentTurnTrace: TraceEntry[]): Promise<{completedTurn: boolean}> {
     const { message, tools } = result;
     
     // Handle case where no tool call was made
@@ -474,7 +471,8 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
     }
     
     // Add tool call trace
-    const toolCallId = await this.addToolCall(this.currentTurnId, toolCall.name, toolCall.args);
+    const toolCallEntry = await this.addToolCall(this.currentTurnId, toolCall.name, toolCall.args);
+    currentTurnTrace.push(toolCallEntry);
     
     try {
       console.log("Lookign up tool", toolCall.name)
@@ -486,7 +484,8 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
       );
       
       console.log("synthesized tool resulst", synthesisResult)
-      await this.addToolResult(this.currentTurnId, toolCallId, synthesisResult);
+      const toolResultEntry = await this.addToolResult(this.currentTurnId, toolCallEntry.toolCallId, synthesisResult);
+      currentTurnTrace.push(toolResultEntry);
       
       if (toolDef?.endsConversation) {
         const resultMessage = `Action complete. Result: ${JSON.stringify(synthesisResult)}`;
@@ -502,7 +501,8 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
       return {completedTurn: false}
     } catch (error: any) {
       // Add error trace
-      await this.addToolResult(this.currentTurnId, toolCallId, null, error.message);
+      const errorResultEntry = await this.addToolResult(this.currentTurnId, toolCallEntry.toolCallId, null, error.message);
+      currentTurnTrace.push(errorResultEntry);
       
       // Complete turn with error response
       await this.completeTurn(this.currentTurnId, `I encountered an error: ${error.message}`);
@@ -676,45 +676,63 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
 
   private formatOtherAgentTurn(turn: ConversationTurn): string {
     const timestamp = this.formatTimestamp(turn.timestamp);
-    return `[${timestamp}] [${turn.agentId}]\n${turn.content}`;
+    return `From: ${turn.agentId}\nTimestamp: ${timestamp}\n\n${turn.content}\n\n---`;
   }
 
   private formatOwnTurnForHistory(turn: ConversationTurn): string {
-    //TODO-JCM: format all steps in order with thier own dedicated formats, don't lump by type.
     const timestamp = this.formatTimestamp(turn.timestamp);
     const turnTraces = this.tracesByTurnId.get(turn.id) || [];
 
-    const thoughts = turnTraces
-        .filter(e => e.type === 'thought')
-        .map(e => (e as any).content)
-        .join('\n');
-
-    const scratchpadBlock = `<scratchpad>\n${thoughts || 'No thoughts recorded.'}\n</scratchpad>`;
-
-    const toolCall = turnTraces.find(e => e.type === 'tool_call')
-    let toolCallBlock = '';
-    let toolResultBlock = '';
-
-    if (toolCall) {
-        const toolCallJson = JSON.stringify({ name: toolCall.toolName, args: toolCall.parameters }, null, 2);
-        toolCallBlock = `\`\`\`json\n${toolCallJson}\n\`\`\``;
-
-        const toolResult = turnTraces.find(e => e.type === 'tool_result' && e.toolCallId === toolCall.toolCallId) as ToolResultEntry
-        if (toolResult) {
-            const resultJson = toolResult.error ? `{ "error": "${toolResult.error}" }` : JSON.stringify(toolResult.result);
-            toolResultBlock = `[TOOL_RESULT] ${resultJson}`;
-        }
+    const parts: string[] = [
+      `From: ${this.agentId.label}`,
+      `Timestamp: ${timestamp}`,
+      '' // Empty line after headers
+    ];
+    let currentScratchpad: string[] = [];
+    
+    // Process traces in order (already chronological)
+    for (const trace of turnTraces) {
+      switch (trace.type) {
+        case 'thought':
+          currentScratchpad.push((trace as ThoughtEntry).content);
+          break;
+          
+        case 'tool_call':
+          // Output any accumulated thoughts first
+          if (currentScratchpad.length > 0) {
+            parts.push(`<scratchpad>\n${currentScratchpad.join('\n')}\n</scratchpad>`);
+            currentScratchpad = [];
+          }
+          
+          // Output the tool call
+          const toolCall = trace as ToolCallEntry;
+          const toolCallJson = JSON.stringify({ name: toolCall.toolName, args: toolCall.parameters }, null, 2);
+          parts.push(`\`\`\`json\n${toolCallJson}\n\`\`\``);
+          break;
+          
+        case 'tool_result':
+          // Output the tool result
+          const toolResult = trace as ToolResultEntry;
+          const resultJson = toolResult.error ? `{ "error": "${toolResult.error}" }` : JSON.stringify(toolResult.result);
+          parts.push(`[TOOL_RESULT] ${resultJson}`);
+          break;
+      }
+    }
+    
+    // Output any remaining thoughts
+    if (currentScratchpad.length > 0) {
+      parts.push(`<scratchpad>\n${currentScratchpad.join('\n')}\n</scratchpad>`);
+    }
+    
+    // Add the final turn content
+    if (turn.content) {
+      parts.push(turn.content);
     }
 
-    const parts = [
-        `From: ${this.agentId.label} @${timestamp}`,
-        scratchpadBlock,
-        toolCallBlock,
-        toolResultBlock,
-        turn.content
-    ];
+    // Add separator at the end
+    parts.push('', '---');
 
-    return parts.filter(Boolean).join('\n');
+    return parts.join('\n');
   }
 
   private formatCurrentProcess(currentTurnTrace: TraceEntry[]): string {
@@ -722,29 +740,47 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
         return `<ourCurrentProcess>\n  <!-- No actions taken yet in this turn -->\n  ***=>>YOU ARE HERE<<=***\n</ourCurrentProcess>`;
     }
 
-    const thoughts = currentTurnTrace
-        .filter(e => e.type === 'thought')
-        .map(e => (e as any).content)
-        .join('\n');
-    const scratchpadBlock = `<scratchpad>\n${thoughts}\n</scratchpad>`;
+    const parts: string[] = [];
+    let currentScratchpad: string[] = [];
     
-    const toolCall = currentTurnTrace.find(e => e.type === 'tool_call');
-    let toolCallBlock = '';
-    let toolResultBlock = '';
-
-    if (toolCall) {
-        const toolCallJson = JSON.stringify({ name: toolCall.toolName, args: toolCall.parameters }, null, 2);
-        toolCallBlock = `\`\`\`json\n${toolCallJson}\n\`\`\``;
-
-        const toolResult = currentTurnTrace.find(e => e.type === 'tool_result' && (e as any).toolCallId === toolCall.toolCallId) as ToolResultEntry | undefined;
-        if (toolResult) {
-            const resultJson = toolResult.error ? `{ "error": "${toolResult.error}" }` : JSON.stringify(toolResult.result);
-            toolResultBlock = `[TOOL_RESULT] ${resultJson}`;
-        }
+    // Process traces in order (already chronological)
+    for (const trace of currentTurnTrace) {
+      switch (trace.type) {
+        case 'thought':
+          currentScratchpad.push((trace as ThoughtEntry).content);
+          break;
+          
+        case 'tool_call':
+          // Output any accumulated thoughts first
+          if (currentScratchpad.length > 0) {
+            parts.push(`<scratchpad>\n${currentScratchpad.join('\n')}\n</scratchpad>`);
+            currentScratchpad = [];
+          }
+          
+          // Output the tool call
+          const toolCall = trace as ToolCallEntry;
+          const toolCallJson = JSON.stringify({ name: toolCall.toolName, args: toolCall.parameters }, null, 2);
+          parts.push(`\`\`\`json\n${toolCallJson}\n\`\`\``);
+          break;
+          
+        case 'tool_result':
+          // Output the tool result
+          const toolResult = trace as ToolResultEntry;
+          const resultJson = toolResult.error ? `{ "error": "${toolResult.error}" }` : JSON.stringify(toolResult.result);
+          parts.push(`[TOOL_RESULT] ${resultJson}`);
+          break;
+      }
     }
+    
+    // Output any remaining thoughts
+    if (currentScratchpad.length > 0) {
+      parts.push(`<scratchpad>\n${currentScratchpad.join('\n')}\n</scratchpad>`);
+    }
+    
+    // Add the "YOU ARE HERE" marker
+    parts.push('***=>>YOU ARE HERE<<=***');
 
-    const parts = [scratchpadBlock, toolCallBlock, toolResultBlock, '***=>>YOU ARE HERE<<=***'];
-    return `<ourCurrentProcess>\n${parts.filter(Boolean).join('\n')}\n</ourCurrentProcess>`;
+    return `<ourCurrentProcess>\n${parts.join('\n')}\n</ourCurrentProcess>`;
   }
 
   // Get conversation from client

@@ -80,7 +80,7 @@ class MockLLMProvider extends LLMProvider {
 
   async generateResponse(request: LLMRequest): Promise<LLMResponse> {
     // Simple mock response that alternates between sending a message and ending
-    console.log("Mock llm", "req", JSON.stringify(request, null, 2), "discussion itme", cannedDiscussion[cannedIndex])
+    console.log("Mock llm", "req", request.messages[0].content, "discussion itme", cannedDiscussion[cannedIndex])
     await new Promise<void>((resolve) => setTimeout(() => {
       resolve()
     }, globalThis.playbackSpeed))

@@ -12,33 +12,31 @@ export interface ParsedResponse {
   tools: ToolCall[];
 }
 
-// TODO-JCM: this should just be a collection of static functions, not a class.
-export class ToolParser {
-  /**
-   * Parse tool calls from LLM response using new scratchpad + JSON block format (Task 1.3)
-   * Supports multiple formats in priority order:
-   * 1. ```json ... ``` code blocks (preferred)
-   * 2. ``` ... ``` generic code blocks containing JSON tool calls
-   * 3. Inline JSON objects (legacy fallback)
-   * 
-   * All text before the code block is treated as reasoning/scratchpad
-   * 
-   * Examples:
-   * - "I need to check the patient's records first.\n```json\n{\"name\": \"searchRecords\", \"args\": {\"query\": \"diabetes\"}}\n```"
-   * - "Let me search.\n```\n{\"name\": \"searchRecords\", \"args\": {}}\n```"
-   * - "Quick search {\"name\": \"searchRecords\", \"args\": {\"query\": \"test\"}}"
-   */
-  parseToolsFromResponse(llmOutput: string): ParsedResponse {
+/**
+ * Parse tool calls from LLM response using new scratchpad + JSON block format (Task 1.3)
+ * Supports multiple formats in priority order:
+ * 1. ```json ... ``` code blocks (preferred)
+ * 2. ``` ... ``` generic code blocks containing JSON tool calls
+ * 3. Inline JSON objects (legacy fallback)
+ * 
+ * All text before the code block is treated as reasoning/scratchpad
+ * 
+ * Examples:
+ * - "I need to check the patient's records first.\n```json\n{\"name\": \"searchRecords\", \"args\": {\"query\": \"diabetes\"}}\n```"
+ * - "Let me search.\n```\n{\"name\": \"searchRecords\", \"args\": {}}\n```"
+ * - "Quick search {\"name\": \"searchRecords\", \"args\": {\"query\": \"test\"}}"
+ */
+export function parseToolsFromResponse(llmOutput: string): ParsedResponse {
     // Find the last occurrence of a ```json ... ``` block
-    const jsonBlockMatch = this.findLastJsonCodeBlock(llmOutput);
+    const jsonBlockMatch = findLastJsonCodeBlock(llmOutput);
     
     if (jsonBlockMatch) {
       try {
         // Parse the JSON with tolerant parsing
-        const parsed = this.parseTolerantJSON(jsonBlockMatch.content);
+        const parsed = parseTolerantJSON(jsonBlockMatch.content);
         
         // Validate it looks like a tool call
-        if (this.isValidToolCall(parsed)) {
+        if (isValidToolCall(parsed)) {
           const toolCall: ToolCall = {
             name: parsed.name,
             args: parsed.args || {},
@@ -46,7 +44,13 @@ export class ToolParser {
           };
           
           // Everything before the JSON block is the reasoning/scratchpad
-          const reasoning = llmOutput.substring(0, jsonBlockMatch.start).trim();
+          let reasoning = llmOutput.substring(0, jsonBlockMatch.start).trim();
+          
+          // Extract content from <scratchpad> tags if present
+          const scratchpadMatch = reasoning.match(/<scratchpad>\s*([\s\S]*?)\s*<\/scratchpad>/);
+          if (scratchpadMatch) {
+            reasoning = scratchpadMatch[1].trim();
+          }
           
           return {
             message: reasoning,
@@ -60,32 +64,32 @@ export class ToolParser {
     }
     
     // Fallback to legacy parsing for backward compatibility
-    return this.parseToolsFromResponseLegacy(llmOutput);
+    return parseToolsFromResponseLegacy(llmOutput);
   }
 
-  /**
-   * Parse tool calls from LLM response containing JSON tool call objects (legacy method)
-   * Looks for objects with structure: {"name": "toolName", "args": {...}}
-   * 
-   * Examples:
-   * - {"name": "searchRecords", "args": {"query": "diabetes"}}
-   * - {"name": "no_response_needed", "args": {}}
-   * - {name: 'sendMessage', args: {text: 'Hello', urgent: true}} // tolerant parsing
-   */
-  parseToolsFromResponseLegacy(llmOutput: string): ParsedResponse {
+/**
+ * Parse tool calls from LLM response containing JSON tool call objects (legacy method)
+ * Looks for objects with structure: {"name": "toolName", "args": {...}}
+ * 
+ * Examples:
+ * - {"name": "searchRecords", "args": {"query": "diabetes"}}
+ * - {"name": "no_response_needed", "args": {}}
+ * - {name: 'sendMessage', args: {text: 'Hello', urgent: true}} // tolerant parsing
+ */
+function parseToolsFromResponseLegacy(llmOutput: string): ParsedResponse {
     let remainingText = llmOutput;
     
     // Find potential JSON objects that contain "name" property
-    const matches = this.findToolCallCandidates(llmOutput);
+    const matches = findToolCallCandidates(llmOutput);
     
     // Return the FIRST valid tool call only (single-action constraint)
     for (const match of matches) {
       try {
         // Parse the JSON with tolerant parsing
-        const parsed = this.parseTolerantJSON(match.content);
+        const parsed = parseTolerantJSON(match.content);
         
         // Validate it looks like a tool call
-        if (this.isValidToolCall(parsed)) {
+        if (isValidToolCall(parsed)) {
           const toolCall: ToolCall = {
             name: parsed.name,
             args: parsed.args || {},
@@ -116,10 +120,10 @@ export class ToolParser {
     };
   }
   
-  /**
-   * Find the last occurrence of a code block (```json or ``` without language)
-   */
-  private findLastJsonCodeBlock(text: string): {content: string, start: number, end: number, fullMatch: string} | null {
+/**
+ * Find the last occurrence of a code block (```json or ``` without language)
+ */
+function findLastJsonCodeBlock(text: string): {content: string, start: number, end: number, fullMatch: string} | null {
     // First try to find ```json blocks
     const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/gi;
     let lastMatch: {content: string, start: number, end: number, fullMatch: string} | null = null;
@@ -155,18 +159,18 @@ export class ToolParser {
     return lastMatch;
   }
 
-  /**
-   * Find potential tool call JSON objects in the text
-   * Uses a more sophisticated approach than simple regex
-   */
-  private findToolCallCandidates(text: string): Array<{content: string, start: number, end: number}> {
+/**
+ * Find potential tool call JSON objects in the text
+ * Uses a more sophisticated approach than simple regex
+ */
+function findToolCallCandidates(text: string): Array<{content: string, start: number, end: number}> {
     const candidates: Array<{content: string, start: number, end: number}> = [];
     
     // Look for opening braces
     for (let i = 0; i < text.length; i++) {
       if (text[i] === '{') {
         // Try to find the matching closing brace
-        const jsonStr = this.extractJSONObject(text, i);
+        const jsonStr = extractJSONObject(text, i);
         if (jsonStr && (jsonStr.includes('"name"') || jsonStr.includes("'name'") || /\bname\s*:/.test(jsonStr))) {
           candidates.push({
             content: jsonStr,
@@ -180,10 +184,10 @@ export class ToolParser {
     return candidates;
   }
   
-  /**
-   * Extract a complete JSON object starting from a given position
-   */
-  private extractJSONObject(text: string, startPos: number): string | null {
+/**
+ * Extract a complete JSON object starting from a given position
+ */
+function extractJSONObject(text: string, startPos: number): string | null {
     let braceCount = 0;
     let inString = false;
     let escapeNext = false;
@@ -223,25 +227,25 @@ export class ToolParser {
     return null; // Incomplete JSON
   }
   
-  /**
-   * Check if parsed object looks like a valid tool call
-   */
-  private isValidToolCall(obj: any): obj is {name: string, args?: Record<string, any>} {
+/**
+ * Check if parsed object looks like a valid tool call
+ */
+function isValidToolCall(obj: any): obj is {name: string, args?: Record<string, any>} {
     return obj && 
            typeof obj === 'object' && 
            typeof obj.name === 'string' && 
            obj.name.length > 0 &&
-           this.validateToolName(obj.name);
+           validateToolName(obj.name);
   }
   
-  /**
-   * Tolerant JSON parser that handles common LLM issues:
-   * - JavaScript-style comments (// and block comments)
-   * - Trailing commas
-   * - Unquoted property names
-   * - Single quotes
-   */
-  private parseTolerantJSON(jsonStr: string): any {
+/**
+ * Tolerant JSON parser that handles common LLM issues:
+ * - JavaScript-style comments (// and block comments)
+ * - Trailing commas
+ * - Unquoted property names
+ * - Single quotes
+ */
+function parseTolerantJSON(jsonStr: string): any {
     try {
       // Try standard JSON first
       return JSON.parse(jsonStr);
@@ -250,25 +254,25 @@ export class ToolParser {
       let cleaned = jsonStr.trim();
       
       // Remove JavaScript-style comments
-      cleaned = this.removeComments(cleaned);
+      cleaned = removeComments(cleaned);
       
       // Fix trailing commas
-      cleaned = this.fixTrailingCommas(cleaned);
+      cleaned = fixTrailingCommas(cleaned);
       
       // Fix unquoted property names
-      cleaned = this.fixUnquotedKeys(cleaned);
+      cleaned = fixUnquotedKeys(cleaned);
       
       // Convert single quotes to double quotes
-      cleaned = this.fixSingleQuotes(cleaned);
+      cleaned = fixSingleQuotes(cleaned);
       
       return JSON.parse(cleaned);
     }
   }
   
-  /**
-   * Remove JavaScript-style comments
-   */
-  private removeComments(str: string): string {
+/**
+ * Remove JavaScript-style comments
+ */
+function removeComments(str: string): string {
     // Remove /* */ style comments
     str = str.replace(/\/\*[\s\S]*?\*\//g, '');
     
@@ -311,24 +315,24 @@ export class ToolParser {
     return cleanedLines.join('\n');
   }
   
-  /**
-   * Fix trailing commas
-   */
-  private fixTrailingCommas(str: string): string {
+/**
+ * Fix trailing commas
+ */
+function fixTrailingCommas(str: string): string {
     return str.replace(/,(\s*[}\]])/g, '$1');
   }
   
-  /**
-   * Fix unquoted property names
-   */
-  private fixUnquotedKeys(str: string): string {
+/**
+ * Fix unquoted property names
+ */
+function fixUnquotedKeys(str: string): string {
     return str.replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":');
   }
   
-  /**
-   * Convert single quotes to double quotes
-   */
-  private fixSingleQuotes(str: string): string {
+/**
+ * Convert single quotes to double quotes
+ */
+function fixSingleQuotes(str: string): string {
     let result = '';
     let inSingleQuote = false;
     let inDoubleQuote = false;
@@ -363,34 +367,32 @@ export class ToolParser {
     return result;
   }
   
-  /**
-   * Check if response contains any tool calls
-   */
-  hasToolCalls(llmOutput: string): boolean {
-    const parsed = this.parseToolsFromResponse(llmOutput);
-    return parsed.tools.length > 0;
-  }
+/**
+ * Check if response contains any tool calls
+ */
+export function hasToolCalls(llmOutput: string): boolean {
+  const parsed = parseToolsFromResponse(llmOutput);
+  return parsed.tools.length > 0;
+}
   
-  /**
-   * Extract just tool names from response (for quick analysis)
-   */
-  extractToolNames(llmOutput: string): string[] {
-    const parsed = this.parseToolsFromResponse(llmOutput);
-    return parsed.tools.map(t => t.name);
-  }
+/**
+ * Extract just tool names from response (for quick analysis)
+ */
+export function extractToolNames(llmOutput: string): string[] {
+  const parsed = parseToolsFromResponse(llmOutput);
+  return parsed.tools.map(t => t.name);
+}
   
-  /**
-   * Validate that tool name is safe (no special characters)
-   */
-  validateToolName(toolName: string): boolean {
-    return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(toolName);
-  }
+/**
+ * Validate that tool name is safe (no special characters)
+ */
+export function validateToolName(toolName: string): boolean {
+  return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(toolName);
 }
 
 // Convenience function for simple tool call parsing
 export function parseToolCalls(text: string): any[] {
-  const parser = new ToolParser();
-  const result = parser.parseToolsFromResponse(text);
+  const result = parseToolsFromResponse(text);
   return result.tools.map(tool => ({
     tool: tool.name,
     parameters: tool.args
