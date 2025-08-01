@@ -103,17 +103,17 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
   }
 
   disconnect(): void {
-    if (this.ws) {
-      this.ws.close(1000, 'Client disconnect');
-      this.ws = undefined;
-    }
-    this.authenticated = false;
-    this.authToken = undefined;
-    
-    this.pendingRequests.forEach(({ reject }) => {
-      reject(new Error('Client disconnected'));
-    });
-    this.pendingRequests.clear();
+   
+    setTimeout(() => {
+      
+      this.pendingRequests.forEach(({ reject }) => {
+        console.log(this.pendingRequests)
+        reject(new Error('Client disconnected'));
+      });
+
+      this.pendingRequests.clear();
+
+    }, 1000)
   }
 
   private handleMessage(data: string | Buffer | ArrayBuffer | Blob): void {

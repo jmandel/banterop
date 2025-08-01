@@ -101,6 +101,7 @@ export class HonoWebSocketJsonRpcServer {
     // Conversation lifecycle
     this.methods.set('createConversation', this.createConversation.bind(this));
     this.methods.set('startConversation', this.startConversation.bind(this));
+    this.methods.set('endConversation', this.endConversation.bind(this));
     
     // Subscriptions
     this.methods.set('subscribe', this.subscribe.bind(this));
@@ -535,6 +536,16 @@ export class HonoWebSocketJsonRpcServer {
     await this.orchestrator.startConversation(params.conversationId);
     return { success: true, message: 'Conversation started successfully' };
   }
+
+  private async endConversation(client: ClientState, params: { conversationId: string }): Promise<any> {
+    if (!params?.conversationId) {
+      throw { ...RPC_ERRORS.INVALID_PARAMS, data: 'Conversation ID required' };
+    }
+
+    await this.orchestrator.endConversation(params.conversationId);
+    return { success: true, message: 'Conversation ended successfully' };
+  }
+
 
   // ============= Utility Methods =============
 

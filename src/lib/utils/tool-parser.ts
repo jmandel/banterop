@@ -12,6 +12,7 @@ export interface ParsedResponse {
   tools: ToolCall[];
 }
 
+// TODO-JCM: this should just be a collection of static functions, not a class.
 export class ToolParser {
   /**
    * Parse tool calls from LLM response using new scratchpad + JSON block format (Task 1.3)

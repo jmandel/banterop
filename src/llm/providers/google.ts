@@ -69,7 +69,7 @@ export class GoogleLLMProvider extends LLMProvider {
   }
   
   async generateWithTools(
-    messages: LLMMessage[],
+    request: LLMRequest,
     tools: LLMTool[],
     toolHandler: (call: LLMToolCall) => Promise<LLMToolResponse>
   ): Promise<LLMResponse> {
@@ -78,7 +78,7 @@ export class GoogleLLMProvider extends LLMProvider {
     }
     
     try {
-      const contents = this.convertMessagesToGoogleFormat(messages);
+      const contents = this.convertMessagesToGoogleFormat(request.messages);
       const googleTools = this.convertToolsToGoogleFormat(tools);
       
       const response = await this.client.models.generateContent({

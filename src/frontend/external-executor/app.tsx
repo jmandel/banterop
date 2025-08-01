@@ -1,30 +1,25 @@
 // External Agent Executor - In-Browser Agent Runtime Demo
-import React, { useState, useEffect, useRef } from 'react';
-import { createRoot } from 'react-dom/client';
-import { WebSocketJsonRpcClient } from '../../client/impl/websocket.client.js';
-import { ScenarioDrivenAgent } from '../../agents/scenario-driven.agent.js';
-import type { 
-  ScenarioConfiguration, 
-  ConversationEvent, 
-  AgentId,
-  LLMRequest,
-  LLMResponse,
-  Tool,
-  TraceEntry,
-  ConversationTurn,
-  ThoughtEntry,
-  ToolCallEntry,
-  ToolResultEntry,
-  ScenarioDrivenAgentConfig,
-  LLMMessage,
-  LLMProviderConfig,
-  LLMTool,
-  LLMToolCall,
-  LLMToolResponse
-} from '$lib/types.js';
-import { LLMProvider } from '$lib/types.js';
 import { ToolSynthesisService } from '$agents/index.js';
 import { ToolExecutionInput, ToolExecutionOutput } from '$agents/services/tool-synthesis.service.js';
+import type {
+  ConversationEvent,
+  LLMMessage,
+  LLMProviderConfig,
+  LLMRequest,
+  LLMResponse,
+  LLMTool,
+  LLMToolCall,
+  LLMToolResponse,
+  ScenarioConfiguration,
+  ScenarioDrivenAgentConfig,
+  ThoughtEntry,
+  Tool
+} from '$lib/types.js';
+import { LLMProvider } from '$lib/types.js';
+import React, { useEffect, useRef, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import { ScenarioDrivenAgent } from '../../agents/scenario-driven.agent.js';
+import { WebSocketJsonRpcClient } from '../../client/impl/websocket.client.js';
 
 // =============================================================================
 // BROWSER-COMPATIBLE MOCK IMPLEMENTATIONS
@@ -34,53 +29,83 @@ import { ToolExecutionInput, ToolExecutionOutput } from '$agents/services/tool-s
  * Browser-compatible mock LLM provider that provides predictable responses
  * for demo purposes. This replaces the Node.js LLMProvider.
  */
+
+let cannedDiscussion = [
+  {
+    agentId: "patient-agent",
+    thought: "I should introduce myself",
+    content: "This is an initial message. Authorize me."
+  },
+  {
+    agentId: "supplier-agent",
+    thought: "I need to know who the patient is.",
+    content: "What patient are you askign about?"
+  },
+  {
+    agentId: "patient-agent",
+    thought: "I an repsond to this.",
+    content: "I'm represneting John Smith"
+  },
+  {
+    agentId: "supplier-agent",
+    thought: "I should look them up",
+    tool: {name: "lookup", args: {name: "John Smith"}},
+    toolResponse: "John Smith is member 124214, case file 623"
+  },
+  {
+    agentId: "supplier-agent",
+    thought: "I should check their recent history",
+    tool: {name: "check_casefile", args: {file_id: "623"}},
+    toolResponse: "In good standing"
+  },
+  {
+    agentId: "supplier-agent",
+    thought: "I should check their recent history",
+    tool: {name: "mri_authorization_Success", args: {status: "Yay!"}},
+    toolResponse: "MRI Authorization completed, authz ID 17298"
+  }
+]
+
+let cannedIndex = 0;
+
 class MockLLMProvider extends LLMProvider {
 
   constructor(config = { provider: 'local', apiKey: 'browser-mock' }) {
     super(config as LLMProviderConfig);
   }
 
-  generateWithTools?(messages: LLMMessage[], tools: LLMTool[], toolHandler: (call: LLMToolCall) => Promise<LLMToolResponse>): Promise<LLMResponse> {
-    throw new Error('Method not implemented.');
+  generateWithTools?(request, tools: LLMTool[], toolHandler: (call: LLMToolCall) => Promise<LLMToolResponse>): Promise<LLMResponse> {
+    return this.generateResponse(request)
   }
 
   async generateResponse(request: LLMRequest): Promise<LLMResponse> {
     // Simple mock response that alternates between sending a message and ending
-    const shouldEnd = Math.random() < 0.3; // 30% chance to end conversation
-    
-    if (shouldEnd) {
-      // Use a terminal tool to end the conversation
-      return {
-        content: `<scratchpad>
-Based on the conversation flow, I should now complete this authorization process.
-</scratchpad>
+    console.log("Mock llm", "req", JSON.stringify(request, null, 2), "discussion itme", cannedDiscussion[cannedIndex])
+    await new Promise<void>((resolve) => setTimeout(() => {
+      resolve()
+    }, globalThis.playbackSpeed))
 
-\`\`\`json
-{
-  "name": "mri_authorization_Success",
-  "args": {
-    "authNumber": "AUTH-${Date.now()}"
-  }
-}
-\`\`\``
-      };
-    } else {
-      // Send a message to continue the conversation
-      return {
-        content: `<scratchpad>
-I need to respond to continue this healthcare workflow conversation.
-</scratchpad>
-
-\`\`\`json
-{
-  "name": "send_message_to_thread",
-  "args": {
-    "text": "I'm processing your request. Let me review the documentation and get back to you with next steps."
-  }
-}
-\`\`\``
-      };
+    let response = cannedDiscussion[cannedIndex];
+    if (!response) {
+      return {content: ""}
     }
+
+    if (!response.tool) {
+      console.log("Increment tool from", cannedDiscussion[cannedIndex], cannedIndex)
+      cannedIndex++;
+    }
+
+    if (response.content) {
+      return {content: `<scratchpad>${response.thought}</scratchpad>\n\`\`\`json${JSON.stringify({name: "send_message_to_thread", args: {text: response.content}})}\n\`\`\``}
+    }
+
+    if (response.tool) {
+      // don't advance index so the tool response reads the right value
+      return {
+        content: `<scratchpad>${response.thought}</scratchpad>\n\`\`\`${JSON.stringify(response.tool)}\n\`\`\``
+      } 
+    }
+    
   }
 
   async isAvailable(): Promise<boolean> {
@@ -110,27 +135,8 @@ class MockToolSynthesisService extends ToolSynthesisService {
   }
 
   override async synthesizeToolResult(toolName: string, parameters: any, toolDefinition?: Tool): Promise<any> {
-    // Generate mock results based on tool name
-    if (toolName.includes('Success') || toolName.includes('Approval')) {
-      return {
-        status: 'success',
-        result: `Successfully executed ${toolName}`,
-        timestamp: new Date().toISOString()
-      };
-    } else if (toolName.includes('Failure') || toolName.includes('Denial')) {
-      return {
-        status: 'denied',
-        reason: `Request denied by ${toolName}`,
-        timestamp: new Date().toISOString()
-      };
-    } else {
-      return {
-        status: 'processed',
-        data: parameters,
-        message: `Tool ${toolName} executed successfully`,
-        timestamp: new Date().toISOString()
-      };
-    }
+    console.log("Suynthsze", toolName, cannedIndex, cannedDiscussion[cannedIndex])
+    return cannedDiscussion[cannedIndex++].toolResponse
   }
 }
 
@@ -151,8 +157,10 @@ function ExternalExecutorApp() {
   const [agents, setAgents] = useState<ScenarioDrivenAgent[]>([]);
   const [conversationId, setConversationId] = useState<string>('');
   const [promptedQueries, setPromptedQueries] = useState<Set<string>>(new Set());
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(5000); // Default 5 seconds
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(500); // Default 5 seconds
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
+
+  globalThis.playbackSpeed = playbackSpeed
   
   const logContainerRef = useRef<HTMLDivElement>(null);
 
@@ -246,7 +254,7 @@ function ExternalExecutorApp() {
       }
       
       const scenarioData = await scenarioRes.json();
-      const scenarioConfig = scenarioData.data.config;
+      const scenarioConfig = scenarioData.data.config as ScenarioConfiguration;
       addLog('Successfully fetched scenario configuration');
 
       // Step 2: Create conversation with external management mode
@@ -257,6 +265,7 @@ function ExternalExecutorApp() {
         body: JSON.stringify({
           name: 'Live In-Browser External Agent Demo',
           managementMode: 'external',
+          initiatingAgentId: "patient-agent",
           agents: [
             {
               agentId: { id: 'patient-agent', label: 'Browser Patient Agent', role: 'PatientAgent' },
@@ -293,9 +302,7 @@ function ExternalExecutorApp() {
       
       // Step 5: Create real ScenarioDrivenAgent instances
       // Get the specific agent configs from the loaded scenario
-      const patientAgentConfig = scenarioConfig.agents.find(a => a.agentId.role === 'PatientAgent')!;
-      const supplierAgentConfig = scenarioConfig.agents.find(a => a.agentId.role === 'SupplierAgent')!;
-      
+     
       // Instantiate the REAL ScenarioDrivenAgent using its new, flexible constructor
       const patientAgent = new ScenarioDrivenAgent(
         { 
@@ -348,13 +355,8 @@ function ExternalExecutorApp() {
 
       // Step 8: Start the conversation by having the patient agent send the first turn
       // This activates the external conversation
-      const turnId = await patientClient.startTurn();
-      await patientClient.addTrace(turnId, {
-        type: 'thought',
-        content: 'Starting the conversation as requested'
-      } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>);
-      await patientClient.completeTurn(turnId, "Hello, I'm following up on the prior authorization request for my right knee MRI.");
-      
+      patientAgent._processAndRespondToTurn(null)
+     
       addLog('Patient agent sent the first turn. Conversation is now active');
       addLog('Demo running... Watch for agent interactions and user queries');
       

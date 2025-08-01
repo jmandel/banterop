@@ -12,9 +12,17 @@ import {
   ToolResultEntry
 } from '$lib/types.js';
 import type { ScenarioConfiguration, AgentConfiguration, Tool } from '$lib/types.js';
+import { ParsedResponse, ToolParser } from '$lib/utils/tool-parser.js';
 import { BaseAgent } from './base.agent.js';
 import { ToolSynthesisService } from './services/tool-synthesis.service.js';
 export { type ScenarioDrivenAgentConfig } from "$lib/types.js";
+
+interface ToolCall {
+  name: string,
+  args?: Record<string,unknown>
+}
+
+const toolParser = new ToolParser();
 
 export class ScenarioDrivenAgent extends BaseAgent {
   private scenario: ScenarioConfiguration;
@@ -23,6 +31,7 @@ export class ScenarioDrivenAgent extends BaseAgent {
   private toolSynthesis: ToolSynthesisService;
   private processingTurn: boolean = false;
   
+  private currentTurnId: string;
   private turns: ConversationTurn[] = [];
   private tracesByTurnId: Map<string, TraceEntry[]> = new Map();
 
@@ -60,7 +69,7 @@ export class ScenarioDrivenAgent extends BaseAgent {
     
     // ONE-TIME-FETCH to hydrate state on startup
     console.log(`Agent ${this.agentId.label} hydrating initial conversation state...`);
-    const initialConversation = await this.getConversation();
+    const initialConversation = await this.client.getConversation();
     this.turns = initialConversation.turns || [];
 
     // Populate the traces map from the initial turns data
@@ -69,6 +78,13 @@ export class ScenarioDrivenAgent extends BaseAgent {
         if (turn.trace && turn.trace.length > 0) {
             this.tracesByTurnId.set(turn.id, turn.trace);
         }
+    }
+
+    if (initialConversation.metadata.initiatingAgentId === this.agentId.id) {
+      console.log("This is the initiattin agent", initialConversation.metadata, this)
+    }
+    else {
+      console.log("NOT initiating agent", initialConversation.metadata, this)
     }
 
     console.log(`Agent ${this.agentId.label} initialized with ${this.turns.length} historical turns.`);
@@ -103,60 +119,19 @@ export class ScenarioDrivenAgent extends BaseAgent {
     }
   }
 
-  async onTurnCompleted(event: TurnCompletedEvent): Promise<void> {
-    console.log(`${this.agentId.id} onTurnCompleted called - ready: ${this.isReady}, turnId: ${event.data.turn.id}, conversationId: ${this.conversationId}`);
-    
-    // Don't process if not ready - this should be checked in onConversationEvent but double-check here
-    if (!this.isReady) {
-      console.log(`${this.agentId.id} ignoring turn_completed - not ready yet`);
+  onTurnCompleted(event: TurnCompletedEvent): Promise<void> {
       return;
-    }
-    
-    // Skip if it's our own turn
-    if (event.data.turn.agentId === this.agentId.id) {
-      return;
-    }
-
-    // Skip if this is a final turn (terminal tool was used)
-    if (event.data.turn.isFinalTurn) {
-      console.log(`${this.agentId.id} skipping final turn processing`);
-      return;
-    }
-
-    // Add mutex to prevent concurrent processing
-    if (this.processingTurn) {
-      console.log(`${this.agentId.id} already processing turn, skipping this turn_completed event`);
-      return;
-    }
-    
-    this.processingTurn = true;
-    console.log(`${this.agentId.id} starting turn processing for turnId: ${event.data.turn.id}`);
-
-    try {
-      // Build full-context prompt with complete conversation and trace history
-      const conversation = await this.getConversation();
-      const prompt = await this.buildPromptFromState(conversation);
-      
-      // Get tool calls from LLM using the scenario-based prompt with reasoning
-      const result = await this.extractToolCallsFromLLMResponse(prompt);
-      
-      // Execute single tool call with reasoning (following single-action constraint)
-      await this.executeSingleToolCallWithReasoning(result);
-      
-    } catch (error) {
-      console.error(`ScenarioDrivenAgent error for ${this.agentId.id}:`, error);
-      await this.recordErrorTrace(error);
-    } finally {
-      this.processingTurn = false;
-      console.log(`${this.agentId.id} finished processing turn for turnId: ${event.data.turn.id}`);
-    }
   }
 
-  private async _processAndRespondToTurn(triggeringTurn: ConversationTurn): Promise<void> {
+
+   async _processAndRespondToTurn(triggeringTurn: ConversationTurn): Promise<void> {
     if (this.processingTurn) return; // Prevent concurrent processing
     this.processingTurn = true;
 
-    try {
+    this.currentTurnId = await this.startTurn()
+    let MAX_STEPS = 10;
+    let step = 0 ;
+    while (step++ < MAX_STEPS) {
         // This array tracks actions taken within this new turn before the LLM is called.
         const currentTurnTrace: TraceEntry[] = [];
 
@@ -175,13 +150,28 @@ export class ScenarioDrivenAgent extends BaseAgent {
         
         // The rest of the agent's logic proceeds from here
         const result = await this.extractToolCallsFromLLMResponse(prompt);
-        await this.executeSingleToolCallWithReasoning(result);
+        if (!result.tools || !result.message) {
+          console.error("Missing thoughts or tools, ending turn")
+          this.completeTurn(this.currentTurnId, "Turn ended with error")
+          this.client.endConversation(this.conversationId)
+          break;
+        }
 
-    } catch (error) {
-        console.error(`Error processing turn triggered by ${triggeringTurn.id}:`, error);
-    } finally {
-        this.processingTurn = false;
-    }
+        console.log("Tools paresed", result)
+        await this.addThought(this.currentTurnId, result.message);
+
+        const step = await this.executeSingleToolCallWithReasoning(result);
+        if (step.completedTurn) {
+          break;
+        }
+      }
+      if (step === MAX_STEPS) {
+        console.error("MAX STEPS reaached, bailing")
+        this.completeTurn(this.currentTurnId, "Error: Max steps reached")
+      }
+
+      this.processingTurn = false;
+      this.currentTurnId = null;
   }
 
   private async buildPromptFromState(conversation: any): Promise<string> {
@@ -350,7 +340,7 @@ ${this.scenario.scenario.challenges.map(c => `- ${c}`).join('\n')}
 </SCENARIO_CONTEXT>`;
     
     const knowledgeBaseSection = `<PRIVATE_KNOWLEDGE_BASE>
-This is your private information. Do not share it directly. Use your tools to act on it.
+This is a summary of information relevant to your role, but you should use tools to fetch the complete and accurate content.
 ${JSON.stringify(agentConfig.knowledgeBase, null, 2)}
 </PRIVATE_KNOWLEDGE_BASE>`;
 
@@ -408,7 +398,7 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
   }
 
   // Extract tool calls from LLM response with reasoning capture
-  private async extractToolCallsFromLLMResponse(prompt: string): Promise<{ reasoning: string; toolCall: any | null }> {
+  private async extractToolCallsFromLLMResponse(prompt: string): Promise<ParsedResponse> {
     const messages: LLMMessage[] = [{ role: 'user', content: prompt }];
     const request: LLMRequest = {
       messages,
@@ -417,138 +407,89 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
     };
 
     const response = await this.llmProvider.generateResponse(request);
+    console.log("llm response", response)
     const responseContent = response.content;
-
-    // Use regex to robustly extract content from within the tags
-    const scratchpadRegex = /<scratchpad>([\s\S]*?)<\/scratchpad>/;
-    const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
-
-    const reasoningMatch = responseContent.match(scratchpadRegex);
-    const toolCallMatch = responseContent.match(jsonRegex);
-
-    // Extract reasoning: prefer scratchpad, fall back to content before JSON block for backward compatibility
-    let reasoning: string;
-    if (reasoningMatch) {
-      reasoning = reasoningMatch[1].trim();
-    } else {
-      // Fallback: extract everything before the first JSON block
-      const contentBeforeJson = responseContent.split('```')[0]?.trim() || '';
-      reasoning = contentBeforeJson || 'Agent provided response without clear reasoning structure.';
-    }
-    
-    let toolCall = null;
-
-    if (toolCallMatch && toolCallMatch[1]) {
-      try {
-        const parsedJson = JSON.parse(toolCallMatch[1]);
-        // Adhere to the instructed { "name": ..., "args": ... } structure
-        toolCall = {
-          tool: parsedJson.name,
-          parameters: parsedJson.args || {} // Default to empty object if args are missing
-        };
-      } catch (e) {
-        console.error("Failed to parse tool call JSON from LLM response", e);
-        // The agent will proceed without a tool call if parsing fails.
-      }
-    }
-
-    if (!toolCall && reasoning) {
-      console.log("No valid tool call found, but reasoning was present. Defaulting to no_response_needed.");
-      return {
-        reasoning,
-        toolCall: { tool: 'no_response_needed', parameters: {} }
-      };
-    }
-
-    return { reasoning, toolCall };
+    return toolParser.parseToolsFromResponse(responseContent)
   }
 
   // Execute single tool call with reasoning capture (following single-action constraint)
-  private async executeSingleToolCallWithReasoning(result: { reasoning: string; toolCall: any | null }): Promise<void> {
-    const { reasoning, toolCall } = result;
+  private async executeSingleToolCallWithReasoning(result: ParsedResponse): Promise<{completedTurn: boolean}> {
+    const { message, tools } = result;
     
     // Handle case where no tool call was made
-    if (!toolCall) {
-      console.log(`${this.agentId.id} provided reasoning but no tool call - treating as no_response_needed`);
-      return;
+    if (!tools || tools.length !== 1) {
+      console.log(`${this.agentId.id} provided reasoning but no tool call -- ending the turn`);
+      return {completedTurn: false};
     }
+    const toolCall = tools[0]
 
     // Handle built-in communication tools
-    if (toolCall.tool === 'no_response_needed') {
+    if (toolCall.name === 'no_response_needed') {
       console.log(`${this.agentId.id} chose not to respond to current situation`);
-      return;
+      this.completeTurn(this.currentTurnId, "No response");
+      return {completedTurn: true};
     }
 
-    if (toolCall.tool === 'send_message_to_thread') {
-      const { text } = toolCall.parameters;
+    if (toolCall.name === 'send_message_to_thread') {
+      const { text } = toolCall.args;
       if (!text || typeof text !== 'string' || text.trim() === '') {
-        const error = new Error(`${this.agentId.id}: send_message_to_thread requires non-empty text parameter. Got: ${JSON.stringify(toolCall.parameters)}`);
+        const error = new Error(`${this.agentId.id}: send_message_to_thread requires non-empty text parameter. Got: ${JSON.stringify(toolCall.args)}`);
         console.error('Stack trace:', error.stack);
         throw error;
       }
-      const turnId = await this.startTurn();
-      await this.addThought(turnId, reasoning);
-      await this.completeTurn(turnId, text);
-      return;
+      await this.completeTurn(this.currentTurnId, text);
+      return {completedTurn: true};
     }
 
-    if (toolCall.tool === 'send_message_to_principal') {
-      const { text } = toolCall.parameters;
+    if (toolCall.name === 'send_message_to_principal') {
+      const { text } = toolCall.args;
       if (!text || typeof text !== 'string' || text.trim() === '') {
-        const error = new Error(`${this.agentId.id}: send_message_to_principal requires non-empty text parameter. Got: ${JSON.stringify(toolCall.parameters)}`);
+        const error = new Error(`${this.agentId.id}: send_message_to_principal requires non-empty text parameter. Got: ${JSON.stringify(toolCall.args)}`);
         console.error('Stack trace:', error.stack);
         throw error;
       }
       const queryId = await this.client.createUserQuery(text);
       console.log(`${this.agentId.id} created user query: ${queryId}`);
       // Turn remains open, waiting for user response
-      return;
+      return {completedTurn: false};
     }
     
-    // Start a turn for streaming execution
-    const turnId = await this.startTurn();
-    
-    // Add reasoning as initial thought trace
-    await this.addThought(turnId, reasoning);
-    
-    // Add tool execution thought
-    await this.addThought(turnId, `Executing ${toolCall.tool} with parameters: ${JSON.stringify(toolCall.parameters)}`);
-    
     // Add tool call trace
-    const toolCallId = await this.addToolCall(turnId, toolCall.tool, toolCall.parameters);
+    const toolCallId = await this.addToolCall(this.currentTurnId, toolCall.name, toolCall.args);
     
     try {
-      const toolDef = this.getToolDefinition(toolCall.tool);
+      console.log("Lookign up tool", toolCall.name)
+      const toolDef = this.getToolDefinition(toolCall.name);
       const synthesisResult = await this.toolSynthesis.synthesizeToolResult(
-        toolCall.tool,
-        toolCall.parameters,
+        toolCall.name,
+        toolCall.args,
         toolDef
       );
       
-      await this.addToolResult(turnId, toolCallId, synthesisResult);
+      console.log("synthesized tool resulst", synthesisResult)
+      await this.addToolResult(this.currentTurnId, toolCallId, synthesisResult);
       
       if (toolDef?.endsConversation) {
         const resultMessage = `Action complete. Result: ${JSON.stringify(synthesisResult)}`;
-        await this.completeTurn(turnId, resultMessage, true);
+        await this.completeTurn(this.currentTurnId, resultMessage, true);
         
-        console.log(`Terminal tool ${toolCall.tool} used, ending conversation gracefully`);
+        console.log(`Terminal tool ${toolCall.name} used, ending conversation gracefully`);
         if (this.conversationId) {
             await this.client.endConversation(this.conversationId);
         }
-      } else {
-        // Generate final response based on tool result for non-terminal tools
-        const responseContent = this.formatToolResponse(toolCall.tool, synthesisResult);
-        
-        // Complete the turn
-        await this.completeTurn(turnId, responseContent);
-      }
-      
+        return {completedTurn: true}
+      } 
+
+      return {completedTurn: false}
     } catch (error: any) {
       // Add error trace
-      await this.addToolResult(turnId, toolCallId, null, error.message);
+      await this.addToolResult(this.currentTurnId, toolCallId, null, error.message);
       
       // Complete turn with error response
-      await this.completeTurn(turnId, `I encountered an error: ${error.message}`);
+      await this.completeTurn(this.currentTurnId, `I encountered an error: ${error.message}`);
+      console.error("Error", error)
+      console.trace()
+      return {completedTurn: true}
     }
   }
 
@@ -585,12 +526,6 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
           required: ['text'],
           properties: {
             text: { type: 'string', minLength: 1 },
-            audience: { 
-              oneOf: [
-                { type: 'string', enum: ['all'] },
-                { type: 'array', items: { type: 'string' } }
-              ]
-            }
           }
         },
         synthesisGuidance: 'Return the turn ID of the created message'
@@ -726,6 +661,7 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
   }
 
   private formatOwnTurnForHistory(turn: ConversationTurn): string {
+    //TODO-JCM: format all steps in order with thier own dedicated formats, don't lump by type.
     const timestamp = this.formatTimestamp(turn.timestamp);
     const turnTraces = this.tracesByTurnId.get(turn.id) || [];
 
@@ -733,6 +669,7 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
         .filter(e => e.type === 'thought')
         .map(e => (e as any).content)
         .join('\n');
+
     const scratchpadBlock = `<scratchpad>\n${thoughts || 'No thoughts recorded.'}\n</scratchpad>`;
 
     const toolCall = turnTraces.find(e => e.type === 'tool_call')
@@ -751,7 +688,7 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
     }
 
     const parts = [
-        `[${timestamp}] [${this.agentId.label}]`,
+        `From: ${this.agentId.label} @${timestamp}`,
         scratchpadBlock,
         toolCallBlock,
         toolResultBlock,

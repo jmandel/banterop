@@ -338,6 +338,8 @@ const TraceViewer: React.FC = () => {
         addEvent(`WebSocket error: ${error.message}`, 'error');
       });
 
+      let globalSubscriptionId: string | null = null;
+
       await newClient.connect();
       setClient(newClient);
       setConnected(true);
@@ -348,8 +350,16 @@ const TraceViewer: React.FC = () => {
       
       addEvent('Connected in read-only mode - no authentication required for viewing events');
       
-      // Auto-select "Monitor All Conversations" mode
-      await startGlobalMonitoring(newClient);
+      // Auto-select "Monitor All Conversations" mode by storing the handler reference
+      globalSubscriptionId = await startGlobalMonitoring(newClient);
+      
+      // Update the event handler with the correct subscription ID
+      newClient.removeAllListeners('event'); // Clear previous listeners
+      newClient.on('event', (event: ConversationEvent, subId: string) => {
+        if (globalSubscriptionId && subId === globalSubscriptionId) {
+          handleGlobalConversationEvent(event);
+        }
+      });
     } catch (error) {
       addEvent('Failed to connect: ' + (error as Error).message, 'error');
     }
@@ -393,12 +403,6 @@ const TraceViewer: React.FC = () => {
       const options = eventFilter ? { events: eventFilter.split(',') } : undefined;
       const subscriptionId = await activeClient.subscribe('*', options);
       
-      // Set up event handler using the universal client's EventEmitter API
-      activeClient.on('event', (event: ConversationEvent, subId: string) => {
-        if (subId === subscriptionId) {
-          handleGlobalConversationEvent(event);
-        }
-      });
       
       // Store the global subscription
       setConversationSubscriptions(prev => {
@@ -408,8 +412,10 @@ const TraceViewer: React.FC = () => {
       });
       
       addEvent('Monitoring all conversations - tabs will appear automatically');
+      return subscriptionId;
     } catch (error) {
       addEvent('Failed to start global monitoring: ' + (error as Error).message, 'error');
+      return null;
     }
   };
 

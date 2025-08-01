@@ -14,7 +14,7 @@ import {
 
 // Mock LLM Provider for testing
 export class MockLLMProvider extends LLMProvider {
-  generateWithTools?(messages: LLMMessage[], tools: LLMTool[], toolHandler: (call: LLMToolCall) => Promise<LLMToolResponse>): Promise<LLMResponse> {
+  generateWithTools?(request: LLMRequest, tools: LLMTool[], toolHandler: (call: LLMToolCall) => Promise<LLMToolResponse>): Promise<LLMResponse> {
     throw new Error('Method not implemented.');
   }
   constructor() {

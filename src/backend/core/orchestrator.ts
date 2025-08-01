@@ -6,7 +6,7 @@ import { createAgent } from '$agents/factory.js';
 import { createClient } from '$client/index.js';
 import type { LLMProvider } from 'src/types/llm.types.js';
 import { ToolSynthesisService } from '../../agents/services/tool-synthesis.service.js';
-import type { AgentInterface } from '$lib/types.js';
+import type { AgentId, AgentInterface } from '$lib/types.js';
 import {
   Conversation, ConversationTurn, TraceEntry, AgentConfig,
   CreateConversationRequest, CreateConversationResponse,
@@ -58,21 +58,6 @@ export class ConversationOrchestrator {
     const agentTokens: Record<string, string> = {};
     const managementMode = request.managementMode || 'internal';
 
-    // Validate initiatingAgentId if provided
-    if (request.initiatingAgentId) {
-      const initiatorConfig = request.agents.find(a => a.agentId.id === request.initiatingAgentId);
-      if (!initiatorConfig) {
-        throw new Error(`initiatingAgentId '${request.initiatingAgentId}' not found in the list of agents.`);
-      }
-      if (!initiatorConfig.messageToUseWhenInitiatingConversation) {
-        throw new Error(`Agent '${request.initiatingAgentId}' was designated as initiator but has no 'messageToUseWhenInitiatingConversation' defined.`);
-      }
-    }
-
-    // Check if any agents are scenario-driven and enrich metadata
-    const firstScenarioAgent = request.agents.find(
-      (a) => a.strategyType === 'scenario_driven'
-    ) as ScenarioDrivenAgentConfig | undefined;
 
     // Create conversation with enriched metadata
     const conversation: Conversation = {
@@ -86,10 +71,6 @@ export class ConversationOrchestrator {
         agentConfigs: request.agents,
         managementMode,
         ...(request.initiatingAgentId && { initiatingAgentId: request.initiatingAgentId }),
-        ...(firstScenarioAgent && {
-          source: 'scenario',
-          scenarioId: firstScenarioAgent.scenarioId
-        })
       }
     };
 
@@ -224,7 +205,7 @@ export class ConversationOrchestrator {
     });
 
     // Handle initial message from metadata
-    const initiatingAgentId = conversation.metadata?.initiatingAgentId;
+    const initiatingAgentId = conversation.metadata?.initiatingAgentId as AgentId['id'];
     if (initiatingAgentId) {
       const agentConfig = conversationState.agentConfigs.get(initiatingAgentId);
       const content = agentConfig?.messageToUseWhenInitiatingConversation;
@@ -284,6 +265,8 @@ export class ConversationOrchestrator {
     const conversation = this.db.getConversation(request.conversationId, false, false);
     if (conversation && conversation.status === 'created' && conversation.metadata?.managementMode === 'external') {
       console.log(`[Orchestrator] External conversation ${request.conversationId} being activated by first turn from agent ${request.agentId}`);
+
+      // TODO-JCM: we should not double-set state -- we should have changes flow to all places automatically instead of setting  in db and in active convesrations instead of setting  in db and in active convesrations
       // Transition to active status for external conversations on first turn
       this.db.updateConversationStatus(request.conversationId, 'active');
       
@@ -294,6 +277,7 @@ export class ConversationOrchestrator {
       }
     }
     
+    // TODO-JCM: we should not double-set state -- we should have changes flow to all places automatically instead of setting  in db and in active convesrations instead of setting  in db and in active convesrations
     // Create in-progress turn in database
     this.db.startTurn(turnId, request.conversationId, request.agentId, request.metadata);
 

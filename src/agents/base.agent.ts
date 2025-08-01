@@ -19,6 +19,7 @@ export abstract class BaseAgent implements AgentInterface {
   protected conversationId?: string;
   protected subscriptionId?: string;
   protected isReady: boolean = false;
+  protected conversationEnded = false;
 
   constructor(config: AgentConfig, client: OrchestratorClient) {
     this.agentId = config.agentId;
@@ -42,15 +43,16 @@ export abstract class BaseAgent implements AgentInterface {
 
   async shutdown(): Promise<void> {
     this.isReady = false;
+    this.conversationEnded = true;
     if (this.subscriptionId) {
       await this.client.unsubscribe(this.subscriptionId);
     }
+
     this.client.disconnect();
     console.log(`Agent ${this.agentId.label} shutting down`);
   }
 
   private _handleEvent(event: ConversationEvent, subscriptionId: string) {
-    console.log(`Agent ${this.agentId.label} _handleEvent called - event: ${event.type}, ready: ${this.isReady}`);
     if (subscriptionId === this.subscriptionId) {
       this.onConversationEvent(event);
     }
@@ -69,7 +71,7 @@ export abstract class BaseAgent implements AgentInterface {
         await this.onTurnCompleted(event as TurnCompletedEvent);
         break;
       case 'conversation_ended':
-        await this.shutdown();
+        this.isReady = false;
         break;
     }
   }

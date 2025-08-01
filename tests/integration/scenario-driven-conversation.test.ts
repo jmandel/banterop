@@ -152,7 +152,7 @@ class DebugLogger {
  * - This simulates a real conversation that progresses and eventually concludes.
  */
 class TerminalAwareMockLLMProvider extends LLMProvider {
-  generateWithTools?(messages: LLMMessage[], tools: LLMTool[], toolHandler: (call: LLMToolCall) => Promise<LLMToolResponse>): Promise<LLMResponse> {
+  generateWithTools?(request: LLMRequest, tools: LLMTool[], toolHandler: (call: LLMToolCall) => Promise<LLMToolResponse>): Promise<LLMResponse> {
     throw new Error('Method not implemented.');
   }
   public lastPrompt: string = '';

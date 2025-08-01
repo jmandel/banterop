@@ -51,7 +51,9 @@ export class ScenarioBuilderLLM {
     
     try {
       if (this.llm.generateWithTools) {
-        const response = await this.llm.generateWithTools(messages, BUILDER_TOOLS, toolHandler);
+        const response = await this.llm.generateWithTools({
+          messages
+        }, BUILDER_TOOLS, toolHandler);
         return {
           message: resultMessage || response.content,
           patches: appliedPatches.length > 0 ? appliedPatches : undefined,
