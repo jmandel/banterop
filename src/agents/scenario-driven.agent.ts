@@ -737,50 +737,74 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
 
   private formatCurrentProcess(currentTurnTrace: TraceEntry[]): string {
     if (currentTurnTrace.length === 0) {
-        return `<ourCurrentProcess>\n  <!-- No actions taken yet in this turn -->\n  ***=>>YOU ARE HERE<<=***\n</ourCurrentProcess>`;
+        return `<ourCurrentProcess>
+<!-- No actions taken yet in this turn -->
+***=>>YOU ARE HERE<<=***
+</ourCurrentProcess>`;
     }
 
-    const parts: string[] = [];
-    let currentScratchpad: string[] = [];
+    const steps: string[] = [];
+    let i = 0;
     
-    // Process traces in order (already chronological)
-    for (const trace of currentTurnTrace) {
-      switch (trace.type) {
-        case 'thought':
-          currentScratchpad.push((trace as ThoughtEntry).content);
-          break;
-          
-        case 'tool_call':
-          // Output any accumulated thoughts first
-          if (currentScratchpad.length > 0) {
-            parts.push(`<scratchpad>\n${currentScratchpad.join('\n')}\n</scratchpad>`);
-            currentScratchpad = [];
-          }
-          
-          // Output the tool call
-          const toolCall = trace as ToolCallEntry;
+    while (i < currentTurnTrace.length) {
+      const trace = currentTurnTrace[i];
+      
+      if (trace.type === 'thought') {
+        // Collect all consecutive thoughts
+        const thoughts: string[] = [];
+        while (i < currentTurnTrace.length && currentTurnTrace[i].type === 'thought') {
+          thoughts.push((currentTurnTrace[i] as ThoughtEntry).content);
+          i++;
+        }
+        
+        // Check if there's a tool call following
+        if (i < currentTurnTrace.length && currentTurnTrace[i].type === 'tool_call') {
+          const toolCall = currentTurnTrace[i] as ToolCallEntry;
           const toolCallJson = JSON.stringify({ name: toolCall.toolName, args: toolCall.parameters }, null, 2);
-          parts.push(`\`\`\`json\n${toolCallJson}\n\`\`\``);
-          break;
           
-        case 'tool_result':
-          // Output the tool result
-          const toolResult = trace as ToolResultEntry;
-          const resultJson = toolResult.error ? `{ "error": "${toolResult.error}" }` : JSON.stringify(toolResult.result);
-          parts.push(`[TOOL_RESULT] ${resultJson}`);
-          break;
+          // Format as a complete LLM response
+          steps.push(`<scratchpad>
+${thoughts.join('\n')}
+</scratchpad>
+
+\`\`\`json
+${toolCallJson}
+\`\`\``);
+          
+          i++; // Move past the tool call
+          
+          // Check for tool result
+          if (i < currentTurnTrace.length && currentTurnTrace[i].type === 'tool_result') {
+            const toolResult = currentTurnTrace[i] as ToolResultEntry;
+            const resultJson = toolResult.error 
+              ? JSON.stringify({ error: toolResult.error }, null, 2)
+              : JSON.stringify(toolResult.result, null, 2);
+            steps.push(`→ Tool returned:
+\`\`\`json
+${resultJson}
+\`\`\``);
+            i++;
+          }
+        } else {
+          // Just thoughts with no tool call yet
+          steps.push(`<scratchpad>
+${thoughts.join('\n')}
+</scratchpad>`);
+        }
+      } else {
+        // Skip non-thought entries that weren't paired
+        i++;
       }
     }
     
-    // Output any remaining thoughts
-    if (currentScratchpad.length > 0) {
-      parts.push(`<scratchpad>\n${currentScratchpad.join('\n')}\n</scratchpad>`);
-    }
-    
-    // Add the "YOU ARE HERE" marker
-    parts.push('***=>>YOU ARE HERE<<=***');
+    // Format the final output
+    const processContent = steps.length > 0 
+      ? steps.join('\n\n') + '\n\n***=>>YOU ARE HERE<<=***'
+      : '***=>>YOU ARE HERE<<=***';
 
-    return `<ourCurrentProcess>\n${parts.join('\n')}\n</ourCurrentProcess>`;
+    return `<ourCurrentProcess>
+${processContent}
+</ourCurrentProcess>`;
   }
 
   // Get conversation from client
