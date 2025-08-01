@@ -322,6 +322,54 @@ export class ScenarioDrivenAgent extends BaseAgent {
     }).join('\n\n');
   }
 
+  /**
+   * Formats tools with usage guidance for better decision making.
+   */
+  private formatToolsWithGuidance(tools: Tool[]): string {
+    const communicationTools = tools.filter(t => 
+      ['send_message_to_thread', 'send_message_to_principal', 'no_response_needed'].includes(t.toolName)
+    );
+    const actionTools = tools.filter(t => 
+      !['send_message_to_thread', 'send_message_to_principal', 'no_response_needed'].includes(t.toolName)
+    );
+
+    let sections: string[] = [];
+
+    if (communicationTools.length > 0) {
+      sections.push('📨 Communication Tools:');
+      sections.push(communicationTools.map(tool => this.formatSingleTool(tool)).join('\n'));
+    }
+
+    if (actionTools.length > 0) {
+      const terminalTools = actionTools.filter(t => t.endsConversation);
+      const nonTerminalTools = actionTools.filter(t => !t.endsConversation);
+
+      if (nonTerminalTools.length > 0) {
+        sections.push('\n🔧 Action Tools:');
+        sections.push(nonTerminalTools.map(tool => this.formatSingleTool(tool)).join('\n'));
+      }
+
+      if (terminalTools.length > 0) {
+        sections.push('\n🏁 Terminal Tools (these end the conversation):');
+        sections.push(terminalTools.map(tool => this.formatSingleTool(tool)).join('\n'));
+      }
+    }
+
+    return sections.join('\n');
+  }
+
+  private formatSingleTool(tool: Tool): string {
+    const params = tool.inputSchema?.properties
+      ? Object.entries(tool.inputSchema.properties).map(([p, s]: [string, any]) => {
+          const isRequired = tool.inputSchema?.required?.includes(p);
+          return `${p}: ${s.type}${isRequired ? ' (required)' : ''}`;
+        }).join(', ')
+      : '';
+    
+    const terminalMarker = tool.endsConversation ? ' [TERMINAL]' : '';
+    return `• ${tool.toolName}(${params})${terminalMarker}\n  └─ ${tool.description}`;
+  }
+
 
   // Construct the full prompt for the LLM using optimal ordering and XML delimiters
   private constructFullPrompt(params: {
@@ -333,32 +381,32 @@ export class ScenarioDrivenAgent extends BaseAgent {
   }): string {
     const { agentConfig, tools, conversationHistory, currentProcess, interleavedConversation } = params;
 
+    const separator = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
+
     const systemPromptSection = `<SYSTEM_PROMPT>
 You are an AI agent in a healthcare interoperability scenario.
-Your Principal: ${agentConfig.principal.name} (${agentConfig.principal.description})
-Your Role: ${agentConfig.agentId.label}
-Your Situation: ${agentConfig.situation}
-Your Instructions: ${agentConfig.systemPrompt}
-Your Goals:
-${agentConfig.goals.map(g => `- ${g}`).join('\n')}
+
+Principal: ${agentConfig.principal.name}
+└─ ${agentConfig.principal.description}
+
+Role: ${agentConfig.agentId.label}
+Situation: ${agentConfig.situation}
+
+Instructions: ${agentConfig.systemPrompt}
+
+Goals:
+${agentConfig.goals.map(g => `• ${g}`).join('\n')}
+
 </SYSTEM_PROMPT>`;
-
-    // 2. Tools Section (What can I do?)
-    const toolsSection = `<TOOLS>
-Here are the tools you can use. You must provide all required parameters.
-${this.formatTools(tools)}
-</TOOLS>`;
-
-    const scenarioContextSection = `<SCENARIO_CONTEXT>
-Background: ${this.scenario.scenario.background}
-Key Challenges:
-${this.scenario.scenario.challenges.map(c => `- ${c}`).join('\n')}
-</SCENARIO_CONTEXT>`;
     
-    const knowledgeBaseSection = `<PRIVATE_KNOWLEDGE_BASE>
-This is a summary of information relevant to your role, but you should use tools to fetch the complete and accurate content.
-${JSON.stringify(agentConfig.knowledgeBase, null, 2)}
-</PRIVATE_KNOWLEDGE_BASE>`;
+
+    // 2. Tools Section with usage guidance
+    const toolsSection = `<AVAILABLE_TOOLS>
+You have access to the following tools. Each tool must be called with all required parameters.
+
+${this.formatToolsWithGuidance(tools)}
+
+</AVAILABLE_TOOLS>`;
 
     // Use new chronological format if available, otherwise fall back to old format
     let conversationHistorySection: string;
@@ -366,24 +414,34 @@ ${JSON.stringify(agentConfig.knowledgeBase, null, 2)}
       // New chronological format
       conversationHistorySection = `<CONVERSATION_HISTORY>
 ${conversationHistory}
----</CONVERSATION_HISTORY>`;
+</CONVERSATION_HISTORY>`;
     } else {
       // Old format for backward compatibility
       conversationHistorySection = `<CONVERSATION_HISTORY>
 This is the conversation so far, with the most recent turn first.
 ${interleavedConversation}
+
 </CONVERSATION_HISTORY>`;
     }
 
-    // Current process section (only for new format)
-    const currentProcessSection = currentProcess || '';
+    // Current status section with process details
+    const currentStatusSection = currentProcess ? `<CURRENT_STATUS>
+You are currently in the middle of processing a turn. Review your progress below.
+
+${currentProcess}
+
+</CURRENT_STATUS>` : '';
 
     // 5. Response Instructions Section (How do I respond?)
     const responseInstructionsSection = `<RESPONSE_INSTRUCTIONS>
-Your response MUST follow this EXACT format with no deviation:
+Your response MUST follow this EXACT format:
 
 <scratchpad>
-[Think step-by-step here. Analyze the latest turn in the conversation history, review your context and available tools, and decide on the single best action to take next. Explain your reasoning clearly.]
+[Your step-by-step reasoning here. Consider:
+ - What just happened in the conversation?
+ - What information do you need?
+ - What is the most appropriate next action?
+ - Which tool should you use and why?]
 </scratchpad>
 
 \`\`\`json
@@ -396,19 +454,22 @@ Your response MUST follow this EXACT format with no deviation:
 }
 \`\`\`
 
-CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call. Do not add any text before the scratchpad or after the JSON block.
+⚠️ CRITICAL: Include BOTH the <scratchpad> reasoning AND the JSON tool call. No other text.
+
 </RESPONSE_INSTRUCTIONS>`;
 
     const sections = [
       systemPromptSection,
+      separator,
       toolsSection,
-      scenarioContextSection,
-      knowledgeBaseSection,
+      separator,
       conversationHistorySection,
-      currentProcessSection,
+      currentStatusSection,
+      separator,
       responseInstructionsSection,
-      "Now, provide your response following the instructions above."
-    ].filter(s => s);
+      '',
+      "🎯 Now, provide your response following the instructions above."
+    ].filter(s => s !== null && s !== undefined);
 
     return sections.join('\n\n');
   }
@@ -737,10 +798,8 @@ CRITICAL: You MUST include both the <scratchpad> section AND the JSON tool call.
 
   private formatCurrentProcess(currentTurnTrace: TraceEntry[]): string {
     if (currentTurnTrace.length === 0) {
-        return `<ourCurrentProcess>
-<!-- No actions taken yet in this turn -->
-***=>>YOU ARE HERE<<=***
-</ourCurrentProcess>`;
+        return `<!-- No actions taken yet in this turn -->
+***=>>YOU ARE HERE<<=***`;
     }
 
     const steps: string[] = [];
@@ -802,9 +861,7 @@ ${thoughts.join('\n')}
       ? steps.join('\n\n') + '\n\n***=>>YOU ARE HERE<<=***'
       : '***=>>YOU ARE HERE<<=***';
 
-    return `<ourCurrentProcess>
-${processContent}
-</ourCurrentProcess>`;
+    return processContent;
   }
 
   // Get conversation from client

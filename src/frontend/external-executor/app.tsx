@@ -37,7 +37,7 @@ let cannedDiscussion = [
     content: "This is an initial message. Authorize me."
   },
   {
-    agentId: "supplier-agent",
+    agentId: "insurance-auth-specialist",
     thought: "I need to know who the patient is.",
     content: "What patient are you askign about?"
   },
@@ -47,19 +47,19 @@ let cannedDiscussion = [
     content: "I'm represneting John Smith"
   },
   {
-    agentId: "supplier-agent",
+    agentId: "insurance-auth-specialist",
     thought: "I should look them up",
     tool: {name: "lookup", args: {name: "John Smith"}},
     toolResponse: "John Smith is member 124214, case file 623"
   },
   {
-    agentId: "supplier-agent",
+    agentId: "insurance-auth-specialist",
     thought: "I should check their recent history",
     tool: {name: "check_casefile", args: {file_id: "623"}},
     toolResponse: "In good standing"
   },
   {
-    agentId: "supplier-agent",
+    agentId: "insurance-auth-specialist",
     thought: "I should check their recent history",
     tool: {name: "mri_authorization_Success", args: {status: "Yay!"}},
     toolResponse: "MRI Authorization completed, authz ID 17298"
@@ -274,7 +274,7 @@ function ExternalExecutorApp() {
               role: 'PatientAgent'
             },
             {
-              agentId: { id: 'supplier-agent', label: 'Browser Supplier Agent', role: 'SupplierAgent' },
+              agentId: { id: 'insurance-auth-specialist', label: 'Browser Supplier Agent', role: 'SupplierAgent' },
               strategyType: 'scenario_driven',
               scenarioId: KNEE_MRI_SCENARIO_ID,
               role: 'SupplierAgent'
@@ -320,7 +320,7 @@ function ExternalExecutorApp() {
         { 
           strategyType: 'scenario_driven', 
           scenarioId: KNEE_MRI_SCENARIO_ID,
-          agentId: { id: 'supplier-agent', label: 'Browser Supplier Agent', role: 'SupplierAgent' }
+          agentId: { id: 'insurance-auth-specialist', label: 'Browser Supplier Agent', role: 'SupplierAgent' }
         } as ScenarioDrivenAgentConfig,
         supplierClient,
         scenarioConfig,           // Inject the fetched scenario JSON
@@ -346,7 +346,7 @@ function ExternalExecutorApp() {
       // Step 7: Initialize agents (connect and authenticate)
       await Promise.all([
         patientAgent.initialize(conversation.id, agentTokens['patient-agent']),
-        supplierAgent.initialize(conversation.id, agentTokens['supplier-agent'])
+        supplierAgent.initialize(conversation.id, agentTokens['insurance-auth-specialist'])
       ]);
       
       setAgents([patientAgent, supplierAgent]);

@@ -174,14 +174,19 @@ class TerminalAwareMockLLMProvider extends LLMProvider {
 
     // Parse available tools from the prompt
     const availableTools = this.parseToolsFromPrompt(prompt);
+    console.log(`[MockLLM] Turn ${this.turnCount} - Found tools:`, availableTools);
+    
     const terminalTools = availableTools.filter(t => 
       /Success$|Approval$|Failure$|Denial$|NoSlots$/.test(t)
     );
+    console.log(`[MockLLM] Terminal tools:`, terminalTools);
+    
     const nonTerminalTools = availableTools.filter(t => 
       !terminalTools.includes(t) && 
       t !== 'no_response_needed' && 
       t !== 'send_message_to_principal'  // Avoid user queries in tests
     );
+    console.log(`[MockLLM] Non-terminal tools:`, nonTerminalTools);
 
     let chosenTool: string;
     // Make termination more deterministic - terminate after 5 turns
@@ -247,11 +252,12 @@ Mock LLM reasoning: The random number was ${shouldTerminate ? '< 0.1' : '>= 0.1'
   
   // Helper to extract tool names from the agent's prompt (supports both old and new XML format)
   private parseToolsFromPrompt(prompt: string): string[] {
-    // Try new XML format first
-    const xmlToolSectionMatch = prompt.match(/<TOOLS>\s*([\s\S]*?)\s*<\/TOOLS>/);
+    // Try new XML format first - look for <AVAILABLE_TOOLS> tag
+    const xmlToolSectionMatch = prompt.match(/<AVAILABLE_TOOLS>\s*([\s\S]*?)\s*<\/AVAILABLE_TOOLS>/);
     if (xmlToolSectionMatch && xmlToolSectionMatch[1]) {
       const toolSection = xmlToolSectionMatch[1];
-      const toolNameRegex = /-\s*`([^(]+)/g;
+      // Updated regex to match the format: • toolName(params) [TERMINAL]
+      const toolNameRegex = /•\s*([^(]+)\(/g;
       const tools = [];
       let match;
       while ((match = toolNameRegex.exec(toolSection)) !== null) {
@@ -343,7 +349,7 @@ describe('Integration Test: Scenario-Driven Agent Conversation', () => {
           messageToUseWhenInitiatingConversation: "Hello, I'm following up on the prior authorization request for my right knee MRI."
         } as ScenarioDrivenAgentConfig,
         {
-          agentId: { id: 'supplier-agent', label: 'Supplier Agent', role: 'SupplierAgent' },
+          agentId: { id: 'insurance-auth-specialist', label: 'Insurance Authorization Specialist', role: 'InsuranceAgent' },
           strategyType: 'scenario_driven',
           scenarioId: kneeMriScenarioId
         } as ScenarioDrivenAgentConfig
@@ -481,13 +487,13 @@ describe('Integration Test: Scenario-Driven Agent Conversation', () => {
           scenarioId: kneeMriScenarioId
         } as ScenarioDrivenAgentConfig,
         {
-          agentId: { id: 'supplier-agent', label: 'Supplier Agent', role: 'SupplierAgent' },
+          agentId: { id: 'insurance-auth-specialist', label: 'Insurance Authorization Specialist', role: 'InsuranceAgent' },
           strategyType: 'scenario_driven',
           scenarioId: kneeMriScenarioId,
           messageToUseWhenInitiatingConversation: "This is HealthFirst Insurance calling about a prior authorization request for an MRI that needs review."
         } as ScenarioDrivenAgentConfig
       ],
-      initiatingAgentId: 'supplier-agent' // The only change is here
+      initiatingAgentId: 'insurance-auth-specialist' // The only change is here
     };
     
     // Set up conversation monitoring
@@ -518,8 +524,8 @@ describe('Integration Test: Scenario-Driven Agent Conversation', () => {
     // Validate the outcome
     const finalState = orchestrator.getConversation(conversation.id, true, true);
     
-    // Check that the first turn was from the supplier-agent
-    expect(finalState.turns[0].agentId).toBe('supplier-agent');
+    // Check that the first turn was from the insurance-auth-specialist
+    expect(finalState.turns[0].agentId).toBe('insurance-auth-specialist');
     expect(finalState.turns[0].content).toContain("HealthFirst Insurance calling");
     
     // Verify conversation completed successfully

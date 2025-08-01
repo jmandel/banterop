@@ -89,7 +89,7 @@ export function seedDatabase(db: ConversationDatabase): void {
         messageToUseWhenInitiatingConversation: "Hello, I'm following up on the prior authorization request for my right knee MRI."
       },
       {
-        agentId: { id: "supplier-agent", label: "Supplier Agent", role: "SupplierAgent" },
+        agentId: { id: "insurance-auth-specialist", label: "Insurance Authorization Specialist", role: "InsuranceAgent" },
         principal: {
           type: "organization",
           name: "HealthFirst Insurance",
@@ -100,17 +100,119 @@ export function seedDatabase(db: ConversationDatabase): void {
         goals: ["Ensure medical necessity is met", "Adhere to company policy", "Provide clear decisions"],
         tools: [
           {
+            toolName: "lookup_beneficiary",
+            description: "Look up beneficiary information in the insurance system.",
+            inputSchema: { 
+              type: "object", 
+              required: ["memberName", "dateOfBirth"],
+              properties: { 
+                memberName: { type: "string", description: "Full name of the member" },
+                dateOfBirth: { type: "string", description: "Date of birth (YYYY-MM-DD)" },
+                memberId: { type: "string", description: "Optional member ID if available" }
+              } 
+            },
+            synthesisGuidance: "Return member information including plan details, coverage status, deductible/out-of-pocket progress. Jordan is an active member with PPO plan, in-network benefits apply."
+          },
+          {
+            toolName: "check_insurance_coverage",
+            description: "Check specific coverage details for a procedure or service.",
+            inputSchema: { 
+              type: "object",
+              required: ["memberId", "procedureCode"],
+              properties: { 
+                memberId: { type: "string", description: "Member ID from beneficiary lookup" },
+                procedureCode: { type: "string", description: "CPT code or procedure description" },
+                providerNPI: { type: "string", description: "Provider NPI to check network status" }
+              } 
+            },
+            synthesisGuidance: "Return coverage details including copay/coinsurance, prior auth requirements, and any limitations. MRI of knee is covered with prior auth, 20% coinsurance after deductible."
+          },
+          {
+            toolName: "lookup_medical_policy",
+            description: "Retrieve specific medical policy criteria for a condition or procedure.",
+            inputSchema: { 
+              type: "object",
+              required: ["policyType", "bodyPart"],
+              properties: { 
+                policyType: { type: "string", description: "Type of procedure (e.g., 'MRI', 'CT', 'Surgery')" },
+                bodyPart: { type: "string", description: "Body part or area (e.g., 'knee', 'shoulder')" },
+                diagnosis: { type: "string", description: "Optional diagnosis or ICD-10 code" }
+              } 
+            },
+            synthesisGuidance: "Return the policy HF-MRI-KNEE-2024 requiring ≥14 days conservative therapy, positive physical exam findings, and functional limitations. Expedited review for in-network providers."
+          },
+          {
+            toolName: "verify_conservative_therapy",
+            description: "Verify if conservative therapy requirements have been met based on submitted documentation.",
+            inputSchema: { 
+              type: "object",
+              required: ["therapyStartDate", "therapyType"],
+              properties: { 
+                therapyStartDate: { type: "string", description: "Start date of conservative therapy" },
+                therapyEndDate: { type: "string", description: "End date or current date if ongoing" },
+                therapyType: { type: "string", description: "Type of therapy (PT, medications, etc.)" },
+                clinicalFindings: { type: "array", items: { type: "string" }, description: "Key clinical findings" }
+              } 
+            },
+            synthesisGuidance: "Calculate therapy duration and verify it meets the 14-day requirement. Jordan had PT from 6/15 to 6/27 (12 days) plus initial care 6/2-6/10 (8 days) = 20+ days total."
+          },
+          {
+            toolName: "check_provider_network",
+            description: "Verify if a provider or facility is in the member's network.",
+            inputSchema: { 
+              type: "object",
+              required: ["providerName"],
+              properties: { 
+                providerName: { type: "string", description: "Provider or facility name" },
+                providerNPI: { type: "string", description: "Optional NPI number" },
+                providerType: { type: "string", description: "Type of provider (facility, physician, etc.)" }
+              } 
+            },
+            synthesisGuidance: "Check if the provider is in-network. HSS (Hospital for Special Surgery) and affiliated providers are in-network for expedited processing."
+          },
+          {
+            toolName: "create_case_notes",
+            description: "Document review findings and decision rationale in the case file.",
+            inputSchema: { 
+              type: "object",
+              required: ["caseId", "notes"],
+              properties: { 
+                caseId: { type: "string", description: "Prior auth case ID" },
+                notes: { type: "string", description: "Clinical review notes and findings" },
+                policyMet: { type: "boolean", description: "Whether policy criteria were met" },
+                additionalRequirements: { type: "array", items: { type: "string" }, description: "Any additional requirements" }
+              } 
+            },
+            synthesisGuidance: "Create comprehensive case notes documenting the review process, findings, and decision rationale."
+          },
+          {
             toolName: "mri_authorization_Success",
             description: "Terminal tool: Approve the MRI authorization request.",
-            inputSchema: { type: "object", properties: { reason: { type: "string" } } },
-            synthesisGuidance: "Generate a final authorization number and approval confirmation.",
+            inputSchema: { 
+              type: "object",
+              required: ["reason"],
+              properties: { 
+                reason: { type: "string", description: "Approval rationale" },
+                authNumber: { type: "string", description: "Generated authorization number" },
+                validityPeriod: { type: "string", description: "How long the auth is valid" }
+              } 
+            },
+            synthesisGuidance: "Generate auth number (e.g., PA2024070123456), valid for 60 days, include member cost-share info.",
             endsConversation: true
           },
           {
             toolName: "mri_authorization_Denial",
             description: "Terminal tool: Deny the MRI authorization request.",
-            inputSchema: { type: "object", properties: { reason: { type: "string" } } },
-            synthesisGuidance: "Generate a final denial with a clear, policy-based rationale.",
+            inputSchema: { 
+              type: "object",
+              required: ["reason", "appealRights"],
+              properties: { 
+                reason: { type: "string", description: "Specific denial reason based on policy" },
+                missingCriteria: { type: "array", items: { type: "string" }, description: "Which criteria were not met" },
+                appealRights: { type: "string", description: "Information about appeal process" }
+              } 
+            },
+            synthesisGuidance: "Generate a clear denial with specific unmet criteria and appeal instructions.",
             endsConversation: true
           }
         ],
@@ -197,7 +299,7 @@ export function seedDatabase(db: ConversationDatabase): void {
         messageToUseWhenInitiatingConversation: "Hello, I'm calling to schedule a cardiology consultation for Maria Santos. Her PCP referred her for evaluation of chest pain symptoms."
       },
       {
-        agentId: { id: "scheduling-coordinator", label: "Scheduling Coordinator", role: "SupplierAgent" },
+        agentId: { id: "scheduling-coordinator", label: "Scheduling Coordinator", role: "ProviderAgent" },
         principal: {
           type: "organization",
           name: "Metropolitan Cardiology Group",
