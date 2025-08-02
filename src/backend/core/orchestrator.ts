@@ -216,13 +216,11 @@ export class ConversationOrchestrator {
         const initiatingAgent = conversationState.agents?.get(initiatingAgentId);
         if (initiatingAgent) {
           // Trigger the agent to initialize the conversation
-          setTimeout(async () => {
-            try {
-              await initiatingAgent.initializeConversation();
-            } catch (error) {
-              console.error(`[Orchestrator] Failed to trigger initial agent:`, error);
-            }
-          }, 100); // Small delay to ensure all agents are ready
+          try {
+            await initiatingAgent.initializeConversation();
+          } catch (error) {
+            console.error(`[Orchestrator] Failed to trigger initial agent:`, error);
+          }
         } else {
           console.error(`[Orchestrator] Could not find agent instance for initiatingAgentId: ${initiatingAgentId}`);
         }

@@ -1,6 +1,8 @@
 // Agent Strategy Types and Configuration
 // This file contains all agent-related type definitions
 
+import { ThoughtEntry, ToolCallEntry, ToolResultEntry } from "./conversation.types";
+
 // ============= Base Agent Types =============
 
 export interface AgentId {
@@ -156,10 +158,10 @@ export interface AgentInterface {
   onConversationEvent(event: any): Promise<void>;
   
   // Actions - Streaming approach
-  startTurn(metadata?: Record<string, any>): Promise<string>; // Returns turnId
-  addThought(turnId: string, thought: string): Promise<void>;
-  addToolCall(turnId: string, toolName: string, parameters: any): Promise<string>; // Returns toolCallId
-  addToolResult(turnId: string, toolCallId: string, result: any, error?: string): Promise<void>;
+  startTurn(metadata?: Record<string, any>): Promise<string>; 
+  addThought(turnId: string, thought: string): Promise<ThoughtEntry>;
+  addToolCall(turnId: string, toolName: string, parameters: any): Promise<ToolCallEntry>; 
+  addToolResult(turnId: string, toolCallId: string, result: any, error?: string): Promise<ToolResultEntry>;
   completeTurn(turnId: string, content: string): Promise<void>;
   
   // User interaction

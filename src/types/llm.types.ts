@@ -40,7 +40,7 @@ export interface LLMToolResponse {
 
 // Provider configuration
 export interface LLMProviderConfig {
-  provider: 'google' | 'openai' | 'anthropic' | 'local';
+  provider: 'google' | 'openai' | 'anthropic' | 'local' | 'remote'
   apiKey?: string;
   baseURL?: string;
   model?: string;

@@ -40,8 +40,8 @@ export class GoogleLLMProvider extends LLMProvider {
         model: request.model || this.config.model || 'gemini-2.5-flash-lite',
         contents: contents,
         config: {
-          temperature: request.temperature || 0.7,
-          maxOutputTokens: request.maxTokens || 2048,
+          temperature: request.temperature,
+          maxOutputTokens: request.maxTokens,
         }
       });
       

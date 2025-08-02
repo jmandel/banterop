@@ -1,352 +1,319 @@
-// Tool Synthesis Service with deterministic caching using Bun crypto
+// Tool Synthesis Service - Oracle implementation
 import type { LLMProvider } from "src/types/llm.types.js";
-import type { ScenarioConfiguration, TraceEntry } from "$lib/types.js";
+import type { ScenarioConfiguration, AgentConfiguration, Tool } from "$lib/types.js";
 
 export interface ToolExecutionInput {
   toolName: string;
   args: Record<string, unknown>;
-  runId: string;
-  role: string;
+  agentId: string;
   scenario: ScenarioConfiguration;
+  conversationHistory: string;
 }
 
 export interface ToolExecutionOutput {
   output: unknown;
-  steps: TraceEntry[];
-}
-
-interface CachedResult {
-  output: unknown;
-  steps: TraceEntry[];
-  timestamp: number;
 }
 
 export class ToolSynthesisService {
-  private cache = new Map<string, CachedResult>();
-  
   constructor(private llm: LLMProvider) {}
 
   async execute(input: ToolExecutionInput): Promise<ToolExecutionOutput> {
     try {
-      // Create deterministic cache key using Bun's crypto
-      const cacheKey = await this.createCacheKey(input);
-      
-      // Check cache first
-      const cached = this.cache.get(cacheKey);
-      if (cached) {
-        return {
-          output: cached.output,
-          steps: [
-            ...cached.steps,
-            {
-              id: `cache_${Date.now()}`,
-              agentId: input.runId,
-              type: 'thought',
-              timestamp: new Date(),
-              content: `Cache hit: Using cached result for deterministic replay (key: ${cacheKey.slice(0, 8)}...)`
-            }
-          ]
-        };
-      }
-      
-      // Synthesize with LLM
-      const result = await this.synthesizeWithLLM(input);
-      
-      // Cache the result
-      this.cache.set(cacheKey, {
-        ...result,
-        timestamp: Date.now()
-      });
-      
-      return result;
+      // Directly call the LLM synthesis method without caching.
+      return await this.synthesizeWithLLM(input);
     } catch (error) {
-      // Top-level error handling for cache or synthesis issues
-      console.error(`Tool synthesis execute failed for ${input.toolName}:`, error);
-      
+      console.error(`[Oracle] Tool synthesis failed for ${input.toolName}:`, error);
       return {
         output: {
           error: 'Tool synthesis failed',
           message: error instanceof Error ? error.message : 'Unknown error'
-        },
-        steps: [{
-          id: `error_${Date.now()}`,
-          agentId: input.runId,
-          type: 'thought',
-          timestamp: new Date(),
-          content: `Tool synthesis failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-        }]
+        }
       };
     }
   }
 
-  // Create deterministic cache key using Bun's crypto
-  private async createCacheKey(input: ToolExecutionInput): Promise<string> {
-    try {
-      // Normalize input for consistent hashing
-      const normalized = {
-        toolName: input.toolName,
-        args: this.sortObject(input.args),
-        role: input.role,
-        scenarioId: input.scenario.metadata.id,
-        schemaVersion: '2.4' // Fixed version for new schema
-      };
-      
-      const jsonString = JSON.stringify(normalized);
-      
-      // Use Bun's built-in crypto for hashing
-      const hasher = new Bun.CryptoHasher("sha256");
-      hasher.update(jsonString);
-      return hasher.digest("hex");
-    } catch (error) {
-      // Fallback to simple string-based key if crypto fails
-      console.warn('Failed to create crypto cache key, using fallback:', error);
-      
-      return `${input.toolName}_${input.role}_${JSON.stringify(input.args).slice(0, 50)}`;
-    }
-  }
 
-  // Synthesize tool execution with LLM
   private async synthesizeWithLLM(input: ToolExecutionInput): Promise<ToolExecutionOutput> {
-    const { toolName, args, role, scenario } = input;
+    const { toolName, args, agentId, scenario, conversationHistory } = input;
     
-    // Find tool definition - using agentId instead of role
-    const agentConfig = scenario.agents.find(a => a.agentId.id === role);
-    if (!agentConfig) {
-      throw new Error(`Agent with id ${role} not found in scenario`);
-    }
+    const agentConfig = scenario.agents.find(a => a.agentId.id === agentId);
+    if (!agentConfig) throw new Error(`Agent '${agentId}' not found.`);
     const tool = agentConfig.tools.find(t => t.toolName === toolName);
-    
-    if (!tool) {
-      throw new Error(`Tool ${toolName} not found for role ${role}`);
-    }
+    if (!tool) throw new Error(`Tool '${toolName}' not found for agent '${agentId}'.`);
 
-    // Build synthesis prompt
-    const prompt = this.buildSynthesisPrompt(tool, args, role, scenario);
+    const prompt = this.buildSynthesisPrompt(tool, args, agentConfig, scenario, conversationHistory);
     
-    const messages = [{ role: 'user' as const, content: prompt }];
+    const response = await this.llm.generateResponse({ 
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.7 // Medium temperature for creative work
+    });
+
+    const parsed = this.parseOracleResponse(response.content);
     
-    try {
-      const response = await this.llm.generateResponse({ messages });
-      
-      // Parse the structured response
-      let parsed;
-      try {
-        parsed = this.parseToolResponse(response.content);
-      } catch (parseError) {
-        // Handle parsing errors specifically
-        console.error(`Failed to parse tool response for ${toolName}:`, parseError);
-        
-        return {
-          output: {
-            error: 'Tool response parsing failed',
-            message: parseError instanceof Error ? parseError.message : 'Unknown parsing error',
-            rawContent: response.content.slice(0, 200)
-          },
-          steps: [{
-            id: `parse_error_${Date.now()}`,
-            agentId: input.runId,
-            type: 'thought',
-            timestamp: new Date(),
-            content: `Response parsing failed: ${parseError instanceof Error ? parseError.message : 'Unknown parsing error'}`
-          }]
-        };
-      }
-      
-      // Create execution steps
-      const toolCallId = `call_${Date.now()}`;
-      const steps: TraceEntry[] = [
-        {
-          id: `thought_${Date.now()}`,
-          agentId: input.runId,
-          type: 'thought',
-          timestamp: new Date(),
-          content: `Analyzing tool request: Processing ${toolName} with args: ${JSON.stringify(args)}`
-        },
-        {
-          id: `tool_call_${Date.now()}`,
-          agentId: input.runId,
-          type: 'tool_call',
-          timestamp: new Date(),
-          toolName: toolName,
-          parameters: args,
-          toolCallId: toolCallId
-        },
-        {
-          id: `tool_result_${Date.now()}`,
-          agentId: input.runId,
-          type: 'tool_result',
-          timestamp: new Date(),
-          toolCallId: toolCallId,
-          result: parsed.output
-        },
-        {
-          id: `synthesis_${Date.now()}`,
-          agentId: input.runId,
-          type: 'thought',
-          timestamp: new Date(),
-          content: `${parsed.summary || 'Tool execution completed'}${parsed.reasoning ? ': ' + parsed.reasoning : ''}`
-        }
-      ];
-      
-      return {
-        output: parsed.output,
-        steps
-      };
-      
-    } catch (error) {
-      // LLM generation error
-      console.error(`LLM generation failed for tool ${toolName}:`, error);
-      
-      // Create error steps
-      const errorSteps: TraceEntry[] = [
-        {
-          id: `llm_error_${Date.now()}`,
-          agentId: input.runId,
-          type: 'thought',
-          timestamp: new Date(),
-          content: `LLM generation failed: ${error instanceof Error ? error.message : 'Unknown LLM error'}`
-        }
-      ];
-      
-      return {
-        output: {
-          error: 'LLM generation failed',
-          message: error instanceof Error ? error.message : 'Unknown error'
-        },
-        steps: errorSteps
-      };
-    }
+    console.log(`[Oracle Reasoning for ${input.toolName}]: ${parsed.reasoning}`);
+    return { output: parsed.output };
   }
 
-  // Build prompt for tool synthesis
-  private buildSynthesisPrompt(tool: any, args: Record<string, unknown>, role: string, scenario: ScenarioConfiguration): string {
-    const agentConfig = scenario.agents.find(a => a.agentId.id === role);
-    if (!agentConfig) {
-      throw new Error(`Agent with id ${role} not found in scenario`);
-    }
-    // Use knowledgeBase for context instead of old clinicalSketch/operationalContext
-    const context = agentConfig.knowledgeBase || {};
+  /**
+   * Builds the synthesis prompt for the Oracle LLM
+   */
+  private buildSynthesisPrompt(
+    tool: Tool, 
+    args: Record<string, unknown>, 
+    agentConfig: AgentConfiguration, 
+    scenario: ScenarioConfiguration, 
+    conversationHistory: string
+  ): string {
+    return `You are an omniscient "Oracle" or "World Simulator" for a multi-agent conversation. Your job is to play the part of the external world (EHRs, databases, APIs) and provide realistic tool execution results.
 
-    return `You are a tool synthesis engine for healthcare interoperability scenarios. Your job is to simulate realistic tool execution results.
+<CONTEXT>
+  <SCENARIO_CONTEXT>
+    Title: ${scenario.metadata.title}
+    Description: ${scenario.metadata.description}
+    Background: ${scenario.scenario.background}
+    Challenges: ${JSON.stringify(scenario.scenario.challenges, null, 2)}
+  </SCENARIO_CONTEXT>
 
-TOOL DEFINITION:
-Name: ${tool.toolName}
-Description: ${tool.description}
-Input Schema: ${JSON.stringify(tool.inputSchema, null, 2)}
-Output Description: ${tool.outputDescription}
-Synthesis Guidance: ${tool.synthesisGuidance}
+  <CONVERSATION_HISTORY_SO_FAR>
+${conversationHistory}
+  </CONVERSATION_HISTORY_SO_FAR>
 
-EXECUTION CONTEXT:
-Role: ${role}
-Principal: ${agentConfig.principal.name}
-Context: ${JSON.stringify(context, null, 2)}
+  <CALLING_AGENT_PROFILE>
+    Agent: ${agentConfig.agentId.label} (${agentConfig.agentId.id})
+    Principal: ${agentConfig.principal.name}
+    Role: ${agentConfig.agentId.role}
+    Situation: ${agentConfig.situation}
+    Goals: ${JSON.stringify(agentConfig.goals, null, 2)}
+    Knowledge Base: ${JSON.stringify(agentConfig.knowledgeBase, null, 2)}
+  </CALLING_AGENT_PROFILE>
 
-TOOL INVOCATION:
-Arguments: ${JSON.stringify(args, null, 2)}
+  <OTHER_AGENTS_IN_SCENARIO>
+${scenario.agents.filter(a => a.agentId.id !== agentConfig.agentId.id).map(a => `    - ${a.agentId.label} (${a.principal.name}): ${a.principal.description}`).join('\n')}
+  </OTHER_AGENTS_IN_SCENARIO>
+</CONTEXT>
 
-INSTRUCTIONS:
-1. Validate that the arguments match the input schema
-2. Generate a realistic output based on the tool description and synthesis guidance
-3. Consider the agent's context and scenario constraints
-4. Provide reasoning for the generated output
+<TOOL_BEING_EXECUTED>
+  <TOOL_NAME>${tool.toolName}</TOOL_NAME>
+  <TOOL_DESCRIPTION>${tool.description}</TOOL_DESCRIPTION>
+  <DIRECTOR_NOTE_FOR_ORACLE>${tool.synthesisGuidance}</DIRECTOR_NOTE_FOR_ORACLE>
+  <ARGUMENTS_PROVIDED>${JSON.stringify(args, null, 2)}</ARGUMENTS_PROVIDED>
+</TOOL_BEING_EXECUTED>
 
-OUTPUT FORMAT (JSON):
+<YOUR_TASK>
+You are omniscient - you can see ALL agents' knowledge bases and the full scenario context. However, you must only reveal information that would be plausibly knowable by the specific tool being called.
+
+IMPORTANT: The tools are being called by an AI AGENT (shown in CALLING_AGENT_PROFILE), not by a human user directly. The agent is acting on behalf of their principal (the human or organization they represent). Structure your responses appropriately for agent-to-system interactions.
+
+CRITICAL COMMUNICATION CONSTRAINT: In this world, ALL communication between parties happens through the conversation thread between agents. Your tool responses must NEVER:
+- Suggest sending emails, faxes, or making phone calls
+- Indicate that documents should be submitted through portals, uploaded elsewhere, or sent externally
+- Reference any communication channels outside the agent conversation thread
+- Imply that the agent should communicate through any means other than the conversation they're already in
+
+Instead, when documents or information need to be shared:
+- Indicate that information/documents should be "provided in the conversation"
+- Use phrases like "please share in this thread" or "include in your response"
+- Treat the conversation as the sole channel for all exchanges
+
+CRITICAL: The knowledge bases and scenario data are just STARTING POINTS and INSPIRATION. You should:
+1. EXPAND on the provided information with realistic, detailed data that such a system would actually return
+2. Add timestamps, IDs, codes, statuses, and other metadata that real systems include
+3. Include realistic variations, edge cases, and details not explicitly mentioned
+4. Make the response feel like it came from a real EHR, insurance system, scheduling system, etc.
+5. Add plausible details that make the interaction more challenging and realistic
+6. Remember you're responding to an AGENT's API call, not a human's direct query
+
+For example:
+- If the knowledge base mentions "X-ray negative for fracture", return a full radiology report with technique, findings, impression, radiologist name, accession numbers, etc.
+- If it mentions "PT from 6/15-6/27", include specific session notes, progress measurements, therapist observations, CPT codes, units billed, etc.
+- If checking coverage, include member ID, group number, deductible amounts, out-of-pocket maximums, specific exclusions, authorization requirements, etc.
+- Include appropriate system responses like "Authorized User: Agent patient-agent", "Access logged", "Query timestamp: 2024-07-01T14:23:45Z"
+
+Use the director's note (synthesisGuidance) to understand what character/system to play and how to advance the story. The scenario data is your inspiration, not your script.
+
+Your entire response MUST be a single JSON code block. The JSON object inside MUST have two keys: "reasoning" and "output". The "output" can be any valid JSON type (string, number, object, array). Do not include any other text or explanations outside of the code block.
+
+<EXAMPLE_1>
+\`\`\`json
 {
-  "valid": true/false,
-  "output": { /* realistic tool output */ },
-  "summary": "Brief description of what happened",
-  "reasoning": "Why this output makes sense given the context"
+  "reasoning": "The user asked for the policy. I am returning the policy object from the agent's knowledgeBase as requested in the synthesis guidance.",
+  "output": {
+    "policyId": "HF-MRI-KNEE-2024",
+    "criteria": [
+      "Knee MRI requires >=14 days of documented conservative therapy."
+    ]
+  }
 }
+\`\`\`
+</EXAMPLE_1>
 
-If arguments are invalid, set "valid": false and explain why in "reasoning".`;
+<EXAMPLE_2>
+\`\`\`json
+{
+  "reasoning": "The synthesis guidance for this tool is to simply return a confirmation string.",
+  "output": "Case notes have been successfully created."
+}
+\`\`\`
+</EXAMPLE_2>
+</YOUR_TASK>`;
   }
 
-  // Parse structured tool response
-  private parseToolResponse(content: string): { output: unknown; summary?: string; reasoning?: string } {
-    let parsed;
-    try {
-      parsed = JSON.parse(content);
-    } catch (error) {
-      // Fallback parsing if JSON is malformed
-      console.warn('Tool response was not valid JSON, using fallback synthesis');
-      
-      return {
-        output: { 
-          synthesized: true, 
-          content: content.slice(0, 200),
-          fallback: true
-        },
-        summary: 'Tool executed with fallback synthesis',
-        reasoning: 'LLM response was not valid JSON, using fallback synthesis'
-      };
-    }
-    
-    // Validate parsed response structure
-    if (typeof parsed !== 'object' || parsed === null) {
-      throw new Error('Tool response must be a JSON object');
-    }
-    
-    if (parsed.valid === false) {
-      throw new Error(`Invalid tool arguments: ${parsed.reasoning || 'Unknown validation error'}`);
-    }
-    
-    return {
-      output: parsed.output || {},
-      summary: parsed.summary,
-      reasoning: parsed.reasoning
-    };
-  }
+  /**
+   * Parses the Oracle's response, gracefully handling common LLM formatting variations.
+   */
+  private parseOracleResponse(content: string): { reasoning: string; output: unknown } {
+    let jsonString: string | null = null;
 
-  // Sort object keys for consistent hashing
-  private sortObject(obj: Record<string, unknown>): Record<string, unknown> {
-    const sorted: Record<string, unknown> = {};
-    const keys = Object.keys(obj).sort();
-    
-    for (const key of keys) {
-      const value = obj[key];
-      if (value && typeof value === 'object' && !Array.isArray(value)) {
-        sorted[key] = this.sortObject(value as Record<string, unknown>);
+    // Priority 1: Look for a ```json ... ``` code block.
+    const jsonBlockMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+    if (jsonBlockMatch && jsonBlockMatch[1]) {
+      jsonString = jsonBlockMatch[1];
+    } else {
+      // Priority 2: Fallback to a generic ``` ... ``` code block.
+      const genericBlockMatch = content.match(/```\s*([\s\S]*?)\s*```/);
+      if (genericBlockMatch && genericBlockMatch[1]) {
+        jsonString = genericBlockMatch[1];
       } else {
-        sorted[key] = value;
+        // Priority 3: Fallback to the first complete bare JSON object `{...}`.
+        const bareJsonMatch = content.match(/{\s*[\s\S]*\s*}/);
+        if (bareJsonMatch && bareJsonMatch[0]) {
+          jsonString = bareJsonMatch[0];
+        }
       }
     }
-    
-    return sorted;
-  }
 
-  // Clear cache (for testing)
-  clearCache(): void {
-    this.cache.clear();
-  }
-
-  // Get cache stats
-  getCacheStats(): { size: number; keys: string[] } {
-    return {
-      size: this.cache.size,
-      keys: Array.from(this.cache.keys()).map(k => k.slice(0, 8) + '...')
-    };
-  }
-
-  // Simplified method for scenario-driven agents to synthesize tool results
-  async synthesizeToolResult(toolName: string, parameters: Record<string, any>, toolDefinition: any): Promise<any> {
-    // For testing purposes, create a simple result
-    // In a real implementation, this would use the LLM to generate realistic results
-    const isTerminal = /Success$|Approval$|Failure$|Denial$|NoSlots$/.test(toolName);
-    
-    if (isTerminal) {
-      return {
-        success: true,
-        action: toolName,
-        message: `Successfully executed ${toolName}`,
-        terminal: true
-      };
-    } else {
-      return {
-        success: true,
-        action: toolName,
-        data: parameters,
-        message: `Executed ${toolName} with parameters: ${JSON.stringify(parameters)}`
-      };
+    // If we have a JSON string, try to parse it
+    if (jsonString) {
+      try {
+        const parsedObject = JSON.parse(jsonString);
+        if (typeof parsedObject.output === 'undefined' || typeof parsedObject.reasoning === 'undefined') {
+          throw new Error("Oracle response JSON is missing required 'output' or 'reasoning' keys.");
+        }
+        return parsedObject;
+      } catch (e) {
+        console.error("[Oracle] Failed to parse extracted JSON string:", jsonString);
+        // Fall through to fallback heuristic
+      }
     }
+
+    // Fallback heuristic: try to find "output" in either the JSON string or raw content
+    console.error("[Oracle] Attempting fallback heuristic...");
+    const contentToSearch = jsonString || content;
+    const outputMatch = contentToSearch.match(/"output"\s*:\s*/);
+    if (outputMatch && outputMatch.index !== undefined) {
+        const beforeOutput = contentToSearch.substring(0, outputMatch.index);
+        const afterOutput = contentToSearch.substring(outputMatch.index + outputMatch[0].length);
+        
+        // Extract reasoning if present
+        let reasoning = "Fallback parsing: no explicit reasoning found";
+        const reasoningMatch = beforeOutput.match(/"reasoning"\s*:\s*"([^"]*)"/);
+        if (reasoningMatch && reasoningMatch[1]) {
+          reasoning = reasoningMatch[1];
+        }
+        
+        // Extract the output value - could be a string, object, array, etc.
+        let outputValue: unknown;
+        
+        // Check if it starts with a quote (string value)
+        const trimmedOutput = afterOutput.trim();
+        
+        // Handle edge case where JSON is truncated right after "output": 
+        if (trimmedOutput.length === 0) {
+          throw new Error('JSON truncated after output key with no value');
+        }
+        
+        if (trimmedOutput.startsWith('"')) {
+          // Find the closing quote, accounting for escaped quotes
+          let endIndex = 1;
+          let inEscape = false;
+          while (endIndex < trimmedOutput.length) {
+            if (trimmedOutput[endIndex] === '\\' && !inEscape) {
+              inEscape = true;
+            } else {
+              if (trimmedOutput[endIndex] === '"' && !inEscape) {
+                break;
+              }
+              inEscape = false;
+            }
+            endIndex++;
+          }
+          
+          // If we didn't find a closing quote, include everything up to end of string
+          if (endIndex >= trimmedOutput.length) {
+            // The string is unclosed - take everything after the opening quote
+            outputValue = trimmedOutput.substring(1);
+          } else {
+            // Extract the string content (without the quotes)
+            outputValue = trimmedOutput.substring(1, endIndex);
+            // Unescape the string
+            outputValue = outputValue.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+          }
+        } else {
+          // For non-string values, we need to find where the value ends
+          // This could be at a comma, closing brace, or end of string
+          let valueEnd = afterOutput.length;
+          let braceDepth = 0;
+          let bracketDepth = 0;
+          let inString = false;
+          let escapeNext = false;
+          
+          for (let i = 0; i < afterOutput.length; i++) {
+            const char = afterOutput[i];
+            
+            if (escapeNext) {
+              escapeNext = false;
+              continue;
+            }
+            
+            if (char === '\\') {
+              escapeNext = true;
+              continue;
+            }
+            
+            if (char === '"') {
+              inString = !inString;
+              continue;
+            }
+            
+            if (!inString) {
+              if (char === '{') braceDepth++;
+              else if (char === '}') {
+                if (braceDepth === 0) {
+                  // This is the closing brace of the main object
+                  valueEnd = i;
+                  break;
+                }
+                braceDepth--;
+              }
+              else if (char === '[') bracketDepth++;
+              else if (char === ']') bracketDepth--;
+              else if (char === ',' && braceDepth === 0 && bracketDepth === 0) {
+                // Found a comma at the top level, this ends the value
+                valueEnd = i;
+                break;
+              }
+            }
+          }
+          
+          const valueString = afterOutput.substring(0, valueEnd).trim();
+          
+          // Try to parse as JSON
+          try {
+            outputValue = JSON.parse(valueString);
+          } catch {
+            // If all else fails, treat as string (but this might include trailing commas/braces)
+            outputValue = valueString;
+          }
+        }
+        
+        console.log("[Oracle] Fallback parsing succeeded");
+        return { reasoning, output: outputValue };
+    }
+    
+    throw new Error(`Oracle LLM response was not valid JSON and fallback parsing failed.`);
   }
+
+
+
+
 }

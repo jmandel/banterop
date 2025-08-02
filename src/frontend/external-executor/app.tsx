@@ -1,18 +1,14 @@
 // External Agent Executor - In-Browser Agent Runtime Demo
+import './tailwind-bundle.css';
 import { ToolSynthesisService } from '$agents/index.js';
 import { ToolExecutionInput, ToolExecutionOutput } from '$agents/services/tool-synthesis.service.js';
 import type {
   ConversationEvent,
-  LLMMessage,
   LLMProviderConfig,
   LLMRequest,
   LLMResponse,
-  LLMTool,
-  LLMToolCall,
-  LLMToolResponse,
   ScenarioConfiguration,
   ScenarioDrivenAgentConfig,
-  ThoughtEntry,
   Tool
 } from '$lib/types.js';
 import { LLMProvider } from '$lib/types.js';
@@ -38,7 +34,6 @@ class RemoteLLMProvider extends LLMProvider {
     this.baseUrl = baseUrl;
     this.model = model;
   }
-
 
   async generateResponse(request: LLMRequest): Promise<LLMResponse> {
     try {
@@ -66,7 +61,6 @@ class RemoteLLMProvider extends LLMProvider {
       throw error;
     }
   }
-
 
   getSupportedModels(): string[] {
     return ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
@@ -145,7 +139,7 @@ let cannedDiscussionWithQuery = [
   {
     agentId: "patient-agent",
     thought: "I don't have the exact injury date in my records. I need to ask my principal for this information.",
-    tool: {name: "send_message_to_principal", args: {text: "What was the date of John Smith's initial knee injury?"}},
+    tool: {name: "ask_question_to_principal", args: {text: "What was the date of John Smith's initial knee injury?"}},
     toolResponse: "The initial injury occurred on June 1st, 2024."
   },
   {
@@ -175,7 +169,6 @@ class MockLLMProvider extends LLMProvider {
     super(config as LLMProviderConfig);
   }
 
-
   async generateResponse(request: LLMRequest): Promise<LLMResponse> {
     // Simple mock response that alternates between sending a message and ending
     console.log("Mock llm", "req", request.messages[0].content, "discussion item", cannedDiscussionWithQuery[cannedIndex])
@@ -188,19 +181,19 @@ class MockLLMProvider extends LLMProvider {
       return {content: ""}
     }
 
-    // Advance index for content messages and send_message_to_principal
+    // Advance index for content messages and ask_question_to_principal
     // Don't advance for other tools (we need to read the tool response next)
-    if (!response.tool || response.tool.name === 'send_message_to_principal') {
+    if (!response.tool || response.tool.name === 'ask_question_to_principal') {
       console.log("Increment index from", cannedDiscussionWithQuery[cannedIndex], cannedIndex)
       cannedIndex++;
     }
 
     if (response.content) {
-      return {content: `<scratchpad>${response.thought}</scratchpad>\n\`\`\`json\n${JSON.stringify({name: "send_message_to_thread", args: {text: response.content}})}\n\`\`\``}
+      return {content: `<scratchpad>${response.thought}</scratchpad>\n\`\`\`json\n${JSON.stringify({name: "send_message_to_agent_conversation", args: {text: response.content}})}\n\`\`\``}
     }
 
     if (response.tool) {
-      // don't advance index so the tool response reads the right value (except for send_message_to_principal which we already advanced)
+      // don't advance index so the tool response reads the right value (except for ask_question_to_principal which we already advanced)
       return {
         content: `<scratchpad>${response.thought}</scratchpad>\n\`\`\`json\n${JSON.stringify(response.tool)}\n\`\`\``
       } 
@@ -221,20 +214,12 @@ class MockToolSynthesisService extends ToolSynthesisService {
 
 
   override execute(input: ToolExecutionInput): Promise<ToolExecutionOutput> {
-    throw new Error('Method not implemented.');
-  }
-  override clearCache(): void {
-    throw new Error('Method not implemented.');
-  }
-  override getCacheStats(): { size: number; keys: string[]; } {
-    throw new Error('Method not implemented.');
-  }
-
-  override async synthesizeToolResult(toolName: string, parameters: any, toolDefinition?: Tool): Promise<any> {
+  // async synthesizeToolResult(toolName: string, parameters: any, toolDefinition?: Tool): Promise<any> {
+    const {toolName, args } = input;
     console.log("Synthesize", toolName, cannedIndex, cannedDiscussionWithQuery[cannedIndex])
-    // Don't synthesize send_message_to_principal - it should be handled by the agent itself
-    if (toolName === 'send_message_to_principal') {
-      throw new Error('send_message_to_principal should be handled by the agent, not synthesized');
+    // Don't synthesize ask_question_to_principal - it should be handled by the agent itself
+    if (toolName === 'ask_question_to_principal') {
+      throw new Error('ask_question_to_principal should be handled by the agent, not synthesized');
     }
     return cannedDiscussionWithQuery[cannedIndex++].toolResponse
   }
@@ -267,8 +252,8 @@ function ExternalExecutorApp() {
   const [outstandingQueries, setOutstandingQueries] = useState<Map<string, OutstandingQuery>>(new Map());
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(500); // Default 5 seconds
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
-  const [useMockLLM, setUseMockLLM] = useState<boolean>(true);
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [llmProvider, setLlmProvider] = useState<'mock' | 'gemini' | 'openrouter'>('mock');
+  const [availableModels, setAvailableModels] = useState<{ gemini: string[], openrouter: string[] }>({ gemini: [], openrouter: [] });
   const [selectedModel, setSelectedModel] = useState<string>('gemini-2.5-flash-lite');
   const [backendUrl, setBackendUrl] = useState<string>(() => {
     // Load from localStorage or use default
@@ -308,24 +293,30 @@ function ExternalExecutorApp() {
         
         // Check if any provider is configured
         let anyProviderConfigured = false;
-        const models: string[] = [];
+        const modelsByProvider = { gemini: [] as string[], openrouter: [] as string[] };
         
         if (result.data?.providers && Array.isArray(result.data.providers)) {
           result.data.providers.forEach((provider: any) => {
             // If a provider has models, it's configured
             if (provider.models && provider.models.length > 0) {
               anyProviderConfigured = true;
-              models.push(...provider.models);
+              if (provider.name === 'google') {
+                modelsByProvider.gemini = provider.models;
+              } else if (provider.name === 'openrouter') {
+                modelsByProvider.openrouter = provider.models;
+              }
             }
           });
         }
         
         setLlmAvailable(anyProviderConfigured);
-        setAvailableModels(models);
+        setAvailableModels(modelsByProvider);
         
-        // Set default model if available
-        if (models.length > 0 && !models.includes(selectedModel)) {
-          setSelectedModel(models[0]);
+        // Set default model based on selected provider
+        if (llmProvider === 'gemini' && modelsByProvider.gemini.length > 0) {
+          setSelectedModel(modelsByProvider.gemini[0]);
+        } else if (llmProvider === 'openrouter' && modelsByProvider.openrouter.length > 0) {
+          setSelectedModel(modelsByProvider.openrouter[0]);
         }
         
         if (anyProviderConfigured) {
@@ -454,15 +445,19 @@ function ExternalExecutorApp() {
       addLog(`External conversation created: ${conversation.id}`);
 
       // Step 3: Create dependencies based on selected LLM provider
-      const llmProvider = useMockLLM ? new MockLLMProvider() : new RemoteLLMProvider(backendUrl, selectedModel);
-      const toolSynthesis = new MockToolSynthesisService(llmProvider);
+      const llmProviderInstance = llmProvider === 'mock' 
+        ? new MockLLMProvider() 
+        : new RemoteLLMProvider(backendUrl, selectedModel);
+      const toolSynthesis = llmProvider === 'mock' 
+        ? new MockToolSynthesisService(llmProviderInstance) 
+        : new ToolSynthesisService(llmProviderInstance);
       
-      if (!useMockLLM) {
-        addLog(`Using real LLM via backend API (Model: ${selectedModel})`);
+      if (llmProvider !== 'mock') {
+        addLog(`Using real LLM via backend API (Provider: ${llmProvider}, Model: ${selectedModel}) for both agent responses and tool synthesis`);
         // Reset canned index when using real LLM
         cannedIndex = 0;
       } else {
-        addLog('Using mock LLM with pre-scripted responses');
+        addLog('Using mock LLM with pre-scripted responses for both agent responses and tool synthesis');
       }
       
       // Step 4: Create WebSocket clients for each agent using the universal client
@@ -483,7 +478,7 @@ function ExternalExecutorApp() {
         } as ScenarioDrivenAgentConfig,
         patientClient,
         scenarioConfig,           // Inject the fetched scenario JSON
-        llmProvider,              // Inject the selected LLM provider
+        llmProviderInstance,      // Inject the actual LLM provider instance, not the string!
         toolSynthesis             // Inject the Tool Synthesis Service
       );
       
@@ -495,7 +490,7 @@ function ExternalExecutorApp() {
         } as ScenarioDrivenAgentConfig,
         supplierClient,
         scenarioConfig,           // Inject the fetched scenario JSON
-        llmProvider,              // Inject the selected LLM provider
+        llmProviderInstance,      // Inject the actual LLM provider instance, not the string!
         toolSynthesis             // Inject the Tool Synthesis Service
       );
       
@@ -511,7 +506,7 @@ function ExternalExecutorApp() {
             // Find the suggested response from the canned discussion
             // Since we advanced the index, look at cannedIndex - 1
             const previousStep = cannedDiscussionWithQuery[cannedIndex - 1];
-            const suggestedResponse = (previousStep?.tool?.name === "send_message_to_principal" && 
+            const suggestedResponse = (previousStep?.tool?.name === "ask_question_to_principal" && 
                                       previousStep?.tool?.args?.text === query.question) 
                                       ? previousStep.toolResponse 
                                       : '';
@@ -671,19 +666,31 @@ function ExternalExecutorApp() {
                   LLM Provider:
                 </label>
                 <select
-                  value={useMockLLM ? 'mock' : 'real'}
-                  onChange={(e) => setUseMockLLM(e.target.value === 'mock')}
+                  value={llmProvider}
+                  onChange={(e) => {
+                    const newProvider = e.target.value as 'mock' | 'gemini' | 'openrouter';
+                    setLlmProvider(newProvider);
+                    // Update selected model when switching providers
+                    if (newProvider === 'gemini' && availableModels.gemini.length > 0) {
+                      setSelectedModel(availableModels.gemini[0]);
+                    } else if (newProvider === 'openrouter' && availableModels.openrouter.length > 0) {
+                      setSelectedModel(availableModels.openrouter[0]);
+                    }
+                  }}
                   disabled={isLoading}
                   className="px-3 py-1 border border-purple-300 rounded text-sm"
                 >
                   <option value="mock">Mock (Scripted)</option>
-                  <option value="real" disabled={!llmAvailable}>
-                    Real LLM {!llmAvailable && '(Not Available)'}
+                  <option value="gemini" disabled={!llmAvailable || availableModels.gemini.length === 0}>
+                    Gemini {(!llmAvailable || availableModels.gemini.length === 0) && '(Not Available)'}
+                  </option>
+                  <option value="openrouter" disabled={!llmAvailable || availableModels.openrouter.length === 0}>
+                    OpenRouter {(!llmAvailable || availableModels.openrouter.length === 0) && '(Not Available)'}
                   </option>
                 </select>
                 
                 {/* Model Selection Dropdown - Only shown when using real LLM */}
-                {!useMockLLM && llmAvailable && availableModels.length > 0 && (
+                {llmProvider !== 'mock' && llmAvailable && (
                   <>
                     <label className="text-sm font-medium text-purple-900 ml-4">
                       Model:
@@ -694,7 +701,7 @@ function ExternalExecutorApp() {
                       disabled={isLoading}
                       className="px-3 py-1 border border-purple-300 rounded text-sm"
                     >
-                      {availableModels.map(model => (
+                      {(llmProvider === 'gemini' ? availableModels.gemini : availableModels.openrouter).map(model => (
                         <option key={model} value={model}>
                           {model}
                         </option>
@@ -703,7 +710,7 @@ function ExternalExecutorApp() {
                   </>
                 )}
                 
-                {!useMockLLM && llmAvailable && (
+                {llmProvider !== 'mock' && llmAvailable && (
                   <span className="text-xs text-purple-600 ml-2">
                     Using backend API
                   </span>

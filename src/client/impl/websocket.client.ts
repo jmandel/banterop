@@ -39,6 +39,7 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
   private authenticated = false;
   private authToken?: string;
   private disconnecting = false;
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
 
   constructor(url: string) {
     super();
@@ -82,11 +83,14 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
           console.log('WebSocket closed:', closeEvent.code, closeEvent.reason);
           this.authenticated = false;
           
-          if (closeEvent.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
-            setTimeout(() => {
+          if (closeEvent.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts && !this.disconnecting) {
+            this.reconnectTimer = setTimeout(() => {
               this.reconnectAttempts++;
               console.log(`Reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
-              this.connect(this.authToken);
+              this.connect(this.authToken).catch(error => {
+                console.warn('Reconnection attempt failed:', error);
+                // Error is already emitted via the 'error' event, no need to throw
+              });
             }, this.reconnectDelay * this.reconnectAttempts);
           }
         };
@@ -94,7 +98,10 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
         this.ws.onerror = (error) => {
           console.error('WebSocket error:', error);
           this.emit('error', error);
-          reject(error);
+          // Only reject if this is the initial connection attempt
+          if (this.reconnectAttempts === 0) {
+            reject(error);
+          }
         };
 
       } catch (error) {
@@ -106,6 +113,12 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
   disconnect(): void {
     // Mark as disconnecting to prevent new requests
     this.disconnecting = true;
+    
+    // Clear any pending reconnection timer
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
     
     // If no pending requests, close immediately
     if (this.pendingRequests.size === 0) {

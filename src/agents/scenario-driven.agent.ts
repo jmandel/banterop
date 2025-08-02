@@ -81,7 +81,7 @@ export class ScenarioDrivenAgent extends BaseAgent {
     }
 
     if (initialConversation.metadata.initiatingAgentId === this.agentId.id) {
-      console.log("This is the initiattin agent", initialConversation.metadata, this)
+      console.log("This is the initiating agent", initialConversation.metadata, this)
     }
     else {
       console.log("NOT initiating agent", initialConversation.metadata, this)
@@ -327,10 +327,10 @@ export class ScenarioDrivenAgent extends BaseAgent {
    */
   private formatToolsWithGuidance(tools: Tool[]): string {
     const communicationTools = tools.filter(t => 
-      ['send_message_to_thread', 'send_message_to_principal', 'no_response_needed'].includes(t.toolName)
+      ['send_message_to_agent_conversation', 'ask_question_to_principal', 'no_response_needed'].includes(t.toolName)
     );
     const actionTools = tools.filter(t => 
-      !['send_message_to_thread', 'send_message_to_principal', 'no_response_needed'].includes(t.toolName)
+      !['send_message_to_agent_conversation', 'ask_question_to_principal', 'no_response_needed'].includes(t.toolName)
     );
 
     let sections: string[] = [];
@@ -507,10 +507,10 @@ Your response MUST follow this EXACT format:
       return {completedTurn: true};
     }
 
-    if (toolCall.name === 'send_message_to_thread') {
+    if (toolCall.name === 'send_message_to_agent_conversation') {
       const { text } = toolCall.args;
       if (!text || typeof text !== 'string' || text.trim() === '') {
-        const error = new Error(`${this.agentId.id}: send_message_to_thread requires non-empty text parameter. Got: ${JSON.stringify(toolCall.args)}`);
+        const error = new Error(`${this.agentId.id}: send_message_to_agent_conversation requires non-empty text parameter. Got: ${JSON.stringify(toolCall.args)}`);
         console.error('Stack trace:', error.stack);
         throw error;
       }
@@ -518,10 +518,10 @@ Your response MUST follow this EXACT format:
       return {completedTurn: true};
     }
 
-    if (toolCall.name === 'send_message_to_principal') {
+    if (toolCall.name === 'ask_question_to_principal') {
       const { text } = toolCall.args;
       if (!text || typeof text !== 'string' || text.trim() === '') {
-        const error = new Error(`${this.agentId.id}: send_message_to_principal requires non-empty text parameter. Got: ${JSON.stringify(toolCall.args)}`);
+        const error = new Error(`${this.agentId.id}: ask_question_to_principal requires non-empty text parameter. Got: ${JSON.stringify(toolCall.args)}`);
         console.error('Stack trace:', error.stack);
         throw error;
       }
@@ -547,20 +547,33 @@ Your response MUST follow this EXACT format:
     currentTurnTrace.push(toolCallEntry);
     
     try {
-      console.log("Lookign up tool", toolCall.name)
       const toolDef = this.getToolDefinition(toolCall.name);
-      const synthesisResult = await this.toolSynthesis.synthesizeToolResult(
-        toolCall.name,
-        toolCall.args,
-        toolDef
-      );
       
-      console.log("synthesized tool resulst", synthesisResult)
-      const toolResultEntry = await this.addToolResult(this.currentTurnId, toolCallEntry.toolCallId, synthesisResult);
+      // Build conversation history including the current in-progress turn
+      const historyString = this.buildConversationHistory();
+      const currentProcessString = this.formatCurrentProcess(currentTurnTrace);
+      const fullHistory = historyString + (historyString ? '\n\n' : '') + 
+                         `From: ${this.agentId.label} (IN PROGRESS)\n` +
+                         `Timestamp: ${new Date().toISOString()}\n\n` +
+                         currentProcessString;
+      
+      const synthesisResult = await this.toolSynthesis.execute({ // New call
+          toolName: toolCall.name,
+          args: toolCall.args,
+          agentId: this.agentId.id,
+          scenario: this.scenario,
+          conversationHistory: fullHistory
+      });
+
+      // The result is already the clean data payload. No parsing needed here.
+      const toolOutput = synthesisResult.output;
+      
+      console.log("Synthesized tool result:", toolOutput);
+      const toolResultEntry = await this.addToolResult(this.currentTurnId, toolCallEntry.toolCallId, toolOutput);
       currentTurnTrace.push(toolResultEntry);
       
       if (toolDef?.endsConversation) {
-        const resultMessage = `Action complete. Result: ${JSON.stringify(synthesisResult)}`;
+        const resultMessage = `Action complete. Result: ${JSON.stringify(toolOutput)}`;
         await this.completeTurn(this.currentTurnId, resultMessage, true);
         
         console.log(`Terminal tool ${toolCall.name} used, ending conversation gracefully`);
@@ -607,11 +620,11 @@ Your response MUST follow this EXACT format:
   }
 
   // Get built-in communication tools (copied from AgentRuntime)
-  private getBuiltInTools(): Tool[] {
+  private getBuiltInTools(): Partial<Tool[]> & Pick<Tool, 'toolName'| 'description'| 'inputSchema'>[] {
     return [
       {
-        toolName: 'send_message_to_thread',
-        description: 'Post a message to the conversation thread for other agents to see',
+        toolName: 'send_message_to_agent_conversation',
+        description: 'Send a message to the other agent you are conversing with, starting/continuing your conversation',
         inputSchema: {
           type: 'object',
           required: ['text'],
@@ -619,11 +632,11 @@ Your response MUST follow this EXACT format:
             text: { type: 'string', minLength: 1 },
           }
         },
-        synthesisGuidance: 'Return the turn ID of the created message'
+        synthesisGuidance: 'N/A'
       },
       {
-        toolName: 'send_message_to_principal',
-        description: 'Send a message or question to the human principal this agent represents',
+        toolName: 'ask_question_to_principal',
+        description: 'Last Resort: Send a message or question to the human principal this agent represents. Only use this as a last resort, if information is unavailable from other agents in conversation thread or from other tools.',
         inputSchema: {
           type: 'object',
           required: ['text'],
@@ -633,17 +646,17 @@ Your response MUST follow this EXACT format:
             expectReply: { type: 'boolean' }
           }
         },
-        synthesisGuidance: 'Return the turn ID of the user_query that was created'
+        synthesisGuidance: 'Respond as the user might'
       },
-      {
-        toolName: 'no_response_needed',
-        description: 'Use this when no action or response is needed in the current situation',
-        inputSchema: {
-          type: 'object',
-          properties: {}
-        },
-        synthesisGuidance: 'Agent chose not to respond to the current situation'
-      }
+      // {
+      //   toolName: 'no_response_needed',
+      //   description: 'Use this when no action or response is needed in the current situation',
+      //   inputSchema: {
+      //     type: 'object',
+      //     properties: {}
+      //   },
+      //   synthesisGuidance: 'Agent chose not to respond to the current situation'
+      // }
     ];
   }
 
@@ -756,7 +769,7 @@ Your response MUST follow this EXACT format:
     const turnTraces = this.tracesByTurnId.get(turn.id) || [];
 
     const parts: string[] = [
-      `From: ${this.agentId.label}`,
+      `From: ${this.agentId.id}`,
       `Timestamp: ${timestamp}`,
       '' // Empty line after headers
     ];

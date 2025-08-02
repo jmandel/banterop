@@ -37,11 +37,11 @@ export function seedDatabase(db: ConversationDatabase): void {
           name: "Jordan Alvarez",
           description: "A 38-year-old amateur soccer player with an acute right knee injury."
         },
-        situation: "You are preparing to contact the insurance company to get prior authorization for a right knee MRI for your client, Jordan Alvarez.",
-        systemPrompt: "You are an AI agent representing Jordan Alvarez. Your instructions are to obtain prior authorization for a right knee MRI. Communicate clearly, provide necessary documentation when requested, and aim for a swift approval.",
+        situation: "You are contacting the insurance company to get prior authorization for a right knee MRI for your client, Jordan Alvarez.",
+        systemPrompt: "You are an AI agent representing Jordan Alvarez. Your instructions are to obtain prior authorization for a right knee MRI. Ask the insurance company what they need, communicate clearly,  provide necessary documentation when requested, and aim for a swift approval.",
         goals: ["Obtain MRI authorization", "Minimize delays", "Understand next steps"],
         tools: [
-          {
+         {
             toolName: "search_ehr_clinical_notes",
             description: "Search EHR for patient's clinical notes and visit summaries.",
             inputSchema: { type: "object", properties: { dateRange: { type: "string" }, searchTerms: { type: "string" } } },
@@ -60,11 +60,11 @@ export function seedDatabase(db: ConversationDatabase): void {
             synthesisGuidance: "Return PT notes documenting daily sessions and persistent anterior instability from the knowledgeBase timeline."
           },
           {
-            toolName: "lookup_provider_network_status",
-            description: "Check if a provider or facility is in the patient's insurance network.",
-            inputSchema: { type: "object", properties: { providerName: { type: "string" }, providerType: { type: "string" } } },
-            synthesisGuidance: "Verify network status of the imaging facility or provider."
-          }
+            toolName: "request_additional_ehr_details",
+            description: "Answer follow-up questions by deeply searching the EHR for relevant information. Populate 'query' with natural language.",
+            inputSchema: { type: "object", properties: {"query": "string"} },
+            synthesisGuidance: "Return relevant information that is reponsive to the query, as a markdown document of EHR snippets"
+          },
         ],
         knowledgeBase: {
         overview: "Acute right knee injury with suspected ACL tear after a pivot injury during soccer. Persistent instability despite PT.",
@@ -72,7 +72,7 @@ export function seedDatabase(db: ConversationDatabase): void {
           { date: "2024-06-01", event: "Pivot injury to right knee during soccer; swelling within hours" },
           { date: "2024-06-02", event: "Urgent care visit; x-ray negative for fracture; knee immobilizer provided" },
           { date: "2024-06-10", event: "PCP exam positive Lachman; MRI ordered if instability persists after PT" },
-          { date: "2024-06-15", event: "Physical therapy started (HSS PT)" },
+          { date: "2024-06-15", event: "Physical therapy started (HSS PT), lasting 2 weeks" },
           { date: "2024-06-27", event: "Continued instability with stairs and pivoting; PT notes document limited improvement" },
           { date: "2024-07-01", event: "PCP ordered right knee MRI without contrast" }
         ],
@@ -96,8 +96,8 @@ export function seedDatabase(db: ConversationDatabase): void {
           description: "A national health insurance provider."
         },
         situation: "You are a prior authorization specialist at HealthFirst Insurance, waiting for the next case in your queue.",
-        systemPrompt: "You are a prior authorization specialist. Review requests against the official medical policy. Be thorough but efficient.",
-        goals: ["Ensure medical necessity is met", "Adhere to company policy", "Provide clear decisions"],
+        systemPrompt: "You are a meticulous prior authorization specialist. You always begin by understanding the relevant medical policy so it can guide your conversation with patients and providers.  Review requests carefully against the official medical policy, asking for clarification on any ambiguities. Begin by understanding what policies apply to the situation and request all necesary documentation, clarifying as needed.  Be thorough in documenting all details - even minor ones. You tend to interpret requirements strictly and often request additional documentation to ensure complete compliance. While you can approve cases that meet criteria, you prefer to have every detail clearly documented.",
+        goals: ["Ensure strict adherence to medical policy", "Document every detail thoroughly", "Request clarification on any ambiguities", "Verify all documentation is complete"],
         tools: [
           {
             toolName: "lookup_beneficiary",
@@ -139,22 +139,7 @@ export function seedDatabase(db: ConversationDatabase): void {
                 diagnosis: { type: "string", description: "Optional diagnosis or ICD-10 code" }
               } 
             },
-            synthesisGuidance: "Return the policy HF-MRI-KNEE-2024 requiring ≥14 days conservative therapy, positive physical exam findings, and functional limitations. Expedited review for in-network providers."
-          },
-          {
-            toolName: "verify_conservative_therapy",
-            description: "Verify if conservative therapy requirements have been met based on submitted documentation.",
-            inputSchema: { 
-              type: "object",
-              required: ["therapyStartDate", "therapyType"],
-              properties: { 
-                therapyStartDate: { type: "string", description: "Start date of conservative therapy" },
-                therapyEndDate: { type: "string", description: "End date or current date if ongoing" },
-                therapyType: { type: "string", description: "Type of therapy (PT, medications, etc.)" },
-                clinicalFindings: { type: "array", items: { type: "string" }, description: "Key clinical findings" }
-              } 
-            },
-            synthesisGuidance: "Calculate therapy duration and verify it meets the 14-day requirement. Jordan had PT from 6/15 to 6/27 (12 days) plus initial care 6/2-6/10 (8 days) = 20+ days total."
+            synthesisGuidance: "Return the comprehensive policy HF-MRI-KNEE-2024 with all criteria from the knowledgeBase. Emphasize that ALL criteria must be met, not just the 14-day requirement. Note the documentation requirements and common areas where clarification is typically needed. Mention that while expedited review is available for in-network providers, all documentation must still be complete."
           },
           {
             toolName: "check_provider_network",
@@ -183,7 +168,7 @@ export function seedDatabase(db: ConversationDatabase): void {
                 additionalRequirements: { type: "array", items: { type: "string" }, description: "Any additional requirements" }
               } 
             },
-            synthesisGuidance: "Create comprehensive case notes documenting the review process, findings, and decision rationale."
+            synthesisGuidance: "Create detailed case notes documenting every aspect of the review. Include all documentation reviewed, any missing or unclear items, specific dates and details verified, and areas where additional clarification might strengthen the case. Be thorough in documenting the decision rationale with reference to each policy criterion."
           },
           {
             toolName: "mri_authorization_Success",
@@ -224,7 +209,27 @@ export function seedDatabase(db: ConversationDatabase): void {
           { step: "Final authorization decision", decision: "Approve/deny with clear reasoning" }
         ],
           policy_id: "HF-MRI-KNEE-2024",
-          criteria: [ "Knee MRI requires ≥14 days of documented conservative therapy." ]
+          criteria: [ 
+            "Knee MRI requires ≥14 days of documented conservative therapy.",
+            "Physical therapy notes must include specific functional limitations.",
+            "Positive clinical exam findings must be documented by treating physician.",
+            "Timeline of injury and treatment must be clearly established.",
+            "Provider must document failure of conservative treatment.",
+            "Imaging facility must be verified as in-network for expedited processing."
+          ],
+          documentation_requirements: [
+            "Initial injury date and mechanism must be specified",
+            "Each PT session must be individually documented with progress notes",
+            "Specific activities that cause instability must be listed",
+            "Lachman test results must include grade and endpoint quality",
+            "Previous imaging results must be referenced if available"
+          ],
+          common_clarifications_needed: [
+            "Exact dates of conservative therapy start and end",
+            "Specific functional limitations (not just 'pain' or 'instability')",
+            "Whether home exercises were prescribed in addition to formal PT",
+            "Confirmation of provider network status with NPI number"
+          ]
         },
         messageToUseWhenInitiatingConversation: "Hello, this is HealthFirst Insurance calling regarding the prior authorization request for Jordan Alvarez. Is the PA Specialist available?"
       }

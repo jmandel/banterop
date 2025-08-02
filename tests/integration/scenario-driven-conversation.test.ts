@@ -152,19 +152,19 @@ class TerminalAwareMockLLMProvider extends LLMProvider {
   private turnCount: number = 0;
   private cannedResponses: string[] = [
     // Turn 1: Initial message
-    `<scratchpad>Starting the authorization process.</scratchpad>\n\`\`\`json\n{"name": "send_message_to_thread", "args": {"text": "Hello, I'm processing your authorization request."}}\n\`\`\``,
+    `<scratchpad>Starting the authorization process.</scratchpad>\n\`\`\`json\n{"name": "send_message_to_agent_conversation", "args": {"text": "Hello, I'm processing your authorization request."}}\n\`\`\``,
     
-    // Turn 2: Check something
-    `<scratchpad>Let me verify the patient information.</scratchpad>\n\`\`\`json\n{"name": "check_patient_eligibility", "args": {"patientId": "test-123"}}\n\`\`\``,
+    // Turn 2: Look up patient's clinical notes
+    `<scratchpad>Let me search for the patient's clinical notes.</scratchpad>\n\`\`\`json\n{"name": "search_ehr_clinical_notes", "args": {"dateRange": "2024-06-01 to 2024-07-01", "searchTerms": "knee injury"}}\n\`\`\``,
     
-    // Turn 3: Another check
-    `<scratchpad>Checking authorization requirements.</scratchpad>\n\`\`\`json\n{"name": "verify_coverage", "args": {"type": "MRI"}}\n\`\`\``,
+    // Turn 3: Get therapy documentation
+    `<scratchpad>Checking therapy documentation.</scratchpad>\n\`\`\`json\n{"name": "get_therapy_documentation", "args": {"therapyType": "physical therapy", "dateRange": "2024-06-01 to 2024-07-01"}}\n\`\`\``,
     
     // Turn 4: Send update
-    `<scratchpad>Providing status update.</scratchpad>\n\`\`\`json\n{"name": "send_message_to_thread", "args": {"text": "Your authorization is being processed."}}\n\`\`\``,
+    `<scratchpad>Providing status update.</scratchpad>\n\`\`\`json\n{"name": "send_message_to_agent_conversation", "args": {"text": "Your authorization is being processed."}}\n\`\`\``,
     
     // Turn 5+: Terminal tool to end conversation
-    `<scratchpad>Authorization complete, approving request.</scratchpad>\n\`\`\`json\n{"name": "mri_authorization_Success", "args": {"authId": "AUTH-123"}}\n\`\`\``
+    `<scratchpad>Authorization complete, approving request.</scratchpad>\n\`\`\`json\n{"name": "mri_authorization_Success", "args": {"reason": "Conservative therapy requirements met", "authNumber": "AUTH-123", "validityPeriod": "60 days"}}\n\`\`\``
   ];
 
   constructor() {
@@ -178,7 +178,56 @@ class TerminalAwareMockLLMProvider extends LLMProvider {
   async generateContent(request: LLMRequest): Promise<LLMResponse> {
     this.lastPrompt = request.messages[0].content;
     
-    // Get the canned response for this turn
+    // Check if this is an Oracle prompt (contains "<YOUR_TASK>")
+    if (request.messages[0].content.includes("<YOUR_TASK>")) {
+      // This is an Oracle tool synthesis call - return a proper Oracle response
+      const oracleResponses: Record<string, any> = {
+        "send_message_to_agent_conversation": {
+          reasoning: "Creating message turn ID for thread communication.",
+          output: "turn-" + Date.now()
+        },
+        "check_patient_eligibility": {
+          reasoning: "Patient is eligible for services under their PPO plan.",
+          output: { eligible: true, patientId: "test-123", planType: "PPO" }
+        },
+        "verify_coverage": {
+          reasoning: "MRI is covered with prior authorization requirement.",
+          output: { covered: true, requiresPriorAuth: true, copay: "20%" }
+        },
+        "search_ehr_clinical_notes": {
+          reasoning: "Returning clinical notes from the patient's knee injury treatment.",
+          output: { notes: "Patient has persistent knee instability after 16 days of conservative therapy." }
+        },
+        "get_therapy_documentation": {
+          reasoning: "Returning PT documentation showing 16 days of conservative therapy.",
+          output: { 
+            sessions: 12, 
+            startDate: "2024-06-15", 
+            endDate: "2024-06-27", 
+            notes: "Persistent anterior instability with functional activities" 
+          }
+        },
+        "mri_authorization_Success": {
+          reasoning: "Authorization approved based on meeting conservative therapy requirements.",
+          output: { authNumber: "AUTH-123", status: "approved", validity: "60 days" }
+        }
+      };
+      
+      // Extract tool name from the prompt
+      const toolNameMatch = request.messages[0].content.match(/<TOOL_NAME>([^<]+)<\/TOOL_NAME>/);
+      const toolName = toolNameMatch ? toolNameMatch[1] : "unknown";
+      
+      const response = oracleResponses[toolName] || {
+        reasoning: "Executing the requested tool operation.",
+        output: { success: true, message: `Tool ${toolName} executed successfully.` }
+      };
+      
+      return {
+        content: `\`\`\`json\n${JSON.stringify(response, null, 2)}\n\`\`\``
+      };
+    }
+    
+    // This is a regular agent prompt - return a canned agent response
     const responseContent = this.cannedResponses[this.turnCount] || this.cannedResponses[this.cannedResponses.length - 1];
     
     // Check if this response contains a terminal tool

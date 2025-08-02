@@ -1,9 +1,11 @@
 import { LLMProvider, LLMProviderConfig } from '../types/llm.types.js';
 import { GoogleLLMProvider } from './providers/google.js';
+import { OpenRouterLLMProvider } from './providers/openrouter.js';
 
 // Registry of available providers
 export const LLM_PROVIDERS = {
   google: GoogleLLMProvider,
+  openrouter: OpenRouterLLMProvider,
   // Future providers can be added here:
   // openai: OpenAILLMProvider,
   // anthropic: AnthropicLLMProvider,
@@ -28,6 +30,10 @@ export function createGoogleProvider(apiKey?: string, model?: string): GoogleLLM
   return new GoogleLLMProvider({ apiKey, model });
 }
 
+export function createOpenRouterProvider(apiKey?: string, model?: string): OpenRouterLLMProvider {
+  return new OpenRouterLLMProvider({ apiKey, model });
+}
+
 // Auto-detect and create provider based on available API keys
 
 // Get information about all available providers
@@ -40,7 +46,12 @@ export function getAvailableProviders(): Array<{
     {
       name: 'google',
       description: 'Google Gemini models via @google/genai',
-      models: ['gemini-2.5-flash-lite', 'gemini-2.0-flash-exp', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.0-pro']
+      models: ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro']
+    },
+    {
+      name: 'openrouter',
+      description: 'OpenRouter multi-model gateway via OpenAI SDK',
+      models: ['openrouter/horizon-beta']
     },
     // Add other providers here as they're implemented
   ];
@@ -49,6 +60,7 @@ export function getAvailableProviders(): Array<{
 // Utility to check which providers can be initialized with given config
 export async function checkProviderAvailability(config: {
   googleApiKey?: string;
+  openrouterApiKey?: string;
   // Add other provider keys as needed
 }): Promise<Array<{ provider: SupportedProvider; available: boolean; error?: string }>> {
   const results = [];
@@ -56,10 +68,22 @@ export async function checkProviderAvailability(config: {
   // Check Google provider
   try {
     const provider = createGoogleProvider(config.googleApiKey);
-    results.push({ provider: 'google' as const });
+    results.push({ provider: 'google' as const, available: true });
   } catch (error) {
     results.push({ 
       provider: 'google' as const, 
+      available: false, 
+      error: error instanceof Error ? error.message : 'Unknown error' 
+    });
+  }
+  
+  // Check OpenRouter provider
+  try {
+    const provider = createOpenRouterProvider(config.openrouterApiKey);
+    results.push({ provider: 'openrouter' as const, available: true });
+  } catch (error) {
+    results.push({ 
+      provider: 'openrouter' as const, 
       available: false, 
       error: error instanceof Error ? error.message : 'Unknown error' 
     });
