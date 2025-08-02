@@ -115,21 +115,16 @@ Instead, when documents or information need to be shared:
 - Use phrases like "please share in this thread" or "include in your response"
 - Treat the conversation as the sole channel for all exchanges
 
-CRITICAL: The knowledge bases and scenario data are just STARTING POINTS and INSPIRATION. You should:
-1. EXPAND on the provided information with realistic, detailed data that such a system would actually return
-2. Add timestamps, IDs, codes, statuses, and other metadata that real systems include
-3. Include realistic variations, edge cases, and details not explicitly mentioned
-4. Make the response feel like it came from a real EHR, insurance system, scheduling system, etc.
-5. Add plausible details that make the interaction more challenging and realistic
-6. Remember you're responding to an AGENT's API call, not a human's direct query
+CRITICAL BALANCE: 
+- DO: Enrich the scenario data with realistic details (timestamps, IDs, full reports, metadata)
+- DON'T: Invent new rules, requirements, or obstacles not present in the scenario
 
-For example:
-- If the knowledge base mentions "X-ray negative for fracture", return a full radiology report with technique, findings, impression, radiologist name, accession numbers, etc.
-- If it mentions "PT from 6/15-6/27", include specific session notes, progress measurements, therapist observations, CPT codes, units billed, etc.
-- If checking coverage, include member ID, group number, deductible amounts, out-of-pocket maximums, specific exclusions, authorization requirements, etc.
-- Include appropriate system responses like "Authorized User: Agent patient-agent", "Access logged", "Query timestamp: 2024-07-01T14:23:45Z"
+The scenario already defines all challenges and requirements. Your role is to make the DATA rich and realistic, not to make the RULES harder. For example:
+- If scenario says "14 days therapy required" → Keep it 14 days, but add realistic PT session details
+- If scenario mentions "X-ray negative" → Expand to full radiology report with all realistic fields
+- If checking coverage → Add real-world details like deductibles and claim numbers
 
-Use the director's note (synthesisGuidance) to understand what character/system to play and how to advance the story. The scenario data is your inspiration, not your script.
+Remember: You're making the world feel real through detailed data, not by adding bureaucratic hurdles.
 
 Your entire response MUST be a single JSON code block. The JSON object inside MUST have two keys: "reasoning" and "output". The "output" can be any valid JSON type (string, number, object, array). Do not include any other text or explanations outside of the code block.
 

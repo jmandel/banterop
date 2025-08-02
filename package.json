@@ -7,6 +7,7 @@
     "//--- DEVELOPMENT ---": "",
     "dev:backend": "bun --watch src/backend/index.ts",
     "dev:frontend": "bun --port 3000 src/frontend/trace-viewer/index.html src/frontend/external-executor/index.html src/frontend/**/*.html",
+    "build:css": "bunx tailwindcss -i ./src/frontend/external-executor/styles.css -o ./src/frontend/external-executor/styles.compiled.css --watch",
     "//--- PRODUCTION ---": "",
     "build": "bun build ./src/frontend/**/*.tsx --outdir ./dist --target browser",
     "start": "NODE_ENV=production bun src/backend/index.ts",
@@ -18,15 +19,22 @@
     "typecheck:tests": "tsc --project tsconfig.tests.json"
   },
   "dependencies": {
+    "@types/marked": "^6.0.0",
     "events": "^3.3.0",
     "hono": "^4.8.9",
-    "uuid": "^11.1.0"
+    "marked": "^16.1.1",
+    "openai": "^5.11.0",
+    "uuid": "^11.1.0",
+    "zustand": "^5.0.7"
   },
   "devDependencies": {
     "@types/bun": "^1.2.19",
     "@types/node": "^24.1.0",
     "@types/uuid": "^10.0.0",
-    "bun-types": "^1.2.19"
+    "autoprefixer": "^10.4.21",
+    "bun-types": "^1.2.19",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.11"
   },
   "peerDependencies": {
     "typescript": "^5.8.3"
