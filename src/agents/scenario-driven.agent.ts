@@ -525,9 +525,20 @@ Your response MUST follow this EXACT format:
         console.error('Stack trace:', error.stack);
         throw error;
       }
-      const queryId = await this.client.createUserQuery(text);
-      console.log(`${this.agentId.id} created user query: ${queryId}`);
-      // Turn remains open, waiting for user response
+      
+      // Add tool call trace BEFORE waiting
+      const toolCallEntry = await this.addToolCall(this.currentTurnId, toolCall.name, toolCall.args);
+      currentTurnTrace.push(toolCallEntry);
+      
+      // Query the user and wait for response
+      const userResponse = await this.queryUser(text);
+      console.log(`${this.agentId.id} received user response: ${userResponse}`);
+      
+      // Add tool result trace AFTER getting the response
+      const toolResultEntry = await this.addToolResult(this.currentTurnId, toolCallEntry.toolCallId, userResponse);
+      currentTurnTrace.push(toolResultEntry);
+      
+      // Turn remains open, agent can continue processing
       return {completedTurn: false};
     }
     

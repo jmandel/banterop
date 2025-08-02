@@ -66,6 +66,59 @@ let cannedDiscussion = [
   }
 ]
 
+// Canned discussion with user query support
+let cannedDiscussionWithQuery = [
+  {
+    agentId: "patient-agent",
+    thought: "I should introduce myself and request MRI authorization",
+    content: "Hello, I need authorization for a knee MRI for my patient John Smith."
+  },
+  {
+    agentId: "insurance-auth-specialist",
+    thought: "I need more information about the request",
+    content: "I can help with that. What is the reason for the MRI request?"
+  },
+  {
+    agentId: "patient-agent",
+    thought: "I should provide the clinical reason",
+    content: "The patient has been experiencing chronic knee pain for several weeks following a sports injury."
+  },
+  {
+    agentId: "insurance-auth-specialist",
+    thought: "I need to look up the patient in our system",
+    tool: {name: "lookup", args: {name: "John Smith"}},
+    toolResponse: "John Smith is member 124214, case file 623"
+  },
+  {
+    agentId: "insurance-auth-specialist",
+    thought: "I need the specific date of injury for the authorization",
+    content: "I found the patient's record. However, I need the specific date of the initial injury to process this authorization."
+  },
+  {
+    agentId: "patient-agent",
+    thought: "I don't have the exact injury date in my records. I need to ask my principal for this information.",
+    tool: {name: "send_message_to_principal", args: {text: "What was the date of John Smith's initial knee injury?"}},
+    toolResponse: "The initial injury occurred on June 1st, 2024."
+  },
+  {
+    agentId: "patient-agent",
+    thought: "Now I have the injury date from my principal, I can provide it to the insurance specialist",
+    content: "Thank you for waiting. The initial injury occurred on June 1st, 2024."
+  },
+  {
+    agentId: "insurance-auth-specialist",
+    thought: "Now I have all the information I need. Let me check their case file",
+    tool: {name: "check_casefile", args: {file_id: "623"}},
+    toolResponse: "In good standing, eligible for MRI authorization"
+  },
+  {
+    agentId: "insurance-auth-specialist",
+    thought: "Everything looks good, I'll approve the MRI",
+    tool: {name: "mri_authorization_Success", args: {status: "Approved", injury_date: "2024-06-01"}},
+    toolResponse: "MRI Authorization completed, authz ID 17298"
+  }
+]
+
 let cannedIndex = 0;
 
 class MockLLMProvider extends LLMProvider {
@@ -80,29 +133,31 @@ class MockLLMProvider extends LLMProvider {
 
   async generateResponse(request: LLMRequest): Promise<LLMResponse> {
     // Simple mock response that alternates between sending a message and ending
-    console.log("Mock llm", "req", request.messages[0].content, "discussion itme", cannedDiscussion[cannedIndex])
+    console.log("Mock llm", "req", request.messages[0].content, "discussion item", cannedDiscussionWithQuery[cannedIndex])
     await new Promise<void>((resolve) => setTimeout(() => {
       resolve()
     }, globalThis.playbackSpeed))
 
-    let response = cannedDiscussion[cannedIndex];
+    let response = cannedDiscussionWithQuery[cannedIndex];
     if (!response) {
       return {content: ""}
     }
 
-    if (!response.tool) {
-      console.log("Increment tool from", cannedDiscussion[cannedIndex], cannedIndex)
+    // Advance index for content messages and send_message_to_principal
+    // Don't advance for other tools (we need to read the tool response next)
+    if (!response.tool || response.tool.name === 'send_message_to_principal') {
+      console.log("Increment index from", cannedDiscussionWithQuery[cannedIndex], cannedIndex)
       cannedIndex++;
     }
 
     if (response.content) {
-      return {content: `<scratchpad>${response.thought}</scratchpad>\n\`\`\`json${JSON.stringify({name: "send_message_to_thread", args: {text: response.content}})}\n\`\`\``}
+      return {content: `<scratchpad>${response.thought}</scratchpad>\n\`\`\`json\n${JSON.stringify({name: "send_message_to_thread", args: {text: response.content}})}\n\`\`\``}
     }
 
     if (response.tool) {
-      // don't advance index so the tool response reads the right value
+      // don't advance index so the tool response reads the right value (except for send_message_to_principal which we already advanced)
       return {
-        content: `<scratchpad>${response.thought}</scratchpad>\n\`\`\`${JSON.stringify(response.tool)}\n\`\`\``
+        content: `<scratchpad>${response.thought}</scratchpad>\n\`\`\`json\n${JSON.stringify(response.tool)}\n\`\`\``
       } 
     }
     
@@ -135,8 +190,12 @@ class MockToolSynthesisService extends ToolSynthesisService {
   }
 
   override async synthesizeToolResult(toolName: string, parameters: any, toolDefinition?: Tool): Promise<any> {
-    console.log("Suynthsze", toolName, cannedIndex, cannedDiscussion[cannedIndex])
-    return cannedDiscussion[cannedIndex++].toolResponse
+    console.log("Synthesize", toolName, cannedIndex, cannedDiscussionWithQuery[cannedIndex])
+    // Don't synthesize send_message_to_principal - it should be handled by the agent itself
+    if (toolName === 'send_message_to_principal') {
+      throw new Error('send_message_to_principal should be handled by the agent, not synthesized');
+    }
+    return cannedDiscussionWithQuery[cannedIndex++].toolResponse
   }
 }
 
@@ -151,12 +210,20 @@ interface LogEntry {
   timestamp: number;
 }
 
+interface OutstandingQuery {
+  queryId: string;
+  agentId: string;
+  question: string;
+  suggestedResponse: string;
+  currentResponse: string; // User's editable text
+}
+
 function ExternalExecutorApp() {
   const [isLoading, setIsLoading] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [agents, setAgents] = useState<ScenarioDrivenAgent[]>([]);
   const [conversationId, setConversationId] = useState<string>('');
-  const [promptedQueries, setPromptedQueries] = useState<Set<string>>(new Set());
+  const [outstandingQueries, setOutstandingQueries] = useState<Map<string, OutstandingQuery>>(new Map());
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(500); // Default 5 seconds
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
 
@@ -201,45 +268,11 @@ function ExternalExecutorApp() {
     }
   };
 
-  const handleUserQuery = async (query: any) => {
-    // Prevent duplicate prompts
-    if (promptedQueries.has(query.queryId)) {
-      return;
-    }
-    
-    setPromptedQueries(prev => new Set(prev).add(query.queryId));
-    
-    try {
-      addLog(`User query received: ${query.question}`, 'info');
-      
-      // Use browser's prompt dialog
-      const userResponse = prompt(`Agent Question:\n\n${query.question}\n\nPlease provide your response:`);
-      
-      if (userResponse !== null) {
-        // Send response back to the orchestrator via REST API
-        const response = await fetch(`http://localhost:3001/api/queries/${query.queryId}/respond`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ response: userResponse })
-        });
-        
-        if (response.ok) {
-          addLog(`Responded to query: "${userResponse}"`, 'success');
-        } else {
-          addLog(`Failed to send response: ${response.statusText}`, 'error');
-        }
-      } else {
-        addLog('User cancelled query response', 'info');
-      }
-    } catch (error: any) {
-      addLog(`Error handling user query: ${error.message}`, 'error');
-    }
-  };
 
   const runDemo = async () => {
     setIsLoading(true);
     setLogs([]);
-    setPromptedQueries(new Set());
+    setOutstandingQueries(new Map());
     addLog('Starting external agent demo...');
     
     const KNEE_MRI_SCENARIO_ID = 'scen_knee_mri_01';
@@ -334,7 +367,28 @@ function ExternalExecutorApp() {
       [patientClient, supplierClient].forEach(client => {
         client.on('event', (event: ConversationEvent) => {
           if (event.type === 'user_query_created') {
-            handleUserQuery(event.data.query);
+            const query = (event as any).data.query;
+            addLog(`User query received: ${query.question}`, 'info');
+            
+            // Find the suggested response from the canned discussion
+            // Since we advanced the index, look at cannedIndex - 1
+            const previousStep = cannedDiscussionWithQuery[cannedIndex - 1];
+            const suggestedResponse = (previousStep?.tool?.name === "send_message_to_principal" && 
+                                      previousStep?.tool?.args?.text === query.question) 
+                                      ? previousStep.toolResponse 
+                                      : '';
+            
+            setOutstandingQueries(prev => {
+              const newQueries = new Map(prev);
+              newQueries.set(query.queryId, {
+                queryId: query.queryId,
+                agentId: query.agentId,
+                question: query.question,
+                suggestedResponse: suggestedResponse,
+                currentResponse: suggestedResponse, // Pre-fill the input
+              });
+              return newQueries;
+            });
           }
           if (event.type === 'conversation_ended') {
             addLog('Conversation has ended', 'success');
@@ -494,6 +548,98 @@ function ExternalExecutorApp() {
               )}
             </div>
           </div>
+
+          {/* User Query Prompts */}
+          {outstandingQueries.size > 0 && (
+            <div className="p-6 border-b border-gray-200 bg-yellow-50">
+              <h2 className="text-lg font-semibold text-yellow-800 mb-4">User Input Required</h2>
+              <div className="space-y-4">
+                {Array.from(outstandingQueries.values()).map(query => (
+                  <div key={query.queryId} className="bg-white rounded-lg border border-yellow-200 p-4 shadow-sm">
+                    <div className="mb-3">
+                      <span className="text-sm text-gray-600">Agent Question:</span>
+                      <p className="text-gray-900 font-medium mt-1">{query.question}</p>
+                    </div>
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        value={query.currentResponse}
+                        onChange={(e) => {
+                          setOutstandingQueries(prev => {
+                            const newQueries = new Map(prev);
+                            const existingQuery = newQueries.get(query.queryId);
+                            if (existingQuery) {
+                              newQueries.set(query.queryId, {
+                                ...existingQuery,
+                                currentResponse: e.target.value
+                              });
+                            }
+                            return newQueries;
+                          });
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Enter your response..."
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={async () => {
+                            try {
+                              // Send response to agent via client
+                              const response = await fetch(`http://localhost:3001/api/queries/${query.queryId}/respond`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ response: query.currentResponse })
+                              });
+                              
+                              if (response.ok) {
+                                addLog(`Responded to query: "${query.currentResponse}"`, 'success');
+                                // Remove the query from outstanding list
+                                setOutstandingQueries(prev => {
+                                  const newQueries = new Map(prev);
+                                  newQueries.delete(query.queryId);
+                                  return newQueries;
+                                });
+                              } else {
+                                addLog(`Failed to send response: ${response.statusText}`, 'error');
+                              }
+                            } catch (error: any) {
+                              addLog(`Error sending response: ${error.message}`, 'error');
+                            }
+                          }}
+                          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                        >
+                          Send Response
+                        </button>
+                        <button
+                          onClick={() => {
+                            setOutstandingQueries(prev => {
+                              const newQueries = new Map(prev);
+                              const existingQuery = newQueries.get(query.queryId);
+                              if (existingQuery) {
+                                newQueries.set(query.queryId, {
+                                  ...existingQuery,
+                                  currentResponse: existingQuery.suggestedResponse
+                                });
+                              }
+                              return newQueries;
+                            });
+                          }}
+                          className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors"
+                        >
+                          Reset to Suggestion
+                        </button>
+                      </div>
+                      {query.suggestedResponse && (
+                        <p className="text-xs text-gray-500 italic">
+                          Suggested: {query.suggestedResponse}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Log Panel */}
           <div className="p-6">
