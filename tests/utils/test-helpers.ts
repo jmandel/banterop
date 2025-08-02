@@ -14,9 +14,6 @@ import {
 
 // Mock LLM Provider for testing
 export class MockLLMProvider extends LLMProvider {
-  generateWithTools?(request: LLMRequest, tools: LLMTool[], toolHandler: (call: LLMToolCall) => Promise<LLMToolResponse>): Promise<LLMResponse> {
-    throw new Error('Method not implemented.');
-  }
   constructor() {
     super({ provider: 'google', apiKey: 'test-key' });
   }
@@ -32,11 +29,6 @@ export class MockLLMProvider extends LLMProvider {
       finishReason: 'stop'
     };
   }
-
-  async isAvailable(): Promise<boolean> {
-    return true;
-  }
-
   getSupportedModels(): string[] {
     return ['mock-model'];
   }

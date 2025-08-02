@@ -50,22 +50,28 @@ export class ScenarioBuilderLLM {
     };
     
     try {
-      if (this.llm.generateWithTools) {
-        const response = await this.llm.generateWithTools({
-          messages
-        }, BUILDER_TOOLS, toolHandler);
-        return {
-          message: resultMessage || response.content,
-          patches: appliedPatches.length > 0 ? appliedPatches : undefined,
-          replaceEntireScenario: replacementScenario
-        };
-      } else {
-        // Fallback to simple generation
-        const response = await this.llm.generateResponse({ messages });
-        return {
-          message: response.content
-        };
+      // Generate response - the LLM will include tool calls in the response content
+      const response = await this.llm.generateResponse({ messages });
+      
+      // Parse tool calls from the response if any
+      const toolCallMatch = response.content.match(/```json\s*(\{[\s\S]*?\})\s*```/);
+      if (toolCallMatch) {
+        try {
+          const toolCall = JSON.parse(toolCallMatch[1]);
+          // Execute the tool if it's one of our builder tools
+          if (BUILDER_TOOLS.some(t => t.name === toolCall.name)) {
+            await toolHandler(toolCall);
+          }
+        } catch (parseError) {
+          // Ignore parsing errors, treat as regular message
+        }
       }
+      
+      return {
+        message: resultMessage || response.content,
+        patches: appliedPatches.length > 0 ? appliedPatches : undefined,
+        replaceEntireScenario: replacementScenario
+      };
     } catch (error) {
       // Only log in non-test environment
       console.error('Scenario builder LLM error:', error);

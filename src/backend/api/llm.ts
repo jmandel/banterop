@@ -26,14 +26,6 @@ router.post('/generate', async (c) => {
     if (!messages || !Array.isArray(messages)) {
       return c.json(createResponse(false, undefined, 'Messages array is required'), 400);
     }
-    
-    // --- REMOVED ---
-    // The block that created a temporary provider with a client key is gone.
-    // We now ALWAYS use the injected `llmProvider`.
-    
-    if (!(await llmProvider.isAvailable())) {
-      return c.json(createResponse(false, undefined, 'The server\'s LLM provider is not configured.'), 400);
-    }
 
     const response = await llmProvider.generateResponse({
       messages,
@@ -80,11 +72,6 @@ router.post('/scenario-chat/:scenarioId', async (c) => {
       modified: dbScenario.modified
     };
     
-    // Check the availability of the single, injected provider.
-    if (!(await llmProvider.isAvailable())) {
-      return c.json(createResponse(false, undefined, 'The server\'s LLM provider is not configured.'), 500);
-    }
-    
     // The ScenarioBuilderLLM is created with the application's default provider.
     const scenarioLLM = new ScenarioBuilderLLM(llmProvider);
     
@@ -125,11 +112,8 @@ router.post('/scenario-chat/:scenarioId', async (c) => {
 router.get('/config', async (c) => {
   try {
     const providers = getAvailableProviders();
-    // This check is now simpler and more direct.
-    const isAvailable = await llmProvider.isAvailable();
     
     return c.json(createResponse(true, {
-      serverApiKeyConfigured: isAvailable,
       providers,
       tools: [
         'send_message_to_user',

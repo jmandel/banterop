@@ -142,155 +142,63 @@ class DebugLogger {
 // =================================================================
 
 /**
- * A mock LLM provider that understands the scenario context to drive the conversation.
- * 
- * Key Behavior:
- * - It parses the available tools from the agent's prompt.
- * - On each call, it has a 10% chance of selecting a "terminal" tool 
- *   (e.g., one ending in 'Success', 'Failure', 'Denial').
- * - Otherwise, it picks a non-terminal tool to continue the conversation.
- * - This simulates a real conversation that progresses and eventually concludes.
+ * Simple canned LLM provider for testing.
+ * Returns pre-scripted responses that exercise the conversation flow
+ * and eventually uses a terminal tool to end the conversation.
  */
 class TerminalAwareMockLLMProvider extends LLMProvider {
-  generateWithTools?(request: LLMRequest, tools: LLMTool[], toolHandler: (call: LLMToolCall) => Promise<LLMToolResponse>): Promise<LLMResponse> {
-    throw new Error('Method not implemented.');
-  }
   public lastPrompt: string = '';
   public terminalToolsUsed: string[] = [];
   private turnCount: number = 0;
-  private debugLogger: DebugLogger;
+  private cannedResponses: string[] = [
+    // Turn 1: Initial message
+    `<scratchpad>Starting the authorization process.</scratchpad>\n\`\`\`json\n{"name": "send_message_to_thread", "args": {"text": "Hello, I'm processing your authorization request."}}\n\`\`\``,
+    
+    // Turn 2: Check something
+    `<scratchpad>Let me verify the patient information.</scratchpad>\n\`\`\`json\n{"name": "check_patient_eligibility", "args": {"patientId": "test-123"}}\n\`\`\``,
+    
+    // Turn 3: Another check
+    `<scratchpad>Checking authorization requirements.</scratchpad>\n\`\`\`json\n{"name": "verify_coverage", "args": {"type": "MRI"}}\n\`\`\``,
+    
+    // Turn 4: Send update
+    `<scratchpad>Providing status update.</scratchpad>\n\`\`\`json\n{"name": "send_message_to_thread", "args": {"text": "Your authorization is being processed."}}\n\`\`\``,
+    
+    // Turn 5+: Terminal tool to end conversation
+    `<scratchpad>Authorization complete, approving request.</scratchpad>\n\`\`\`json\n{"name": "mri_authorization_Success", "args": {"authId": "AUTH-123"}}\n\`\`\``
+  ];
 
   constructor() {
     super({ provider: 'google', apiKey: 'mock-key' });
-    this.debugLogger = DebugLogger.getInstance();
+  }
+
+  async generateResponse(request: LLMRequest): Promise<LLMResponse> {
+    return this.generateContent(request);
   }
 
   async generateContent(request: LLMRequest): Promise<LLMResponse> {
-    await this.debugLogger.logLLMRequest(request);
+    this.lastPrompt = request.messages[0].content;
     
-    const prompt = request.messages[0].content;
-    this.lastPrompt = prompt;
+    // Get the canned response for this turn
+    const responseContent = this.cannedResponses[this.turnCount] || this.cannedResponses[this.cannedResponses.length - 1];
+    
+    // Check if this response contains a terminal tool
+    const toolMatch = responseContent.match(/"name":\s*"([^"]+)"/);
+    if (toolMatch) {
+      const toolName = toolMatch[1];
+      if (/Success$|Approval$|Failure$|Denial$|NoSlots$/.test(toolName)) {
+        this.terminalToolsUsed.push(toolName);
+      }
+    }
+    
     this.turnCount++;
-
-    // Parse available tools from the prompt
-    const availableTools = this.parseToolsFromPrompt(prompt);
-    console.log(`[MockLLM] Turn ${this.turnCount} - Found tools:`, availableTools);
     
-    const terminalTools = availableTools.filter(t => 
-      /Success$|Approval$|Failure$|Denial$|NoSlots$/.test(t)
-    );
-    console.log(`[MockLLM] Terminal tools:`, terminalTools);
-    
-    const nonTerminalTools = availableTools.filter(t => 
-      !terminalTools.includes(t) && 
-      t !== 'no_response_needed' && 
-      t !== 'send_message_to_principal'  // Avoid user queries in tests
-    );
-    console.log(`[MockLLM] Non-terminal tools:`, nonTerminalTools);
-
-    let chosenTool: string;
-    // Make termination more deterministic - terminate after 5 turns
-    const shouldTerminate = this.turnCount >= 5 || Math.random() < 0.2;
-
-    if (shouldTerminate && terminalTools.length > 0) {
-      // Pick a random terminal tool
-      chosenTool = terminalTools[Math.floor(Math.random() * terminalTools.length)];
-      this.terminalToolsUsed.push(chosenTool);
-    } else if (nonTerminalTools.length > 0) {
-      // Pick a random non-terminal tool
-      chosenTool = nonTerminalTools[Math.floor(Math.random() * nonTerminalTools.length)];
-    } else {
-      // If no non-terminal tools are available, force termination with a terminal tool
-      chosenTool = terminalTools.length > 0 ? terminalTools[0] : 'send_message_to_thread';
-    }
-
-    // Generate appropriate parameters based on the chosen tool
-    let toolArgs: any;
-    if (chosenTool === 'send_message_to_thread') {
-      toolArgs = { "text": "I'm proceeding with the authorization process. Please let me know if you need anything." };
-    } else if (chosenTool === 'send_message_to_principal') {
-      toolArgs = { "text": "Do you have any additional documentation for this authorization request?" };
-    } else if (chosenTool === 'no_response_needed') {
-      toolArgs = {};
-    } else {
-      // For domain-specific tools, use mock parameters
-      toolArgs = { "mockParameter": "mockValue" };
-    }
-
-    // Construct a valid LLM response with reasoning and a single tool call in the new XML format
-    const responseContent = `<scratchpad>
-Mock LLM reasoning: The random number was ${shouldTerminate ? '< 0.1' : '>= 0.1'}. Based on the conversation context and available tools, I will now call the tool '${chosenTool}' to ${shouldTerminate ? 'conclude this authorization process' : 'continue the authorization workflow'}.
-</scratchpad>
-
-\`\`\`json
-{
-  "name": "${chosenTool}",
-  "args": ${JSON.stringify(toolArgs)}
-}
-\`\`\``;
-
-    const response: LLMResponse = {
-      content: responseContent,
+    return {
+      content: responseContent
     };
-    
-    // Log debug information about tool selection
-    await this.debugLogger.log('tool-selection', {
-      turnCount: this.turnCount,
-      availableTools,
-      terminalTools,
-      nonTerminalTools,
-      shouldTerminate,
-      chosenTool,
-      toolArgs,
-      terminalToolsUsed: this.terminalToolsUsed
-    });
-    
-    await this.debugLogger.logLLMResponse(response);
-    
-    return response;
   }
   
-  // Helper to extract tool names from the agent's prompt (supports both old and new XML format)
-  private parseToolsFromPrompt(prompt: string): string[] {
-    // Try new XML format first - look for <AVAILABLE_TOOLS> tag
-    const xmlToolSectionMatch = prompt.match(/<AVAILABLE_TOOLS>\s*([\s\S]*?)\s*<\/AVAILABLE_TOOLS>/);
-    if (xmlToolSectionMatch && xmlToolSectionMatch[1]) {
-      const toolSection = xmlToolSectionMatch[1];
-      // Log first 500 chars of tool section for debugging
-      console.log(`[MockLLM] Tool section preview: ${toolSection.substring(0, 500)}...`);
-      
-      // Updated regex to match the format: • toolName(params) [TERMINAL]
-      const toolNameRegex = /•\s*([^(]+)\(/g;
-      const tools = [];
-      let match;
-      while ((match = toolNameRegex.exec(toolSection)) !== null) {
-        tools.push(match[1].trim());
-      }
-      if (tools.length > 0) {
-        console.log(`[MockLLM] Successfully parsed ${tools.length} tools from XML format`);
-        return tools;
-      }
-    }
-    
-    // Fallback to old format
-    const toolSectionMatch = prompt.match(/AVAILABLE TOOLS:\s*([\s\S]*?)\s*INSTRUCTIONS:/);
-    if (!toolSectionMatch || !toolSectionMatch[1]) {
-      return [];
-    }
-    const toolSection = toolSectionMatch[1];
-    const toolNameRegex = /-\s(.*?):/g;
-    const tools = [];
-    let match;
-    while ((match = toolNameRegex.exec(toolSection)) !== null) {
-      tools.push(match[1].trim());
-    }
-    return tools;
-  }
-  
-  async isAvailable(): Promise<boolean> { return true; }
-  getSupportedModels(): string[] { return ['mock-terminal-aware-model']; }
-  async generateResponse(request: LLMRequest): Promise<LLMResponse> {
-    return this.generateContent(request);
+  getSupportedModels(): string[] {
+    return ['mock-model'];
   }
 }
 

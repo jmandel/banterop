@@ -19,17 +19,11 @@ export class GoogleLLMProvider extends LLMProvider {
     }
   }
   
-  async isAvailable(): Promise<boolean> {
-    return this.client !== null;
-  }
-  
   getSupportedModels(): string[] {
     return [
       'gemini-2.5-flash-lite',
-      'gemini-2.0-flash-exp',
-      'gemini-1.5-flash',
-      'gemini-1.5-pro',
-      'gemini-1.0-pro'
+      'gemini-2.5-flash',
+      'gemini-2.5-pro',
     ];
   }
   
@@ -65,96 +59,6 @@ export class GoogleLLMProvider extends LLMProvider {
     } catch (error) {
       console.error('Google LLM generation error:', error);
       throw new Error(`Google LLM generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-  
-  async generateWithTools(
-    request: LLMRequest,
-    tools: LLMTool[],
-    toolHandler: (call: LLMToolCall) => Promise<LLMToolResponse>
-  ): Promise<LLMResponse> {
-    if (!this.client) {
-      throw new Error('Google AI client not initialized - API key required');
-    }
-    
-    try {
-      const contents = this.convertMessagesToGoogleFormat(request.messages);
-      const googleTools = this.convertToolsToGoogleFormat(tools);
-      
-      const response = await this.client.models.generateContent({
-        model: this.config.model || 'gemini-2.5-flash-lite',
-        contents: contents,
-        config: {
-          tools: googleTools
-        }
-      });
-      
-      // Check if there are function calls
-      const functionCalls = response.functionCalls;
-      if (functionCalls && functionCalls.length > 0) {
-        // Handle function calls
-        const toolResults = [];
-        
-        for (const call of functionCalls) {
-          try {
-            const toolResponse = await toolHandler({
-              name: call.name || '',
-              arguments: call.args || {}
-            });
-            
-            toolResults.push({
-              functionResponse: {
-                name: call.name || '',
-                response: { content: toolResponse.content }
-              }
-            });
-          } catch (error) {
-            toolResults.push({
-              functionResponse: {
-                name: call.name || '',
-                response: { error: error instanceof Error ? error.message : 'Tool execution failed' }
-              }
-            });
-          }
-        }
-        
-        // Generate final response with tool results
-        const baseContents = Array.isArray(contents) ? contents : [{ parts: [{ text: contents }] }];
-        const finalContents = [
-          ...baseContents,
-          { role: 'model', parts: [{ text: response.text || '' }] },
-          { role: 'user', parts: toolResults }
-        ];
-        
-        const finalResponse = await this.client.models.generateContent({
-          model: this.config.model || 'gemini-2.5-flash-lite',
-          contents: finalContents
-        });
-        
-        return {
-          content: finalResponse.text || '',
-          finishReason: 'stop',
-          usage: {
-            promptTokens: 0,
-            completionTokens: 0,
-            totalTokens: 0
-          }
-        };
-      }
-      
-      // No function calls, return regular response
-      return {
-        content: response.text || '',
-        finishReason: 'stop',
-        usage: {
-          promptTokens: 0,
-          completionTokens: 0,
-          totalTokens: 0
-        }
-      };
-    } catch (error) {
-      console.error('Google LLM with tools error:', error);
-      throw new Error(`Google LLM with tools failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
   
@@ -195,15 +99,5 @@ export class GoogleLLMProvider extends LLMProvider {
     }
     
     return contentArray;
-  }
-  
-  private convertToolsToGoogleFormat(tools: LLMTool[]) {
-    return [{
-      functionDeclarations: tools.map(tool => ({
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.inputSchema
-      }))
-    }];
   }
 }

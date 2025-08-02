@@ -56,13 +56,5 @@ export abstract class LLMProvider {
   
   abstract generateResponse(request: LLMRequest): Promise<LLMResponse>;
   
-  abstract generateWithTools?(
-    request: LLMRequest,
-    tools: LLMTool[],
-    toolHandler: (call: LLMToolCall) => Promise<LLMToolResponse>
-  ): Promise<LLMResponse>;
-  
-  abstract isAvailable(): Promise<boolean>;
-  
   abstract getSupportedModels(): string[];
 }

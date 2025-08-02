@@ -56,8 +56,7 @@ export async function checkProviderAvailability(config: {
   // Check Google provider
   try {
     const provider = createGoogleProvider(config.googleApiKey);
-    const available = await provider.isAvailable();
-    results.push({ provider: 'google' as const, available });
+    results.push({ provider: 'google' as const });
   } catch (error) {
     results.push({ 
       provider: 'google' as const, 

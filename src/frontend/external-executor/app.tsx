@@ -26,6 +26,54 @@ import { WebSocketJsonRpcClient } from '../../client/impl/websocket.client.js';
 // =============================================================================
 
 /**
+ * Browser-compatible LLM provider that calls the backend REST API
+ * This keeps the API key secure on the server while allowing browser agents to use real LLM
+ */
+class RemoteLLMProvider extends LLMProvider {
+  private baseUrl: string;
+  private model?: string;
+
+  constructor(baseUrl: string = 'http://localhost:3001', model?: string) {
+    super({ provider: 'remote', apiKey: 'not-needed', model } as LLMProviderConfig);
+    this.baseUrl = baseUrl;
+    this.model = model;
+  }
+
+
+  async generateResponse(request: LLMRequest): Promise<LLMResponse> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/llm/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...request,
+          model: this.model || request.model
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`LLM request failed: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || 'LLM generation failed');
+      }
+
+      return result.data;
+    } catch (error) {
+      console.error('Remote LLM error:', error);
+      throw error;
+    }
+  }
+
+
+  getSupportedModels(): string[] {
+    return ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+  }
+}
+
+/**
  * Browser-compatible mock LLM provider that provides predictable responses
  * for demo purposes. This replaces the Node.js LLMProvider.
  */
@@ -127,9 +175,6 @@ class MockLLMProvider extends LLMProvider {
     super(config as LLMProviderConfig);
   }
 
-  generateWithTools?(request, tools: LLMTool[], toolHandler: (call: LLMToolCall) => Promise<LLMToolResponse>): Promise<LLMResponse> {
-    return this.generateResponse(request)
-  }
 
   async generateResponse(request: LLMRequest): Promise<LLMResponse> {
     // Simple mock response that alternates between sending a message and ending
@@ -161,10 +206,6 @@ class MockLLMProvider extends LLMProvider {
       } 
     }
     
-  }
-
-  async isAvailable(): Promise<boolean> {
-    return true;
   }
 
   getSupportedModels(): string[] {
@@ -226,6 +267,21 @@ function ExternalExecutorApp() {
   const [outstandingQueries, setOutstandingQueries] = useState<Map<string, OutstandingQuery>>(new Map());
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(500); // Default 5 seconds
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
+  const [useMockLLM, setUseMockLLM] = useState<boolean>(true);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-2.5-flash-lite');
+  const [backendUrl, setBackendUrl] = useState<string>(() => {
+    // Load from localStorage or use default
+    const stored = localStorage.getItem('external-executor-backend-url');
+    // Validate that it's a proper URL
+    if (stored && stored.startsWith('http')) {
+      return stored;
+    }
+    return 'http://localhost:3001';
+  });
+  const [checkingConnection, setCheckingConnection] = useState<boolean>(true);
+  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [llmAvailable, setLlmAvailable] = useState<boolean>(false);
 
   globalThis.playbackSpeed = playbackSpeed
   
@@ -235,12 +291,85 @@ function ExternalExecutorApp() {
     setLogs(prev => [...prev, { message, type, timestamp: Date.now() }]);
   };
 
+  const checkLLMAvailability = async (url: string) => {
+    setCheckingConnection(true);
+    try {
+      // Simple fetch without extra headers
+      const response = await fetch(`${url}/api/llm/config`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        setIsConnected(true);
+        
+        // Check if any provider is configured
+        let anyProviderConfigured = false;
+        const models: string[] = [];
+        
+        if (result.data?.providers && Array.isArray(result.data.providers)) {
+          result.data.providers.forEach((provider: any) => {
+            // If a provider has models, it's configured
+            if (provider.models && provider.models.length > 0) {
+              anyProviderConfigured = true;
+              models.push(...provider.models);
+            }
+          });
+        }
+        
+        setLlmAvailable(anyProviderConfigured);
+        setAvailableModels(models);
+        
+        // Set default model if available
+        if (models.length > 0 && !models.includes(selectedModel)) {
+          setSelectedModel(models[0]);
+        }
+        
+        if (anyProviderConfigured) {
+          addLog('Backend connected with LLM provider(s) configured', 'success');
+        } else {
+          addLog('Backend connected but no LLM providers configured. Using mock responses.', 'info');
+        }
+      } else {
+        setIsConnected(false);
+        setLlmAvailable(false);
+        addLog('Backend connection failed', 'error');
+      }
+    } catch (error) {
+      console.error('Error checking LLM config:', error);
+      setIsConnected(false); // Cannot reach backend at all
+      setLlmAvailable(false);
+      setAvailableModels([]);
+      addLog(`Cannot connect to backend at ${url}: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+    } finally {
+      setCheckingConnection(false);
+    }
+  };
+
+  const handleBackendUrlChange = (newUrl: string) => {
+    setBackendUrl(newUrl);
+    // Only save valid URLs to localStorage
+    if (newUrl && newUrl.startsWith('http')) {
+      localStorage.setItem('external-executor-backend-url', newUrl);
+      // Re-check LLM availability with new URL
+      checkLLMAvailability(newUrl);
+    }
+  };
+
   // Auto-scroll to bottom when new logs are added
   useEffect(() => {
     if (autoScroll && logContainerRef.current) {
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
   }, [logs, autoScroll]);
+
+  // Check if LLM is available and fetch models on mount and when backend URL changes
+  useEffect(() => {
+    checkLLMAvailability(backendUrl);
+  }, [backendUrl]);
 
   const clearLogs = () => {
     setLogs([]);
@@ -280,7 +409,7 @@ function ExternalExecutorApp() {
     try {
       // Step 1: Fetch the scenario from the backend
       addLog('Fetching knee MRI scenario...');
-      const scenarioRes = await fetch(`http://localhost:3001/api/scenarios/${KNEE_MRI_SCENARIO_ID}`);
+      const scenarioRes = await fetch(`${backendUrl}/api/scenarios/${KNEE_MRI_SCENARIO_ID}`);
       
       if (!scenarioRes.ok) {
         throw new Error(`Failed to fetch scenario: ${scenarioRes.statusText}`);
@@ -292,7 +421,7 @@ function ExternalExecutorApp() {
 
       // Step 2: Create conversation with external management mode
       addLog('Creating external conversation...');
-      const createRes = await fetch('http://localhost:3001/api/conversations', {
+      const createRes = await fetch(`${backendUrl}/api/conversations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -324,14 +453,23 @@ function ExternalExecutorApp() {
       setConversationId(conversation.id);
       addLog(`External conversation created: ${conversation.id}`);
 
-      // Step 3: Create mock dependencies
-      const mockLlm = new MockLLMProvider();
-      const mockToolSynthesis = new MockToolSynthesisService(mockLlm);
+      // Step 3: Create dependencies based on selected LLM provider
+      const llmProvider = useMockLLM ? new MockLLMProvider() : new RemoteLLMProvider(backendUrl, selectedModel);
+      const toolSynthesis = new MockToolSynthesisService(llmProvider);
+      
+      if (!useMockLLM) {
+        addLog(`Using real LLM via backend API (Model: ${selectedModel})`);
+        // Reset canned index when using real LLM
+        cannedIndex = 0;
+      } else {
+        addLog('Using mock LLM with pre-scripted responses');
+      }
       
       // Step 4: Create WebSocket clients for each agent using the universal client
-      // We pass the browser's global WebSocket constructor for dependency injection
-      const patientClient = new WebSocketJsonRpcClient('ws://localhost:3001/api/ws');
-      const supplierClient = new WebSocketJsonRpcClient('ws://localhost:3001/api/ws');
+      // Convert HTTP URL to WebSocket URL
+      const wsUrl = backendUrl.replace(/^http/, 'ws');
+      const patientClient = new WebSocketJsonRpcClient(`${wsUrl}/api/ws`);
+      const supplierClient = new WebSocketJsonRpcClient(`${wsUrl}/api/ws`);
       
       // Step 5: Create real ScenarioDrivenAgent instances
       // Get the specific agent configs from the loaded scenario
@@ -345,8 +483,8 @@ function ExternalExecutorApp() {
         } as ScenarioDrivenAgentConfig,
         patientClient,
         scenarioConfig,           // Inject the fetched scenario JSON
-        mockLlm,                  // Inject the mock LLM
-        mockToolSynthesis         // Inject the mock Tool Synthesis Service
+        llmProvider,              // Inject the selected LLM provider
+        toolSynthesis             // Inject the Tool Synthesis Service
       );
       
       const supplierAgent = new ScenarioDrivenAgent(
@@ -357,8 +495,8 @@ function ExternalExecutorApp() {
         } as ScenarioDrivenAgentConfig,
         supplierClient,
         scenarioConfig,           // Inject the fetched scenario JSON
-        mockLlm,                  // Inject the other mock LLM
-        mockToolSynthesis         // Inject the same mock Tool Synthesis Service
+        llmProvider,              // Inject the selected LLM provider
+        toolSynthesis             // Inject the Tool Synthesis Service
       );
       
       addLog('Successfully instantiated REAL ScenarioDrivenAgent classes in the browser');
@@ -454,17 +592,56 @@ function ExternalExecutorApp() {
             </p>
           </div>
 
+          {/* Backend Configuration */}
+          <div className="p-6 border-b border-gray-200 bg-gray-50">
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">Backend Configuration</h2>
+            <div className="flex items-center gap-4">
+              <label htmlFor="backend-url" className="text-sm font-medium text-gray-700">
+                Backend URL:
+              </label>
+              <input
+                id="backend-url"
+                type="text"
+                value={backendUrl}
+                onChange={(e) => handleBackendUrlChange(e.target.value)}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="http://localhost:3001"
+              />
+              <div className="flex items-center gap-2">
+                {checkingConnection ? (
+                  <>
+                    <div className="w-3 h-3 rounded-full bg-yellow-500 animate-pulse" />
+                    <span className="text-sm text-gray-600">Checking...</span>
+                  </>
+                ) : (
+                  <>
+                    <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                    <span className="text-sm text-gray-600">
+                      {isConnected ? 'Connected' : 'Not Connected'}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+            {!isLoading && (
+              <p className="mt-2 text-xs text-gray-500">
+                URL for the backend API server. Changes are saved to localStorage.
+              </p>
+            )}
+          </div>
+
           {/* Instructions */}
           <div className="p-6 border-b border-gray-200 bg-yellow-50">
             <h2 className="text-lg font-semibold text-yellow-800 mb-2">Instructions</h2>
             <ol className="text-sm text-yellow-700 space-y-1">
-              <li>1. <strong>Open Trace Viewer:</strong> Open the Trace Viewer in another tab to monitor the conversation</li>
-              <li>2. <strong>Set Speed FIRST:</strong> Use the playback speed slider (50ms-10s) to set your preferred delay <em>before</em> starting</li>
-              <li>3. <strong>Run Demo:</strong> Click "Run External Agent Demo" to start the in-browser agents</li>
-              <li>4. <strong>Watch Interaction:</strong> Agents will communicate automatically with your pre-set delay</li>
-              <li>5. <strong>Answer Queries:</strong> When an agent asks a user question, a browser prompt will appear</li>
-              <li>6. <strong>Adjust During:</strong> You can still change speed while the demo runs if needed</li>
-              <li>7. <strong>Monitor Progress:</strong> Check the Trace Viewer for real-time conversation updates</li>
+              <li>1. <strong>Configure Backend:</strong> Set the backend URL above if not using default localhost:3001</li>
+              <li>2. <strong>Open Trace Viewer:</strong> Open the Trace Viewer in another tab to monitor the conversation</li>
+              <li>3. <strong>Set Speed FIRST:</strong> Use the playback speed slider (50ms-10s) to set your preferred delay <em>before</em> starting</li>
+              <li>4. <strong>Run Demo:</strong> Click "Run External Agent Demo" to start the in-browser agents</li>
+              <li>5. <strong>Watch Interaction:</strong> Agents will communicate automatically with your pre-set delay</li>
+              <li>6. <strong>Answer Queries:</strong> When an agent asks a user question, a browser prompt will appear</li>
+              <li>7. <strong>Adjust During:</strong> You can still change speed while the demo runs if needed</li>
+              <li>8. <strong>Monitor Progress:</strong> Check the Trace Viewer for real-time conversation updates</li>
             </ol>
           </div>
 
@@ -487,6 +664,51 @@ function ExternalExecutorApp() {
                   Stop Demo
                 </button>
               )}
+              
+              {/* LLM Provider Toggle */}
+              <div className="flex items-center gap-3 p-3 bg-purple-50 rounded-lg border border-purple-200">
+                <label className="text-sm font-medium text-purple-900">
+                  LLM Provider:
+                </label>
+                <select
+                  value={useMockLLM ? 'mock' : 'real'}
+                  onChange={(e) => setUseMockLLM(e.target.value === 'mock')}
+                  disabled={isLoading}
+                  className="px-3 py-1 border border-purple-300 rounded text-sm"
+                >
+                  <option value="mock">Mock (Scripted)</option>
+                  <option value="real" disabled={!llmAvailable}>
+                    Real LLM {!llmAvailable && '(Not Available)'}
+                  </option>
+                </select>
+                
+                {/* Model Selection Dropdown - Only shown when using real LLM */}
+                {!useMockLLM && llmAvailable && availableModels.length > 0 && (
+                  <>
+                    <label className="text-sm font-medium text-purple-900 ml-4">
+                      Model:
+                    </label>
+                    <select
+                      value={selectedModel}
+                      onChange={(e) => setSelectedModel(e.target.value)}
+                      disabled={isLoading}
+                      className="px-3 py-1 border border-purple-300 rounded text-sm"
+                    >
+                      {availableModels.map(model => (
+                        <option key={model} value={model}>
+                          {model}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
+                
+                {!useMockLLM && llmAvailable && (
+                  <span className="text-xs text-purple-600 ml-2">
+                    Using backend API
+                  </span>
+                )}
+              </div>
               
               {/* Playback Speed Slider - Always Available */}
               <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
@@ -585,7 +807,7 @@ function ExternalExecutorApp() {
                           onClick={async () => {
                             try {
                               // Send response to agent via client
-                              const response = await fetch(`http://localhost:3001/api/queries/${query.queryId}/respond`, {
+                              const response = await fetch(`${backendUrl}/api/queries/${query.queryId}/respond`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ response: query.currentResponse })
