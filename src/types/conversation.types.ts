@@ -91,6 +91,7 @@ export interface Conversation {
   status: 'created' | 'active' | 'completed' | 'failed';
   metadata?: Record<string, any>;
   inProgressTurns?: Record<string, InProgressTurn>; // agentId -> in-progress turn
+  attachments?: Attachment[]; // Added for rehydration support
 }
 
 // ============= Event Types =============
@@ -98,7 +99,7 @@ export interface Conversation {
 export interface ConversationEvent {
   type: 'turn_started' | 'trace_added' | 'turn_completed' | 'turn_cancelled' |
         'conversation_created' | 'conversation_ended' | 'conversation_ready' | 'user_query_created' | 
-        'user_query_answered' | 'agent_thinking' | 'tool_executing';
+        'user_query_answered' | 'agent_thinking' | 'tool_executing' | 'rehydrated';
   conversationId: string;
   timestamp: Date;
   data: any;
@@ -164,6 +165,13 @@ export interface UserQueryAnsweredEvent extends ConversationEvent {
     queryId: string;
     response: string;
     context: Record<string, any>;
+  };
+}
+
+export interface RehydratedEvent extends ConversationEvent {
+  type: 'rehydrated';
+  data: {
+    conversation: Conversation;
   };
 }
 

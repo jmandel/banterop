@@ -276,7 +276,7 @@ For resolve_document_reference tool, the output MUST have this structure:
             // Extract the string content (without the quotes)
             outputValue = trimmedOutput.substring(1, endIndex);
             // Unescape the string
-            outputValue = outputValue.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+            outputValue = (outputValue as string).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
           }
         } else {
           // For non-string values, we need to find where the value ends

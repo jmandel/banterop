@@ -16,11 +16,11 @@ export class StaticReplayAgent extends BaseAgent {
     // Static replay agents can initiate with the first script entry if it has no trigger
     const firstEntry = this.config.script[0];
     if (firstEntry && !firstEntry.trigger) {
-      const turnId = await this.startTurn();
+      await this.startTurn();
       
       if (firstEntry.thoughts) {
         for (const thought of firstEntry.thoughts) {
-          await this.addThought(turnId, thought);
+          await this.addThought(thought);
         }
       }
       
@@ -28,7 +28,7 @@ export class StaticReplayAgent extends BaseAgent {
         await new Promise(resolve => setTimeout(resolve, firstEntry.delay));
       }
       
-      await this.completeTurn(turnId, firstEntry.response);
+      await this.completeTurn(firstEntry.response);
     }
   }
 
@@ -48,12 +48,12 @@ export class StaticReplayAgent extends BaseAgent {
       }
 
       // Start a new turn
-      const turnId = await this.startTurn();
+      await this.startTurn();
 
       // Add thoughts if specified
       if (entry.thoughts) {
         for (const thought of entry.thoughts) {
-          await this.addThought(turnId, thought);
+          await this.addThought(thought);
         }
       }
 
@@ -63,7 +63,7 @@ export class StaticReplayAgent extends BaseAgent {
       }
 
       // Complete the turn with the response
-      await this.completeTurn(turnId, entry.response);
+      await this.completeTurn(entry.response);
       break; // Only respond with the first matching entry
     }
   }
@@ -89,12 +89,12 @@ export class StaticReplayAgent extends BaseAgent {
       }
 
       // Start a new turn
-      const turnId = await this.startTurn();
+      await this.startTurn();
 
       // Add thoughts if specified
       if (entry.thoughts) {
         for (const thought of entry.thoughts) {
-          await this.addThought(turnId, thought);
+          await this.addThought(thought);
         }
       }
 
@@ -104,7 +104,7 @@ export class StaticReplayAgent extends BaseAgent {
       }
 
       // Complete the turn with the response
-      await this.completeTurn(turnId, entry.response);
+      await this.completeTurn(entry.response);
       break; // Only respond once per turn
     }
   }

@@ -4,7 +4,8 @@ import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import {
   ConversationEvent, SubscriptionOptions, TraceEntry,
-  ConversationTurn, CreateConversationRequest, CreateConversationResponse
+  ConversationTurn, CreateConversationRequest, CreateConversationResponse,
+  Attachment
 } from '$lib/types.js';
 import type { OrchestratorClient } from '../index.js';
 
@@ -40,17 +41,43 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
   private authToken?: string;
   private disconnecting = false;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
+  
+  // New state management for rehydration
+  private connectionState: 'disconnected' | 'connecting' | 'rehydrating' | 'ready' = 'disconnected';
+  private activeSubscriptions: Map<string, { conversationId: string, options?: SubscriptionOptions }> = new Map();
 
   constructor(url: string) {
     super();
     this.url = url;
     this.pendingRequests = new Map();
   }
+  
+  private setConnectionState(state: 'disconnected' | 'connecting' | 'rehydrating' | 'ready'): void {
+    const previousState = this.connectionState;
+    if (previousState !== state) {
+      this.connectionState = state;
+      // Emit state change event for tests and monitoring
+      this.emit('stateChange', { from: previousState, to: state });
+      
+      // Also emit specific state events
+      if (state === 'ready') {
+        this.emit('connected');
+      } else if (state === 'disconnected') {
+        this.emit('disconnected');
+      }
+    }
+  }
+
+  getConnectionState(): 'disconnected' | 'connecting' | 'rehydrating' | 'ready' {
+    return this.connectionState;
+  }
 
   async connect(authToken?: string): Promise<void> {
     if (authToken) {
       this.authToken = authToken;
     }
+    
+    this.setConnectionState('connecting');
     
     return new Promise((resolve, reject) => {
       try {
@@ -65,11 +92,13 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
             try {
               await this.authenticate(this.authToken);
             } catch (error) {
+              this.setConnectionState('disconnected');
               reject(error);
               return;
             }
           }
           
+          this.setConnectionState('ready');
           resolve();
         };
 
@@ -82,16 +111,24 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
           const closeEvent = event as CloseEvent & { code: number; reason: string };
           console.log('WebSocket closed:', closeEvent.code, closeEvent.reason);
           this.authenticated = false;
+          this.setConnectionState('disconnected');
           
           if (closeEvent.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts && !this.disconnecting) {
-            this.reconnectTimer = setTimeout(() => {
+            // Use exponential backoff for reconnection
+            const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts), 30000);
+            this.reconnectTimer = setTimeout(async () => {
               this.reconnectAttempts++;
               console.log(`Reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
-              this.connect(this.authToken).catch(error => {
-                console.warn('Reconnection attempt failed:', error);
-                // Error is already emitted via the 'error' event, no need to throw
-              });
-            }, this.reconnectDelay * this.reconnectAttempts);
+              
+              try {
+                await this.connect(this.authToken);
+                // If connection successful, perform rehydration
+                await this.performRehydration();
+              } catch (error) {
+                console.warn('Reconnection/rehydration failed:', error);
+                // Error is already emitted via the 'error' event
+              }
+            }, delay);
           }
         };
 
@@ -220,15 +257,24 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
 
   async subscribe(conversationId: string, options?: SubscriptionOptions): Promise<string> {
     const result = await this.sendRequest('subscribe', { conversationId, options });
-    return result.subscriptionId;
+    const subscriptionId = result.subscriptionId;
+    
+    // Track active subscriptions for rehydration
+    this.activeSubscriptions.set(subscriptionId, { conversationId, options });
+    
+    return subscriptionId;
   }
 
   async unsubscribe(subscriptionId: string): Promise<void> {
-    return this.sendRequest('unsubscribe', { subscriptionId });
+    await this.sendRequest('unsubscribe', { subscriptionId });
+    // Remove from tracked subscriptions
+    this.activeSubscriptions.delete(subscriptionId);
   }
 
   async unsubscribeAll(): Promise<void> {
-    return this.sendRequest('unsubscribeAll');
+    await this.sendRequest('unsubscribeAll');
+    // Clear all tracked subscriptions
+    this.activeSubscriptions.clear();
   }
 
   async startTurn(metadata?: Record<string, any>): Promise<string> {
@@ -280,6 +326,7 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
     includeTurns?: boolean;
     includeTrace?: boolean;
     includeInProgress?: boolean;
+    includeAttachments?: boolean;
   }): Promise<any> {
     return this.sendRequest('getConversation', { 
       conversationId, 
@@ -292,6 +339,7 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
     offset?: number; 
     includeTurns?: boolean; 
     includeTrace?: boolean;
+    includeAttachments?: boolean;
   }): Promise<{ conversations: any[]; total: number; limit: number; offset: number }> {
     return this.sendRequest('getAllConversations', options);
   }
@@ -307,5 +355,62 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
 
   async endConversation(conversationId?: string): Promise<void> {
     return this.sendRequest('endConversation', { conversationId });
+  }
+
+  private async performRehydration(): Promise<void> {
+    this.setConnectionState('rehydrating');
+    console.log('Performing rehydration after reconnect');
+    
+    try {
+      // Step 1: Re-authenticate if we have a token
+      if (this.authToken) {
+        await this.authenticate(this.authToken);
+      }
+      
+      // Step 2: Re-subscribe to all conversations
+      const subscriptionsToRestore = new Map(this.activeSubscriptions);
+      this.activeSubscriptions.clear();
+      
+      for (const [oldSubscriptionId, { conversationId, options }] of subscriptionsToRestore) {
+        try {
+          await this.subscribe(conversationId, options);
+        } catch (error) {
+          console.error(`Failed to re-subscribe to conversation ${conversationId}:`, error);
+        }
+      }
+      
+      // Step 3: Fetch snapshots for each unique conversation
+      const conversationIds = new Set<string>();
+      for (const { conversationId } of subscriptionsToRestore.values()) {
+        conversationIds.add(conversationId);
+      }
+      
+      for (const conversationId of conversationIds) {
+        try {
+          const snapshot = await this.getConversation(conversationId, {
+            includeTurns: true,
+            includeTrace: true,
+            includeAttachments: true
+          });
+          
+          // Step 4: Emit synthetic rehydrated event
+          this.emit('event', {
+            type: 'rehydrated',
+            conversationId,
+            timestamp: new Date(),
+            data: { conversation: snapshot }
+          } as ConversationEvent, conversationId);
+        } catch (error) {
+          console.error(`Failed to fetch snapshot for conversation ${conversationId}:`, error);
+        }
+      }
+      
+      this.setConnectionState('ready');
+      console.log('Rehydration complete');
+    } catch (error) {
+      console.error('Rehydration failed:', error);
+      this.connectionState = 'disconnected';
+      throw error;
+    }
   }
 }

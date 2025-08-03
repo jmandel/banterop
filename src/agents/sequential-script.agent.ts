@@ -23,7 +23,6 @@ export class SequentialScriptAgent extends BaseAgent {
   declare config: SequentialScriptConfig;
   private currentScript?: SequentialScriptEntry;
   private currentStepIndex: number = 0;
-  private activeTurnId?: string;
 
   constructor(config: SequentialScriptConfig, client: any) {
     super(config, client);
@@ -186,8 +185,8 @@ export class SequentialScriptAgent extends BaseAgent {
       this.currentStepIndex = 0;
       
       // Start a new turn for this script execution
-      this.activeTurnId = await this.client.startTurn();
-      console.log(`${this.agentId.label} started turn ${this.activeTurnId} for script execution`);
+      await this.startTurn();
+      console.log(`${this.agentId.label} started turn ${this.getCurrentTurnId()} for script execution`);
       
       await this.executeNextStep();
     } catch (error: any) {
@@ -201,7 +200,7 @@ export class SequentialScriptAgent extends BaseAgent {
    * This is the core sequencing logic
    */
   private async executeNextStep(): Promise<void> {
-    if (!this.currentScript || !this.activeTurnId) {
+    if (!this.currentScript || !this.getCurrentTurnId()) {
       console.warn(`${this.agentId.label} executeNextStep called without active script/turn`);
       return;
     }
@@ -257,34 +256,20 @@ export class SequentialScriptAgent extends BaseAgent {
    * Execute a thought step - adds trace entry
    */
   private async executeThoughtStep(step: ThoughtStep): Promise<void> {
-    await this.client.addTrace(this.activeTurnId!, {
-      type: 'thought',
-      content: step.content
-    });
+    await this.addThought(step.content);
   }
 
   /**
    * Execute a tool call step - adds tool_call and tool_result traces
    */
   private async executeToolCallStep(step: ToolCallStep): Promise<void> {
-    const toolCallId = uuidv4();
-    
     // Add tool call trace
-    await this.client.addTrace(this.activeTurnId!, {
-      type: 'tool_call',
-      toolName: step.tool.name,
-      parameters: step.tool.params,
-      toolCallId
-    });
+    const toolCallId = await this.addToolCall(step.tool.name, step.tool.params);
     
     // No artificial delays for tests
     
     // Add simple tool result trace
-    await this.client.addTrace(this.activeTurnId!, {
-      type: 'tool_result',
-      toolCallId,
-      result: { success: true, tool: step.tool.name }
-    });
+    await this.addToolResult(toolCallId, { success: true, tool: step.tool.name });
   }
 
   /**
@@ -307,9 +292,10 @@ export class SequentialScriptAgent extends BaseAgent {
    * Execute a response step - completes the turn with final content
    */
   private async executeResponseStep(step: ResponseStep): Promise<void> {
-    console.log(`${this.agentId.label} about to complete turn ${this.activeTurnId} with content: "${step.content.slice(0, 50)}..."`);
-    await this.client.completeTurn(this.activeTurnId!, step.content);
-    console.log(`${this.agentId.label} completed turn ${this.activeTurnId} with response: "${step.content.slice(0, 50)}..."`);
+    const turnId = this.getCurrentTurnId();
+    console.log(`${this.agentId.label} about to complete turn ${turnId} with content: "${step.content.slice(0, 50)}..."`);
+    await this.completeTurn(step.content);
+    console.log(`${this.agentId.label} completed turn ${turnId} with response: "${step.content.slice(0, 50)}..."`);
     this.resetScriptState();
   }
 
@@ -318,20 +304,21 @@ export class SequentialScriptAgent extends BaseAgent {
    * Called when all steps are finished or after user_query step
    */
   private async completeCurrentScript(): Promise<void> {
-    if (!this.activeTurnId) return;
+    if (!this.getCurrentTurnId()) return;
     
     // Check if this script ends with a user_query (incomplete turn)
     const lastStep = this.currentScript!.steps[this.currentScript!.steps.length - 1];
     
     if (lastStep?.type === 'user_query') {
-      // Don't complete the turn - leave it open for continuation
-      console.log(`${this.agentId.label} script completed with user query - turn remains open`);
+      // Complete the turn with a placeholder message
+      await this.completeTurn('Awaiting user response...');
+      console.log(`${this.agentId.label} completed turn after user query`);
     } else {
       // Find response step for turn completion, or use default
       const responseStep = this.currentScript!.steps.find(s => s.type === 'response') as ResponseStep;
       const content = responseStep?.content || 'Script execution completed.';
       
-      await this.client.completeTurn(this.activeTurnId, content);
+      await this.completeTurn(content);
       console.log(`${this.agentId.label} completed script execution and turn`);
     }
     
@@ -344,9 +331,9 @@ export class SequentialScriptAgent extends BaseAgent {
   private async handleScriptError(error: any): Promise<void> {
     console.error(`${this.agentId.label} script error:`, error);
     
-    if (this.activeTurnId) {
+    if (this.getCurrentTurnId()) {
       try {
-        await this.client.completeTurn(this.activeTurnId, 'Script execution failed due to an error.');
+        await this.completeTurn('Script execution failed due to an error.');
       } catch (completionError) {
         console.error(`${this.agentId.label} error completing failed turn:`, completionError);
       }
@@ -361,7 +348,6 @@ export class SequentialScriptAgent extends BaseAgent {
   private resetScriptState(): void {
     this.currentScript = undefined;
     this.currentStepIndex = 0;
-    this.activeTurnId = undefined;
   }
 
   /**

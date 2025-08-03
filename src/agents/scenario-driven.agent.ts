@@ -32,10 +32,6 @@ export class ScenarioDrivenAgent extends BaseAgent {
   private toolSynthesis: ToolSynthesisService;
   private processingTurn: boolean = false;
   
-  private currentTurnId: string;
-  private turns: ConversationTurn[] = [];
-  private tracesByTurnId: Map<string, TraceEntry[]> = new Map();
-  private attachmentsByTurnId: Map<string, Attachment[]> = new Map();
   private availableDocuments: Map<string, any> = new Map(); // Map of docId to document object
 
   constructor(
@@ -67,59 +63,26 @@ export class ScenarioDrivenAgent extends BaseAgent {
   }
 
   async initialize(conversationId: string, authToken: string): Promise<void> {
-    // Call parent initialization first
+    // Call parent initialization first - BaseAgent now handles all state management
     await super.initialize(conversationId, authToken);
     
     // ONE-TIME-FETCH to hydrate state on startup
     console.log(`Agent ${this.agentId.label} hydrating initial conversation state...`);
     const initialConversation = await this.client.getConversation();
-    this.turns = initialConversation.turns || [];
-
-    // Populate the traces map from the initial turns data
-    this.tracesByTurnId.clear();
-    this.attachmentsByTurnId.clear();
+    
+    // Extract available documents from all turns (BaseAgent handles turns/traces/attachments)
     this.availableDocuments.clear();
     
-    // Load attachments for all turns
-    for (const turn of this.turns) {
-        console.log(`[${this.agentId.id}] Initial load turn ${turn.id}:`, {
-            agentId: turn.agentId,
-            hasAttachments: !!turn.attachments,
-            attachmentCount: turn.attachments?.length || 0,
-            attachmentIds: turn.attachments || []
-        });
-        
-        if (turn.trace && turn.trace.length > 0) {
-            this.tracesByTurnId.set(turn.id, turn.trace);
-            
-            // Extract all documents from this turn's trace
-            for (const entry of turn.trace) {
-                if (entry.type === 'tool_result' && (entry as ToolResultEntry).result) {
-                    const documents = this.extractDocuments((entry as ToolResultEntry).result);
-                    for (const [docId, doc] of documents) {
-                        this.availableDocuments.set(docId, doc);
-                    }
+    const turns = this.getTurns();
+    for (const turn of turns) {
+        const traces = this.getTraceForTurn(turn.id);
+        for (const entry of traces) {
+            if (entry.type === 'tool_result' && (entry as ToolResultEntry).result) {
+                const documents = this.extractDocuments((entry as ToolResultEntry).result);
+                for (const [docId, doc] of documents) {
+                    this.availableDocuments.set(docId, doc);
                 }
             }
-        }
-        
-        // Load attachments for this turn
-        if (turn.attachments && turn.attachments.length > 0) {
-            console.log(`[${this.agentId.id}] Initial load: Loading ${turn.attachments.length} attachments for turn ${turn.id}`);
-            const attachments: Attachment[] = [];
-            for (const attachmentId of turn.attachments) {
-                const attachment = await this.client.getAttachment(attachmentId);
-                if (attachment) {
-                    attachments.push(attachment);
-                    console.log(`[${this.agentId.id}] Initial load: Loaded attachment: ${attachment.name} (docId: ${attachment.docId})`);
-                } else {
-                    console.error(`[${this.agentId.id}] Initial load: Attachment ${attachmentId} not found`);
-                }
-            }
-            this.attachmentsByTurnId.set(turn.id, attachments);
-            console.log(`[${this.agentId.id}] Initial load: Stored ${attachments.length} attachments for turn ${turn.id}`);
-        } else {
-            console.log(`[${this.agentId.id}] Initial load: No attachments in turn ${turn.id}`);
         }
     }
 
@@ -130,31 +93,20 @@ export class ScenarioDrivenAgent extends BaseAgent {
       console.log("NOT initiating agent", initialConversation.metadata, this)
     }
 
-    console.log(`Agent ${this.agentId.label} initialized with ${this.turns.length} historical turns.`);
+    console.log(`Agent ${this.agentId.label} initialized with ${turns.length} historical turns.`);
   }
 
   async onConversationEvent(event: ConversationEvent): Promise<void> {
-    if (!this.isReady) return;
+    // Let BaseAgent handle the main event processing
+    await super.onConversationEvent(event);
 
+    // Handle specific events for document extraction
     switch (event.type) {
         case 'turn_completed':
             const completedTurn = event.data.turn as ConversationTurn;
-            console.log(`[${this.agentId.id}] Received turn_completed event:`, {
-                turnId: completedTurn.id,
-                agentId: completedTurn.agentId,
-                hasAttachments: !!completedTurn.attachments,
-                attachmentCount: completedTurn.attachments?.length || 0,
-                attachmentIds: completedTurn.attachments || []
-            });
             
-            // Add the new turn to our local history
-            this.turns.push(completedTurn);
-            
-            // Store traces if present
+            // Extract all documents from this turn's trace
             if (completedTurn.trace && completedTurn.trace.length > 0) {
-                this.tracesByTurnId.set(completedTurn.id, completedTurn.trace);
-                
-                // Extract all documents from this turn's trace
                 for (const entry of completedTurn.trace) {
                     if (entry.type === 'tool_result' && (entry as ToolResultEntry).result) {
                         const documents = this.extractDocuments((entry as ToolResultEntry).result);
@@ -164,61 +116,37 @@ export class ScenarioDrivenAgent extends BaseAgent {
                     }
                 }
             }
-            
-            // Load attachments if present
-            if (completedTurn.attachments && completedTurn.attachments.length > 0) {
-                console.log(`[${this.agentId.id}] Loading ${completedTurn.attachments.length} attachments for turn ${completedTurn.id}`);
-                const attachments: Attachment[] = [];
-                for (const attachmentId of completedTurn.attachments) {
-                    const attachment = await this.client.getAttachment(attachmentId);
-                    if (attachment) {
-                        attachments.push(attachment);
-                        console.log(`[${this.agentId.id}] Loaded attachment: ${attachment.name} (docId: ${attachment.docId})`);
-                    } else {
-                      console.error(`[${this.agentId.id}] Attachment with ID ${attachmentId} not found for turn ${completedTurn.id}`);
-                    }
-                }
-                this.attachmentsByTurnId.set(completedTurn.id, attachments);
-                console.log(`[${this.agentId.id}] Stored ${attachments.length} attachments for turn ${completedTurn.id}`);
-            } else {
-                console.log(`[${this.agentId.id}] No attachments in turn ${completedTurn.id}`);
-            }
-            
-            // Trigger the agent's response logic if it's another agent's turn
-            if (completedTurn.agentId !== this.agentId.id && !completedTurn.isFinalTurn) {
-                await this._processAndRespondToTurn(completedTurn);
-            }
             break;
 
         case 'trace_added':
             const trace = event.data.trace as TraceEntry;
-            const turnId = event.data.turn.id; // The turn shell provided in the event
-            const existingTraces = this.tracesByTurnId.get(turnId) || [];
-            existingTraces.push(trace);
-            this.tracesByTurnId.set(turnId, existingTraces);
-            break;
-
-        case 'conversation_ended':
-            await this.shutdown();
+            // Extract documents from new trace entries
+            if (trace.type === 'tool_result' && (trace as ToolResultEntry).result) {
+                const documents = this.extractDocuments((trace as ToolResultEntry).result);
+                for (const [docId, doc] of documents) {
+                    this.availableDocuments.set(docId, doc);
+                }
+            }
             break;
     }
   }
 
-  onTurnCompleted(event: TurnCompletedEvent): Promise<void> {
+  async onTurnCompleted(event: TurnCompletedEvent): Promise<void> {
+      // BaseAgent will call processAndReply if needed
       return;
   }
 
   async initializeConversation(instructions?: string): Promise<void> {
     // For the initiating agent, we start with the configured initial message
     if (this.agentConfig.messageToUseWhenInitiatingConversation) {
-      const turnId = await this.startTurn();
+      await this.startTurn();
       
       // Compose thought with optional instructions
       let thought = "Starting conversation with configured initial message";
       if (instructions) {
         thought += `. Additional instructions: ${instructions}`;
       }
-      await this.addThought(turnId, thought);
+      await this.addThought(thought);
       
       // If instructions are provided, we might want to process them through the LLM
       // to potentially modify the initial message
@@ -240,7 +168,7 @@ export class ScenarioDrivenAgent extends BaseAgent {
         }
       }
       
-      await this.completeTurn(turnId, messageToSend);
+      await this.completeTurn(messageToSend);
     }
   }
 
@@ -254,14 +182,13 @@ export class ScenarioDrivenAgent extends BaseAgent {
     if (this.processingTurn) return; // Prevent concurrent processing
     this.processingTurn = true;
 
-    this.currentTurnId = await this.startTurn()
-    const currentTurnTrace: TraceEntry[] = []; // Track traces locally for this turn
+    await this.startTurn();
     
     let MAX_STEPS = 10;
     let stepCount = 0;
     while (stepCount++ < MAX_STEPS) {
         const historyString = this.buildConversationHistory();
-        const currentProcessString = this.formatCurrentProcess(currentTurnTrace);
+        const currentProcessString = this.formatCurrentProcess(this.getCurrentTurnTrace());
         
         const remainingSteps = MAX_STEPS - stepCount + 1;
         const prompt = this.constructFullPrompt({
@@ -276,24 +203,23 @@ export class ScenarioDrivenAgent extends BaseAgent {
         const result = await this.extractToolCallsFromLLMResponse(prompt);
         if (!result.tools || !result.message) {
           console.error("Missing thoughts or tools, ending turn")
-          this.completeTurn(this.currentTurnId, "Turn ended with error")
+          await this.completeTurn("Turn ended with error");
           this.client.endConversation(this.conversationId)
           break;
         }
 
         console.log("Tools paresed", result)
-        const thoughtEntry = await this.addThought(this.currentTurnId, result.message);
-        currentTurnTrace.push(thoughtEntry);
+        await this.addThought(result.message);
 
-        const stepResult = await this.executeSingleToolCallWithReasoning(result, currentTurnTrace);
+        const stepResult = await this.executeSingleToolCallWithReasoning(result);
         if (stepResult.completedTurn) {
           break;
         }
       }
-      if (stepCount > MAX_STEPS && this.currentTurnId) {
+      if (stepCount > MAX_STEPS) {
         console.error("MAX STEPS reaached, bailing")
         try {
-          await this.completeTurn(this.currentTurnId, "Error: Max steps reached")
+          await this.completeTurn("Error: Max steps reached");
         } catch (error) {
           // Turn might have already been completed by a terminal tool
           console.log("Turn already completed or error completing:", error);
@@ -301,14 +227,14 @@ export class ScenarioDrivenAgent extends BaseAgent {
       }
 
       this.processingTurn = false;
-      this.currentTurnId = null;
   }
 
   private buildConversationHistory(): string {
     const sections: string[] = [];
     
     // Process turns chronologically
-    for (const turn of this.turns) {
+    const turns = this.getTurns();
+    for (const turn of turns) {
       if (turn.agentId === this.agentId.id) {
         // Our own turn - use detailed formatting with scratchpad and tool calls
         sections.push(this.formatOwnTurnForHistory(turn));
@@ -499,7 +425,7 @@ Your response MUST follow this EXACT format:
   }
 
   // Execute single tool call with reasoning capture (following single-action constraint)
-  private async executeSingleToolCallWithReasoning(result: ParsedResponse, currentTurnTrace: TraceEntry[]): Promise<{completedTurn: boolean}> {
+  private async executeSingleToolCallWithReasoning(result: ParsedResponse): Promise<{completedTurn: boolean}> {
     const { message, tools } = result;
     
     // Handle case where no tool call was made
@@ -512,7 +438,7 @@ Your response MUST follow this EXACT format:
     // Handle built-in communication tools
     if (toolCall.name === 'no_response_needed') {
       console.log(`${this.agentId.id} chose not to respond to current situation`);
-      this.completeTurn(this.currentTurnId, "No response");
+      await this.completeTurn("No response");
       return {completedTurn: true};
     }
 
@@ -569,9 +495,16 @@ Your response MUST follow this EXACT format:
             }
             
             // Register the attachment
+            // Get current turn ID from the base class state
+            const currentTurnId = this.getCurrentTurnId();
+            if (!currentTurnId) {
+              console.error('No current turn ID available for attachment registration');
+              continue;
+            }
+            
             const attachmentId = await this.client.registerAttachment({
               conversationId: this.conversationId!,
-              turnId: this.currentTurnId,
+              turnId: currentTurnId,
               docId: docId,
               name: doc.name || docId,
               contentType: doc.contentType || 'text/markdown',
@@ -590,7 +523,7 @@ Your response MUST follow this EXACT format:
       }
       
       console.log(`${this.agentId.id} sending message: "${text}" with ${attachmentIds.length} attachments`);
-      await this.completeTurn(this.currentTurnId, text, false, undefined, attachmentIds);
+      await this.completeTurn(text, false, attachmentIds);
       return {completedTurn: true};
     }
 
@@ -603,16 +536,14 @@ Your response MUST follow this EXACT format:
       }
       
       // Add tool call trace BEFORE waiting
-      const toolCallEntry = await this.addToolCall(this.currentTurnId, toolCall.name, toolCall.args);
-      currentTurnTrace.push(toolCallEntry);
+      const toolCallId = await this.addToolCall(toolCall.name, toolCall.args);
       
       // Query the user and wait for response
       const userResponse = await this.queryUser(text);
       console.log(`${this.agentId.id} received user response: ${userResponse}`);
       
       // Add tool result trace AFTER getting the response
-      const toolResultEntry = await this.addToolResult(this.currentTurnId, toolCallEntry.toolCallId, userResponse);
-      currentTurnTrace.push(toolResultEntry);
+      await this.addToolResult(toolCallId, userResponse);
       
       // Turn remains open, agent can continue processing
       return {completedTurn: false};
@@ -620,8 +551,7 @@ Your response MUST follow this EXACT format:
 
     
     // Add tool call trace
-    const toolCallEntry = await this.addToolCall(this.currentTurnId, toolCall.name, toolCall.args);
-    currentTurnTrace.push(toolCallEntry);
+    const toolCallId = await this.addToolCall(toolCall.name, toolCall.args);
     
     try {
       const toolDef = this.getToolDefinition(toolCall.name);
@@ -649,7 +579,7 @@ Your response MUST follow this EXACT format:
       if (!toolOutput) {
         // Build conversation history including the current in-progress turn
         const historyString = this.buildConversationHistory();
-        const currentProcessString = this.formatCurrentProcess(currentTurnTrace);
+        const currentProcessString = this.formatCurrentProcess(this.getCurrentTurnTrace());
         const fullHistory = historyString + (historyString ? '\n\n' : '') + 
                            `From: ${this.agentId.label} (IN PROGRESS)\n` +
                            `Timestamp: ${new Date().toISOString()}\n\n` +
@@ -667,9 +597,9 @@ Your response MUST follow this EXACT format:
       }
 
       // Reification Logic: Wrap tool output in document structure if it doesn't have a docId
-      if (typeof toolOutput !== 'object' || !toolOutput || !toolOutput.hasOwnProperty('docId')) {
+      if (toolOutput && (typeof toolOutput !== 'object' || !toolOutput.hasOwnProperty('docId'))) {
         toolOutput = {
-          docId: toolCallEntry.toolCallId, // Use the toolCallId as the docId
+          docId: toolCallId, // Use the toolCallId as the docId
           contentType: 'application/json',
           content: toolOutput
         };
@@ -687,12 +617,11 @@ Your response MUST follow this EXACT format:
         }
       }
       
-      const toolResultEntry = await this.addToolResult(this.currentTurnId, toolCallEntry.toolCallId, toolOutput);
-      currentTurnTrace.push(toolResultEntry);
+      await this.addToolResult(toolCallId, toolOutput);
       
       if (toolDef?.endsConversation) {
         const resultMessage = `Action complete. Result: ${JSON.stringify(toolOutput)}`;
-        await this.completeTurn(this.currentTurnId, resultMessage, true);
+        await this.completeTurn(resultMessage, true);
         
         console.log(`Terminal tool ${toolCall.name} used, ending conversation gracefully`);
         if (this.conversationId) {
@@ -704,14 +633,13 @@ Your response MUST follow this EXACT format:
       return {completedTurn: false}
     } catch (error: any) {
       // Add error trace
-      const errorResultEntry = await this.addToolResult(this.currentTurnId, toolCallEntry.toolCallId, null, error.message);
-      currentTurnTrace.push(errorResultEntry);
+      await this.addToolResult(toolCallId, null, error.message);
       
       // Complete turn with error response
-      await this.completeTurn(this.currentTurnId, `I encountered an error: ${error.message}`);
+      await this.completeTurn(`I encountered an error: ${error.message}`);
       console.error("Error", error)
       console.trace()
-      return {completedTurn: true}
+      return {completedTurn: true};
     }
   }
 
@@ -980,7 +908,7 @@ Your response MUST follow this EXACT format:
   }
 
   private formatTurnAttachments(turnId: string): string {
-    const attachments = this.attachmentsByTurnId.get(turnId);
+    const attachments = this.getAttachmentsForTurn(turnId);
     console.log(`[${this.agentId.id}] Formatting attachments for turn ${turnId}: found ${attachments?.length || 0} attachments`);
     if (!attachments || attachments.length === 0) return '';
     
@@ -1013,7 +941,7 @@ Your response MUST follow this EXACT format:
 
   private formatOwnTurnForHistory(turn: ConversationTurn): string {
     const timestamp = this.formatTimestamp(turn.timestamp);
-    const turnTraces = this.tracesByTurnId.get(turn.id) || [];
+    const turnTraces = this.getTraceForTurn(turn.id);
 
     const parts: string[] = [
       `From: ${this.agentId.id}`,
@@ -1151,9 +1079,9 @@ ${thoughts.join('\n')}
   // Record error trace
   private async recordErrorTrace(error: any): Promise<void> {
     try {
-      const turnId = await this.startTurn();
-      await this.addThought(turnId, `Error occurred: ${error.message || error}`);
-      await this.completeTurn(turnId, `I encountered an error and need to stop: ${error.message || error}`);
+      await this.startTurn();
+      await this.addThought(`Error occurred: ${error.message || error}`);
+      await this.completeTurn(`I encountered an error and need to stop: ${error.message || error}`);
     } catch (traceError) {
       console.error('Failed to record error trace:', traceError);
     }

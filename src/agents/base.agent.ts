@@ -8,8 +8,9 @@ import {
   ConversationEvent,
   ConversationTurn,
   ThoughtEntry, ToolCallEntry, ToolResultEntry,
-  TurnCompletedEvent,
-  TraceEntry
+  TurnCompletedEvent, TurnStartedEvent, TraceAddedEvent,
+  UserQueryAnsweredEvent, RehydratedEvent,
+  TraceEntry, Attachment
 } from '$lib/types.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -21,6 +22,17 @@ export abstract class BaseAgent implements AgentInterface {
   protected subscriptionId?: string;
   protected isReady: boolean = false;
   protected conversationEnded = false;
+  
+  // Private state maps for stateful design
+  private turns: Map<string, ConversationTurn> = new Map();
+  private turnOrder: string[] = [];
+  private tracesByTurnId: Map<string, TraceEntry[]> = new Map();
+  private attachmentsByTurnId: Map<string, Attachment[]> = new Map();
+  private pendingUserQueries: Map<string, { resolve: Function, reject: Function }> = new Map();
+  
+  // Current turn tracking
+  private currentTurnId: string | null = null;
+  private lastProcessedTurnId: string | null = null;
 
   constructor(config: AgentConfig, client: OrchestratorClient) {
     this.agentId = config.agentId;
@@ -67,12 +79,24 @@ export abstract class BaseAgent implements AgentInterface {
     }
     
     switch (event.type) {
+      case 'turn_started':
+        await this.onTurnStarted(event as TurnStartedEvent);
+        break;
       case 'turn_completed':
-        // Agent coordination should use turn_completed (the authoritative completion event)
-        await this.onTurnCompleted(event as TurnCompletedEvent);
+        await this.onTurnCompletedInternal(event as TurnCompletedEvent);
+        break;
+      case 'trace_added':
+        await this.onTraceAdded(event as TraceAddedEvent);
+        break;
+      case 'user_query_answered':
+        await this.onUserQueryAnswered(event as UserQueryAnsweredEvent);
+        break;
+      case 'rehydrated':
+        await this.onRehydrated(event as RehydratedEvent);
         break;
       case 'conversation_ended':
         this.isReady = false;
+        this.conversationEnded = true;
         break;
     }
   }
@@ -85,84 +109,213 @@ export abstract class BaseAgent implements AgentInterface {
 
   // Abstract method for processing and replying to a turn
   abstract processAndReply(previousTurn: ConversationTurn): Promise<void>;
-
-  // ============= Agent Actions (Delegated to Client) =============
-
-  async startTurn(metadata?: Record<string, any>): Promise<string> {
-    return await this.client.startTurn(metadata);
+  
+  // ============= Internal Event Handlers =============
+  
+  private async onTurnStarted(event: TurnStartedEvent): Promise<void> {
+    const turn = event.data.turn;
+    this.turns.set(turn.id, turn);
+    this.turnOrder.push(turn.id);
   }
-
-  async addThought(turnId: string, thought: string): Promise<ThoughtEntry> {
-    const entry = this.createThought(thought);
-    await this.client.addTrace(turnId, { type: 'thought', content: thought });
-    return entry;
-  }
-
-  async addToolCall(turnId: string, toolName: string, parameters: any): Promise<ToolCallEntry> {
-    const toolCallId = uuidv4();
-    const entry = this.createToolCall(toolName, parameters);
-    entry.toolCallId = toolCallId;
-    await this.client.addTrace(turnId, { type: 'tool_call', toolName, parameters, toolCallId });
-    return entry;
-  }
-
-  async addToolResult(turnId: string, toolCallId: string, result: any, error?: string): Promise<ToolResultEntry> {
-    const entry = this.createToolResult(toolCallId, result, error);
-    await this.client.addTrace(turnId, { type: 'tool_result', toolCallId, result, error });
-    return entry;
-  }
-
-  async completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>, attachments?: string[]): Promise<void> {
-    await this.client.completeTurn(turnId, content, isFinalTurn, metadata, attachments);
-  }
-
-  async queryUser(question: string, context?: Record<string, any>): Promise<string> {
-    const queryId = await this.client.createUserQuery(question, context);
+  
+  private async onTurnCompletedInternal(event: TurnCompletedEvent): Promise<void> {
+    const turn = event.data.turn;
+    this.turns.set(turn.id, turn);
     
-    // Wait for response via events
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('User query timeout'));
-      }, 300000); // 5 minutes
-
-      const handleQueryResponse = (event: ConversationEvent) => {
-        if (event.type === 'user_query_answered' && event.data.queryId === queryId) {
-          clearTimeout(timeout);
-          this.client.off('event', handleQueryResponse);
-          resolve(event.data.response);
+    // Store traces if present
+    if (turn.trace && turn.trace.length > 0) {
+      this.tracesByTurnId.set(turn.id, turn.trace);
+    }
+    
+    // Process attachments if present
+    if (turn.attachments && turn.attachments.length > 0) {
+      const attachments: Attachment[] = [];
+      for (const attachmentId of turn.attachments) {
+        const attachment = await this.client.getAttachment(attachmentId);
+        if (attachment) {
+          attachments.push(attachment);
         }
-      };
-
-      this.client.on('event', handleQueryResponse);
-    });
+      }
+      this.attachmentsByTurnId.set(turn.id, attachments);
+    }
+    
+    // Call the abstract method that subclasses implement
+    await this.onTurnCompleted(event);
+    
+    // Check if we should process this turn
+    if (turn.agentId !== this.agentId.id && !turn.isFinalTurn) {
+      await this.maybeProcessNextOpportunity();
+    }
+  }
+  
+  private async onTraceAdded(event: TraceAddedEvent): Promise<void> {
+    const turnId = event.data.turn.id;
+    const trace = event.data.trace;
+    
+    const existingTraces = this.tracesByTurnId.get(turnId) || [];
+    existingTraces.push(trace);
+    this.tracesByTurnId.set(turnId, existingTraces);
+  }
+  
+  private async onUserQueryAnswered(event: UserQueryAnsweredEvent): Promise<void> {
+    const queryId = event.data.queryId;
+    const pending = this.pendingUserQueries.get(queryId);
+    if (pending) {
+      this.pendingUserQueries.delete(queryId);
+      pending.resolve(event.data.response);
+    }
+  }
+  
+  private async onRehydrated(event: RehydratedEvent): Promise<void> {
+    console.log(`Agent ${this.agentId.label} received rehydration event`);
+    
+    // Clear and rebuild all state from snapshot
+    this.turns.clear();
+    this.turnOrder = [];
+    this.tracesByTurnId.clear();
+    this.attachmentsByTurnId.clear();
+    
+    const conversation = event.data.conversation;
+    
+    // Rebuild turns and traces
+    for (const turn of conversation.turns || []) {
+      this.turns.set(turn.id, turn);
+      this.turnOrder.push(turn.id);
+      
+      if (turn.trace && turn.trace.length > 0) {
+        this.tracesByTurnId.set(turn.id, turn.trace);
+      }
+    }
+    
+    // Rebuild attachments from conversation level
+    if (conversation.attachments) {
+      for (const attachment of conversation.attachments) {
+        const turnAttachments = this.attachmentsByTurnId.get(attachment.turnId) || [];
+        turnAttachments.push(attachment);
+        this.attachmentsByTurnId.set(attachment.turnId, turnAttachments);
+      }
+    }
+    
+    // Check if we had an in-progress turn
+    const inProgressTurn = conversation.turns.find(
+      t => t.status === 'in_progress' && t.agentId === this.agentId.id
+    );
+    
+    if (inProgressTurn) {
+      console.log(`Agent ${this.agentId.label} aborting in-progress turn ${inProgressTurn.id}`);
+      await this._abortCurrentTurn(inProgressTurn.id);
+    }
+    
+    // Clear pending queries as they are now stale
+    for (const [queryId, { reject }] of this.pendingUserQueries) {
+      reject(new Error('Query cancelled due to rehydration'));
+    }
+    this.pendingUserQueries.clear();
+    
+    // Check if we should take a turn
+    await this.maybeProcessNextOpportunity();
+  }
+  
+  private async _abortCurrentTurn(turnId: string): Promise<void> {
+    try {
+      const abortMessage = this.getAbortMessage();
+      await this.client.completeTurn(turnId, abortMessage);
+    } catch (error) {
+      console.error(`Failed to abort turn ${turnId}:`, error);
+    }
+  }
+  
+  protected getAbortMessage(): string {
+    return "I encountered a brief connection issue and had to abort my previous action. I will now re-evaluate the situation.";
+  }
+  
+  private async maybeProcessNextOpportunity(): Promise<void> {
+    if (!this.isReady || this.currentTurnId || this.conversationEnded) return;
+    
+    // Check if we should initiate
+    if (this.turnOrder.length === 0 && this.isInitiator()) {
+      await this.initializeConversation();
+      return;
+    }
+    
+    // Check last turn
+    const lastTurnId = this.turnOrder[this.turnOrder.length - 1];
+    const lastTurn = this.turns.get(lastTurnId);
+    
+    if (lastTurn && lastTurn.agentId !== this.agentId.id && lastTurn.id !== this.lastProcessedTurnId) {
+      this.lastProcessedTurnId = lastTurn.id;
+      await this.processAndReply(lastTurn);
+    }
+  }
+  
+  private isInitiator(): boolean {
+    // Check if this agent should initiate based on config
+    return !!(this.config as any).messageToUseWhenInitiatingConversation;
   }
 
-  // ============= Helper Methods =============
-
-  protected createThought(content: string): ThoughtEntry {
-    return {
+  // ============= Simplified Public API (No Turn IDs!) =============
+  
+  protected async startTurn(metadata?: Record<string, any>): Promise<void> {
+    if (this.currentTurnId) throw new Error('Turn already in progress');
+    this.currentTurnId = await this.client.startTurn(metadata);
+  }
+  
+  protected async completeTurn(content: string, isFinalTurn?: boolean, attachments?: string[]): Promise<void> {
+    if (!this.currentTurnId) throw new Error('No turn in progress');
+    await this.client.completeTurn(this.currentTurnId, content, isFinalTurn, undefined, attachments);
+    this.currentTurnId = null;
+  }
+  
+  protected async addThought(thought: string): Promise<void> {
+    if (!this.currentTurnId) throw new Error('No turn in progress');
+    const entry = await this.client.addTrace(this.currentTurnId, { type: 'thought', content: thought });
+    // Update local state
+    const existingTraces = this.tracesByTurnId.get(this.currentTurnId) || [];
+    existingTraces.push({
       id: uuidv4(),
       agentId: this.agentId.id,
       timestamp: new Date(),
       type: 'thought',
-      content
-    };
+      content: thought
+    } as ThoughtEntry);
+    this.tracesByTurnId.set(this.currentTurnId, existingTraces);
   }
-
-  protected createToolCall(toolName: string, parameters: Record<string, any>): ToolCallEntry {
-    return {
+  
+  protected async addToolCall(toolName: string, parameters: any): Promise<string> {
+    if (!this.currentTurnId) throw new Error('No turn in progress');
+    const toolCallId = uuidv4();
+    await this.client.addTrace(this.currentTurnId, { 
+      type: 'tool_call', 
+      toolName, 
+      parameters, 
+      toolCallId 
+    });
+    // Update local state
+    const existingTraces = this.tracesByTurnId.get(this.currentTurnId) || [];
+    existingTraces.push({
       id: uuidv4(),
       agentId: this.agentId.id,
       timestamp: new Date(),
       type: 'tool_call',
       toolName,
       parameters,
-      toolCallId: uuidv4()
-    };
+      toolCallId
+    } as ToolCallEntry);
+    this.tracesByTurnId.set(this.currentTurnId, existingTraces);
+    return toolCallId;
   }
-
-  protected createToolResult(toolCallId: string, result: any, error?: string): ToolResultEntry {
-    return {
+  
+  protected async addToolResult(toolCallId: string, result: any, error?: string): Promise<void> {
+    if (!this.currentTurnId) throw new Error('No turn in progress');
+    await this.client.addTrace(this.currentTurnId, { 
+      type: 'tool_result', 
+      toolCallId, 
+      result, 
+      error 
+    });
+    // Update local state
+    const existingTraces = this.tracesByTurnId.get(this.currentTurnId) || [];
+    existingTraces.push({
       id: uuidv4(),
       agentId: this.agentId.id,
       timestamp: new Date(),
@@ -170,6 +323,53 @@ export abstract class BaseAgent implements AgentInterface {
       toolCallId,
       result,
       error
-    };
+    } as ToolResultEntry);
+    this.tracesByTurnId.set(this.currentTurnId, existingTraces);
   }
+  
+  async queryUser(question: string, context?: Record<string, any>): Promise<string> {
+    const queryId = await this.client.createUserQuery(question, context);
+    
+    return new Promise((resolve, reject) => {
+      // Store in pending queries map
+      this.pendingUserQueries.set(queryId, { resolve, reject });
+      
+      // Set timeout
+      setTimeout(() => {
+        if (this.pendingUserQueries.has(queryId)) {
+          this.pendingUserQueries.delete(queryId);
+          reject(new Error('User query timeout'));
+        }
+      }, 300000); // 5 minutes
+    });
+  }
+  
+  // ============= State Access Methods =============
+  
+  protected getTurns(): ConversationTurn[] {
+    return this.turnOrder.map(id => this.turns.get(id)!).filter(Boolean);
+  }
+  
+  protected getLastTurn(): ConversationTurn | null {
+    const lastId = this.turnOrder[this.turnOrder.length - 1];
+    return lastId ? this.turns.get(lastId) || null : null;
+  }
+  
+  protected getTraceForTurn(turnId: string): TraceEntry[] {
+    return this.tracesByTurnId.get(turnId) || [];
+  }
+  
+  protected getAttachmentsForTurn(turnId: string): Attachment[] {
+    return this.attachmentsByTurnId.get(turnId) || [];
+  }
+  
+  protected getCurrentTurnTrace(): TraceEntry[] {
+    if (!this.currentTurnId) return [];
+    return this.getTraceForTurn(this.currentTurnId);
+  }
+  
+  protected getCurrentTurnId(): string | null {
+    return this.currentTurnId;
+  }
+
 }

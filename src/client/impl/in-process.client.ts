@@ -7,7 +7,7 @@ import {
   ConversationEvent, SubscriptionOptions, TraceEntry,
   ConversationTurn, StartTurnRequest, AddTraceEntryRequest,
   CompleteTurnRequest, UserQueryRequest, CreateConversationRequest,
-  CreateConversationResponse
+  CreateConversationResponse, Attachment
 } from '$lib/types.js';
 import type { OrchestratorClient } from '../index.js';
 
@@ -212,6 +212,7 @@ export class InProcessOrchestratorClient extends EventEmitter implements Orchest
     includeTurns?: boolean;
     includeTrace?: boolean;
     includeInProgress?: boolean;
+    includeAttachments?: boolean;
   }): Promise<any> {
     const targetConversationId = conversationId || this.conversationId;
     if (!targetConversationId) {
@@ -231,6 +232,7 @@ export class InProcessOrchestratorClient extends EventEmitter implements Orchest
     offset?: number; 
     includeTurns?: boolean; 
     includeTrace?: boolean;
+    includeAttachments?: boolean;
   }): Promise<{ conversations: any[]; total: number; limit: number; offset: number }> {
     return this.orchestrator.getAllConversations(options);
   }

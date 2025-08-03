@@ -70,7 +70,7 @@ export abstract class InProcessBaseAgent implements AgentInterface {
     return response.turnId;
   }
 
-  async addThought(turnId: string, thought: string): Promise<void> {
+  async addThought(turnId: string, thought: string): Promise<ThoughtEntry> {
     if (!this.conversationId) {
       throw new Error('Agent not initialized');
     }
@@ -84,9 +84,17 @@ export abstract class InProcessBaseAgent implements AgentInterface {
         content: thought
       }
     });
+    
+    return {
+      id: uuidv4(),
+      agentId: this.agentId.id,
+      timestamp: new Date(),
+      type: 'thought',
+      content: thought
+    };
   }
 
-  async addToolCall(turnId: string, toolName: string, parameters: any): Promise<string> {
+  async addToolCall(turnId: string, toolName: string, parameters: any): Promise<ToolCallEntry> {
     if (!this.conversationId) {
       throw new Error('Agent not initialized');
     }
@@ -104,10 +112,18 @@ export abstract class InProcessBaseAgent implements AgentInterface {
       }
     });
 
-    return toolCallId;
+    return {
+      id: uuidv4(),
+      agentId: this.agentId.id,
+      timestamp: new Date(),
+      type: 'tool_call',
+      toolName,
+      parameters,
+      toolCallId
+    };
   }
 
-  async addToolResult(turnId: string, toolCallId: string, result: any, error?: string): Promise<void> {
+  async addToolResult(turnId: string, toolCallId: string, result: any, error?: string): Promise<ToolResultEntry> {
     if (!this.conversationId) {
       throw new Error('Agent not initialized');
     }
@@ -123,6 +139,16 @@ export abstract class InProcessBaseAgent implements AgentInterface {
         error
       }
     });
+    
+    return {
+      id: uuidv4(),
+      agentId: this.agentId.id,
+      timestamp: new Date(),
+      type: 'tool_result',
+      toolCallId,
+      result,
+      error
+    };
   }
 
   async completeTurn(turnId: string, content: string): Promise<void> {

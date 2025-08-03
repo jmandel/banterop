@@ -2,9 +2,10 @@ import { describe, it, expect, beforeEach } from 'bun:test';
 import { ScenarioDrivenAgent } from '../../src/agents/scenario-driven.agent.js';
 import { ToolSynthesisService } from '../../src/agents/services/tool-synthesis.service.js';
 import type { 
-  OrchestratorClient, ScenarioDrivenAgentConfig, ScenarioConfiguration,
+  ScenarioDrivenAgentConfig, ScenarioConfiguration,
   LLMProvider, TraceEntry, ToolResultEntry 
 } from '../../src/types/index.js';
+import type { OrchestratorClient } from '../../src/client/index.js';
 import { v4 as uuidv4 } from 'uuid';
 
 // Mock implementations
@@ -61,10 +62,14 @@ class MockOrchestratorClient implements Partial<OrchestratorClient> {
   }
 }
 
-class MockLLMProvider implements LLMProvider {
+class MockLLMProvider extends LLMProvider {
   modelIdentifier = 'mock-model';
   responses: string[] = [];
   currentResponse = 0;
+  
+  constructor() {
+    super({ provider: 'local', model: 'mock-model' });
+  }
   
   setResponses(responses: string[]) {
     this.responses = responses;
@@ -74,6 +79,10 @@ class MockLLMProvider implements LLMProvider {
   async generateResponse() {
     const response = this.responses[this.currentResponse++];
     return { content: response };
+  }
+  
+  getSupportedModels(): string[] {
+    return ['mock-model'];
   }
 }
 
@@ -109,7 +118,6 @@ describe('ScenarioDrivenAgent Attachment Handling', () => {
       metadata: { 
         title: 'Test Scenario',
         description: 'Test',
-        schemaVersion: '2.4'
       },
       scenario: {
         background: 'Test background',

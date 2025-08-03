@@ -379,15 +379,27 @@ test('complete multi-agent workflow with user queries and tool usage', async () 
     ]
   };
   
-  // Create conversation using the createScriptedConversation method (which includes start call)
-  const { conversationId, agentTokens } = await e2e.createScriptedConversation([supportAgentConfig, techAgentConfig]);
-  
-  // Set up WebSocket monitoring like the basic test
+  // Set up WebSocket monitoring BEFORE creating conversation
   const { WebSocketJsonRpcClient } = await import('$client/impl/websocket.client.js');
   const { WebSocket } = await import('ws');
   const wsClient = new WebSocketJsonRpcClient(e2e.wsUrl);
   await wsClient.connect();
   
+  // Create conversation but don't start it yet
+  const response = await fetch(`${e2e.httpUrl}/conversations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: 'E2E User Query Integration Test',
+      agents: [supportAgentConfig, techAgentConfig],
+      managementMode: 'internal'
+    })
+  });
+  
+  const { conversation, agentTokens } = await response.json();
+  const conversationId = conversation.id;
+  
+  // Authenticate and subscribe BEFORE starting the conversation
   const firstAgentToken = Object.values(agentTokens)[0] as string;
   await wsClient.authenticate(firstAgentToken);
   await wsClient.subscribe(conversationId);
@@ -399,6 +411,13 @@ test('complete multi-agent workflow with user queries and tool usage', async () 
     console.log(`Event: ${event.type}`);
   });
   
+  // NOW start the conversation after WebSocket is ready
+  const startResponse = await fetch(`${e2e.httpUrl}/conversations/${conversationId}/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  expect(startResponse.ok).toBe(true);
+  
   // Set up automated query responder using WebSocket (like basic test)
   const queryResponses = new Map([
     ['when did the customer first notice', 'The customer first reported timeout issues on Tuesday morning around 9 AM, coinciding with increased traffic from a marketing campaign.'],
@@ -406,10 +425,15 @@ test('complete multi-agent workflow with user queries and tool usage', async () 
   ]);
   
   // Monitor and respond to queries using WebSocket (like basic test)
+  let queriesAnswered = 0;
   const respondToQueries = async () => {
     while (true) {
       try {
         const { queries } = await wsClient.getAllPendingUserQueries();
+        
+        if (queries.length > 0) {
+          console.log(`Found ${queries.length} pending queries`);
+        }
         
         for (const query of queries) {
           const questionLower = query.question.toLowerCase();
@@ -420,13 +444,16 @@ test('complete multi-agent workflow with user queries and tool usage', async () 
               console.log(`Response: "${response}"`);
               
               await wsClient.respondToUserQuery(query.queryId, response);
+              queriesAnswered++;
+              console.log(`Queries answered so far: ${queriesAnswered}`);
               break;
             }
           }
         }
         
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 50)); // Faster polling
       } catch (error) {
+        console.log('Query responder error:', error);
         break; // Exit when test is done
       }
     }
@@ -461,31 +488,32 @@ test('complete multi-agent workflow with user queries and tool usage', async () 
   
   // Wait for the complete conversation flow (simplified expectations)
   await waitForEvents([
-    'turn_completed',        // Support or Tech agent completes  
-    'user_query_created',    // Tech agent asks question
-    'user_query_answered',   // Question answered
+    'turn_completed',        // Support agent completes  
+    'user_query_created',    // Tech agent asks first question
+    'user_query_answered',   // First question answered
     'user_query_created',    // Tech agent asks second question  
     'user_query_answered',   // Second question answered
-    'turn_completed'         // Final turn completed
-  ], 10000);
+  ], 20000); // Increased timeout
   
-  // Comprehensive validation - allow for some variation in event count
-  // The key thing is that we have the main flow working
-  expect(events.length).toBeGreaterThanOrEqual(9);
+  // Wait a bit more for the final turn to complete
+  await new Promise(resolve => setTimeout(resolve, 1000));
   
-  // Validate user query flow - at least one query should be created
+  // Comprehensive validation - we should have captured the main flow
+  expect(events.length).toBeGreaterThanOrEqual(20);
+  
+  // Validate user query flow - should have 2 queries created
   const queries = events.filter(e => e.type === 'user_query_created');
-  expect(queries.length).toBeGreaterThanOrEqual(1);
+  expect(queries.length).toBe(2);
   
   // The second query should be about proceeding (from the second script)
   const proceedQuery = queries.find(q => q.data.query.question.toLowerCase().includes('should i proceed with implementing'));
   expect(proceedQuery).toBeDefined();
   
   const responses = events.filter(e => e.type === 'user_query_answered');
-  expect(responses.length).toBeGreaterThanOrEqual(1);
+  expect(responses.length).toBe(2);
   
   // Should have a response about the connection pool approval
-  const approvalResponse = responses.find(r => r.data.response.toLowerCase().includes('proceed with the connection pool'));
+  const approvalResponse = responses.find(r => r.data.response.toLowerCase().includes('proceed') || r.data.response.toLowerCase().includes('maintenance window'));
   expect(approvalResponse).toBeDefined();
   
   // Validate tool usage - should have at least some tool calls

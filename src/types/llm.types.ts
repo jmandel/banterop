@@ -18,7 +18,7 @@ export interface LLMResponse {
     completionTokens: number;
     totalTokens: number;
   };
-  finishReason?: 'stop' | 'length' | 'tool_calls' | 'content_filter';
+  finishReason?: 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'function_call';
 }
 
 export interface LLMTool {
@@ -40,7 +40,7 @@ export interface LLMToolResponse {
 
 // Provider configuration
 export interface LLMProviderConfig {
-  provider: 'google' | 'openai' | 'anthropic' | 'local' | 'remote'
+  provider: 'google' | 'openai' | 'anthropic' | 'local' | 'remote' | 'openrouter'
   apiKey?: string;
   baseURL?: string;
   model?: string;

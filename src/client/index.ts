@@ -8,7 +8,7 @@ import { WebSocketJsonRpcClient } from './impl/websocket.client.js';
 import {
   ConversationEvent, SubscriptionOptions, TraceEntry,
   ConversationTurn, CreateConversationRequest, CreateConversationResponse,
-  Conversation
+  Conversation, Attachment
 } from '$lib/types.js';
 
 // ============= Abstract Client Interface =============
@@ -60,6 +60,7 @@ export interface OrchestratorClient extends EventEmitter {
     includeTurns?: boolean;
     includeTrace?: boolean;
     includeInProgress?: boolean;
+    includeAttachments?: boolean;
   }): Promise<Conversation>;
   
   getAllConversations(options?: { 
@@ -67,6 +68,7 @@ export interface OrchestratorClient extends EventEmitter {
     offset?: number; 
     includeTurns?: boolean; 
     includeTrace?: boolean;
+    includeAttachments?: boolean;
   }): Promise<{ conversations: any[]; total: number; limit: number; offset: number }>;
   
   // Conversation management

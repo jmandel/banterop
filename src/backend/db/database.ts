@@ -625,6 +625,7 @@ export class ConversationDatabase {
       
       // If includeAttachments is true, load attachments for each turn
       if (includeAttachments) {
+        const allAttachments: Attachment[] = [];
         for (const turn of conversation.turns) {
           if (turn.attachments && turn.attachments.length > 0) {
             // Load the actual attachment objects
@@ -633,12 +634,15 @@ export class ConversationDatabase {
               const attachment = this.getAttachment(attachmentId);
               if (attachment) {
                 attachmentObjects.push(attachment);
+                allAttachments.push(attachment);
               }
             }
             // Add attachmentDetails to the turn
             (turn as any).attachmentDetails = attachmentObjects;
           }
         }
+        // Aggregate all attachments at the conversation level
+        conversation.attachments = allAttachments;
       }
     }
 

@@ -214,8 +214,10 @@ export class WebSocketTestClient {
   private subscriptions: string[] = [];
   private eventWaiters: Array<{ count: number; resolve: (events: ConversationEvent[]) => void }> = [];
   private predicateWaiters: Array<{ check: () => boolean }> = [];
+  private wsUrl: string;
 
   constructor(wsUrl: string) {
+    this.wsUrl = wsUrl;
     this.client = new WebSocketJsonRpcClient(wsUrl);
     this.setupEventCapture();
   }
@@ -352,8 +354,8 @@ export class WebSocketTestClient {
     return this.client.addTrace(turnId, entry);
   }
 
-  async completeTurn(turnId: string, content: string, metadata?: Record<string, any>): Promise<ConversationTurn> {
-    return this.client.completeTurn(turnId, content, undefined, metadata);
+  async completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>, attachments?: string[]): Promise<ConversationTurn> {
+    return this.client.completeTurn(turnId, content, isFinalTurn, metadata, attachments);
   }
 
   // Helper method for backward compatibility with old submitTurn pattern
@@ -449,6 +451,38 @@ export class WebSocketTestClient {
 
   listenerCount(event: string): number {
     return this.client.listenerCount(event);
+  }
+
+  async simulateReconnect(): Promise<void> {
+    // Force a disconnect by calling the internal websocket close with a non-1000 code
+    // This simulates an abnormal closure which should trigger reconnection
+    const ws = (this.client as any).ws;
+    if (ws && ws.close) {
+      // Use code 1006 (abnormal closure) to trigger reconnection
+      ws.close(1006, 'Test disconnect');
+    } else {
+      throw new Error('No WebSocket found to close');
+    }
+    
+    // Wait for the client to reconnect automatically
+    await waitForCondition(() => this.client.getConnectionState() === 'ready', 10000);
+  }
+
+  async registerAttachment(params: {
+    conversationId: string;
+    turnId: string;
+    docId?: string;
+    name: string;
+    contentType: string;
+    content: string;
+    summary?: string;
+    createdByAgentId: string;
+  }): Promise<string> {
+    return this.client.registerAttachment(params);
+  }
+
+  getConnectionState(): 'disconnected' | 'connecting' | 'rehydrating' | 'ready' {
+    return this.client.getConnectionState();
   }
 }
 
@@ -604,8 +638,8 @@ export class InProcessTestClient {
     return this.client.addTrace(turnId, entry);
   }
 
-  async completeTurn(turnId: string, content: string, metadata?: Record<string, any>): Promise<ConversationTurn> {
-    return this.client.completeTurn(turnId, content, undefined, metadata);
+  async completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>, attachments?: string[]): Promise<ConversationTurn> {
+    return this.client.completeTurn(turnId, content, isFinalTurn, metadata, attachments);
   }
 
   // Helper method for backward compatibility with old submitTurn pattern

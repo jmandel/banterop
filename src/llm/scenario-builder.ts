@@ -138,7 +138,7 @@ ${JSON.stringify(currentScenario, null, 2)}
 \`\`\`
 
 SCHEMA VALIDATION REQUIREMENTS:
-- metadata must have title, schemaVersion: "2.4", description
+- metadata must have title, description
 - scenario must have background and challenges array
 - agents must be an array where each agent has:
   - agentId with id and label

@@ -157,13 +157,6 @@ export interface AgentInterface {
   // Event handling
   onConversationEvent(event: any): Promise<void>;
   
-  // Actions - Streaming approach
-  startTurn(metadata?: Record<string, any>): Promise<string>; 
-  addThought(turnId: string, thought: string): Promise<ThoughtEntry>;
-  addToolCall(turnId: string, toolName: string, parameters: any): Promise<ToolCallEntry>; 
-  addToolResult(turnId: string, toolCallId: string, result: any, error?: string): Promise<ToolResultEntry>;
-  completeTurn(turnId: string, content: string): Promise<void>;
-  
   // User interaction
   queryUser(question: string, context?: Record<string, any>): Promise<string>;
 }

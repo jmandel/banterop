@@ -126,10 +126,12 @@ export const conversationStore = create<ConversationState>((set, get) => ({
           
           const newTurn: ConversationTurn = {
             id: event.data.turnId,
+            conversationId: conversationId,
             agentId: event.data.agentId || 'unknown',
-            timestamp: new Date().toISOString(),
+            timestamp: new Date(),
             content: '',
             status: 'in_progress',
+            startedAt: new Date(),
             trace: []
           };
           
@@ -318,10 +320,12 @@ export const conversationStore = create<ConversationState>((set, get) => ({
               // Create a new turn
               const newTurn: ConversationTurn = {
                 id: event.data.turnId,
+                conversationId: conversationId,
                 agentId: event.data.agentId,
-                timestamp: new Date().toISOString(),
+                timestamp: new Date(),
                 content: '',
                 status: 'in_progress',
+                startedAt: new Date(),
                 trace: []
               };
               
@@ -359,10 +363,12 @@ export const conversationStore = create<ConversationState>((set, get) => ({
               // Create a new turn
               const newTurn: ConversationTurn = {
                 id: event.data.turnId,
+                conversationId: conversationId,
                 agentId: event.data.agentId,
-                timestamp: new Date().toISOString(),
+                timestamp: new Date(),
                 content: '',
                 status: 'in_progress',
+                startedAt: new Date(),
                 trace: []
               };
               
