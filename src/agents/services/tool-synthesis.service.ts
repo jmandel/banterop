@@ -115,6 +115,27 @@ Instead, when documents or information need to be shared:
 - Use phrases like "please share in this thread" or "include in your response"
 - Treat the conversation as the sole channel for all exchanges
 
+DOCUMENT OUTPUT FORMATS:
+1. Direct Document Output (Preferred): When your tool output IS the document itself, include a docId at the root:
+{
+  "docId": "unique-document-id",
+  "contentType": "text/markdown",
+  "content": "The actual document content...",
+  ...any other fields relevant to the tool's purpose...
+}
+
+2. Document Reference Output: When referring to an external document that needs to be retrieved later:
+{
+  "refToDocId": "unique-logical-identifier",
+  "name": "Human-readable document name",
+  "type": "Document type (e.g. Progress Note, Policy Document, etc.)",
+  "contentType": "text/markdown",
+  "summary": "Brief summary of what the document contains (will help drive future synthesis)",
+  "details": { ...any fields needed to synthesize the full content later... }
+}
+
+Remember: ALL tool outputs are automatically wrapped with a docId if they don't already have one. So even simple outputs become attachable documents.
+
 CRITICAL BALANCE: 
 - DO: Enrich the scenario data with realistic details (timestamps, IDs, full reports, metadata)
 - DON'T: Invent new rules, requirements, or obstacles not present in the scenario
@@ -150,6 +171,20 @@ Your entire response MUST be a single JSON code block. The JSON object inside MU
 }
 \`\`\`
 </EXAMPLE_2>
+
+<EXAMPLE_3_RESOLVE_DOCUMENT_REFERENCE>
+For resolve_document_reference tool, the output MUST have this structure:
+\`\`\`json
+{
+  "reasoning": "Reading the clinical trial overview document refernced. Based on the scenario context and details, I'll generate realistic trial documentation.",
+  "output": {
+    "docId": "doc_trial_inflixibmab",
+    "contentType": "text/markdown",
+    "content": "# Clinical Trial For ..."
+  }
+}
+\`\`\`
+</EXAMPLE_3_RESOLVE_DOCUMENT_REFERENCE>
 </YOUR_TASK>`;
   }
 

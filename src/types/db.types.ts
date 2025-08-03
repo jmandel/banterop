@@ -24,6 +24,7 @@ export interface ConversationTurnRow {
   started_at: string;
   completed_at: string | null;
   is_final_turn: number; // SQLite INTEGER (0 or 1)
+  attachments: string | null; // JSON array of attachment IDs
 }
 
 export interface TraceEntryRow {

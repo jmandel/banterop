@@ -81,7 +81,7 @@ export abstract class BaseAgent implements AgentInterface {
   abstract onTurnCompleted(event: TurnCompletedEvent): Promise<void>;
 
   // Abstract method for initiating a conversation (no previous turn)
-  abstract initializeConversation(): Promise<void>;
+  abstract initializeConversation(instructions?: string): Promise<void>;
 
   // Abstract method for processing and replying to a turn
   abstract processAndReply(previousTurn: ConversationTurn): Promise<void>;
@@ -112,8 +112,8 @@ export abstract class BaseAgent implements AgentInterface {
     return entry;
   }
 
-  async completeTurn(turnId: string, content: string, isFinalTurn?: boolean): Promise<void> {
-    await this.client.completeTurn(turnId, content, isFinalTurn);
+  async completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>, attachments?: string[]): Promise<void> {
+    await this.client.completeTurn(turnId, content, isFinalTurn, metadata, attachments);
   }
 
   async queryUser(question: string, context?: Record<string, any>): Promise<string> {

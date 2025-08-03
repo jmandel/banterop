@@ -11,7 +11,8 @@ import {
   TurnCompletedEvent,
   ToolResultEntry,
   ThoughtEntry,
-  ToolCallEntry
+  ToolCallEntry,
+  Attachment
 } from '$lib/types.js';
 import type { ScenarioConfiguration, AgentConfiguration, Tool } from '$lib/types.js';
 import { ParsedResponse, parseToolsFromResponse } from '$lib/utils/tool-parser.js';
@@ -34,6 +35,8 @@ export class ScenarioDrivenAgent extends BaseAgent {
   private currentTurnId: string;
   private turns: ConversationTurn[] = [];
   private tracesByTurnId: Map<string, TraceEntry[]> = new Map();
+  private attachmentsByTurnId: Map<string, Attachment[]> = new Map();
+  private availableDocuments: Map<string, any> = new Map(); // Map of docId to document object
 
   constructor(
     config: ScenarioDrivenAgentConfig, 
@@ -74,9 +77,49 @@ export class ScenarioDrivenAgent extends BaseAgent {
 
     // Populate the traces map from the initial turns data
     this.tracesByTurnId.clear();
+    this.attachmentsByTurnId.clear();
+    this.availableDocuments.clear();
+    
+    // Load attachments for all turns
     for (const turn of this.turns) {
+        console.log(`[${this.agentId.id}] Initial load turn ${turn.id}:`, {
+            agentId: turn.agentId,
+            hasAttachments: !!turn.attachments,
+            attachmentCount: turn.attachments?.length || 0,
+            attachmentIds: turn.attachments || []
+        });
+        
         if (turn.trace && turn.trace.length > 0) {
             this.tracesByTurnId.set(turn.id, turn.trace);
+            
+            // Extract all documents from this turn's trace
+            for (const entry of turn.trace) {
+                if (entry.type === 'tool_result' && (entry as ToolResultEntry).result) {
+                    const documents = this.extractDocuments((entry as ToolResultEntry).result);
+                    for (const [docId, doc] of documents) {
+                        this.availableDocuments.set(docId, doc);
+                    }
+                }
+            }
+        }
+        
+        // Load attachments for this turn
+        if (turn.attachments && turn.attachments.length > 0) {
+            console.log(`[${this.agentId.id}] Initial load: Loading ${turn.attachments.length} attachments for turn ${turn.id}`);
+            const attachments: Attachment[] = [];
+            for (const attachmentId of turn.attachments) {
+                const attachment = await this.client.getAttachment(attachmentId);
+                if (attachment) {
+                    attachments.push(attachment);
+                    console.log(`[${this.agentId.id}] Initial load: Loaded attachment: ${attachment.name} (docId: ${attachment.docId})`);
+                } else {
+                    console.error(`[${this.agentId.id}] Initial load: Attachment ${attachmentId} not found`);
+                }
+            }
+            this.attachmentsByTurnId.set(turn.id, attachments);
+            console.log(`[${this.agentId.id}] Initial load: Stored ${attachments.length} attachments for turn ${turn.id}`);
+        } else {
+            console.log(`[${this.agentId.id}] Initial load: No attachments in turn ${turn.id}`);
         }
     }
 
@@ -96,8 +139,50 @@ export class ScenarioDrivenAgent extends BaseAgent {
     switch (event.type) {
         case 'turn_completed':
             const completedTurn = event.data.turn as ConversationTurn;
+            console.log(`[${this.agentId.id}] Received turn_completed event:`, {
+                turnId: completedTurn.id,
+                agentId: completedTurn.agentId,
+                hasAttachments: !!completedTurn.attachments,
+                attachmentCount: completedTurn.attachments?.length || 0,
+                attachmentIds: completedTurn.attachments || []
+            });
+            
             // Add the new turn to our local history
             this.turns.push(completedTurn);
+            
+            // Store traces if present
+            if (completedTurn.trace && completedTurn.trace.length > 0) {
+                this.tracesByTurnId.set(completedTurn.id, completedTurn.trace);
+                
+                // Extract all documents from this turn's trace
+                for (const entry of completedTurn.trace) {
+                    if (entry.type === 'tool_result' && (entry as ToolResultEntry).result) {
+                        const documents = this.extractDocuments((entry as ToolResultEntry).result);
+                        for (const [docId, doc] of documents) {
+                            this.availableDocuments.set(docId, doc);
+                        }
+                    }
+                }
+            }
+            
+            // Load attachments if present
+            if (completedTurn.attachments && completedTurn.attachments.length > 0) {
+                console.log(`[${this.agentId.id}] Loading ${completedTurn.attachments.length} attachments for turn ${completedTurn.id}`);
+                const attachments: Attachment[] = [];
+                for (const attachmentId of completedTurn.attachments) {
+                    const attachment = await this.client.getAttachment(attachmentId);
+                    if (attachment) {
+                        attachments.push(attachment);
+                        console.log(`[${this.agentId.id}] Loaded attachment: ${attachment.name} (docId: ${attachment.docId})`);
+                    } else {
+                      console.error(`[${this.agentId.id}] Attachment with ID ${attachmentId} not found for turn ${completedTurn.id}`);
+                    }
+                }
+                this.attachmentsByTurnId.set(completedTurn.id, attachments);
+                console.log(`[${this.agentId.id}] Stored ${attachments.length} attachments for turn ${completedTurn.id}`);
+            } else {
+                console.log(`[${this.agentId.id}] No attachments in turn ${completedTurn.id}`);
+            }
             
             // Trigger the agent's response logic if it's another agent's turn
             if (completedTurn.agentId !== this.agentId.id && !completedTurn.isFinalTurn) {
@@ -123,12 +208,39 @@ export class ScenarioDrivenAgent extends BaseAgent {
       return;
   }
 
-  async initializeConversation(): Promise<void> {
+  async initializeConversation(instructions?: string): Promise<void> {
     // For the initiating agent, we start with the configured initial message
     if (this.agentConfig.messageToUseWhenInitiatingConversation) {
       const turnId = await this.startTurn();
-      await this.addThought(turnId, "Starting conversation with configured initial message");
-      await this.completeTurn(turnId, this.agentConfig.messageToUseWhenInitiatingConversation);
+      
+      // Compose thought with optional instructions
+      let thought = "Starting conversation with configured initial message";
+      if (instructions) {
+        thought += `. Additional instructions: ${instructions}`;
+      }
+      await this.addThought(turnId, thought);
+      
+      // If instructions are provided, we might want to process them through the LLM
+      // to potentially modify the initial message
+      let messageToSend = this.agentConfig.messageToUseWhenInitiatingConversation;
+      
+      if (instructions) {
+        // Build a special prompt that includes the instructions
+        const prompt = this.constructFullPrompt({
+          agentConfig: this.agentConfig,
+          tools: this.agentConfig.tools,
+          conversationHistory: `INSTRUCTIONS FOR THIS CONVERSATION: ${instructions}\n\nYou are about to start a conversation. Your configured initial message is: "${messageToSend}"\n\nConsider if you need to adjust this message based on the instructions provided.`,
+          currentProcess: ''
+        });
+        
+        // Get the agent's response considering the instructions
+        const result = await this.extractToolCallsFromLLMResponse(prompt);
+        if (result.tools && result.tools.length === 1 && result.tools[0].name === 'send_message_to_agent_conversation') {
+          messageToSend = result.tools[0].args.text || messageToSend;
+        }
+      }
+      
+      await this.completeTurn(turnId, messageToSend);
     }
   }
 
@@ -151,11 +263,13 @@ export class ScenarioDrivenAgent extends BaseAgent {
         const historyString = this.buildConversationHistory();
         const currentProcessString = this.formatCurrentProcess(currentTurnTrace);
         
+        const remainingSteps = MAX_STEPS - stepCount + 1;
         const prompt = this.constructFullPrompt({
             agentConfig: this.agentConfig,
             tools: this.agentConfig.tools,
             conversationHistory: historyString,
-            currentProcess: currentProcessString
+            currentProcess: currentProcessString,
+            remainingSteps
         });
         
         // The rest of the agent's logic proceeds from here
@@ -190,16 +304,6 @@ export class ScenarioDrivenAgent extends BaseAgent {
       this.currentTurnId = null;
   }
 
-  private async buildPromptFromState(conversation: any): Promise<string> {
-    const interleavedConversation = this.buildInterleavedConversation(conversation.turns || [], conversation.traces || {});
-    
-    return this.constructFullPrompt({
-      agentConfig: this.agentConfig,
-      tools: this.agentConfig.tools,
-      interleavedConversation
-    });
-  }
-
   private buildConversationHistory(): string {
     const sections: string[] = [];
     
@@ -217,110 +321,6 @@ export class ScenarioDrivenAgent extends BaseAgent {
     return sections.join('\n\n');
   }
 
-  // Build interleaved conversation with turns and their associated tool uses
-  private buildInterleavedConversation(turns: ConversationTurn[], traces: Record<string, any>, maxWords: number = 100000): string {
-    // First pass: determine which turns we can fit within budget
-    const turnData = this.analyzeTurnsForBudget(turns, traces, maxWords);
-    
-    const sections: string[] = [];
-    let skippedCount = 0;
-    
-    // Add skipped indicator if we're not starting from the beginning
-    if (turnData.firstIncludedIndex > 0) {
-      skippedCount = turnData.firstIncludedIndex;
-      sections.push(`[${skippedCount} conversation turns snipped to save space]`);
-    }
-    
-    // Process included turns with their tool uses
-    for (let i = turnData.firstIncludedIndex; i < turns.length; i++) {
-      const turn = turns[i];
-      if (!turn) continue;
-      
-      // Add the conversation turn
-      sections.push(`[${turn.agentId}] ${turn.content}`);
-      
-      // Find and add associated tool uses
-      const turnTraces = Object.values(traces).filter((trace: any) => 
-        trace && trace.turnId === turn.id
-      );
-      
-      for (const trace of turnTraces) {
-        const toolUseText = this.formatToolUseForConversation(trace, turnData.toolBudgetPerTurn);
-        if (toolUseText) {
-          sections.push(toolUseText);
-        }
-      }
-    }
-    
-    return sections.join('\n\n');
-  }
-
-  // Analyze turns to determine what fits within token budget
-  private analyzeTurnsForBudget(turns: ConversationTurn[], traces: Record<string, any>, maxWords: number): {
-    firstIncludedIndex: number;
-    toolBudgetPerTurn: number;
-    totalEstimatedWords: number;
-  } {
-    const turnCosts: Array<{ index: number; baseWords: number; toolWords: number }> = [];
-    
-    // Calculate cost for each turn including its tool uses
-    for (let i = 0; i < turns.length; i++) {
-      const turn = turns[i];
-      if (!turn) continue;
-      
-      const baseWords = this.countWords(`[${turn.agentId}] ${turn.content}`);
-      
-      // Calculate tool use words for this turn
-      const turnTraces = Object.values(traces).filter((trace: any) => 
-        trace && trace.turnId === turn.id
-      );
-      
-      const toolWords = turnTraces.reduce((total, trace) => {
-        return total + this.countWords(this.formatTraceForContext(trace));
-      }, 0);
-      
-      turnCosts.push({ index: i, baseWords, toolWords });
-    }
-    
-    // Work backwards to fit as many recent turns as possible
-    let totalWords = 0;
-    let firstIncludedIndex = turns.length;
-    
-    for (let i = turnCosts.length - 1; i >= 0; i--) {
-      const cost = turnCosts[i];
-      const turnTotalWords = cost.baseWords + Math.min(cost.toolWords, 500); // Cap tool words per turn
-      
-      if (totalWords + turnTotalWords > maxWords && firstIncludedIndex < turns.length) {
-        break;
-      }
-      
-      totalWords += turnTotalWords;
-      firstIncludedIndex = cost.index;
-    }
-    
-    // Calculate tool budget per turn based on remaining space
-    const includedTurns = turns.length - firstIncludedIndex;
-    const toolBudgetPerTurn = includedTurns > 0 ? Math.floor((maxWords - totalWords) / includedTurns) + 200 : 500;
-    
-    return {
-      firstIncludedIndex,
-      toolBudgetPerTurn: Math.max(toolBudgetPerTurn, 100), // Minimum budget
-      totalEstimatedWords: totalWords
-    };
-  }
-
-  /**
-   * Formats the agent's available tools into a structured, readable format.
-   */
-  private formatTools(tools: Tool[]): string {
-    return tools.map(tool => {
-      const params = tool.inputSchema?.properties
-        ? Object.entries(tool.inputSchema.properties).map(([p, s]: [string, any]) => `${p}: ${s.type}`).join(', ')
-        : '';
-      const required = tool.inputSchema?.required ? ` (required: ${tool.inputSchema.required.join(', ')})` : '';
-      return `- \`${tool.toolName}(${params})\`\n  // ${tool.description}${required}`;
-    }).join('\n\n');
-  }
 
   /**
    * Formats tools with usage guidance for better decision making.
@@ -377,9 +377,9 @@ export class ScenarioDrivenAgent extends BaseAgent {
     tools: Tool[];
     conversationHistory?: string;
     currentProcess?: string;
-    interleavedConversation?: string;
+    remainingSteps?: number;
   }): string {
-    const { agentConfig, tools, conversationHistory, currentProcess, interleavedConversation } = params;
+    const { agentConfig, tools, conversationHistory, currentProcess, remainingSteps } = params;
 
     const separator = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
 
@@ -406,31 +406,42 @@ You have access to the following tools. Each tool must be called with all requir
 
 ${this.formatToolsWithGuidance(tools)}
 
+ATTACHMENT GUIDANCE:
+- ANY tool response that has a "docId" field at the root level is an attachable document. You can attach it directly without any additional resolution.
+- Tool responses with "refToDocId" (instead of "docId") are references that need to be resolved first using resolve_document_reference.
+- Simple rule: If you see "docId" at the root of any tool result, that's a document you can attach. Only "refToDocId" needs resolution.
+- To attach documents in your messages:
+  1. Collect the docIds from tool results (no resolution needed if docId already exists)
+  2. Use send_message_to_agent_conversation with attachments_to_include as an array of docId strings
+  Example: attachments_to_include: ["doc_policy_123", "doc_report_456"]
+- You can only attach documents whose docId has appeared in a tool result within this conversation.
+- Never claim "see attached" without including actual attachments.
+
 </AVAILABLE_TOOLS>`;
 
     // Use new chronological format if available, otherwise fall back to old format
-    let conversationHistorySection: string;
-    if (conversationHistory !== undefined) {
-      // New chronological format
-      conversationHistorySection = `<CONVERSATION_HISTORY>
+    let conversationHistorySection: string = `<CONVERSATION_HISTORY>
 ${conversationHistory}
 </CONVERSATION_HISTORY>`;
-    } else {
-      // Old format for backward compatibility
-      conversationHistorySection = `<CONVERSATION_HISTORY>
-This is the conversation so far, with the most recent turn first.
-${interleavedConversation}
-
-</CONVERSATION_HISTORY>`;
-    }
 
     // Current status section with process details
-    const currentStatusSection = currentProcess ? `<CURRENT_STATUS>
+    let currentStatusSection = currentProcess ? `<CURRENT_STATUS>
 You are currently in the middle of processing a turn. Review your progress below.
 
 ${currentProcess}
 
 </CURRENT_STATUS>` : '';
+
+    // Add warning if approaching MAX_STEPS
+    if (remainingSteps !== undefined && remainingSteps <= 5) {
+      const warningSection = `
+<IMPORTANT_WARNING>
+⚠️ You have only ${remainingSteps} step${remainingSteps === 1 ? '' : 's'} remaining in this turn!
+You MUST send a message to the conversation thread using send_message_to_agent_conversation before your steps run out.
+If you don't send a message before reaching 0 steps, the turn will end with an error.
+</IMPORTANT_WARNING>`;
+      currentStatusSection = warningSection + currentStatusSection;
+    }
 
     // 5. Response Instructions Section (How do I respond?)
     const responseInstructionsSection = `<RESPONSE_INSTRUCTIONS>
@@ -479,8 +490,6 @@ Your response MUST follow this EXACT format:
     const messages: LLMMessage[] = [{ role: 'user', content: prompt }];
     const request: LLMRequest = {
       messages,
-      temperature: 0.1, // Lower temperature for more deterministic tool use
-      maxTokens: 1500
     };
 
     const response = await this.llmProvider.generateResponse(request);
@@ -508,13 +517,80 @@ Your response MUST follow this EXACT format:
     }
 
     if (toolCall.name === 'send_message_to_agent_conversation') {
-      const { text } = toolCall.args;
+      const { text, attachments_to_include } = toolCall.args;
       if (!text || typeof text !== 'string' || text.trim() === '') {
         const error = new Error(`${this.agentId.id}: send_message_to_agent_conversation requires non-empty text parameter. Got: ${JSON.stringify(toolCall.args)}`);
         console.error('Stack trace:', error.stack);
         throw error;
       }
-      await this.completeTurn(this.currentTurnId, text);
+      
+      const attachmentIds: string[] = [];
+      
+      // Process attachments if provided (now an array of docIds)
+      if (attachments_to_include && Array.isArray(attachments_to_include) && attachments_to_include.length > 0) {
+        console.log(`[${this.agentId.id}] Processing attachments_to_include:`, JSON.stringify(attachments_to_include));
+        
+        // Handle case where LLM sends objects instead of strings
+        const docIds = attachments_to_include.map(item => {
+          if (typeof item === 'string') {
+            return item;
+          } else if (typeof item === 'object' && item.docId) {
+            console.warn(`[${this.agentId.id}] Received object with docId instead of string. Converting...`);
+            return item.docId;
+          } else {
+            console.error(`[${this.agentId.id}] Invalid attachment format:`, item);
+            return null;
+          }
+        }).filter(id => id !== null);
+        // Create a Set of all available docIds from the entire conversation
+        const availableDocIds = new Set<string>();
+        
+        // Use the availableDocuments map which already has all documents from all turns
+        for (const docId of this.availableDocuments.keys()) {
+          availableDocIds.add(docId);
+        }
+        
+        // Filter to keep only valid docIds
+        const validDocIds = docIds.filter(docId => availableDocIds.has(docId));
+        
+        if (validDocIds.length < docIds.length) {
+          console.warn(`Some docIds were not found in conversation history. Requested: ${docIds.join(', ')}, Valid: ${validDocIds.join(', ')}`);
+        }
+        
+        // Process each valid docId
+        for (const docId of validDocIds) {
+          try {
+            // Get the document from our map
+            const doc = this.availableDocuments.get(docId);
+            
+            if (!doc) {
+              console.error(`Could not find document with docId: ${docId}`);
+              continue;
+            }
+            
+            // Register the attachment
+            const attachmentId = await this.client.registerAttachment({
+              conversationId: this.conversationId!,
+              turnId: this.currentTurnId,
+              docId: docId,
+              name: doc.name || docId,
+              contentType: doc.contentType || 'text/markdown',
+              content: typeof doc.content === 'string' ? doc.content : JSON.stringify(doc.content),
+              summary: doc.summary,
+              createdByAgentId: this.agentId.id
+            });
+            
+            attachmentIds.push(attachmentId);
+            console.log(`Registered attachment ${attachmentId} for docId: ${docId}`);
+          } catch (error) {
+            console.error(`Failed to process attachment ${docId}:`, error);
+            // Continue with other attachments
+          }
+        }
+      }
+      
+      console.log(`${this.agentId.id} sending message: "${text}" with ${attachmentIds.length} attachments`);
+      await this.completeTurn(this.currentTurnId, text, false, undefined, attachmentIds);
       return {completedTurn: true};
     }
 
@@ -541,6 +617,7 @@ Your response MUST follow this EXACT format:
       // Turn remains open, agent can continue processing
       return {completedTurn: false};
     }
+
     
     // Add tool call trace
     const toolCallEntry = await this.addToolCall(this.currentTurnId, toolCall.name, toolCall.args);
@@ -549,26 +626,67 @@ Your response MUST follow this EXACT format:
     try {
       const toolDef = this.getToolDefinition(toolCall.name);
       
-      // Build conversation history including the current in-progress turn
-      const historyString = this.buildConversationHistory();
-      const currentProcessString = this.formatCurrentProcess(currentTurnTrace);
-      const fullHistory = historyString + (historyString ? '\n\n' : '') + 
-                         `From: ${this.agentId.label} (IN PROGRESS)\n` +
-                         `Timestamp: ${new Date().toISOString()}\n\n` +
-                         currentProcessString;
+      let toolOutput: any;
       
-      const synthesisResult = await this.toolSynthesis.execute({ // New call
-          toolName: toolCall.name,
-          args: toolCall.args,
-          agentId: this.agentId.id,
-          scenario: this.scenario,
-          conversationHistory: fullHistory
-      });
+      // Special handling for resolve_document_reference - check if document already exists
+      if (toolCall.name === 'resolve_document_reference' && toolCall.args.refToDocId) {
+        // First check if we already have this document as an attachment
+        const existingAttachment = await this.checkExistingAttachment(toolCall.args.refToDocId as string);
+        
+        if (existingAttachment) {
+          console.log(`Found existing attachment for docId: ${toolCall.args.refToDocId}`);
+          toolOutput = {
+            docId: existingAttachment.docId,
+            name: existingAttachment.name,
+            contentType: existingAttachment.contentType,
+            content: existingAttachment.content,
+            summary: existingAttachment.summary
+          };
+        }
+      }
+      
+      // If we didn't find an existing attachment, call synthesis
+      if (!toolOutput) {
+        // Build conversation history including the current in-progress turn
+        const historyString = this.buildConversationHistory();
+        const currentProcessString = this.formatCurrentProcess(currentTurnTrace);
+        const fullHistory = historyString + (historyString ? '\n\n' : '') + 
+                           `From: ${this.agentId.label} (IN PROGRESS)\n` +
+                           `Timestamp: ${new Date().toISOString()}\n\n` +
+                           currentProcessString;
+        
+        const synthesisResult = await this.toolSynthesis.execute({ // New call
+            toolName: toolCall.name,
+            args: toolCall.args,
+            agentId: this.agentId.id,
+            scenario: this.scenario,
+            conversationHistory: fullHistory
+        });
+        
+        toolOutput = synthesisResult.output;
+      }
 
-      // The result is already the clean data payload. No parsing needed here.
-      const toolOutput = synthesisResult.output;
+      // Reification Logic: Wrap tool output in document structure if it doesn't have a docId
+      if (typeof toolOutput !== 'object' || !toolOutput || !toolOutput.hasOwnProperty('docId')) {
+        toolOutput = {
+          docId: toolCallEntry.toolCallId, // Use the toolCallId as the docId
+          contentType: 'application/json',
+          content: toolOutput
+        };
+      }
       
       console.log("Synthesized tool result:", toolOutput);
+      
+      // Extract all documents with docIds from the tool output (including nested ones)
+      const documentsInResult = this.extractDocuments(toolOutput);
+      if (documentsInResult.size > 0) {
+        console.log(`Found ${documentsInResult.size} document(s) with docId in tool result:`, Array.from(documentsInResult.keys()));
+        // Add all found documents to our available documents map
+        for (const [docId, doc] of documentsInResult) {
+          this.availableDocuments.set(docId, doc);
+        }
+      }
+      
       const toolResultEntry = await this.addToolResult(this.currentTurnId, toolCallEntry.toolCallId, toolOutput);
       currentTurnTrace.push(toolResultEntry);
       
@@ -601,6 +719,86 @@ Your response MUST follow this EXACT format:
     return this.agentConfig.tools.find(tool => tool.toolName === toolName);
   }
 
+  /**
+   * Recursively extracts all documents with docIds and builds a map
+   */
+  private extractDocuments(obj: any, docMap: Map<string, any> = new Map()): Map<string, any> {
+    if (!obj || typeof obj !== 'object') {
+      return docMap;
+    }
+
+    // If this object has a docId, add it to the map
+    if (obj.docId && typeof obj.docId === 'string') {
+      docMap.set(obj.docId, obj);
+    }
+
+    // Recursively search arrays and objects
+    if (Array.isArray(obj)) {
+      for (const item of obj) {
+        this.extractDocuments(item, docMap);
+      }
+    } else {
+      for (const key of Object.keys(obj)) {
+        this.extractDocuments(obj[key], docMap);
+      }
+    }
+
+    return docMap;
+  }
+  
+  /**
+   * Public method to populate documents from trace (for testing)
+   */
+  public populateDocumentsFromTrace(trace: TraceEntry[]): void {
+    for (const entry of trace) {
+      if (entry.type === 'tool_result' && (entry as ToolResultEntry).result) {
+        const documents = this.extractDocuments((entry as ToolResultEntry).result);
+        for (const [docId, doc] of documents) {
+          this.availableDocuments.set(docId, doc);
+        }
+      }
+    }
+  }
+
+  /**
+   * Recursively finds a document by docId within a nested structure
+   */
+  private findDocumentByDocId(obj: any, targetDocId: string): any | null {
+    if (!obj || typeof obj !== 'object') {
+      return null;
+    }
+
+    // If this object has the target docId, return it
+    if (obj.docId === targetDocId) {
+      return obj;
+    }
+
+    // Recursively search arrays and objects
+    if (Array.isArray(obj)) {
+      for (const item of obj) {
+        const found = this.findDocumentByDocId(item, targetDocId);
+        if (found) return found;
+      }
+    } else {
+      for (const key of Object.keys(obj)) {
+        const found = this.findDocumentByDocId(obj[key], targetDocId);
+        if (found) return found;
+      }
+    }
+
+    return null;
+  }
+
+  private async checkExistingAttachment(docId: string): Promise<Attachment | null> {
+    try {
+      // Use the client to check for existing attachment by docId
+      return await this.client.getAttachmentByDocId(this.conversationId!, docId);
+    } catch (error) {
+      console.error(`Failed to check existing attachment for docId ${docId}:`, error);
+      return null;
+    }
+  }
+
   // Format tool response for the conversation
   private formatToolResponse(toolName: string, result: any): string {
     const isTerminal = this.isTerminalTool(toolName);
@@ -630,6 +828,11 @@ Your response MUST follow this EXACT format:
           required: ['text'],
           properties: {
             text: { type: 'string', minLength: 1 },
+            attachments_to_include: { 
+              type: 'array',
+              description: 'Array of document IDs (strings) to include as attachments. You must have previously read these documents in this turn using resolve_document_reference.',
+              items: { type: 'string' }
+            }
           }
         },
         synthesisGuidance: 'N/A'
@@ -647,6 +850,23 @@ Your response MUST follow this EXACT format:
           }
         },
         synthesisGuidance: 'Respond as the user might'
+      },
+      {
+        toolName: 'resolve_document_reference',
+        description: 'Read the full content of a document/attachment that was described in a tool result. Call this before including any attachment in your message.',
+        inputSchema: {
+          type: 'object',
+          required: ['refToDocId'],
+          properties: {
+            refToDocId: { type: 'string', description: 'Reference ID of the document to read' },
+            name: { type: 'string', description: 'Document name' },
+            type: { type: 'string', description: 'Document type' },
+            contentType: { type: 'string', description: 'MIME type (default: text/markdown)' },
+            summary: { type: 'string', description: 'Summary of the document' },
+            details: { type: 'object', description: 'Additional details for synthesis' }
+          }
+        },
+        synthesisGuidance: 'Generate the full text content of the described document based on the scenario context and provided details'
       },
       // {
       //   toolName: 'no_response_needed',
@@ -759,9 +979,36 @@ Your response MUST follow this EXACT format:
     return d.toISOString().replace('T', ' ').substring(0, 19);
   }
 
+  private formatTurnAttachments(turnId: string): string {
+    const attachments = this.attachmentsByTurnId.get(turnId);
+    console.log(`[${this.agentId.id}] Formatting attachments for turn ${turnId}: found ${attachments?.length || 0} attachments`);
+    if (!attachments || attachments.length === 0) return '';
+    
+    const attachmentDetails: string[] = [];
+    attachmentDetails.push('\n\n📎 Attachments:');
+    
+    // Use stored attachment metadata
+    for (const attachment of attachments) {
+      attachmentDetails.push(`• ${attachment.name || 'Untitled Document'} (docId: ${attachment.docId || attachment.id})`);
+      if (attachment.summary) {
+        attachmentDetails.push(`  Summary: ${attachment.summary}`);
+      }
+      attachmentDetails.push(`  💡 Use resolve_document_reference with refToDocId: "${attachment.docId || attachment.id}" to read this document`);
+    }
+    
+    return attachmentDetails.join('\n');
+  }
+
   private formatOtherAgentTurn(turn: ConversationTurn): string {
     const timestamp = this.formatTimestamp(turn.timestamp);
-    return `From: ${turn.agentId}\nTimestamp: ${timestamp}\n\n${turn.content}\n\n---`;
+    let formatted = `From: ${turn.agentId}\nTimestamp: ${timestamp}\n\n${turn.content}`;
+    
+    // Add attachments if present
+    if (turn.attachments && turn.attachments.length > 0) {
+      formatted += this.formatTurnAttachments(turn.id);
+    }
+    
+    return formatted + '\n\n---';
   }
 
   private formatOwnTurnForHistory(turn: ConversationTurn): string {
@@ -812,6 +1059,11 @@ Your response MUST follow this EXACT format:
     // Add the final turn content
     if (turn.content) {
       parts.push(turn.content);
+    }
+    
+    // Add attachments if present
+    if (turn.attachments && turn.attachments.length > 0) {
+      parts.push(this.formatTurnAttachments(turn.id));
     }
 
     // Add separator at the end

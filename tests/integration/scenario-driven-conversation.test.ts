@@ -498,4 +498,188 @@ describe('Integration Test: Scenario-Driven Agent Conversation', () => {
     console.log(`Supplier-initiated conversation completed in ${finalState.turns.length} turns.`);
     console.log('--- Supplier-Initiated Test Passed Successfully ---');
   }, 15000);
+
+  test('should handle document attachments in conversation flow', async () => {
+    console.log('\n--- Starting Attachment Flow Test ---');
+
+    // Create a custom mock LLM that will exercise the attachment flow
+    class AttachmentFlowMockLLMProvider extends TerminalAwareMockLLMProvider {
+      private attachmentTurnCount: number = 0;
+      private attachmentResponses: string[] = [
+        // Turn 1: Initial tool call that returns a document reference
+        `<scratchpad>Let me look up the medical policy first.</scratchpad>\n\`\`\`json\n{"name": "lookup_medical_policy", "args": {"policyType": "MRI", "bodyPart": "knee"}}\n\`\`\``,
+        
+        // Turn 2: Resolve the document reference
+        `<scratchpad>I need to read the full policy document that was referenced.</scratchpad>\n\`\`\`json\n{"name": "resolve_document_reference", "args": {"refToDocId": "policy_mri_knee_2024", "name": "Knee MRI Policy 2024", "type": "Medical Policy", "contentType": "text/markdown", "summary": "Policy for knee MRI authorization"}}\n\`\`\``,
+        
+        // Turn 3: Send message with the document attached
+        `<scratchpad>Now I'll send the policy document to the patient.</scratchpad>\n\`\`\`json\n{"name": "send_message_to_agent_conversation", "args": {"text": "I've found the relevant medical policy. Please see the attached document for the full requirements.", "attachments_to_include": ["doc_policy_mri_knee_2024"]}}\n\`\`\``,
+        
+        // Turn 4+: End the conversation
+        `<scratchpad>Authorization complete with policy provided.</scratchpad>\n\`\`\`json\n{"name": "mri_authorization_Success", "args": {"reason": "Policy reviewed and requirements met", "authNumber": "AUTH-456"}}\n\`\`\``
+      ];
+
+      async generateContent(request: LLMRequest): Promise<LLMResponse> {
+        this.lastPrompt = request.messages[0].content;
+        await debugLogger.logLLMRequest(request);
+        
+        const response = this.attachmentTurnCount < this.attachmentResponses.length 
+          ? this.attachmentResponses[this.attachmentTurnCount] 
+          : this.attachmentResponses[this.attachmentResponses.length - 1];
+        this.attachmentTurnCount++;
+        
+        // Check if terminal tool is being used
+        const toolNameMatch = response.match(/"name":\s*"([^"]+)"/);
+        if (toolNameMatch) {
+          const toolName = toolNameMatch[1];
+          if (/Success$|Approval$|Failure$|Denial$|NoSlots$/.test(toolName)) {
+            this.terminalToolsUsed.push(toolName);
+          }
+        }
+        
+        const llmResponse = { content: response };
+        await debugLogger.logLLMResponse(llmResponse);
+        return llmResponse;
+      }
+    }
+
+    // Override the tool synthesis to provide realistic responses
+    class AttachmentToolSynthesis extends ToolSynthesisService {
+      async execute(input: any) {
+        // Handle lookup_medical_policy to return a document reference
+        if (input.toolName === 'lookup_medical_policy') {
+          return {
+            output: {
+              policyFound: true,
+              policyDetails: {
+                refToDocId: 'policy_mri_knee_2024',
+                name: 'Knee MRI Policy 2024',
+                type: 'Medical Policy',
+                contentType: 'text/markdown',
+                summary: 'Policy requirements for knee MRI authorization including conservative therapy requirements'
+              }
+            }
+          };
+        }
+        
+        // Handle resolve_document_reference to return full document content
+        if (input.toolName === 'resolve_document_reference') {
+          return {
+            output: {
+              docId: 'doc_policy_mri_knee_2024',
+              contentType: 'text/markdown',
+              content: '# Knee MRI Authorization Policy\n\n## Requirements\n\n1. **Conservative Therapy**: Minimum 14 days of physical therapy\n2. **Documentation**: PT notes must be provided\n3. **Timeline**: Must be within last 60 days\n\n## Approval Criteria\n\n- Evidence of failed conservative treatment\n- Clear medical necessity\n- Appropriate diagnostic pathway'
+            }
+          };
+        }
+        
+        // Default to parent implementation
+        return super.execute(input);
+      }
+    }
+
+    // Create test setup with attachment-aware mocks
+    const attachmentMockLLM = new AttachmentFlowMockLLMProvider();
+    const attachmentToolSynthesis = new AttachmentToolSynthesis(attachmentMockLLM);
+    
+    // Create a new orchestrator with our custom mocks
+    const attachmentOrchestrator = new ConversationOrchestrator(
+      ':memory:',
+      attachmentMockLLM,
+      attachmentToolSynthesis
+    );
+    seedDatabase(attachmentOrchestrator.getDbInstance());
+
+    // Create the conversation
+    const kneeMriScenarioId = 'scen_knee_mri_01';
+    const createRequest: CreateConversationRequest = {
+      name: 'E2E Attachment Test',
+      managementMode: 'internal',
+      agents: [
+        {
+          agentId: { id: 'patient-agent', label: 'Patient Agent', role: 'PatientAgent' },
+          strategyType: 'scenario_driven',
+          scenarioId: kneeMriScenarioId,
+          messageToUseWhenInitiatingConversation: "I need help getting my knee MRI authorized. Can you provide the policy requirements?"
+        } as ScenarioDrivenAgentConfig,
+        {
+          agentId: { id: 'insurance-auth-specialist', label: 'Insurance Authorization Specialist', role: 'InsuranceAgent' },
+          strategyType: 'scenario_driven',
+          scenarioId: kneeMriScenarioId
+        } as ScenarioDrivenAgentConfig
+      ],
+      initiatingAgentId: 'patient-agent'
+    };
+
+    // Set up conversation monitoring
+    let conversationEnded = false;
+    let attachmentRegistered = false;
+    let turnWithAttachments: any = null;
+    
+    const conversationEndPromise = new Promise<void>((resolve) => {
+      attachmentOrchestrator.subscribeToConversation('*', async (event: ConversationEvent) => {
+        await debugLogger.logEvent(event.type, event);
+        
+        if (event.type === 'turn_completed' && event.data.turn.attachments && event.data.turn.attachments.length > 0) {
+          attachmentRegistered = true;
+          turnWithAttachments = event.data.turn;
+        }
+        
+        if (event.type === 'conversation_ended') {
+          conversationEnded = true;
+          resolve();
+        }
+      });
+    });
+
+    // Create and start the conversation
+    console.log('Creating attachment test conversation...');
+    const { conversation } = await attachmentOrchestrator.createConversation(createRequest);
+    await attachmentOrchestrator.startConversation(conversation.id);
+    console.log(`Conversation ${conversation.id} started.`);
+
+    // Wait for conversation to end
+    await Promise.race([
+      conversationEndPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Test timeout')), 15000))
+    ]);
+
+    // Validate the outcome
+    const finalState = attachmentOrchestrator.getConversation(conversation.id, true, true);
+    
+    // Verify attachment was registered and included in a turn
+    expect(attachmentRegistered).toBe(true);
+    expect(turnWithAttachments).toBeTruthy();
+    expect(turnWithAttachments.attachments).toHaveLength(1);
+    
+    // Get the attachment details
+    const attachmentId = turnWithAttachments.attachments[0];
+    const attachment = attachmentOrchestrator.getDbInstance().getAttachment(attachmentId);
+    
+    expect(attachment).toBeTruthy();
+    expect(attachment?.contentType).toBe('text/markdown');
+    expect(attachment?.content).toContain('Knee MRI Authorization Policy');
+    expect(attachment?.content).toContain('Conservative Therapy');
+    
+    // Verify the conversation flow included document reference and resolution
+    const allTraces = finalState.turns.flatMap(t => t.trace || []);
+    
+    // Check for lookup_medical_policy tool call
+    const lookupCall = allTraces.find(t => t.type === 'tool_call' && (t as any).toolName === 'lookup_medical_policy');
+    expect(lookupCall).toBeTruthy();
+    
+    // Check for resolve_document_reference tool call
+    const resolveCall = allTraces.find(t => t.type === 'tool_call' && (t as any).toolName === 'resolve_document_reference');
+    expect(resolveCall).toBeTruthy();
+    
+    // Check that the message with attachment mentioned it
+    expect(turnWithAttachments.content).toContain('attached document');
+    
+    console.log(`Conversation with attachments completed in ${finalState.turns.length} turns.`);
+    console.log(`Attachment ID: ${attachmentId}`);
+    console.log('--- Attachment Flow Test Passed Successfully ---');
+
+    // Clean up
+    attachmentOrchestrator.close();
+  }, 20000);
 });

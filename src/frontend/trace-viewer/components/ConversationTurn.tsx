@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useMemo } from 'react';
 import type { ConversationTurn } from '../types/index.js';
 import { TraceEntryComponent } from './TraceEntry.js';
 import { useConversationStore } from '../stores/conversation.store.js';
+import { useUIStore } from '../stores/ui.store.js';
 import { marked } from 'marked';
 
 interface ConversationTurnProps {
@@ -88,12 +89,73 @@ export const ConversationTurnComponent: React.FC<ConversationTurnProps> = ({
             {turn.content || 'Processing...'}
           </div>
         ) : (
-          <div 
-            className="turn-markdown-content"
-            dangerouslySetInnerHTML={{ __html: renderedContent }}
-          />
+          <>
+            <div 
+              className="turn-markdown-content"
+              dangerouslySetInnerHTML={{ __html: renderedContent }}
+            />
+            {turn.attachments && turn.attachments.length > 0 && (
+              <div className="turn-attachments">
+                <div className="attachments-header">
+                  <span>📎 Attachments ({turn.attachments.length})</span>
+                </div>
+                <div className="attachments-list">
+                  {turn.attachments.map((attachmentId) => (
+                    <AttachmentChip key={attachmentId} attachmentId={attachmentId} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
+    </div>
+  );
+};
+
+const AttachmentChip: React.FC<{ attachmentId: string }> = ({ attachmentId }) => {
+  const [metadata, setMetadata] = React.useState<any>(null);
+  const [loading, setLoading] = React.useState(true);
+  const apiEndpoint = useUIStore(state => state.apiEndpoint);
+  
+  React.useEffect(() => {
+    fetch(`${apiEndpoint}/attachments/${attachmentId}`)
+      .then(res => {
+        console.log(`Attachment ${attachmentId} response:`, res.status, res.statusText);
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        return res.json();
+      })
+      .then(data => {
+        console.log(`Attachment ${attachmentId} data:`, data);
+        setMetadata(data);
+        setLoading(false);
+      })
+      .catch(error => {
+        console.error(`Failed to load attachment ${attachmentId}:`, error);
+        setLoading(false);
+      });
+  }, [attachmentId, apiEndpoint]);
+  
+  const handleClick = () => {
+    window.open(`${apiEndpoint}/attachments/${attachmentId}/content`, '_blank');
+  };
+  
+  if (loading) {
+    return <div className="attachment-chip loading">Loading...</div>;
+  }
+  
+  if (!metadata) {
+    console.error(`AttachmentChip: No metadata for attachment ${attachmentId}. Loading state was:`, loading);
+    return <div className="attachment-chip error">Attachment not found (ID: {attachmentId})</div>;
+  }
+  
+  return (
+    <div className="attachment-chip" onClick={handleClick} title="Click to view">
+      <span className="attachment-icon">📄</span>
+      <span className="attachment-name">{metadata.name}</span>
+      <span className="attachment-type">{metadata.contentType}</span>
     </div>
   );
 };

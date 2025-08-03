@@ -68,6 +68,7 @@ export interface ConversationTurn {
   completedAt?: Date;
   trace?: TraceEntry[]; // Embedded trace entries when requested
   isFinalTurn?: boolean; // Indicates if this is the final turn in the conversation
+  attachments?: string[]; // Array of attachment IDs
 }
 
 // TurnShell - ConversationTurn without trace array for efficient event payloads
@@ -177,6 +178,21 @@ export interface OrchestratorConversationState {
   agentConfigs: Map<string, any>; // AgentConfig - avoiding circular dependency
   agentTokens: Record<string, string>;
   agents?: Map<string, any>; // AgentInterface - avoiding circular dependency
+}
+
+// ============= Attachment Types =============
+
+export interface Attachment {
+  id: string;                 // att_<uuid>
+  conversationId: string;
+  turnId: string;
+  docId?: string;             // Original document ID (like a filename)
+  name: string;
+  contentType: string;        // e.g., 'text/markdown'
+  content: string;            // text body
+  summary?: string;           // Optional summary of the document
+  createdByAgentId: string;
+  createdAt: Date;
 }
 
 // ============= Frontend Monitor Types =============

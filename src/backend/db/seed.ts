@@ -38,7 +38,7 @@ export function seedDatabase(db: ConversationDatabase): void {
           description: "A 38-year-old amateur soccer player with an acute right knee injury."
         },
         situation: "You are contacting the insurance company to get prior authorization for a right knee MRI for your client, Jordan Alvarez.",
-        systemPrompt: "You are an AI agent representing Jordan Alvarez. Your instructions are to obtain prior authorization for a right knee MRI. Ask the insurance company what they need, communicate clearly,  provide necessary documentation when requested, and aim for a swift approval.",
+        systemPrompt: "You are an AI agent representing Jordan Alvarez. Your instructions are to obtain prior authorization for a right knee MRI. Ask the insurance company what they need, communicate clearly,  provide necessary documentation when requested, and aim for a swift approval. Try to request a full copy of any applicable policy documents as an attachmetn from the insurer.",
         goals: ["Obtain MRI authorization", "Minimize delays", "Understand next steps"],
         tools: [
          {

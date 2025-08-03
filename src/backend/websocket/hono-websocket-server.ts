@@ -51,7 +51,8 @@ const RPC_ERRORS = {
   UNAUTHORIZED: { code: -32000, message: 'Unauthorized' },
   CONVERSATION_NOT_FOUND: { code: -32001, message: 'Conversation not found' },
   INVALID_TOKEN: { code: -32002, message: 'Invalid token' },
-  SUBSCRIPTION_FAILED: { code: -32003, message: 'Subscription failed' }
+  SUBSCRIPTION_FAILED: { code: -32003, message: 'Subscription failed' },
+  NOT_FOUND: { code: -32004, message: 'Resource not found' }
 };
 
 // ============= WebSocket Client State =============
@@ -122,6 +123,11 @@ export class HonoWebSocketJsonRpcServer {
     // Conversation info
     this.methods.set('getConversation', this.getConversation.bind(this));
     this.methods.set('getAllConversations', this.getAllConversations.bind(this));
+    
+    // Attachments
+    this.methods.set('registerAttachment', this.registerAttachment.bind(this));
+    this.methods.set('getAttachment', this.getAttachment.bind(this));
+    this.methods.set('getAttachmentByDocId', this.getAttachmentByDocId.bind(this));
   }
 
   private setupWebSocketRoute(upgradeWebSocket: any) {
@@ -408,6 +414,7 @@ export class HonoWebSocketJsonRpcServer {
     content: string;
     isFinalTurn?: boolean;
     metadata?: Record<string, any>;
+    attachments?: string[];
   }): Promise<any> {
     if (!client.conversationId || !client.agentId) {
       throw RPC_ERRORS.UNAUTHORIZED;
@@ -423,7 +430,8 @@ export class HonoWebSocketJsonRpcServer {
       agentId: client.agentId,
       content: params.content,
       isFinalTurn: params.isFinalTurn,
-      metadata: params.metadata
+      metadata: params.metadata,
+      attachments: params.attachments
     };
 
     const turn = this.orchestrator.completeTurn(request);
@@ -490,6 +498,7 @@ export class HonoWebSocketJsonRpcServer {
     includeTurns?: boolean;
     includeTrace?: boolean;
     includeInProgress?: boolean;
+    includeAttachments?: boolean;
   }): Promise<any> {
     const conversationId = params?.conversationId || client.conversationId;
     if (!conversationId) {
@@ -500,7 +509,8 @@ export class HonoWebSocketJsonRpcServer {
       conversationId,
       params?.includeTurns !== false,
       params?.includeTrace === true,
-      params?.includeInProgress === true
+      params?.includeInProgress === true,
+      params?.includeAttachments === true
     );
 
     if (!conversation) {
@@ -544,6 +554,74 @@ export class HonoWebSocketJsonRpcServer {
 
     await this.orchestrator.endConversation(params.conversationId);
     return { success: true, message: 'Conversation ended successfully' };
+  }
+
+  private async registerAttachment(client: ClientState, params: {
+    conversationId: string;
+    turnId: string;
+    docId?: string;
+    name: string;
+    contentType: string;
+    content: string;
+    summary?: string;
+  }): Promise<any> {
+    if (!client.conversationId || !client.agentId) {
+      throw RPC_ERRORS.UNAUTHORIZED;
+    }
+
+    if (!params?.turnId || !params?.name || !params?.content) {
+      throw { ...RPC_ERRORS.INVALID_PARAMS, data: 'Turn ID, name, and content required' };
+    }
+
+    if (params.conversationId !== client.conversationId) {
+      throw { ...RPC_ERRORS.INVALID_PARAMS, data: 'Cannot register attachment for different conversation' };
+    }
+
+    const attachmentId = this.orchestrator.registerAttachment({
+      conversationId: params.conversationId,
+      turnId: params.turnId,
+      docId: params.docId,
+      name: params.name,
+      contentType: params.contentType || 'text/markdown',
+      content: params.content,
+      summary: params.summary,
+      createdByAgentId: client.agentId
+    });
+
+    return { attachmentId };
+  }
+
+  private async getAttachment(client: ClientState, params: {
+    attachmentId: string;
+  }): Promise<any> {
+    if (!params?.attachmentId) {
+      throw { ...RPC_ERRORS.INVALID_PARAMS, data: 'Attachment ID required' };
+    }
+
+    const attachment = this.orchestrator.getDbInstance().getAttachment(params.attachmentId);
+    if (!attachment) {
+      throw { ...RPC_ERRORS.NOT_FOUND, data: 'Attachment not found' };
+    }
+
+    return attachment;
+  }
+
+  private async getAttachmentByDocId(client: ClientState, params: {
+    conversationId: string;
+    docId: string;
+  }): Promise<any> {
+    if (!params?.conversationId || !params?.docId) {
+      throw { ...RPC_ERRORS.INVALID_PARAMS, data: 'Conversation ID and doc ID required' };
+    }
+
+    const attachments = this.orchestrator.getDbInstance().listAttachments(params.conversationId);
+    const attachment = attachments.find(att => att.docId === params.docId);
+    
+    if (!attachment) {
+      throw { ...RPC_ERRORS.NOT_FOUND, data: 'Attachment not found' };
+    }
+
+    return attachment;
   }
 
 

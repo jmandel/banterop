@@ -188,6 +188,97 @@ apiApp.get('/conversations/:id/queries', async (c) => {
   }
 });
 
+// Attachment endpoints
+apiApp.get('/attachments/:id', async (c) => {
+  try {
+    const attachmentId = c.req.param('id');
+    const attachment = orchestrator.getDbInstance().getAttachment(attachmentId);
+    
+    if (!attachment) {
+      return c.json({ error: 'Attachment not found' }, 404);
+    }
+    
+    // Return metadata only (not content)
+    return c.json({
+      id: attachment.id,
+      name: attachment.name,
+      contentType: attachment.contentType,
+      createdAt: attachment.createdAt,
+      createdByAgentId: attachment.createdByAgentId,
+      turnId: attachment.turnId
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+apiApp.get('/attachments/:id/content', async (c) => {
+  try {
+    const attachmentId = c.req.param('id');
+    const attachment = orchestrator.getDbInstance().getAttachment(attachmentId);
+    
+    if (!attachment) {
+      return c.json({ error: 'Attachment not found' }, 404);
+    }
+    
+    // Return content with appropriate content type
+    c.header('Content-Type', attachment.contentType);
+    c.header('Content-Disposition', `inline; filename="${attachment.name}"`);
+    return c.text(attachment.content);
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+apiApp.get('/conversations/:id/attachments', async (c) => {
+  try {
+    const conversationId = c.req.param('id');
+    const attachments = orchestrator.getDbInstance().listAttachments(conversationId);
+    
+    // Return metadata only (not content)
+    const metadata = attachments.map(att => ({
+      id: att.id,
+      name: att.name,
+      contentType: att.contentType,
+      createdAt: att.createdAt,
+      createdByAgentId: att.createdByAgentId,
+      turnId: att.turnId
+    }));
+    
+    return c.json({ attachments: metadata, count: metadata.length });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+apiApp.post('/attachments', authMiddleware, async (c) => {
+  try {
+    const auth = c.get('auth');
+    const { conversationId, turnId, name, contentType, content } = await c.req.json();
+    
+    if (!conversationId || !turnId || !name || !content) {
+      return c.json({ error: 'Missing required fields' }, 400);
+    }
+    
+    if (conversationId !== auth.conversationId) {
+      return c.json({ error: 'Cannot create attachment for different conversation' }, 403);
+    }
+    
+    const attachmentId = orchestrator.registerAttachment({
+      conversationId,
+      turnId,
+      name,
+      contentType: contentType || 'text/markdown',
+      content,
+      createdByAgentId: auth.agentId
+    });
+    
+    return c.json({ attachmentId });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 400);
+  }
+});
+
 // SSE endpoint for real-time updates
 apiApp.get('/conversations/:id/events', async (c) => {
   const conversationId = c.req.param('id');

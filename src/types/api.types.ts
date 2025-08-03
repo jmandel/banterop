@@ -13,6 +13,11 @@ export interface CreateConversationRequest {
    * `messageToUseWhenInitiatingConversation` defined.
    */
   initiatingAgentId?: string;
+  /**
+   * Optional instructions to provide to the initiating agent
+   * to help shape/steer the initial turn
+   */
+  initiatingInstructions?: string;
 }
 
 export interface CreateConversationResponse {
@@ -44,6 +49,7 @@ export interface CompleteTurnRequest {
   content: string;
   isFinalTurn?: boolean;
   metadata?: Record<string, any>;
+  attachments?: string[]; // Array of attachment IDs
 }
 
 

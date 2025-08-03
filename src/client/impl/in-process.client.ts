@@ -143,7 +143,7 @@ export class InProcessOrchestratorClient extends EventEmitter implements Orchest
     this.orchestrator.addTraceEntry(request);
   }
 
-  async completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>): Promise<ConversationTurn> {
+  async completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>, attachments?: string[]): Promise<ConversationTurn> {
     if (!this.authenticated || !this.conversationId || !this.agentId) {
       throw new Error('Client not authenticated');
     }
@@ -154,10 +154,37 @@ export class InProcessOrchestratorClient extends EventEmitter implements Orchest
       agentId: this.agentId,
       content,
       isFinalTurn,
-      metadata
+      metadata,
+      attachments
     };
 
     return this.orchestrator.completeTurn(request);
+  }
+
+  async registerAttachment(params: {
+    conversationId: string;
+    turnId: string;
+    docId?: string;
+    name: string;
+    contentType: string;
+    content: string;
+    summary?: string;
+    createdByAgentId: string;
+  }): Promise<string> {
+    if (!this.authenticated) {
+      throw new Error('Client not authenticated');
+    }
+
+    return this.orchestrator.registerAttachment(params);
+  }
+
+  async getAttachment(attachmentId: string): Promise<Attachment | null> {
+    return this.orchestrator.getDbInstance().getAttachment(attachmentId);
+  }
+
+  async getAttachmentByDocId(conversationId: string, docId: string): Promise<Attachment | null> {
+    const attachments = this.orchestrator.getDbInstance().listAttachments(conversationId);
+    return attachments.find(att => att.docId === docId) || null;
   }
 
 

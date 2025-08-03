@@ -240,8 +240,32 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
     return this.sendRequest('addTrace', { turnId, entry });
   }
 
-  async completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>): Promise<ConversationTurn> {
-    return this.sendRequest('completeTurn', { turnId, content, isFinalTurn, metadata });
+  async completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>, attachments?: string[]): Promise<ConversationTurn> {
+    return this.sendRequest('completeTurn', { turnId, content, isFinalTurn, metadata, attachments });
+  }
+
+  async registerAttachment(params: {
+    conversationId: string;
+    turnId: string;
+    docId?: string;
+    name: string;
+    contentType: string;
+    content: string;
+    summary?: string;
+    createdByAgentId: string;
+  }): Promise<string> {
+    const result = await this.sendRequest('registerAttachment', params);
+    return result.attachmentId;
+  }
+
+  async getAttachment(attachmentId: string): Promise<Attachment | null> {
+    const result = await this.sendRequest('getAttachment', { attachmentId });
+    return result;
+  }
+
+  async getAttachmentByDocId(conversationId: string, docId: string): Promise<Attachment | null> {
+    const result = await this.sendRequest('getAttachmentByDocId', { conversationId, docId });
+    return result;
   }
 
   async createUserQuery(question: string, context?: Record<string, any>, timeout?: number): Promise<string> {

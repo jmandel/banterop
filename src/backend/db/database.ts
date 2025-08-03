@@ -6,7 +6,8 @@ import {
   Conversation, ConversationTurn, TraceEntry, AgentId,
   ConversationRow, ConversationTurnRow, TraceEntryRow, 
   UserQueryRow, AgentTokenRow, AgentConfig, ScenarioRow,
-  ScenarioVersionRow, ScenarioConfiguration, ScenarioItem
+  ScenarioVersionRow, ScenarioConfiguration, ScenarioItem,
+  Attachment
 } from '$lib/types.js';
 
 export class ConversationDatabase {
@@ -61,6 +62,7 @@ export class ConversationDatabase {
         started_at TEXT NOT NULL,
         completed_at TEXT,
         is_final_turn INTEGER DEFAULT 0,
+        attachments TEXT,
         FOREIGN KEY (conversation_id) REFERENCES conversations(id)
       )
     `);
@@ -162,6 +164,40 @@ export class ConversationDatabase {
       CREATE INDEX IF NOT EXISTS idx_scenario_versions_active 
       ON scenario_versions(scenario_id, is_active)
     `);
+
+    // Attachments table
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS attachments (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        turn_id TEXT NOT NULL,
+        doc_id TEXT,
+        name TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        content TEXT NOT NULL,
+        summary TEXT,
+        created_by_agent_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (conversation_id) REFERENCES conversations(id),
+        FOREIGN KEY (turn_id) REFERENCES conversation_turns(id)
+      )
+    `);
+
+    // Create indices for attachment lookups
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_attachments_conversation 
+      ON attachments(conversation_id, created_at)
+    `);
+    
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_attachments_turn 
+      ON attachments(turn_id)
+    `);
+    
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_attachments_doc_id 
+      ON attachments(conversation_id, doc_id)
+    `);
   }
 
   // ============= Conversation Methods =============
@@ -182,7 +218,7 @@ export class ConversationDatabase {
     );
   }
 
-  getConversation(id: string, includeTurns = true, includeTrace = false): Conversation | null {
+  getConversation(id: string, includeTurns = true, includeTrace = false, includeAttachments = false): Conversation | null {
     const stmt = this.db.prepare(`
       SELECT * FROM conversations WHERE id = ?
     `);
@@ -190,7 +226,7 @@ export class ConversationDatabase {
     const row = stmt.get(id) as ConversationRow | undefined;
     if (!row) return null;
 
-    return this.conversationFromRow(row, includeTurns, includeTrace);
+    return this.conversationFromRow(row, includeTurns, includeTrace, includeAttachments);
   }
 
   getAllConversations(options?: { 
@@ -198,8 +234,9 @@ export class ConversationDatabase {
     offset?: number; 
     includeTurns?: boolean; 
     includeTrace?: boolean;
+    includeAttachments?: boolean;
   }): { conversations: Conversation[]; total: number } {
-    const { limit = 50, offset = 0, includeTurns = false, includeTrace = false } = options || {};
+    const { limit = 50, offset = 0, includeTurns = false, includeTrace = false, includeAttachments = false } = options || {};
 
     // Get total count
     const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM conversations');
@@ -213,7 +250,7 @@ export class ConversationDatabase {
     `);
 
     const rows = stmt.all(limit, offset) as ConversationRow[];
-    const conversations = rows.map(row => this.conversationFromRow(row, includeTurns, includeTrace));
+    const conversations = rows.map(row => this.conversationFromRow(row, includeTurns, includeTrace, includeAttachments));
 
     return { conversations, total };
   }
@@ -248,10 +285,10 @@ export class ConversationDatabase {
     );
   }
 
-  completeTurn(turnId: string, content: string, isFinalTurn?: boolean): void {
+  completeTurn(turnId: string, content: string, isFinalTurn?: boolean, attachments?: string[]): void {
     const stmt = this.db.prepare(`
       UPDATE conversation_turns 
-      SET content = ?, status = 'completed', completed_at = ?, is_final_turn = ?
+      SET content = ?, status = 'completed', completed_at = ?, is_final_turn = ?, attachments = ?
       WHERE id = ? AND status = 'in_progress'
     `);
 
@@ -259,6 +296,7 @@ export class ConversationDatabase {
       content,
       new Date().toISOString(),
       isFinalTurn ? 1 : 0,
+      attachments ? JSON.stringify(attachments) : null,
       turnId
     );
   }
@@ -571,7 +609,7 @@ export class ConversationDatabase {
 
   // ============= Helper Methods =============
 
-  private conversationFromRow(row: ConversationRow, includeTurns = true, includeTrace = false): Conversation {
+  private conversationFromRow(row: ConversationRow, includeTurns = true, includeTrace = false, includeAttachments = false): Conversation {
     const conversation: Conversation = {
       id: row.id,
       name: row.name || undefined,
@@ -584,6 +622,24 @@ export class ConversationDatabase {
 
     if (includeTurns) {
       conversation.turns = this.getTurns(row.id, includeTrace);
+      
+      // If includeAttachments is true, load attachments for each turn
+      if (includeAttachments) {
+        for (const turn of conversation.turns) {
+          if (turn.attachments && turn.attachments.length > 0) {
+            // Load the actual attachment objects
+            const attachmentObjects: Attachment[] = [];
+            for (const attachmentId of turn.attachments) {
+              const attachment = this.getAttachment(attachmentId);
+              if (attachment) {
+                attachmentObjects.push(attachment);
+              }
+            }
+            // Add attachmentDetails to the turn
+            (turn as any).attachmentDetails = attachmentObjects;
+          }
+        }
+      }
     }
 
     return conversation;
@@ -601,7 +657,8 @@ export class ConversationDatabase {
       startedAt: new Date(row.started_at),
       completedAt: row.completed_at ? new Date(row.completed_at) : undefined,
       trace: [], // Initialize empty trace array
-      isFinalTurn: Boolean(row.is_final_turn)
+      isFinalTurn: Boolean(row.is_final_turn),
+      attachments: row.attachments ? JSON.parse(row.attachments) : undefined
     };
   }
 
@@ -824,6 +881,116 @@ export class ConversationDatabase {
       created: new Date(row.created_at).getTime(),
       modified: new Date(row.updated_at).getTime()
     }));
+  }
+
+  // ============= Attachment Methods =============
+
+  insertAttachment(attachment: Attachment): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO attachments (id, conversation_id, turn_id, doc_id, name, content_type, content, summary, created_by_agent_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      attachment.id,
+      attachment.conversationId,
+      attachment.turnId,
+      attachment.docId || null,
+      attachment.name,
+      attachment.contentType,
+      attachment.content,
+      attachment.summary || null,
+      attachment.createdByAgentId,
+      attachment.createdAt.toISOString()
+    );
+  }
+
+  getAttachment(id: string): Attachment | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM attachments WHERE id = ?
+    `);
+
+    const row = stmt.get(id) as any;
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      conversationId: row.conversation_id,
+      turnId: row.turn_id,
+      docId: row.doc_id,
+      name: row.name,
+      contentType: row.content_type,
+      content: row.content,
+      summary: row.summary,
+      createdByAgentId: row.created_by_agent_id,
+      createdAt: new Date(row.created_at)
+    };
+  }
+
+  listAttachments(conversationId: string): Attachment[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM attachments 
+      WHERE conversation_id = ? 
+      ORDER BY created_at DESC
+    `);
+
+    const rows = stmt.all(conversationId) as any[];
+    return rows.map(row => ({
+      id: row.id,
+      conversationId: row.conversation_id,
+      turnId: row.turn_id,
+      docId: row.doc_id,
+      name: row.name,
+      contentType: row.content_type,
+      content: row.content,
+      summary: row.summary,
+      createdByAgentId: row.created_by_agent_id,
+      createdAt: new Date(row.created_at)
+    }));
+  }
+
+  listAttachmentsByTurn(turnId: string): Attachment[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM attachments 
+      WHERE turn_id = ? 
+      ORDER BY created_at DESC
+    `);
+
+    const rows = stmt.all(turnId) as any[];
+    return rows.map(row => ({
+      id: row.id,
+      conversationId: row.conversation_id,
+      turnId: row.turn_id,
+      docId: row.doc_id,
+      name: row.name,
+      contentType: row.content_type,
+      content: row.content,
+      summary: row.summary,
+      createdByAgentId: row.created_by_agent_id,
+      createdAt: new Date(row.created_at)
+    }));
+  }
+
+  getAttachmentByDocId(conversationId: string, docId: string): Attachment | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM attachments WHERE conversation_id = ? AND doc_id = ?
+    `);
+    
+    const row = stmt.get(conversationId, docId) as any;
+    if (!row) return null;
+    
+    return {
+      id: row.id,
+      conversationId: row.conversation_id,
+      turnId: row.turn_id,
+      docId: row.doc_id,
+      name: row.name,
+      contentType: row.content_type,
+      content: row.content,
+      summary: row.summary,
+      createdByAgentId: row.created_by_agent_id,
+      createdAt: new Date(row.created_at)
+    };
   }
 
   close(): void {

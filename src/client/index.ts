@@ -33,7 +33,22 @@ export interface OrchestratorClient extends EventEmitter {
   // Turn management
   startTurn(metadata?: Record<string, any>): Promise<string>;
   addTrace(turnId: string, entry: Partial<TraceEntry>): Promise<void>;
-  completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>): Promise<ConversationTurn>;
+  completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>, attachments?: string[]): Promise<ConversationTurn>;
+  
+  // Attachment management
+  registerAttachment(params: {
+    conversationId: string;
+    turnId: string;
+    docId?: string;
+    name: string;
+    contentType: string;
+    content: string;
+    summary?: string;
+    createdByAgentId: string;
+  }): Promise<string>;
+
+  getAttachment(attachmentId: string): Promise<Attachment | null>;
+  getAttachmentByDocId(conversationId: string, docId: string): Promise<Attachment | null>;
   
   
   // User interaction

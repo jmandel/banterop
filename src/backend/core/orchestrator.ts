@@ -13,8 +13,8 @@ import {
   ConversationEvent, TurnShell, OrchestratorConversationState,
   UserQueryRequest, UserQueryResponse, StartTurnRequest, StartTurnResponse, AddTraceEntryRequest,
   CompleteTurnRequest, SubscriptionOptions, ThoughtEntry,
-  ToolCallEntry, ScenarioDrivenAgentConfig, FormattedUserQuery, UserQueryRow,
-  ScenarioConfiguration
+  ToolCallEntry, ToolResultEntry, ScenarioDrivenAgentConfig, FormattedUserQuery, UserQueryRow,
+  ScenarioConfiguration, Attachment
 } from '$lib/types.js';
 
 interface InProgressTurnState {
@@ -71,6 +71,7 @@ export class ConversationOrchestrator {
         agentConfigs: request.agents,
         managementMode,
         ...(request.initiatingAgentId && { initiatingAgentId: request.initiatingAgentId }),
+        ...(request.initiatingInstructions && { initiatingInstructions: request.initiatingInstructions }),
       }
     };
 
@@ -217,7 +218,8 @@ export class ConversationOrchestrator {
         if (initiatingAgent) {
           // Trigger the agent to initialize the conversation
           try {
-            await initiatingAgent.initializeConversation();
+            const instructions = conversation.metadata?.initiatingInstructions as string | undefined;
+            await initiatingAgent.initializeConversation(instructions);
           } catch (error) {
             console.error(`[Orchestrator] Failed to trigger initial agent:`, error);
           }
@@ -395,14 +397,83 @@ export class ConversationOrchestrator {
     });
   }
 
+  registerAttachment(params: {
+    conversationId: string;
+    turnId: string;
+    docId?: string;
+    name: string;
+    contentType: string;
+    content: string;
+    summary?: string;
+    createdByAgentId: string;
+  }): string {
+    const attachmentId = `att_${uuidv4()}`;
+    
+    const attachment: Attachment = {
+      id: attachmentId,
+      conversationId: params.conversationId,
+      turnId: params.turnId,
+      docId: params.docId,
+      name: params.name,
+      contentType: params.contentType,
+      content: params.content,
+      summary: params.summary,
+      createdByAgentId: params.createdByAgentId,
+      createdAt: new Date()
+    };
+
+    // Persist to database
+    this.db.insertAttachment(attachment);
+
+    // Emit trace event for attachment creation
+    const traceEntry: ToolResultEntry = {
+      id: uuidv4(),
+      agentId: params.createdByAgentId,
+      timestamp: new Date(),
+      type: 'tool_result',
+      toolCallId: 'attachment_registration',
+      result: { attachmentId, name: params.name }
+    };
+    
+    this.db.addTraceEntry(params.conversationId, traceEntry, params.turnId);
+
+    console.log(`[Orchestrator] Registered attachment ${attachmentId} for turn ${params.turnId}`);
+    
+    return attachmentId;
+  }
+
   completeTurn(request: CompleteTurnRequest): ConversationTurn {
     const inProgress = this.inProgressTurns.get(request.turnId);
     if (!inProgress) {
       throw new Error(`Turn ${request.turnId} not found or already completed`);
     }
 
+    // Validate attachments if provided
+    if (request.attachments && request.attachments.length > 0) {
+      for (const attachmentId of request.attachments) {
+        const attachment = this.db.getAttachment(attachmentId);
+        if (!attachment) {
+          throw new Error(`Attachment ${attachmentId} not found`);
+        }
+        if (attachment.conversationId !== request.conversationId) {
+          throw new Error(`Attachment ${attachmentId} does not belong to conversation ${request.conversationId}`);
+        }
+        
+        // Emit trace for attachment reference
+        const referenceTrace: ToolResultEntry = {
+          id: uuidv4(),
+          agentId: request.agentId,
+          timestamp: new Date(),
+          type: 'tool_result',
+          toolCallId: 'attachment_reference',
+          result: { attachmentId, referenced: true }
+        };
+        this.db.addTraceEntry(request.conversationId, referenceTrace, request.turnId);
+      }
+    }
+
     // Complete turn in database
-    this.db.completeTurn(request.turnId, request.content, request.isFinalTurn);
+    this.db.completeTurn(request.turnId, request.content, request.isFinalTurn, request.attachments);
 
     // Get trace entries for the turn
     const trace = this.db.getTraceEntriesForTurn(request.turnId);
@@ -419,7 +490,8 @@ export class ConversationOrchestrator {
       startedAt: inProgress.startedAt,
       completedAt: new Date(),
       trace, // Include trace data
-      isFinalTurn: request.isFinalTurn || false
+      isFinalTurn: request.isFinalTurn || false,
+      attachments: request.attachments
     };
 
     // Update in-memory state
@@ -509,8 +581,8 @@ export class ConversationOrchestrator {
     };
   }
 
-  getConversation(conversationId: string, includeTurns = true, includeTrace = false, includeInProgress = false): any {
-    const conversation = this.db.getConversation(conversationId, includeTurns, includeTrace);
+  getConversation(conversationId: string, includeTurns = true, includeTrace = false, includeInProgress = false, includeAttachments = false): any {
+    const conversation = this.db.getConversation(conversationId, includeTurns, includeTrace, includeAttachments);
     if (!conversation) return null;
 
     const result: any = { ...conversation };

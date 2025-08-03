@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { useConversationStore } from '../stores/conversation.store.js';
 import { ConversationTurnComponent } from './ConversationTurn.js';
+import { ConversationTurn } from '$lib/types.js';
 
 export const ConversationView: React.FC = () => {
   const conversations = useConversationStore(state => state.conversations);
@@ -19,6 +20,74 @@ export const ConversationView: React.FC = () => {
   React.useEffect(() => {
     console.log(`ConversationView render - ${turns.length} turns for ${activeTab}`);
   }, [turns.length, activeTab]);
+
+  const exportToMarkdown = async () => {
+    const conversation = conversations.get(activeTab);
+    if (!conversation || turns.length === 0) return;
+
+    let markdown = `# Conversation: ${conversation.name || 'Untitled'}\n\n`;
+    markdown += `**ID:** ${activeTab}\n`;
+    markdown += `**Agents:** ${conversation.agents?.join(', ') || 'Unknown'}\n`;
+    markdown += `**Status:** ${conversation.status}\n`;
+    markdown += `**Created:** ${new Date(conversation.createdAt).toLocaleString()}\n\n`;
+    markdown += `---\n\n`;
+
+    // Export each turn with its trace
+    for (const turn of turns) {
+      markdown += `## ${turn.agentId} - ${new Date(turn.timestamp).toLocaleString()}\n\n`;
+      
+      // Add trace if available
+      if (turn.trace && turn.trace.length > 0) {
+        markdown += `<details>\n<summary>🔍 Trace (${turn.trace.length} entries)</summary>\n\n`;
+        
+        for (const entry of turn.trace) {
+          switch (entry.type) {
+            case 'thought':
+              markdown += `### 💭 Thought\n${entry.content}\n\n`;
+              break;
+            case 'tool_call':
+              markdown += `### 🔧 Tool Call: ${entry.toolName}\n`;
+              markdown += '```json\n' + JSON.stringify(entry.parameters, null, 2) + '\n```\n\n';
+              break;
+            case 'tool_result':
+              markdown += `### ✅ Tool Result\n`;
+              if (entry.error) {
+                markdown += `**Error:** ${entry.error}\n\n`;
+              } else if (entry.result?.content && entry.result?.contentType === 'text/markdown') {
+                markdown += entry.result.content + '\n\n';
+              } else {
+                markdown += '```json\n' + JSON.stringify(entry.result, null, 2) + '\n```\n\n';
+              }
+              break;
+          }
+        }
+        
+        markdown += `</details>\n\n`;
+      }
+      
+      // Add the actual message content
+      markdown += turn.content + '\n\n';
+      
+      // Add attachments if any
+      if (turn.attachments && turn.attachments.length > 0) {
+        markdown += `**Attachments:** ${turn.attachments.length} file(s)\n\n`;
+      }
+      
+      markdown += `---\n\n`;
+    }
+
+    // Create blob with UTF-8 encoding and open in new tab
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    
+    // Open in new tab
+    window.open(url, '_blank');
+    
+    // Clean up the URL after a delay to ensure the new tab has loaded
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+    }, 1000);
+  };
   
   if (activeTab === '*') {
     return <GlobalMonitorView />;
@@ -38,7 +107,12 @@ export const ConversationView: React.FC = () => {
   return (
     <div className="conversation-view">
       <div className="conversation-header">
-        <h2>{conversation.name}</h2>
+        <div className="header-content">
+          <h2>{conversation.name}</h2>
+          <button className="export-button" onClick={exportToMarkdown}>
+            📄 Export Markdown
+          </button>
+        </div>
         <div className="conversation-info">
           <div>ID: {activeTab}</div>
           <div>Agents: {conversation.agents?.join(', ') || 'Loading...'}</div>
