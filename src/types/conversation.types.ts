@@ -203,6 +203,14 @@ export interface Attachment {
   createdAt: Date;
 }
 
+export interface AttachmentPayload {
+  docId?: string;             // The original, logical ID from the tool result
+  name: string;
+  contentType: string;
+  content: string;
+  summary?: string;
+}
+
 // ============= Frontend Monitor Types =============
 
 /**

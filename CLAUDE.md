@@ -15,3 +15,5 @@ please don't implement timeouts to "make tests pass", that's not a good way to t
 
 don't litter files with commets like "We changed XYZ"... your changes will be checked into git and live forever in the codebase, so "we made this change" isn't relevan tcontext to litter in source files.
 
+
+when you're trying to understand a file, just read the whole thing; reading snippets often leaves your understanding fragmented/confused.

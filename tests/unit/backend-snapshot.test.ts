@@ -65,25 +65,20 @@ describe('Backend Snapshot Functionality', () => {
       }
     });
     
-    // Register an attachment
-    const attachmentId = await orchestrator.registerAttachment({
-      conversationId,
-      turnId,
-      docId: 'doc-1',
-      name: 'test.md',
-      contentType: 'text/markdown',
-      content: '# Test Document',
-      metadata: { source: 'test' },
-      createdByAgentId: 'test-agent-1'
-    });
-    
+    // Complete turn with embedded attachment
     orchestrator.completeTurn({
       conversationId,
       turnId,
       agentId: 'test-agent-1',
       content: 'Test turn',
       isFinalTurn: false,
-      attachments: [attachmentId]
+      attachments: [{
+        docId: 'doc-1',
+        name: 'test.md',
+        contentType: 'text/markdown',
+        content: '# Test Document',
+        summary: 'Test document with metadata from test source'
+      }]
     });
     
     // Get conversation snapshot with all includes
@@ -106,9 +101,10 @@ describe('Backend Snapshot Functionality', () => {
     expect(conversation.turns).toBeDefined();
     expect(conversation.turns!.length).toBe(1);
     expect(conversation.turns![0].trace).toBeDefined();
-    // Should have 2 original entries + 2 attachment entries (registration + reference)
-    expect(conversation.turns![0].trace!.length).toBe(4);
-    expect(conversation.turns![0].attachments).toContain(attachmentId);
+    // Should have 2 original entries + 1 attachment creation entry
+    expect(conversation.turns![0].trace!.length).toBe(3);
+    expect(conversation.turns![0].attachments).toBeDefined();
+    expect(conversation.turns![0].attachments!.length).toBe(1);
   });
 
   test('conversation attachments aggregate from all turns', async () => {
@@ -118,22 +114,18 @@ describe('Backend Snapshot Functionality', () => {
       conversationId,
       agentId: 'test-agent-1'
     });
-    const attachmentId1 = await orchestrator.registerAttachment({
-      conversationId,
-      turnId: turnId1,
-      docId: 'doc-1',
-      name: 'first.md',
-      contentType: 'text/markdown',
-      content: 'First document',
-      createdByAgentId: 'test-agent-1'
-    });
     orchestrator.completeTurn({
       conversationId,
       turnId: turnId1,
       agentId: 'test-agent-1',
       content: 'First turn',
       isFinalTurn: false,
-      attachments: [attachmentId1]
+      attachments: [{
+        docId: 'doc-1',
+        name: 'first.md',
+        contentType: 'text/markdown',
+        content: 'First document'
+      }]
     });
     
     // Create second turn with different attachment
@@ -141,22 +133,18 @@ describe('Backend Snapshot Functionality', () => {
       conversationId,
       agentId: 'test-agent-1'
     });
-    const attachmentId2 = await orchestrator.registerAttachment({
-      conversationId,
-      turnId: turnId2,
-      docId: 'doc-2',
-      name: 'second.md',
-      contentType: 'text/markdown',
-      content: 'Second document',
-      createdByAgentId: 'test-agent-1'
-    });
     orchestrator.completeTurn({
       conversationId,
       turnId: turnId2,
       agentId: 'test-agent-1',
       content: 'Second turn',
       isFinalTurn: false,
-      attachments: [attachmentId2]
+      attachments: [{
+        docId: 'doc-2',
+        name: 'second.md',
+        contentType: 'text/markdown',
+        content: 'Second document'
+      }]
     });
     
     // Get conversation snapshot
@@ -260,22 +248,18 @@ describe('Backend Snapshot Functionality', () => {
       agentId: 'test-agent-1',
       entry: { type: 'thought', content: 'Test' }
     });
-    const attachmentId = await orchestrator.registerAttachment({
-      conversationId,
-      turnId,
-      docId: 'doc-1',
-      name: 'test.md',
-      contentType: 'text/markdown',
-      content: 'Content',
-      createdByAgentId: 'test-agent-1'
-    });
     orchestrator.completeTurn({
       conversationId,
       turnId,
       agentId: 'test-agent-1',
       content: 'Turn',
       isFinalTurn: false,
-      attachments: [attachmentId]
+      attachments: [{
+        docId: 'doc-1',
+        name: 'test.md',
+        contentType: 'text/markdown',
+        content: 'Content'
+      }]
     });
     
     // Get minimal snapshot
@@ -306,20 +290,16 @@ describe('Backend Snapshot Functionality', () => {
       conversationId,
       agentId: 'test-agent-1'
     });
-    const attachmentIds: string[] = [];
+    const attachmentPayloads = [];
     
     for (let i = 0; i < 3; i++) {
-      const attachmentId = await orchestrator.registerAttachment({
-        conversationId,
-        turnId,
+      attachmentPayloads.push({
         docId: `doc-${i}`,
         name: `file${i}.md`,
         contentType: 'text/markdown',
         content: `Content ${i}`,
-        metadata: { index: i },
-        createdByAgentId: 'test-agent-1'
+        summary: `File with index ${i}`
       });
-      attachmentIds.push(attachmentId);
     }
     
     orchestrator.completeTurn({
@@ -328,7 +308,7 @@ describe('Backend Snapshot Functionality', () => {
       agentId: 'test-agent-1',
       content: 'Multi-attachment turn',
       isFinalTurn: false,
-      attachments: attachmentIds
+      attachments: attachmentPayloads
     });
     
     // Get conversation through orchestrator (which properly returns attachments)

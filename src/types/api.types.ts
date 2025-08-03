@@ -1,6 +1,8 @@
 // API Request/Response Types
 // This file contains all API-related type definitions
 
+import type { AttachmentPayload } from './conversation.types.js';
+
 // ============= API Request/Response Types =============
 
 export interface CreateConversationRequest {
@@ -49,7 +51,7 @@ export interface CompleteTurnRequest {
   content: string;
   isFinalTurn?: boolean;
   metadata?: Record<string, any>;
-  attachments?: string[]; // Array of attachment IDs
+  attachments?: AttachmentPayload[]; // Array of full attachment objects
 }
 
 

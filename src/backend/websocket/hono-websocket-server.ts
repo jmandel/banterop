@@ -124,8 +124,7 @@ export class HonoWebSocketJsonRpcServer {
     this.methods.set('getConversation', this.getConversation.bind(this));
     this.methods.set('getAllConversations', this.getAllConversations.bind(this));
     
-    // Attachments
-    this.methods.set('registerAttachment', this.registerAttachment.bind(this));
+    // Attachments (read-only methods)
     this.methods.set('getAttachment', this.getAttachment.bind(this));
     this.methods.set('getAttachmentByDocId', this.getAttachmentByDocId.bind(this));
   }
@@ -414,7 +413,7 @@ export class HonoWebSocketJsonRpcServer {
     content: string;
     isFinalTurn?: boolean;
     metadata?: Record<string, any>;
-    attachments?: string[];
+    attachments?: any[];
   }): Promise<any> {
     if (!client.conversationId || !client.agentId) {
       throw RPC_ERRORS.UNAUTHORIZED;
@@ -556,40 +555,7 @@ export class HonoWebSocketJsonRpcServer {
     return { success: true, message: 'Conversation ended successfully' };
   }
 
-  private async registerAttachment(client: ClientState, params: {
-    conversationId: string;
-    turnId: string;
-    docId?: string;
-    name: string;
-    contentType: string;
-    content: string;
-    summary?: string;
-  }): Promise<any> {
-    if (!client.conversationId || !client.agentId) {
-      throw RPC_ERRORS.UNAUTHORIZED;
-    }
-
-    if (!params?.turnId || !params?.name || !params?.content) {
-      throw { ...RPC_ERRORS.INVALID_PARAMS, data: 'Turn ID, name, and content required' };
-    }
-
-    if (params.conversationId !== client.conversationId) {
-      throw { ...RPC_ERRORS.INVALID_PARAMS, data: 'Cannot register attachment for different conversation' };
-    }
-
-    const attachmentId = this.orchestrator.registerAttachment({
-      conversationId: params.conversationId,
-      turnId: params.turnId,
-      docId: params.docId,
-      name: params.name,
-      contentType: params.contentType || 'text/markdown',
-      content: params.content,
-      summary: params.summary,
-      createdByAgentId: client.agentId
-    });
-
-    return { attachmentId };
-  }
+  // REMOVED: registerAttachment - now handled atomically in completeTurn
 
   private async getAttachment(client: ClientState, params: {
     attachmentId: string;

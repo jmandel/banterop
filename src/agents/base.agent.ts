@@ -10,7 +10,7 @@ import {
   ThoughtEntry, ToolCallEntry, ToolResultEntry,
   TurnCompletedEvent, TurnStartedEvent, TraceAddedEvent,
   UserQueryAnsweredEvent, RehydratedEvent,
-  TraceEntry, Attachment
+  TraceEntry, Attachment, AttachmentPayload
 } from '$lib/types.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -260,7 +260,7 @@ export abstract class BaseAgent implements AgentInterface {
     this.currentTurnId = await this.client.startTurn(metadata);
   }
   
-  protected async completeTurn(content: string, isFinalTurn?: boolean, attachments?: string[]): Promise<void> {
+  protected async completeTurn(content: string, isFinalTurn?: boolean, attachments?: AttachmentPayload[]): Promise<void> {
     if (!this.currentTurnId) throw new Error('No turn in progress');
     await this.client.completeTurn(this.currentTurnId, content, isFinalTurn, undefined, attachments);
     this.currentTurnId = null;

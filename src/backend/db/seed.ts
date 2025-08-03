@@ -38,7 +38,7 @@ export function seedDatabase(db: ConversationDatabase): void {
           description: "A 38-year-old amateur soccer player with an acute right knee injury."
         },
         situation: "You are contacting the insurance company to get prior authorization for a right knee MRI for your client, Jordan Alvarez.",
-        systemPrompt: "You are an AI agent representing Jordan Alvarez. Your instructions are to obtain prior authorization for a right knee MRI. Ask the insurance company what they need, communicate clearly,  provide necessary documentation when requested, and aim for a swift approval. Try to request a full copy of any applicable policy documents as an attachmetn from the insurer.",
+        systemPrompt: "You are an AI agent representing Jordan Alvarez (DOB: 1987-09-14, Member ID: HF8901234567, PPO Gold plan). Your instructions are to obtain prior authorization for a right knee MRI ordered by Dr. Priya Mehta (NPI: 1629345678). You have access to complete clinical documentation in your knowledge base including demographics, provider details, and preferred imaging facility (Springfield Advanced Imaging Center, NPI: 1679599911). Ask the insurance company what they need, communicate clearly, provide necessary documentation when requested, and aim for a swift approval. Try to request a full copy of any applicable policy documents as an attachment from the insurer.",
         goals: ["Obtain MRI authorization", "Minimize delays", "Understand next steps"],
         tools: [
          {
@@ -68,6 +68,15 @@ export function seedDatabase(db: ConversationDatabase): void {
         ],
         knowledgeBase: {
         overview: "Acute right knee injury with suspected ACL tear after a pivot injury during soccer. Persistent instability despite PT.",
+        demographics: {
+          dateOfBirth: "1987-09-14",
+          memberId: "HF8901234567",
+          planType: "PPO Gold"
+        },
+        providers: {
+          pcp: { name: "Priya Mehta, MD", npi: "1629345678", tin: "11-3456789" },
+          preferredImaging: { name: "Springfield Advanced Imaging Center", npi: "1679599911" }
+        },
         timeline: [
           { date: "2024-06-01", event: "Pivot injury to right knee during soccer; swelling within hours" },
           { date: "2024-06-02", event: "Urgent care visit; x-ray negative for fracture; knee immobilizer provided" },

@@ -7,7 +7,7 @@ import {
   ConversationEvent, SubscriptionOptions, TraceEntry,
   ConversationTurn, StartTurnRequest, AddTraceEntryRequest,
   CompleteTurnRequest, UserQueryRequest, CreateConversationRequest,
-  CreateConversationResponse, Attachment
+  CreateConversationResponse, Attachment, AttachmentPayload
 } from '$lib/types.js';
 import type { OrchestratorClient } from '../index.js';
 
@@ -143,7 +143,7 @@ export class InProcessOrchestratorClient extends EventEmitter implements Orchest
     this.orchestrator.addTraceEntry(request);
   }
 
-  async completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>, attachments?: string[]): Promise<ConversationTurn> {
+  async completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>, attachments?: AttachmentPayload[]): Promise<ConversationTurn> {
     if (!this.authenticated || !this.conversationId || !this.agentId) {
       throw new Error('Client not authenticated');
     }
@@ -161,22 +161,7 @@ export class InProcessOrchestratorClient extends EventEmitter implements Orchest
     return this.orchestrator.completeTurn(request);
   }
 
-  async registerAttachment(params: {
-    conversationId: string;
-    turnId: string;
-    docId?: string;
-    name: string;
-    contentType: string;
-    content: string;
-    summary?: string;
-    createdByAgentId: string;
-  }): Promise<string> {
-    if (!this.authenticated) {
-      throw new Error('Client not authenticated');
-    }
-
-    return this.orchestrator.registerAttachment(params);
-  }
+  // REMOVED: registerAttachment - now handled atomically in completeTurn
 
   async getAttachment(attachmentId: string): Promise<Attachment | null> {
     return this.orchestrator.getDbInstance().getAttachment(attachmentId);

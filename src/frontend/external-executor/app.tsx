@@ -47,7 +47,8 @@ class RemoteLLMProvider extends LLMProvider {
       });
 
       if (!response.ok) {
-        throw new Error(`LLM request failed: ${response.statusText}`);
+        const errorText = await response.text().catch(() => response.statusText);
+        throw new Error(`LLM request failed (${response.status}): ${errorText}`);
       }
 
       const result = await response.json();
@@ -58,6 +59,10 @@ class RemoteLLMProvider extends LLMProvider {
       return result.data;
     } catch (error) {
       console.error('Remote LLM error:', error);
+      // Add more context to network errors
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        throw new Error(`Network error: Unable to connect to LLM service at ${this.baseUrl}. Is the backend running?`);
+      }
       throw error;
     }
   }

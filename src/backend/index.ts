@@ -251,33 +251,7 @@ apiApp.get('/conversations/:id/attachments', async (c) => {
   }
 });
 
-apiApp.post('/attachments', authMiddleware, async (c) => {
-  try {
-    const auth = c.get('auth');
-    const { conversationId, turnId, name, contentType, content } = await c.req.json();
-    
-    if (!conversationId || !turnId || !name || !content) {
-      return c.json({ error: 'Missing required fields' }, 400);
-    }
-    
-    if (conversationId !== auth.conversationId) {
-      return c.json({ error: 'Cannot create attachment for different conversation' }, 403);
-    }
-    
-    const attachmentId = orchestrator.registerAttachment({
-      conversationId,
-      turnId,
-      name,
-      contentType: contentType || 'text/markdown',
-      content,
-      createdByAgentId: auth.agentId
-    });
-    
-    return c.json({ attachmentId });
-  } catch (error: any) {
-    return c.json({ error: error.message }, 400);
-  }
-});
+// REMOVED: POST /attachments endpoint - attachments are now created atomically in completeTurn
 
 // SSE endpoint for real-time updates
 apiApp.get('/conversations/:id/events', async (c) => {

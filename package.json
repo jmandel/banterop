@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@types/marked": "^6.0.0",
+    "bun-plugin-tailwind": "^0.0.15",
     "events": "^3.3.0",
     "hono": "^4.8.9",
     "marked": "^16.1.1",

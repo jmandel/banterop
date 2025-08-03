@@ -84,16 +84,12 @@ describe('Client Rehydration', () => {
     
     // Create turn with attachment
     const turnId = await client.startTurn();
-    const attachmentId = await client.registerAttachment({
-      conversationId,
-      turnId,
+    await client.completeTurn(turnId, 'Message with attachment', false, undefined, [{
       docId: 'test-doc',
       name: 'test.md',
       contentType: 'text/markdown',
-      content: '# Test Document',
-      createdByAgentId: 'test-agent'
-    });
-    await client.completeTurn(turnId, 'Message with attachment', false, undefined, [attachmentId]);
+      content: '# Test Document'
+    }]);
     
     // Wait for completion
     await waitForCondition(() => events.some(e => e.type === 'turn_completed'), 2000);

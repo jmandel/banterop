@@ -9,7 +9,7 @@ import { InProcessOrchestratorClient } from '$client/impl/in-process.client.js';
 import { LLMMessage, LLMProvider, LLMRequest, LLMResponse, LLMTool, LLMToolCall, LLMToolResponse } from '../../src/types/llm.types.js';
 import {
   StaticReplayConfig, CreateConversationRequest, ConversationEvent,
-  AgentId, ConversationTurn, TraceEntry, ThoughtEntry, ToolCallEntry, ToolResultEntry, UserQueryEntry, UserResponseEntry
+  AgentId, ConversationTurn, TraceEntry, ThoughtEntry, ToolCallEntry, ToolResultEntry, UserQueryEntry, UserResponseEntry, AttachmentPayload
 } from '$lib/types.js';
 
 // Mock LLM Provider for testing
@@ -354,7 +354,7 @@ export class WebSocketTestClient {
     return this.client.addTrace(turnId, entry);
   }
 
-  async completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>, attachments?: string[]): Promise<ConversationTurn> {
+  async completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>, attachments?: AttachmentPayload[]): Promise<ConversationTurn> {
     return this.client.completeTurn(turnId, content, isFinalTurn, metadata, attachments);
   }
 
@@ -468,18 +468,7 @@ export class WebSocketTestClient {
     await waitForCondition(() => this.client.getConnectionState() === 'ready', 10000);
   }
 
-  async registerAttachment(params: {
-    conversationId: string;
-    turnId: string;
-    docId?: string;
-    name: string;
-    contentType: string;
-    content: string;
-    summary?: string;
-    createdByAgentId: string;
-  }): Promise<string> {
-    return this.client.registerAttachment(params);
-  }
+  // REMOVED: registerAttachment - now handled atomically in completeTurn
 
   getConnectionState(): 'disconnected' | 'connecting' | 'rehydrating' | 'ready' {
     return this.client.getConnectionState();
@@ -638,7 +627,7 @@ export class InProcessTestClient {
     return this.client.addTrace(turnId, entry);
   }
 
-  async completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>, attachments?: string[]): Promise<ConversationTurn> {
+  async completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>, attachments?: AttachmentPayload[]): Promise<ConversationTurn> {
     return this.client.completeTurn(turnId, content, isFinalTurn, metadata, attachments);
   }
 
