@@ -130,7 +130,7 @@ describe('ScenarioDrivenAgent Attachment Handling', () => {
     scenario = {
       id: 'test-scenario',
       agents: [{
-        id: "test-agent",
+        agentId: "test-agent",
         llmEndpoint: { provider: 'test', model: 'test' },
         tools: [
           {
@@ -141,7 +141,7 @@ describe('ScenarioDrivenAgent Attachment Handling', () => {
         ]
       }],
       patientAgent: {
-        id: 'patient',
+        agentId: 'patient',
         llmEndpoint: { provider: 'test', model: 'test' },
         tools: [
           {
@@ -152,7 +152,7 @@ describe('ScenarioDrivenAgent Attachment Handling', () => {
         ]
       },
       supplierAgent: {
-        id: 'supplier',
+        agentId: 'supplier',
         llmEndpoint: { provider: 'test', model: 'test' },
         tools: []
       },

@@ -73,6 +73,26 @@ export interface SequentialScriptConfig extends BaseAgentConfig {
   script: SequentialScriptEntry[];
 }
 
+export interface ExternalWebSocketClientConfig extends BaseAgentConfig {
+  strategyType: 'external_websocket_client';
+}
+
+export interface BridgeToExternalMCPClientConfig extends BaseAgentConfig {
+  strategyType: 'bridge_to_external_mcp_client';
+}
+
+export interface BridgeToExternalMCPServerConfig extends BaseAgentConfig {
+  strategyType: 'bridge_to_external_mcp_server';
+}
+
+export interface BridgeToExternalA2AClientConfig extends BaseAgentConfig {
+  strategyType: 'bridge_to_external_a2a_client';
+}
+
+export interface BridgeToExternalA2AServerConfig extends BaseAgentConfig {
+  strategyType: 'bridge_to_external_a2a_server';
+}
+
 /**
  * Sequential script entry - contains trigger and ordered steps
  * Multiple entries can chain together via user_query_answered triggers
@@ -127,7 +147,12 @@ export type AgentConfig =
   | RuleBasedConfig 
   | ExternalProxyConfig
   | ScenarioDrivenAgentConfig
-  | SequentialScriptConfig;
+  | SequentialScriptConfig
+  | ExternalWebSocketClientConfig
+  | BridgeToExternalMCPClientConfig
+  | BridgeToExternalMCPServerConfig
+  | BridgeToExternalA2AClientConfig
+  | BridgeToExternalA2AServerConfig;
 
 // ============= Tool Definition =============
 

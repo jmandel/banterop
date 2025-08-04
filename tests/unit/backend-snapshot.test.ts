@@ -81,7 +81,7 @@ describe('Backend Snapshot Functionality', () => {
     expect(conversation.attachments).toBeDefined();
     expect(conversation.attachments!.length).toBe(1);
     expect(conversation.attachments![0].docId).toBe('doc-1');
-    expect(conversation.metadata.conversationTitle).toBe('test.md');
+    expect(conversation.attachments![0].name).toBe('test.md');
     expect(conversation.attachments![0].content).toBe('# Test Document');
     
     expect(conversation.turns).toBeDefined();

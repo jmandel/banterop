@@ -24,9 +24,9 @@ export const TabBar: React.FC = () => {
             key={id}
             className={`tab ${activeTab === id ? 'active' : ''}`}
             onClick={() => setActiveTab(id)}
-            title={`${id}\nAgents: ${agents.join(', ')}`}
+            title={`${id}\nAgents: ${agents.map(a => a.id).join(', ')}`}
           >
-            [{shortId}...] {agents.length > 0 ? agents.join(' + ') : 'Loading...'}
+            [{shortId}...] {agents.length > 0 ? agents.map(a => a.id).join(' + ') : 'Loading...'}
           </div>
         );
       })}

@@ -64,7 +64,7 @@ describe('Attachment System', () => {
     // Retrieve the attachment
     const attachment = db.getAttachment(attachmentId);
     expect(attachment).toBeTruthy();
-    expect(conversation.metadata.conversationTitle).toBe('Test Document.md');
+    expect(attachment?.name).toBe('Test Document.md');
     expect(attachment?.contentType).toBe('text/markdown');
     expect(attachment?.content).toBe('# Test Document\n\nThis is a test attachment.');
     expect(attachment?.summary).toBe('A test attachment');
@@ -126,7 +126,7 @@ describe('Attachment System', () => {
       const attachment = db.getAttachment(attachmentId);
       expect(attachment).toBeTruthy();
       expect(attachment?.docId).toBe(attachmentPayloads[i].docId);
-      expect(conversation.metadata.conversationTitle).toBe(attachmentPayloads[i].name);
+      expect(attachment?.name).toBe(attachmentPayloads[i].name);
       expect(attachment?.content).toBe(attachmentPayloads[i].content);
     }
   });
@@ -226,7 +226,7 @@ describe('Attachment System', () => {
     const attachment = await client.getAttachment(attachmentId);
     expect(attachment).toBeTruthy();
     expect(attachment?.docId).toBe('client_doc_1');
-    expect(conversation.metadata.conversationTitle).toBe('Client Doc.md');
+    expect(attachment?.name).toBe('Client Doc.md');
     expect(attachment?.content).toBe('# Client Document');
     expect(attachment?.summary).toBe('Document created via client');
   });

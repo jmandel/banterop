@@ -24,7 +24,9 @@ describe('Conversation Instructions', () => {
       agents: [{
         id: "agent1",
         strategyType: 'static_replay',
-        script: []
+        script: [],
+        shouldInitiateConversation: true,
+        additionalInstructions: instructions
       } as StaticReplayConfig]
     });
       

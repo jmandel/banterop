@@ -65,70 +65,32 @@ describe('Conversation Initiation Refactor', () => {
     const testEnv = new TestEnvironment();
     await testEnv.start(3051);
       
+    // Create conversation with only external agent
     const { conversation, agentTokens } = await testEnv.orchestrator.createConversation({
       metadata: { conversationTitle: 'Test External Conversation' },
       agents: [{
-        id: "test-agent",
-        strategyType: 'scenario_driven',
-        scenarioId: 'test-scenario'
+        id: "external-agent",
+        strategyType: 'external_websocket_client'
       }]
     });
       
     expect(conversation.status).toBe('created');
       
+    // Simulate external agent connecting and taking first turn
     const client = new WebSocketJsonRpcClient(`ws://localhost:3051/api/ws`);
-      
-    const mockScenario: ScenarioConfiguration = {
-      metadata: {
-        id: 'test-scenario',
-        title: 'Test Scenario',
-        description: 'Test scenario for initiation'
-      },
-      scenario: {
-        background: 'Testing conversation initiation',
-        challenges: ['Test challenge']
-      },
-      agents: [{
-        agentId: "test-agent",
-        principal: { type: 'individual', name: 'Test Principal', description: 'Test' },
-        situation: 'Testing',
-        systemPrompt: 'Be a test agent',
-        goals: ['Test'],
-        tools: [],
-        knowledgeBase: {},
-        messageToUseWhenInitiatingConversation: 'Hello, I am starting the conversation'
-      }]
-    };
+    await client.connect();
+    await client.authenticate(agentTokens['external-agent']);
+    await client.subscribe(conversation.id);
     
-    const agent = createAgent(
-      {
-        strategyType: 'scenario_driven',
-        scenarioId: 'test-scenario',
-        id: "test-agent"
-      } as ScenarioDrivenAgentConfig,
-      client,
-      {
-        db: testEnv.orchestrator.getDbInstance(),
-        llmProvider: new MockLLMProvider(),
-        toolSynthesisService: new ToolSynthesisService(new MockLLMProvider()),
-        scenario: mockScenario
-      }
-    );
-      
-    await agent.initialize(conversation.id, agentTokens['test-agent']);
-      
-    // Start the conversation first (required for internal agents)
-    await testEnv.orchestrator.startConversation(conversation.id);
-    
-    // Now agent can initiate
-    await (agent as ScenarioDrivenAgent).initializeConversation('Please be concise');
+    // External agent takes first turn - this should activate the conversation
+    const turnId = await client.startTurn();
+    await client.completeTurn(turnId, 'Hello from external agent');
       
     await new Promise(resolve => setTimeout(resolve, 100));
       
     const updated = testEnv.orchestrator.getConversation(conversation.id, false, false);
-    expect(updated.status).toBe('active');
+    expect(updated.status).toBe('active'); // Should be activated by first turn
       
-    await agent.shutdown();
     await client.disconnect();
     await testEnv.stop();
   });

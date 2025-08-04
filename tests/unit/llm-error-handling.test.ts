@@ -157,7 +157,7 @@ describe('LLM Error Handling', () => {
     scenario = {
       id: 'test-scenario',
       agents: [{
-        id: "test-agent",
+        agentId: "test-agent",
         llmEndpoint: { provider: 'test', model: 'test' },
         principal: {
           name: 'Test Principal',
@@ -175,12 +175,12 @@ describe('LLM Error Handling', () => {
         ]
       }],
       patientAgent: {
-        id: 'patient',
+        agentId: 'patient',
         llmEndpoint: { provider: 'test', model: 'test' },
         tools: []
       },
       supplierAgent: {
-        id: 'supplier',
+        agentId: 'supplier',
         llmEndpoint: { provider: 'test', model: 'test' },
         tools: []
       },

@@ -29,7 +29,7 @@ export const ConversationList: React.FC = () => {
               )}
               {conv.agents.length > 0 && (
                 <div className="conversation-agents">
-                  {conv.agents.join(', ')}
+                  {conv.agents.map(agent => agent.id).join(', ')}
                 </div>
               )}
             </div>

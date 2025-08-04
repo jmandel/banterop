@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { WebSocketJsonRpcClient } from '$client/impl/websocket.client.js';
-import type { ConversationEvent, ConversationTurn, TraceEntry } from '$lib/types.js';
+import type { ConversationEvent, ConversationTurn, TraceEntry, SpecificConversationEvent } from '$lib/types.js';
 import type { EventLogEntry, ConversationSummary } from '../types/index.js';
 
 interface ConversationState {
@@ -16,7 +16,7 @@ interface ConversationState {
   updateVersion: number;
   
   loadConversations: (client: WebSocketJsonRpcClient) => Promise<void>;
-  handleEvent: (event: ConversationEvent, conversationId: string) => void;
+  handleEvent: (event: SpecificConversationEvent, conversationId: string) => void;
   addEvent: (message: string, type?: 'info' | 'error') => void;
   clearEvents: () => void;
   setActiveTab: (tabId: string) => void;
@@ -97,52 +97,80 @@ export const conversationStore = create<ConversationState>((set, get) => ({
     }
   },
 
-  handleEvent: (event: ConversationEvent, subscriptionId: string) => {
+  handleEvent: (event: SpecificConversationEvent, subscriptionId: string) => {
     const conversationId = event.conversationId;
     if (!conversationId) return;
     
     // Log event order to understand the flow
-    console.log(`📍 EVENT: ${event.type}`, {
+    const eventData: any = {
       conversationId: conversationId.slice(0, 8),
-      turnId: event.data?.turnId || event.data?.turn?.id,
-      agentId: event.data?.agentId,
-      hasTrace: !!event.data?.entry,
       data: event.data
-    });
+    };
+    
+    // Extract common fields based on event type
+    if (event.type === 'turn_started' || event.type === 'turn_completed') {
+      eventData.turnId = event.data.turn.id;
+      eventData.agentId = event.data.turn.agentId;
+    } else if (event.type === 'trace_added') {
+      eventData.turnId = event.data.turn.id;
+      eventData.hasTrace = true;
+    } else if (event.type === 'agent_thinking' || event.type === 'tool_executing') {
+      eventData.agentId = event.data.agentId;
+    } else if (event.type === 'turn_cancelled') {
+      eventData.turnId = event.data.turnId;
+    }
+    
+    console.log(`📍 EVENT: ${event.type}`, eventData);
 
     const { conversations, conversationTurns, addEvent } = get();
     
     // If any event has a turnId, ensure the turn exists first
-    if (event.data?.turnId && event.type !== 'turn_started' && event.type !== 'turn_completed') {
+    let turnId: string | undefined;
+    let agentId: string | undefined;
+    
+    if (event.type === 'turn_cancelled') {
+      turnId = event.data.turnId;
+    } else if (event.type === 'trace_added') {
+      turnId = event.data.turn.id;
+    }
+    
+    if (turnId && event.type !== 'turn_started' && event.type !== 'turn_completed') {
       const turns = conversationTurns.get(conversationId) || [];
-      const turnExists = turns.some(t => t.id === event.data.turnId);
+      const turnExists = turns.some(t => t.id === turnId);
       
       if (!turnExists) {
-        console.log(`⚠️ Turn ${event.data.turnId} doesn't exist yet, creating from ${event.type} event`);
+        console.log(`⚠️ Turn ${turnId} doesn't exist yet, creating from ${event.type} event`);
         
-        set(state => {
-          const newTurns = new Map(state.conversationTurns);
-          const turns = newTurns.get(conversationId) || [];
-          
-          const newTurn: ConversationTurn = {
-            id: event.data.turnId,
-            conversationId: conversationId,
-            agentId: event.data.agentId || 'unknown',
-            timestamp: new Date(),
-            content: '',
-            status: 'in_progress',
-            startedAt: new Date(),
-            trace: []
-          };
-          
-          turns.push(newTurn);
-          newTurns.set(conversationId, [...turns]);
-          
-          return {
-            conversationTurns: new Map(newTurns),
-            updateVersion: state.updateVersion + 1
-          };
-        });
+        // For trace_added, we can get agentId from the turn shell
+        if (event.type === 'trace_added') {
+          agentId = event.data.turn.agentId;
+        }
+        
+        if (agentId) {
+          set(state => {
+            const newTurns = new Map(state.conversationTurns);
+            const turns = newTurns.get(conversationId) || [];
+            
+            const newTurn: ConversationTurn = {
+              id: turnId,
+              conversationId: conversationId,
+              agentId: agentId,
+              timestamp: new Date(),
+              content: '',
+              status: 'in_progress',
+              startedAt: new Date(),
+              trace: []
+            };
+            
+            turns.push(newTurn);
+            newTurns.set(conversationId, [...turns]);
+            
+            return {
+              conversationTurns: new Map(newTurns),
+              updateVersion: state.updateVersion + 1
+            };
+          });
+        }
       }
     }
 
@@ -165,7 +193,7 @@ export const conversationStore = create<ConversationState>((set, get) => ({
     switch (event.type) {
       case 'conversation_created':
         const convData = event.data.conversation;
-        addEvent(`New conversation created: ${convData.name || 'Unnamed'}`);
+        addEvent(`New conversation created: ${convData.metadata?.conversationTitle || 'Unnamed'}`);
         
         // Update the conversation name if it was previously discovered
         set(state => {
@@ -176,7 +204,7 @@ export const conversationStore = create<ConversationState>((set, get) => ({
             newConversations.set(conversationId, {
               ...existing,
               metadata: convData.metadata || { conversationTitle: `Conversation ${conversationId.slice(0, 8)}...` },
-              createdAt: convData.createdAt || existing.createdAt,
+              createdAt: convData.createdAt instanceof Date ? convData.createdAt.toISOString() : convData.createdAt || existing.createdAt,
               status: convData.status || existing.status,
               agents: convData.agents || existing.agents
             });
@@ -254,25 +282,25 @@ export const conversationStore = create<ConversationState>((set, get) => ({
 
       case 'trace_added':
         // Handle the actual data structure: {turn: {...}, trace: {...}}
-        const turnId = event.data.turn?.id || event.data.turnId;
-        const traceEntry = event.data.trace || event.data.entry;
+        const traceTurnId = event.data.turn.id;
+        const traceEntry = event.data.trace;
         
-        if (!turnId) {
+        if (!traceTurnId) {
           console.log('❌ TRACE_ADDED missing turnId!', event.data);
         }
         if (!traceEntry) {
           console.log('❌ TRACE_ADDED missing trace entry!', event.data);
         }
         
-        if (turnId && traceEntry) {
-          console.log(`🔷 TRACE_ADDED: ${traceEntry.type} for turn ${turnId}`);
+        if (traceTurnId && traceEntry) {
+          console.log(`🔷 TRACE_ADDED: ${traceEntry.type} for turn ${traceTurnId}`);
           
           set(state => {
             const newTurns = new Map(state.conversationTurns);
             const turns = newTurns.get(conversationId) || [];
             
             const updatedTurns = turns.map(turn => {
-              if (turn.id === turnId) {
+              if (turn.id === traceTurnId) {
                 const currentTrace = turn.trace || [];
                 const traceExists = currentTrace.some(t => t.id === traceEntry.id);
                 
@@ -307,90 +335,63 @@ export const conversationStore = create<ConversationState>((set, get) => ({
         break;
         
       case 'agent_thinking':
-        // Create or update turn if it doesn't exist
-        if (event.data.turnId && event.data.agentId) {
-          console.log('Agent thinking event for turn:', event.data.turnId);
-          
-          set(state => {
-            const newTurns = new Map(state.conversationTurns);
-            const turns = newTurns.get(conversationId) || [];
-            
-            // Check if turn exists
-            const turnExists = turns.some(t => t.id === event.data.turnId);
-            
-            if (!turnExists) {
-              console.log('Creating turn from agent_thinking event');
-              // Create a new turn
-              const newTurn: ConversationTurn = {
-                id: event.data.turnId,
-                conversationId: conversationId,
-                agentId: event.data.agentId,
-                timestamp: new Date(),
-                content: '',
-                status: 'in_progress',
-                startedAt: new Date(),
-                trace: []
-              };
-              
-              turns.push(newTurn);
-              newTurns.set(conversationId, [...turns]);
-              
-              // No need to expand - traces show by default now
-              
-              return { 
-                conversationTurns: new Map(newTurns),
-                updateVersion: state.updateVersion + 1
-              };
-            }
-            
-            return state;
-          });
-        }
-        addEvent(`💭 Agent ${event.data.agentId} is thinking...`);
+        // Agent thinking events don't have turnId
+        addEvent(`💭 Agent ${event.data.agentId} is thinking: ${event.data.thought}`);
         break;
+          
         
       case 'tool_executing':
-        // Similar to agent_thinking, ensure turn exists
-        if (event.data.turnId && event.data.toolName) {
-          console.log('Tool executing event for turn:', event.data.turnId);
-          
-          set(state => {
-            const newTurns = new Map(state.conversationTurns);
-            const turns = newTurns.get(conversationId) || [];
-            
-            // Check if turn exists
-            const turnExists = turns.some(t => t.id === event.data.turnId);
-            
-            if (!turnExists && event.data.agentId) {
-              console.log('Creating turn from tool_executing event');
-              // Create a new turn
-              const newTurn: ConversationTurn = {
-                id: event.data.turnId,
-                conversationId: conversationId,
-                agentId: event.data.agentId,
-                timestamp: new Date(),
-                content: '',
-                status: 'in_progress',
-                startedAt: new Date(),
-                trace: []
-              };
-              
-              turns.push(newTurn);
-              newTurns.set(conversationId, [...turns]);
-              
-              // No need to expand - traces show by default now
-              
-              return { 
-                conversationTurns: new Map(newTurns),
-                updateVersion: state.updateVersion + 1
-              };
-            }
-            
-            return state;
+        // Tool executing events don't have turnId
+        addEvent(`🔧 Executing tool: ${event.data.toolName}`);
+        break;
+        
+      case 'user_query_created':
+        addEvent(`❓ User query: ${event.data.query.question}`);
+        break;
+        
+      case 'user_query_answered':
+        addEvent(`✅ User query answered`);
+        break;
+        
+      case 'conversation_ended':
+        addEvent(`🏁 Conversation ended${event.data.reason ? `: ${event.data.reason}` : ''}`);
+        set(state => {
+          const newConversations = new Map(state.conversations);
+          const conv = newConversations.get(conversationId);
+          if (conv) {
+            newConversations.set(conversationId, {
+              ...conv,
+              status: 'completed'
+            });
+          }
+          return { conversations: newConversations };
+        });
+        break;
+        
+      case 'conversation_ready':
+        addEvent(`✅ Conversation ready`);
+        break;
+        
+      case 'rehydrated':
+        addEvent(`📥 Conversation rehydrated`);
+        // Update conversation data from rehydration
+        set(state => {
+          const newConversations = new Map(state.conversations);
+          newConversations.set(conversationId, {
+            id: event.data.conversation.id,
+            createdAt: event.data.conversation.createdAt instanceof Date 
+              ? event.data.conversation.createdAt.toISOString() 
+              : event.data.conversation.createdAt,
+            status: event.data.conversation.status,
+            agents: event.data.conversation.agents,
+            metadata: event.data.conversation.metadata
           });
-          
-          addEvent(`🔧 Executing tool: ${event.data.toolName}`);
-        }
+          return { conversations: newConversations };
+        });
+        break;
+        
+      case 'turn_cancelled':
+        addEvent(`❌ Turn cancelled: ${event.data.turnId}`);
         break;
     }
   },

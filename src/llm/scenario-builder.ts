@@ -129,7 +129,7 @@ CURRENT SCENARIO STRUCTURE:
 - Title: ${currentScenario?.metadata?.title || 'Unknown'}
 - Description: ${currentScenario?.metadata?.description || 'No description'}
 - Number of agents: ${currentScenario?.agents?.length || 0}
-- Agents: ${currentScenario?.agents?.map((a: any) => a.agentId?.label || a.agentId?.id || 'Unknown').join(', ') || 'None'}
+- Agents: ${currentScenario?.agents?.map((a: any) =>  a.agentId || 'Unknown').join(', ') || 'None'}
 - Total tools: ${currentScenario?.agents?.reduce((sum: number, a: any) => sum + (a.tools?.length || 0), 0) || 0}
 
 COMPLETE CURRENT SCENARIO JSON:
@@ -141,8 +141,8 @@ SCHEMA VALIDATION REQUIREMENTS:
 - metadata must have title, description
 - scenario must have background and challenges array
 - agents must be an array where each agent has:
-  - agentId with id and label
-  - principal with name and description
+  - agentId 
+  - principal with type, name, and description
   - situation, systemPrompt, goals array, tools array, knowledgeBase object
   - optional messageToUseWhenInitiatingConversation for conversation initiation${formattedHistory}
 

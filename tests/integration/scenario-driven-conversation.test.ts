@@ -286,6 +286,7 @@ describe('Integration Test: Scenario-Driven Agent Conversation', () => {
           id: "patient-agent",
           strategyType: 'scenario_driven',
           scenarioId: kneeMriScenarioId,
+          shouldInitiateConversation: true,
           messageToUseWhenInitiatingConversation: "Hello, I'm following up on the prior authorization request for my right knee MRI."
         } as ScenarioDrivenAgentConfig,
         {
@@ -415,6 +416,7 @@ describe('Integration Test: Scenario-Driven Agent Conversation', () => {
           id: "insurance-auth-specialist",
           strategyType: 'scenario_driven',
           scenarioId: kneeMriScenarioId,
+          shouldInitiateConversation: true,
           messageToUseWhenInitiatingConversation: "This is HealthFirst Insurance calling about a prior authorization request for an MRI that needs review."
         } as ScenarioDrivenAgentConfig
       ] // The only change is here
@@ -543,6 +545,7 @@ describe('Integration Test: Scenario-Driven Agent Conversation', () => {
           id: "patient-agent",
           strategyType: 'scenario_driven',
           scenarioId: kneeMriScenarioId,
+          shouldInitiateConversation: true,
           messageToUseWhenInitiatingConversation: "I need help getting my knee MRI authorized. Can you provide the policy requirements?"
         } as ScenarioDrivenAgentConfig,
         {

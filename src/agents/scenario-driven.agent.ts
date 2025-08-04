@@ -335,14 +335,12 @@ You have access to the following tools. Each tool must be called with all requir
 ${this.formatToolsWithGuidance(tools)}
 
 ATTACHMENT GUIDANCE:
-- ANY tool response that has a "docId" field at the root level is an attachable document. You can attach it directly without any additional resolution.
+- ANY tool response that has a "docId" field at the root level or nested inside is an attachable document. You can attach it directly without any additional resolution. Simple rule: If you see "docId" anywhere in a tool result, that's a document you can attach.
 - Tool responses with "refToDocId" (instead of "docId") are references that need to be resolved first using resolve_document_reference.
-- Simple rule: If you see "docId" at the root of any tool result, that's a document you can attach. Only "refToDocId" needs resolution.
 - To attach documents in your messages:
-  1. Collect the docIds from tool results (no resolution needed if docId already exists)
+  1. Collect the docIds from tool results (resolving any refToDocId as needed)
   2. Use send_message_to_agent_conversation with attachments_to_include as an array of docId strings
   Example: attachments_to_include: ["doc_policy_123", "doc_report_456"]
-- You can only attach documents whose docId has appeared in a tool result within this conversation.
 - Never claim "see attached" without including actual attachments.
 
 </AVAILABLE_TOOLS>`;

@@ -15,7 +15,16 @@ export function getInitiationDetails(conversation: Conversation): {
   initiatingAgentId?: string;
   instructions?: string;
 } {
-  // This function is deprecated - initiation is now handled via agent.shouldInitiateConversation
+  // Find the agent that should initiate the conversation
+  const initiatingAgent = conversation.agents.find(agent => agent.shouldInitiateConversation);
+  
+  if (initiatingAgent) {
+    return {
+      initiatingAgentId: initiatingAgent.id,
+      instructions: initiatingAgent.additionalInstructions
+    };
+  }
+  
   return {
     initiatingAgentId: undefined,
     instructions: undefined

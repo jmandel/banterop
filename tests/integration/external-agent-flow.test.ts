@@ -31,7 +31,7 @@ describe('External Agent Flow Integration', () => {
 
   test('should support external agent workflow', async () => {
     const agentId1 = 'external-agent-1';
-    const agentId2 = 'internal-agent-2';
+    const agentId2 = 'external-agent-2';
 
     // Step 1: Setup Client Creates the Conversation for external management
     const createRequest: CreateConversationRequest = {
@@ -41,17 +41,11 @@ describe('External Agent Flow Integration', () => {
       agents: [
         { 
           id: agentId1, 
-          strategyType: 'static_replay',
-          script: [
-            { trigger: 'hello', response: 'Hello from external agent!' }
-          ]
+          strategyType: 'external_websocket_client'
         },
         { 
           id: agentId2, 
-          strategyType: 'static_replay',
-          script: [
-            { trigger: 'hello', response: 'Hello back from internal agent!' }
-          ]
+          strategyType: 'external_websocket_client'
         }
       ]
     };

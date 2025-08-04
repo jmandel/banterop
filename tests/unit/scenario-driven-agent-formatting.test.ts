@@ -4,7 +4,7 @@ import { ConversationTurn, TraceEntry, ToolCallEntry, ToolResultEntry, ThoughtEn
 
 // Create a mock agent class to test the formatting methods
 class MockScenarioDrivenAgent {
-  private agentId = { id: 'test-agent', label: 'Test Agent' };
+  private agentId = 'test-agent';
   private tracesByTurnId: Map<string, TraceEntry[]> = new Map();
 
   // Copy the private formatting methods from ScenarioDrivenAgent for testing
@@ -176,7 +176,7 @@ describe('ScenarioDrivenAgent Formatting Helpers', () => {
 
       const result = agent.formatOwnTurnForHistory(turn);
       
-      expect(result).toContain('[2024-07-01 10:30:15] [Test Agent]');
+      expect(result).toContain('[2024-07-01 10:30:15] [test-agent]');
       expect(result).toContain('<scratchpad>\nI need to check the patient authorization\n</scratchpad>');
       expect(result).toContain('```json\n{\n  "name": "check_authorization",\n  "args": {\n    "patientId": "123"\n  }\n}\n```');
       expect(result).toContain('[TOOL_RESULT] {"status":"approved"}');
@@ -198,7 +198,7 @@ describe('ScenarioDrivenAgent Formatting Helpers', () => {
 
       const result = agent.formatOwnTurnForHistory(turn);
       
-      expect(result).toContain('[2024-07-01 10:30:15] [Test Agent]');
+      expect(result).toContain('[2024-07-01 10:30:15] [test-agent]');
       expect(result).toContain('<scratchpad>\nNo thoughts recorded.\n</scratchpad>');
       expect(result).toContain('Simple message without tool use.');
       expect(result).not.toContain('```json');

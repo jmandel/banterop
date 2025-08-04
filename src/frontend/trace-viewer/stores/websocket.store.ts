@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { WebSocketJsonRpcClient } from '$client/impl/websocket.client.js';
-import type { ConversationEvent } from '$lib/types.js';
+import type { SpecificConversationEvent } from '$lib/types.js';
 import { conversationStore } from './conversation.store.js';
 
 interface WebSocketState {
@@ -33,7 +33,7 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
       conversationStore.getState().addEvent(`WebSocket error: ${error.message}`, 'error');
     });
 
-    client.on('event', (event: ConversationEvent, subscriptionId: string) => {
+    client.on('event', (event: SpecificConversationEvent, subscriptionId: string) => {
       console.log('Received event:', event.type, 'subscription:', subscriptionId, 'conversation:', event.conversationId);
       
       // Always handle the event regardless of subscription type

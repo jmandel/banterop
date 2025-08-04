@@ -140,6 +140,14 @@ export interface TurnCompletedEvent extends ConversationEvent {
   };
 }
 
+export interface TurnCancelledEvent extends ConversationEvent {
+  type: 'turn_cancelled';
+  data: {
+    turnId: string;
+    reason?: string;
+  };
+}
+
 
 export interface AgentThinkingEvent extends ConversationEvent {
   type: 'agent_thinking';
@@ -187,6 +195,40 @@ export interface RehydratedEvent extends ConversationEvent {
     conversation: Conversation;
   };
 }
+
+export interface ConversationCreatedEvent extends ConversationEvent {
+  type: 'conversation_created';
+  data: {
+    conversation: Conversation;
+  };
+}
+
+export interface ConversationEndedEvent extends ConversationEvent {
+  type: 'conversation_ended';
+  data: {
+    reason?: string;
+  };
+}
+
+export interface ConversationReadyEvent extends ConversationEvent {
+  type: 'conversation_ready';
+  data: Record<string, never>; // Empty object
+}
+
+// Discriminated union of all specific event types
+export type SpecificConversationEvent = 
+  | TurnStartedEvent
+  | TraceAddedEvent
+  | TurnCompletedEvent
+  | TurnCancelledEvent
+  | AgentThinkingEvent
+  | ToolExecutingEvent
+  | UserQueryCreatedEvent
+  | UserQueryAnsweredEvent
+  | RehydratedEvent
+  | ConversationCreatedEvent
+  | ConversationEndedEvent
+  | ConversationReadyEvent;
 
 // ============= Backend Orchestrator Types =============
 
