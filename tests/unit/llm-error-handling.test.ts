@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { ScenarioDrivenAgent } from '$agents/scenario-driven.agent.js';
+import { createAgent } from '$agents/factory.js';
 import { ToolSynthesisService } from '$agents/services/tool-synthesis.service.js';
 import type { 
   ScenarioDrivenAgentConfig, ScenarioConfiguration,
-  LLMRequest, LLMResponse
+  LLMRequest, LLMResponse, AgentInterface
 } from '$lib/types.js';
 import { LLMProvider } from '$lib/types.js';
 import type { OrchestratorClient } from '$client/index.js';
 import { v4 as uuidv4 } from 'uuid';
+import { ConversationDatabase } from '$backend/db/database.js';
 
 // Mock implementations
 class MockOrchestratorClient implements Partial<OrchestratorClient> {
@@ -142,8 +143,9 @@ describe('LLM Error Handling', () => {
   let mockClient: MockOrchestratorClient;
   let failingLLM: FailingLLMProvider;
   let failingToolSynthesis: FailingToolSynthesis;
-  let agent: ScenarioDrivenAgent;
+  let agent: AgentInterface;
   let scenario: ScenarioConfiguration;
+  let mockDb: ConversationDatabase;
 
   beforeEach(() => {
     mockClient = new MockOrchestratorClient();
@@ -189,12 +191,17 @@ describe('LLM Error Handling', () => {
       scenarioId: 'test-scenario'
     };
     
-    agent = new ScenarioDrivenAgent(
+    mockDb = new ConversationDatabase(':memory:');
+    
+    agent = createAgent(
       config,
       mockClient as any,
-      scenario,
-      failingLLM,
-      failingToolSynthesis
+      {
+        db: mockDb,
+        llmProvider: failingLLM,
+        toolSynthesisService: failingToolSynthesis,
+        scenario: scenario
+      }
     );
   });
 
@@ -245,16 +252,19 @@ describe('LLM Error Handling', () => {
         mockClient = new MockOrchestratorClient();
         failingLLM = new FailingLLMProvider(errorMsg);
         
-        agent = new ScenarioDrivenAgent(
+        agent = createAgent(
           {
             agentId: { id: 'test-agent', label: 'Test Agent', role: 'test' },
             strategyType: 'scenario_driven',
             scenarioId: 'test-scenario'
           },
           mockClient as any,
-          scenario,
-          failingLLM,
-          failingToolSynthesis
+          {
+            db: mockDb,
+            llmProvider: failingLLM,
+            toolSynthesisService: failingToolSynthesis,
+            scenario: scenario
+          }
         );
         
         const mockTurn = {
@@ -292,16 +302,19 @@ describe('LLM Error Handling', () => {
         }
         \`\`\``]);
       
-      agent = new ScenarioDrivenAgent(
+      agent = createAgent(
         {
           agentId: { id: 'test-agent', label: 'Test Agent', role: 'test' },
           strategyType: 'scenario_driven',
           scenarioId: 'test-scenario'
         },
         mockClient as any,
-        scenario,
-        workingLLM,
-        failingToolSynthesis
+        {
+          db: mockDb,
+          llmProvider: workingLLM,
+          toolSynthesisService: failingToolSynthesis,
+          scenario: scenario
+        }
       );
       
       // Configure tool synthesis to fail

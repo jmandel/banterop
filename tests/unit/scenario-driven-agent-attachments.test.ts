@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { ScenarioDrivenAgent } from '$agents/scenario-driven.agent.js';
+import { createAgent } from '$agents/factory.js';
 import { ToolSynthesisService } from '$agents/services/tool-synthesis.service.js';
 import type { 
   ScenarioDrivenAgentConfig, ScenarioConfiguration,
-  TraceEntry, ToolResultEntry, AttachmentPayload 
+  TraceEntry, ToolResultEntry, AttachmentPayload, AgentInterface 
 } from '$lib/types.js';
 import { LLMProvider } from '$lib/types.js';
 import type { OrchestratorClient } from '$client/index.js';
 import { v4 as uuidv4 } from 'uuid';
+import { ConversationDatabase } from '$backend/db/database.js';
 
 // Mock implementations
 class MockOrchestratorClient implements Partial<OrchestratorClient> {
@@ -112,8 +113,9 @@ describe('ScenarioDrivenAgent Attachment Handling', () => {
   let mockClient: MockOrchestratorClient;
   let mockLLM: MockLLMProvider;
   let mockToolSynthesis: MockToolSynthesis;
-  let agent: ScenarioDrivenAgent;
+  let agent: AgentInterface;
   let scenario: ScenarioConfiguration;
+  let mockDb: ConversationDatabase;
 
   beforeEach(() => {
     mockClient = new MockOrchestratorClient();
@@ -168,12 +170,17 @@ describe('ScenarioDrivenAgent Attachment Handling', () => {
       scenarioId: 'test-scenario'
     };
     
-    agent = new ScenarioDrivenAgent(
+    mockDb = new ConversationDatabase(':memory:');
+    
+    agent = createAgent(
       config,
       mockClient as any,
-      scenario,
-      mockLLM,
-      mockToolSynthesis
+      {
+        db: mockDb,
+        llmProvider: mockLLM,
+        toolSynthesisService: mockToolSynthesis,
+        scenario: scenario
+      }
     );
   });
 
