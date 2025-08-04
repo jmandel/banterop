@@ -3,7 +3,6 @@
 import type { OrchestratorClient } from '$client/index.js';
 import {
   AgentConfig,
-  AgentId,
   AgentInterface,
   ConversationEvent,
   ConversationTurn,
@@ -15,7 +14,7 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 
 export abstract class BaseAgent implements AgentInterface {
-  agentId: AgentId;
+  agentId: string;
   config: AgentConfig;
   protected client: OrchestratorClient;
   protected conversationId?: string;
@@ -35,7 +34,7 @@ export abstract class BaseAgent implements AgentInterface {
   private lastProcessedTurnId: string | null = null;
 
   constructor(config: AgentConfig, client: OrchestratorClient) {
-    this.agentId = config.agentId;
+    this.agentId = config.id;
     this.config = config;
     this.client = client;
 
@@ -43,7 +42,7 @@ export abstract class BaseAgent implements AgentInterface {
   }
 
   async initialize(conversationId: string, authToken: string): Promise<void> {
-    console.log(`Agent ${this.agentId.label} starting initialization...`);
+    console.log(`Agent ${this.agentId} starting initialization...`);
     this.conversationId = conversationId;
     
     await this.client.connect(authToken);
@@ -51,7 +50,7 @@ export abstract class BaseAgent implements AgentInterface {
     
     this.subscriptionId = await this.client.subscribe(conversationId);
     this.isReady = true;
-    console.log(`Agent ${this.agentId.label} initialized for conversation ${conversationId} - READY FLAG SET`);
+    console.log(`Agent ${this.agentId} initialized for conversation ${conversationId} - READY FLAG SET`);
   }
 
   async shutdown(): Promise<void> {
@@ -62,7 +61,7 @@ export abstract class BaseAgent implements AgentInterface {
     }
 
     this.client.disconnect();
-    console.log(`Agent ${this.agentId.label} shutting down`);
+    console.log(`Agent ${this.agentId} shutting down`);
   }
 
   private _handleEvent(event: ConversationEvent, subscriptionId: string) {
@@ -74,7 +73,7 @@ export abstract class BaseAgent implements AgentInterface {
   async onConversationEvent(event: ConversationEvent): Promise<void> {
     // Don't process events until agent is fully ready
     if (!this.isReady) {
-      console.log(`Agent ${this.agentId.label} ignoring ${event.type} - not ready yet`);
+      console.log(`Agent ${this.agentId} ignoring ${event.type} - not ready yet`);
       return;
     }
     
@@ -145,7 +144,7 @@ export abstract class BaseAgent implements AgentInterface {
     await this.onTurnCompleted(event);
     
     // Check if we should process this turn
-    if (turn.agentId !== this.agentId.id && !turn.isFinalTurn) {
+    if (turn.agentId !== this.agentId && !turn.isFinalTurn) {
       await this.maybeProcessNextOpportunity();
     }
   }
@@ -169,7 +168,7 @@ export abstract class BaseAgent implements AgentInterface {
   }
   
   private async onRehydrated(event: RehydratedEvent): Promise<void> {
-    console.log(`Agent ${this.agentId.label} received rehydration event`);
+    console.log(`Agent ${this.agentId} received rehydration event`);
     
     // Clear and rebuild all state from snapshot
     this.turns.clear();
@@ -200,11 +199,11 @@ export abstract class BaseAgent implements AgentInterface {
     
     // Check if we had an in-progress turn
     const inProgressTurn = conversation.turns.find(
-      t => t.status === 'in_progress' && t.agentId === this.agentId.id
+      t => t.status === 'in_progress' && t.agentId === this.agentId
     );
     
     if (inProgressTurn) {
-      console.log(`Agent ${this.agentId.label} aborting in-progress turn ${inProgressTurn.id}`);
+      console.log(`Agent ${this.agentId} aborting in-progress turn ${inProgressTurn.id}`);
       await this._abortCurrentTurn(inProgressTurn.id);
     }
     
@@ -238,7 +237,7 @@ export abstract class BaseAgent implements AgentInterface {
     const lastTurnId = this.turnOrder[this.turnOrder.length - 1];
     const lastTurn = this.turns.get(lastTurnId);
     
-    if (lastTurn && lastTurn.agentId !== this.agentId.id && lastTurn.id !== this.lastProcessedTurnId) {
+    if (lastTurn && lastTurn.agentId !== this.agentId && lastTurn.id !== this.lastProcessedTurnId) {
       this.lastProcessedTurnId = lastTurn.id;
       await this.processAndReply(lastTurn);
     }
@@ -264,7 +263,7 @@ export abstract class BaseAgent implements AgentInterface {
     const existingTraces = this.tracesByTurnId.get(this.currentTurnId) || [];
     existingTraces.push({
       id: uuidv4(),
-      agentId: this.agentId.id,
+      agentId: this.agentId,
       timestamp: new Date(),
       type: 'thought',
       content: thought
@@ -285,7 +284,7 @@ export abstract class BaseAgent implements AgentInterface {
     const existingTraces = this.tracesByTurnId.get(this.currentTurnId) || [];
     existingTraces.push({
       id: uuidv4(),
-      agentId: this.agentId.id,
+      agentId: this.agentId,
       timestamp: new Date(),
       type: 'tool_call',
       toolName,
@@ -308,7 +307,7 @@ export abstract class BaseAgent implements AgentInterface {
     const existingTraces = this.tracesByTurnId.get(this.currentTurnId) || [];
     existingTraces.push({
       id: uuidv4(),
-      agentId: this.agentId.id,
+      agentId: this.agentId,
       timestamp: new Date(),
       type: 'tool_result',
       toolCallId,

@@ -17,7 +17,7 @@ beforeEach(async () => {
   
   // Create a test conversation
   const { conversation, agentTokens } = await orchestrator.createConversation({
-    name: 'In-Process Query Tests',
+    metadata: { conversationTitle: "In-Process Query Tests" },
     agents: [TestDataFactory.createStaticReplayConfig()]
   });
   

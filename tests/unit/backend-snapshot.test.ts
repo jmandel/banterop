@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { ConversationOrchestrator } from '$backend/core/orchestrator.js';
 import { MockLLMProvider } from '../utils/test-helpers.js';
 import { v4 as uuidv4 } from 'uuid';
-import { CreateConversationRequest, ScenarioDrivenAgentConfig, AgentId } from '$lib/types.js';
+import { CreateConversationRequest, ScenarioDrivenAgentConfig, AgentId, ThoughtEntry, ToolCallEntry, ToolResultEntry } from '$lib/types.js';
 
 describe('Backend Snapshot Functionality', () => {
   let orchestrator: ConversationOrchestrator;
@@ -12,19 +12,13 @@ describe('Backend Snapshot Functionality', () => {
   beforeEach(async () => {
     const mockLLMProvider = new MockLLMProvider();
     orchestrator = new ConversationOrchestrator(':memory:', mockLLMProvider);
-    
-    // Create a test conversation
-    const agentId: AgentId = {
-      id: 'test-agent-1',
-      label: 'Test Agent 1',
-      role: 'assistant'
-    };
+      
+    const agentId = 'test-agent-1';
     
     const request: CreateConversationRequest = {
-      name: 'Test Conversation',
-      managementMode: 'external', // Don't auto-provision agents
+      metadata: { conversationTitle: 'Test Conversation' },
       agents: [{
-        agentId,
+        id: agentId,
         strategyType: 'scenario_driven',
         scenarioId: 'test-scenario'
       } as ScenarioDrivenAgentConfig]
@@ -32,13 +26,12 @@ describe('Backend Snapshot Functionality', () => {
     
     const result = await orchestrator.createConversation(request);
     conversationId = result.conversation.id;
-    agentToken = result.agentTokens[agentId.id];
+    agentToken = result.agentTokens[agentId];
   });
 
   test('getConversation returns complete snapshot with attachments', async () => {
     // Don't start conversation - just create turns directly
-    
-    // Create a turn with trace and attachment
+      
     const { turnId } = orchestrator.startTurn({
       conversationId,
       agentId: 'test-agent-1'
@@ -47,7 +40,7 @@ describe('Backend Snapshot Functionality', () => {
       conversationId,
       turnId,
       agentId: 'test-agent-1',
-      entry: { type: 'thought', content: 'Thinking...' }
+      entry: { type: 'thought', content: 'Thinking...' } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>
     });
     orchestrator.addTraceEntry({
       conversationId,
@@ -58,10 +51,9 @@ describe('Backend Snapshot Functionality', () => {
         toolName: 'test_tool', 
         parameters: { test: true },
         toolCallId: 'test-call-1'
-      }
+      } as Omit<ToolCallEntry, 'id' | 'timestamp' | 'agentId'>
     });
-    
-    // Complete turn with embedded attachment
+      
     orchestrator.completeTurn({
       conversationId,
       turnId,
@@ -76,8 +68,7 @@ describe('Backend Snapshot Functionality', () => {
         summary: 'Test document with metadata from test source'
       }]
     });
-    
-    // Get conversation snapshot with all includes
+      
     const conversation = await orchestrator.getConversation(
       conversationId, 
       true,  // includeTurns
@@ -85,13 +76,12 @@ describe('Backend Snapshot Functionality', () => {
       false, // includeAgents
       true   // includeAttachments
     );
-    
-    // Verify complete snapshot
+      
     expect(conversation.id).toBe(conversationId);
     expect(conversation.attachments).toBeDefined();
     expect(conversation.attachments!.length).toBe(1);
     expect(conversation.attachments![0].docId).toBe('doc-1');
-    expect(conversation.attachments![0].name).toBe('test.md');
+    expect(conversation.metadata.conversationTitle).toBe('test.md');
     expect(conversation.attachments![0].content).toBe('# Test Document');
     
     expect(conversation.turns).toBeDefined();
@@ -104,8 +94,7 @@ describe('Backend Snapshot Functionality', () => {
   });
 
   test('conversation attachments aggregate from all turns', async () => {
-    
-    // Create first turn with attachment
+      
     const { turnId: turnId1 } = orchestrator.startTurn({
       conversationId,
       agentId: 'test-agent-1'
@@ -123,8 +112,7 @@ describe('Backend Snapshot Functionality', () => {
         content: 'First document'
       }]
     });
-    
-    // Create second turn with different attachment
+      
     const { turnId: turnId2 } = orchestrator.startTurn({
       conversationId,
       agentId: 'test-agent-1'
@@ -142,8 +130,7 @@ describe('Backend Snapshot Functionality', () => {
         content: 'Second document'
       }]
     });
-    
-    // Get conversation snapshot
+      
     const conversation = await orchestrator.getConversation(
       conversationId, 
       true,  // includeTurns
@@ -151,15 +138,13 @@ describe('Backend Snapshot Functionality', () => {
       false, // includeAgents
       true   // includeAttachments
     );
-    
-    // Verify all attachments are aggregated at conversation level
+      
     expect(conversation.attachments).toBeDefined();
     expect(conversation.attachments!.length).toBe(2);
     
     const docIds = conversation.attachments!.map(a => a.docId).sort();
     expect(docIds).toEqual(['doc-1', 'doc-2']);
-    
-    // Verify each attachment has correct turnId
+      
     const att1 = conversation.attachments!.find(a => a.docId === 'doc-1');
     const att2 = conversation.attachments!.find(a => a.docId === 'doc-2');
     expect(att1!.turnId).toBe(turnId1);
@@ -172,13 +157,12 @@ describe('Backend Snapshot Functionality', () => {
       conversationId,
       agentId: 'test-agent-1'
     });
-    
-    // Add various trace entries
+      
     orchestrator.addTraceEntry({
       conversationId,
       turnId,
       agentId: 'test-agent-1',
-      entry: { type: 'thought', content: 'Step 1' }
+      entry: { type: 'thought', content: 'Step 1' } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>
     });
     orchestrator.addTraceEntry({
       conversationId,
@@ -189,7 +173,7 @@ describe('Backend Snapshot Functionality', () => {
         toolName: 'calculator', 
         parameters: { operation: 'add', a: 1, b: 2 },
         toolCallId: 'calc-1'
-      }
+      } as Omit<ToolCallEntry, 'id' | 'timestamp' | 'agentId'>
     });
     orchestrator.addTraceEntry({
       conversationId,
@@ -199,13 +183,13 @@ describe('Backend Snapshot Functionality', () => {
         type: 'tool_result',
         toolCallId: 'calc-1',
         result: 3
-      }
+      } as Omit<ToolResultEntry, 'id' | 'timestamp' | 'agentId'>
     });
     orchestrator.addTraceEntry({
       conversationId,
       turnId,
       agentId: 'test-agent-1',
-      entry: { type: 'thought', content: 'Step 2' }
+      entry: { type: 'thought', content: 'Step 2' } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>
     });
     
     orchestrator.completeTurn({
@@ -214,8 +198,7 @@ describe('Backend Snapshot Functionality', () => {
       agentId: 'test-agent-1',
       content: 'Calculation complete'
     });
-    
-    // Get snapshot with traces
+      
     const conversation = await orchestrator.getConversation(
       conversationId,
       true,  // includeTurns
@@ -232,8 +215,7 @@ describe('Backend Snapshot Functionality', () => {
   });
 
   test('snapshot without includes returns minimal data', async () => {
-    
-    // Create turn with trace and attachment
+      
     const { turnId } = orchestrator.startTurn({
       conversationId,
       agentId: 'test-agent-1'
@@ -242,7 +224,7 @@ describe('Backend Snapshot Functionality', () => {
       conversationId,
       turnId,
       agentId: 'test-agent-1',
-      entry: { type: 'thought', content: 'Test' }
+      entry: { type: 'thought', content: 'Test' } as Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>
     });
     orchestrator.completeTurn({
       conversationId,
@@ -257,8 +239,7 @@ describe('Backend Snapshot Functionality', () => {
         content: 'Content'
       }]
     });
-    
-    // Get minimal snapshot
+      
     const conversation = await orchestrator.getConversation(
       conversationId,
       false, // includeTurns
@@ -266,22 +247,19 @@ describe('Backend Snapshot Functionality', () => {
       false, // includeAgents
       false  // includeAttachments
     );
-    
-    // Should have basic info but no detailed data
+      
     expect(conversation.id).toBe(conversationId);
-    expect(conversation.name).toBe('Test Conversation');
+    expect(conversation.metadata.conversationTitle).toBe('Test Conversation');
     expect(conversation.status).toBeDefined();
     expect(conversation.metadata).toBeDefined();
-    
-    // Should not include optional data
+      
     // Note: Currently returns empty array instead of undefined
     expect(conversation.turns).toEqual([]);
     expect(conversation.attachments).toBeUndefined();
   });
 
   test('getConversation aggregates attachments from multiple turns', async () => {
-    
-    // Create multiple attachments
+      
     const { turnId } = orchestrator.startTurn({
       conversationId,
       agentId: 'test-agent-1'
@@ -306,8 +284,7 @@ describe('Backend Snapshot Functionality', () => {
       isFinalTurn: false,
       attachments: attachmentPayloads
     });
-    
-    // Get conversation through orchestrator (which properly returns attachments)
+      
     const conversation = await orchestrator.getConversation(
       conversationId,
       true,  // includeTurns
@@ -319,8 +296,7 @@ describe('Backend Snapshot Functionality', () => {
     expect(conversation).toBeDefined();
     expect(conversation!.attachments).toBeDefined();
     expect(conversation!.attachments!.length).toBe(3);
-    
-    // Verify all attachments have complete data
+      
     for (let i = 0; i < 3; i++) {
       const attachment = conversation!.attachments!.find(a => a.docId === `doc-${i}`);
       expect(attachment).toBeDefined();

@@ -53,7 +53,7 @@ export class SequentialScriptAgent extends BaseAgent {
     // Check for conversation_ready triggers to initiate
     for (const scriptEntry of this.config.script) {
       if (scriptEntry.trigger.type === 'conversation_ready') {
-        console.log(`${this.agentId.label} initiating conversation with conversation_ready trigger`);
+        console.log(`${this.agentId} initiating conversation with conversation_ready trigger`);
         await this.executeScript(scriptEntry);
         break;
       }
@@ -109,14 +109,14 @@ export class SequentialScriptAgent extends BaseAgent {
   private async handleConversationReadyEvent(): Promise<void> {
     // Don't start new scripts while one is running
     if (this.isScriptRunning()) {
-      console.log(`${this.agentId.label} ignoring conversation_ready - script already running`);
+      console.log(`${this.agentId} ignoring conversation_ready - script already running`);
       return;
     }
 
     // Check for conversation_ready triggers
     for (const scriptEntry of this.config.script) {
       if (scriptEntry.trigger.type === 'conversation_ready') {
-        console.log(`${this.agentId.label} triggered script by: conversation_ready`);
+        console.log(`${this.agentId} triggered script by: conversation_ready`);
         await this.executeScript(scriptEntry);
         break; // Execute only the first matching script
       }
@@ -186,11 +186,11 @@ export class SequentialScriptAgent extends BaseAgent {
       
       // Start a new turn for this script execution
       await this.startTurn();
-      console.log(`${this.agentId.label} started turn ${this.getCurrentTurnId()} for script execution`);
+      console.log(`${this.agentId} started turn ${this.getCurrentTurnId()} for script execution`);
       
       await this.executeNextStep();
     } catch (error: any) {
-      console.error(`${this.agentId.label} error in executeScript:`, error);
+      console.error(`${this.agentId} error in executeScript:`, error);
       await this.handleScriptError(error);
     }
   }
@@ -201,7 +201,7 @@ export class SequentialScriptAgent extends BaseAgent {
    */
   private async executeNextStep(): Promise<void> {
     if (!this.currentScript || !this.getCurrentTurnId()) {
-      console.warn(`${this.agentId.label} executeNextStep called without active script/turn`);
+      console.warn(`${this.agentId} executeNextStep called without active script/turn`);
       return;
     }
     
@@ -212,7 +212,7 @@ export class SequentialScriptAgent extends BaseAgent {
       return;
     }
 
-    console.log(`${this.agentId.label} executing step ${this.currentStepIndex + 1}/${this.currentScript.steps.length}: ${step.type}`);
+    console.log(`${this.agentId} executing step ${this.currentStepIndex + 1}/${this.currentScript.steps.length}: ${step.type}`);
 
     try {
       switch (step.type) {
@@ -236,18 +236,18 @@ export class SequentialScriptAgent extends BaseAgent {
           return;
 
         default:
-          console.warn(`${this.agentId.label} unknown step type: ${(step as any).type}`);
+          console.warn(`${this.agentId} unknown step type: ${(step as any).type}`);
       }
 
-      console.log(`${this.agentId.label} step ${this.currentStepIndex + 1} completed successfully`);
+      console.log(`${this.agentId} step ${this.currentStepIndex + 1} completed successfully`);
 
       // Continue to next step
       this.currentStepIndex++;
-      console.log(`${this.agentId.label} advancing to step ${this.currentStepIndex + 1}/${this.currentScript.steps.length}`);
+      console.log(`${this.agentId} advancing to step ${this.currentStepIndex + 1}/${this.currentScript.steps.length}`);
       await this.executeNextStep();
 
     } catch (error: any) {
-      console.error(`${this.agentId.label} error executing step:`, error);
+      console.error(`${this.agentId} error executing step:`, error);
       await this.handleScriptError(error);
     }
   }
@@ -293,9 +293,9 @@ export class SequentialScriptAgent extends BaseAgent {
    */
   private async executeResponseStep(step: ResponseStep): Promise<void> {
     const turnId = this.getCurrentTurnId();
-    console.log(`${this.agentId.label} about to complete turn ${turnId} with content: "${step.content.slice(0, 50)}..."`);
+    console.log(`${this.agentId} about to complete turn ${turnId} with content: "${step.content.slice(0, 50)}..."`);
     await this.completeTurn(step.content);
-    console.log(`${this.agentId.label} completed turn ${turnId} with response: "${step.content.slice(0, 50)}..."`);
+    console.log(`${this.agentId} completed turn ${turnId} with response: "${step.content.slice(0, 50)}..."`);
     this.resetScriptState();
   }
 
@@ -312,14 +312,14 @@ export class SequentialScriptAgent extends BaseAgent {
     if (lastStep?.type === 'user_query') {
       // Complete the turn with a placeholder message
       await this.completeTurn('Awaiting user response...');
-      console.log(`${this.agentId.label} completed turn after user query`);
+      console.log(`${this.agentId} completed turn after user query`);
     } else {
       // Find response step for turn completion, or use default
       const responseStep = this.currentScript!.steps.find(s => s.type === 'response') as ResponseStep;
       const content = responseStep?.content || 'Script execution completed.';
       
       await this.completeTurn(content);
-      console.log(`${this.agentId.label} completed script execution and turn`);
+      console.log(`${this.agentId} completed script execution and turn`);
     }
     
     this.resetScriptState();
@@ -329,13 +329,13 @@ export class SequentialScriptAgent extends BaseAgent {
    * Handle script execution errors
    */
   private async handleScriptError(error: any): Promise<void> {
-    console.error(`${this.agentId.label} script error:`, error);
+    console.error(`${this.agentId} script error:`, error);
     
     if (this.getCurrentTurnId()) {
       try {
         await this.completeTurn('Script execution failed due to an error.');
       } catch (completionError) {
-        console.error(`${this.agentId.label} error completing failed turn:`, completionError);
+        console.error(`${this.agentId} error completing failed turn:`, completionError);
       }
     }
     

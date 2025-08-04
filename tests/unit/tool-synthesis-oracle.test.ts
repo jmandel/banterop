@@ -56,7 +56,7 @@ describe('ToolSynthesisService Oracle Implementation', () => {
       },
       agents: [
         {
-          agentId: { id: 'agent1', label: 'Agent 1', role: 'TestAgent' },
+          agentId: "agent1",
           principal: { type: 'individual', name: 'Test User', description: 'Test user' },
           situation: 'Test situation',
           systemPrompt: 'Test prompt',

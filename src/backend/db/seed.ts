@@ -31,7 +31,7 @@ export function seedDatabase(db: ConversationDatabase): void {
     },
     agents: [
       {
-        agentId: { id: "patient-agent", label: "Patient Agent", role: "PatientAgent" },
+        agentId: "patient-agent",
         principal: {
           type: "individual",
           name: "Jordan Alvarez",
@@ -98,7 +98,7 @@ export function seedDatabase(db: ConversationDatabase): void {
         messageToUseWhenInitiatingConversation: "Hello, I'm following up on the prior authorization request for my right knee MRI."
       },
       {
-        agentId: { id: "insurance-auth-specialist", label: "Insurance Authorization Specialist", role: "InsuranceAgent" },
+        agentId: "insurance-auth-specialist",
         principal: {
           type: "organization",
           name: "HealthFirst Insurance",
@@ -261,7 +261,7 @@ export function seedDatabase(db: ConversationDatabase): void {
     },
     agents: [
       {
-        agentId: { id: "patient-scheduling", label: "Patient Representative", role: "PatientAgent" },
+        agentId: "patient-scheduling",
         principal: {
           type: "individual",
           name: "Maria Santos",
@@ -313,7 +313,7 @@ export function seedDatabase(db: ConversationDatabase): void {
         messageToUseWhenInitiatingConversation: "Hello, I'm calling to schedule a cardiology consultation for Maria Santos. Her PCP referred her for evaluation of chest pain symptoms."
       },
       {
-        agentId: { id: "scheduling-coordinator", label: "Scheduling Coordinator", role: "ProviderAgent" },
+        agentId: "scheduling-coordinator",
         principal: {
           type: "organization",
           name: "Metropolitan Cardiology Group",

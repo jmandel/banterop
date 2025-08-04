@@ -423,24 +423,20 @@ function ExternalExecutorApp() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: 'Live In-Browser External Agent Demo',
-          managementMode: 'external',
-          // NOMINATE the initiator.
-          initiatingAgentId: 'patient-agent',
-          // Optionally, add dynamic instructions from the UI.
-          initiatingInstructions: initInstructions || undefined,
+          metadata: {
+            conversationTitle: 'Live In-Browser External Agent Demo',
+            scenarioId: KNEE_MRI_SCENARIO_ID
+          },
           agents: [
             {
-              agentId: { id: 'patient-agent', label: 'Browser Patient Agent', role: 'PatientAgent' },
-              strategyType: 'scenario_driven',
-              scenarioId: KNEE_MRI_SCENARIO_ID,
-              role: 'PatientAgent'
+              id: 'patient-agent',
+              strategyType: 'external_websocket_client',
+              shouldInitiateConversation: true,
+              additionalInstructions: initInstructions || undefined
             },
             {
-              agentId: { id: 'insurance-auth-specialist', label: 'Browser Supplier Agent', role: 'SupplierAgent' },
-              strategyType: 'scenario_driven',
-              scenarioId: KNEE_MRI_SCENARIO_ID,
-              role: 'SupplierAgent'
+              id: 'insurance-auth-specialist',
+              strategyType: 'external_websocket_client'
             }
           ]
         })
@@ -484,7 +480,7 @@ function ExternalExecutorApp() {
         { 
           strategyType: 'scenario_driven', 
           scenarioId: KNEE_MRI_SCENARIO_ID,
-          agentId: { id: 'patient-agent', label: 'Browser Patient Agent', role: 'PatientAgent' }
+          id: 'patient-agent'
         } as ScenarioDrivenAgentConfig,
         patientClient,
         scenarioConfig,           // Inject the fetched scenario JSON
@@ -496,7 +492,7 @@ function ExternalExecutorApp() {
         { 
           strategyType: 'scenario_driven', 
           scenarioId: KNEE_MRI_SCENARIO_ID,
-          agentId: { id: 'insurance-auth-specialist', label: 'Browser Supplier Agent', role: 'SupplierAgent' }
+          id: 'insurance-auth-specialist'
         } as ScenarioDrivenAgentConfig,
         supplierClient,
         scenarioConfig,           // Inject the fetched scenario JSON
@@ -562,11 +558,11 @@ function ExternalExecutorApp() {
       }
       
       // 3. Find the local agent instance that corresponds to the ID.
-      const agentToStart = myLocalAgents.find(a => a.agentId.id === initiatingAgentId);
+      const agentToStart = myLocalAgents.find(a => a.agentId === initiatingAgentId);
 
       if (agentToStart) {
         // 4. Command the nominated agent to start the conversation.
-        addLog(`Commanding ${agentToStart.agentId.label} to initiate the conversation...`);
+        addLog(`Commanding ${agentToStart.agentId} to initiate the conversation...`);
         // This single call now correctly kicks off the entire flow.
         await agentToStart.initializeConversation(instructions);
         addLog('First turn sent. Conversation is now active.');

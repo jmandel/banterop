@@ -14,7 +14,7 @@ test('multi-agent workflow with user queries (event-driven)', async () => {
   
   // Define scripted agents for the conversation
   const supportAgentConfig: SequentialScriptConfig = {
-    agentId: { id: 'support-agent', label: 'Support Agent', role: 'assistant' },
+    id: "support-agent",
     strategyType: 'sequential_script',
     script: [
       {
@@ -38,7 +38,7 @@ test('multi-agent workflow with user queries (event-driven)', async () => {
   };
   
   const techAgentConfig: SequentialScriptConfig = {
-    agentId: { id: 'tech-specialist', label: 'Tech Specialist', role: 'specialist' },
+    id: "tech-specialist",
     strategyType: 'sequential_script',
     script: [
       {
@@ -110,9 +110,9 @@ test('multi-agent workflow with user queries (event-driven)', async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: 'Multi-Agent E2E Test (Safer)',
+        metadata: { conversationTitle: "Multi-Agent E2E Test (Safer)" },
         agents: [supportAgentConfig, techAgentConfig],
-        managementMode: 'internal'
+        /* managementMode removed */
       })
     });
     

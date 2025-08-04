@@ -174,24 +174,22 @@ export class TestEnvironment {
   // Create isolated test conversation
   async createTestConversation(name: string, agentCount: number = 1): Promise<{
     conversationId: string;
-    agents: Array<{ agentId: string; token: string }>;
+    agents: Array<{ id: string; token: string }>;
   }> {
     const agents: StaticReplayConfig[] = [];
     
     for (let i = 0; i < agentCount; i++) {
       agents.push({
-        agentId: { 
-          id: `test-agent-${i}`, 
-          label: `Test Agent ${i}`, 
-          role: 'assistant' 
-        } as AgentId,
+        id: `test-agent-${i}`,
         strategyType: 'static_replay',
         script: TEST_CONFIG.DEFAULT_AGENT_SCRIPT
       });
     }
 
     const request: CreateConversationRequest = {
-      name,
+      metadata: {
+        conversationTitle: name
+      },
       agents
     };
 
@@ -200,8 +198,8 @@ export class TestEnvironment {
     return {
       conversationId: result.conversation.id,
       agents: agents.map(agent => ({
-        agentId: agent.agentId.id,
-        token: result.agentTokens[agent.agentId.id]
+        id: agent.id,
+        token: result.agentTokens[agent.id]
       }))
     };
   }
@@ -725,17 +723,13 @@ export class InProcessTestClient {
 
 // Test Data Factories
 export class TestDataFactory {
-  static createAgentId(id?: string): AgentId {
-    return {
-      id: id || `agent-${uuidv4()}`,
-      label: `Test Agent ${id || 'Auto'}`,
-      role: 'assistant'
-    };
+  static createAgentId(id?: string): string {
+    return id || `agent-${uuidv4()}`;
   }
 
-  static createStaticReplayConfig(agentId?: AgentId, script?: any[]): StaticReplayConfig {
+  static createStaticReplayConfig(agentId?: string, script?: any[]): StaticReplayConfig {
     return {
-      agentId: agentId || TestDataFactory.createAgentId(),
+      id: agentId || TestDataFactory.createAgentId(),
       strategyType: 'static_replay',
       script: script || TEST_CONFIG.DEFAULT_AGENT_SCRIPT
     };

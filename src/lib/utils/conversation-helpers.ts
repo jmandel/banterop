@@ -15,8 +15,9 @@ export function getInitiationDetails(conversation: Conversation): {
   initiatingAgentId?: string;
   instructions?: string;
 } {
+  // This function is deprecated - initiation is now handled via agent.shouldInitiateConversation
   return {
-    initiatingAgentId: conversation.metadata?.initiatingAgentId,
-    instructions: conversation.metadata?.initiatingInstructions
+    initiatingAgentId: undefined,
+    instructions: undefined
   };
 }

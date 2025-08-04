@@ -1,29 +1,23 @@
 // API Request/Response Types
 // This file contains all API-related type definitions
 
-import type { AttachmentPayload } from './conversation.types.js';
+import type { AttachmentPayload, Conversation, TraceEntry, ConversationEvent } from './conversation.types.js';
+import type { AgentConfig } from './agent.types.js';
+import type { ScenarioItem } from './scenario.types.js';
 
 // ============= API Request/Response Types =============
 
 export interface CreateConversationRequest {
-  name?: string;
-  agents: any[]; // AgentConfig[] - avoiding circular dependency
-  managementMode?: 'internal' | 'external'; // defaults to 'internal'
-  /** 
-   * The ID of the agent that should send the first message. 
-   * The corresponding agent's config in the `agents` array MUST have a 
-   * `messageToUseWhenInitiatingConversation` defined.
-   */
-  initiatingAgentId?: string;
-  /**
-   * Optional instructions to provide to the initiating agent
-   * to help shape/steer the initial turn
-   */
-  initiatingInstructions?: string;
+  metadata: {
+    scenarioId?: string;
+    conversationTitle?: string;
+    conversationDescription?: string;
+  };
+  agents: AgentConfig[];
 }
 
 export interface CreateConversationResponse {
-  conversation: any; // Conversation - avoiding circular dependency
+  conversation: Conversation;
   agentTokens: Record<string, string>; // agentId -> auth token
 }
 
@@ -41,7 +35,7 @@ export interface AddTraceEntryRequest {
   conversationId: string;
   turnId: string;
   agentId: string;
-  entry: any; // Omit<TraceEntry, 'id' | 'timestamp' | 'agentId'> - avoiding circular dependency
+  entry: Omit<TraceEntry, 'id' | 'timestamp' | 'agentId'>;
 }
 
 export interface CompleteTurnRequest {
@@ -63,7 +57,7 @@ export interface GetConversationRequest {
 }
 
 export interface SubscriptionOptions {
-  events?: any[];  // ConversationEvent['type'][] - avoiding circular dependency
+  events?: ConversationEvent['type'][];
   agents?: string[];  // Subscribe to events from specific agents only
 }
 
@@ -103,11 +97,11 @@ export interface ApiResponse<T = any> {
 
 export interface ScenarioListResponse extends ApiResponse {
   data: {
-    scenarios: any[]; // ScenarioItem[] - avoiding circular dependency
+    scenarios: ScenarioItem[];
     total: number;
   };
 }
 
 export interface ScenarioResponse extends ApiResponse {
-  data: any; // ScenarioItem - avoiding circular dependency
+  data: ScenarioItem;
 }

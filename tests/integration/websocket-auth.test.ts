@@ -44,7 +44,7 @@ test('should accept valid agent tokens', async () => {
   
   expect(authResult.success).toBe(true);
   expect(authResult.conversationId).toBe(conversationId);
-  expect(authResult.agentId).toBe(agents[0].agentId);
+  expect(authResult.agentId).toBe(agents[0].id);
 });
 
 test('should reject invalid tokens', async () => {

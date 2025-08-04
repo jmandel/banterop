@@ -130,7 +130,7 @@ describe('ScenarioDrivenAgent Attachment Handling', () => {
     scenario = {
       id: 'test-scenario',
       agents: [{
-        agentId: { id: 'test-agent', label: 'Test Agent', role: 'test' },
+        id: "test-agent",
         llmEndpoint: { provider: 'test', model: 'test' },
         tools: [
           {
@@ -170,7 +170,7 @@ describe('ScenarioDrivenAgent Attachment Handling', () => {
     } as any;
     
     const config: ScenarioDrivenAgentConfig = {
-      agentId: { id: 'test-agent', label: 'Test Agent', role: 'test' },
+      id: "test-agent",
       strategyType: 'scenario_driven',
       scenarioId: 'test-scenario'
     };

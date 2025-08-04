@@ -25,9 +25,9 @@ export const ConversationView: React.FC = () => {
     const conversation = conversations.get(activeTab);
     if (!conversation || turns.length === 0) return;
 
-    let markdown = `# Conversation: ${conversation.name || 'Untitled'}\n\n`;
+    let markdown = `# Conversation: ${conversation.metadata?.conversationTitle || 'Untitled'}\n\n`;
     markdown += `**ID:** ${activeTab}\n`;
-    markdown += `**Agents:** ${conversation.agents?.join(', ') || 'Unknown'}\n`;
+    markdown += `**Agents:** ${conversation.agents?.map(a => a.id).join(', ') || 'Unknown'}\n`;
     markdown += `**Status:** ${conversation.status}\n`;
     markdown += `**Created:** ${new Date(conversation.createdAt).toLocaleString()}\n\n`;
     markdown += `---\n\n`;
@@ -108,14 +108,14 @@ export const ConversationView: React.FC = () => {
     <div className="conversation-view">
       <div className="conversation-header">
         <div className="header-content">
-          <h2>{conversation.name}</h2>
+          <h2>{conversation.metadata?.conversationTitle || 'Untitled'}</h2>
           <button className="export-button" onClick={exportToMarkdown}>
             📄 Export Markdown
           </button>
         </div>
         <div className="conversation-info">
           <div>ID: {activeTab}</div>
-          <div>Agents: {conversation.agents?.join(', ') || 'Loading...'}</div>
+          <div>Agents: {conversation.agents?.map(a => a.id).join(', ') || 'Loading...'}</div>
           <div>Status: {conversation.status}</div>
         </div>
       </div>
@@ -180,7 +180,7 @@ const GlobalMonitorView: React.FC = () => {
                   className="conversation-card" 
                   onClick={() => setActiveTab(id)}
                 >
-                  <h5>[{id.slice(0, 8)}...] {conv.agents.join(' + ')}</h5>
+                  <h5>[{id.slice(0, 8)}...] {conv.agents.map(a => a.id).join(' + ')}</h5>
                   <p>{turns.length} turns • Last: {lastActivity}</p>
                 </div>
               );

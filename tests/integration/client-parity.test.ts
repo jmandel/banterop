@@ -31,7 +31,7 @@ beforeEach(async () => {
   
   // Create a test conversation
   const { conversation, agentTokens } = await orchestrator.createConversation({
-    name: 'Client Parity Tests',
+    metadata: { conversationTitle: "Client Parity Tests" },
     agents: [TestDataFactory.createStaticReplayConfig()]
   });
   
@@ -289,7 +289,7 @@ test('should maintain same event filtering behavior', async () => {
   
   // Create a second conversation for filtering test
   const { conversation: otherConversation } = await orchestrator.createConversation({
-    name: 'Other Conversation',
+    metadata: { conversationTitle: "Other Conversation" },
     agents: [TestDataFactory.createStaticReplayConfig()]
   });
   

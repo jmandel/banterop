@@ -54,10 +54,10 @@ export const conversationStore = create<ConversationState>((set, get) => ({
       for (const conv of conversations) {
         const summary: ConversationSummary = {
           id: conv.id,
-          name: conv.name || `Conversation ${conv.id.slice(0, 8)}...`,
           createdAt: conv.createdAt,
           status: conv.status,
-          agents: []
+          agents: conv.agents || [],
+          metadata: conv.metadata || {}
         };
         
         newConversations.set(conv.id, summary);
@@ -151,10 +151,12 @@ export const conversationStore = create<ConversationState>((set, get) => ({
         const newConversations = new Map(state.conversations);
         newConversations.set(conversationId, {
           id: conversationId,
-          name: `Discovered ${conversationId.slice(0, 8)}...`,
           status: 'active',
           createdAt: new Date().toISOString(),
-          agents: []
+          agents: [],
+          metadata: {
+            conversationTitle: `Discovered ${conversationId.slice(0, 8)}...`
+          }
         });
         return { conversations: newConversations };
       });
@@ -170,12 +172,13 @@ export const conversationStore = create<ConversationState>((set, get) => ({
           const newConversations = new Map(state.conversations);
           const existing = newConversations.get(conversationId);
           
-          if (existing && existing.name.startsWith('Discovered')) {
+          if (existing && existing.metadata?.conversationTitle?.startsWith('Discovered')) {
             newConversations.set(conversationId, {
               ...existing,
-              name: convData.name || `Conversation ${conversationId.slice(0, 8)}...`,
+              metadata: convData.metadata || { conversationTitle: `Conversation ${conversationId.slice(0, 8)}...` },
               createdAt: convData.createdAt || existing.createdAt,
-              status: convData.status || existing.status
+              status: convData.status || existing.status,
+              agents: convData.agents || existing.agents
             });
             
             return { conversations: newConversations };

@@ -6,11 +6,13 @@ import {
   AgentConfig, AgentInterface,
   ScenarioDrivenAgentConfig,
   SequentialScriptConfig,
+  StaticReplayConfig,
   ScenarioConfiguration,
 } from '$lib/types.js';
 import type { LLMProvider } from 'src/types/llm.types.js';
 import { ScenarioDrivenAgent } from './scenario-driven.agent.js';
 import { SequentialScriptAgent } from './sequential-script.agent.js';
+import { StaticReplayAgent } from './static-replay.agent.js';
 import { ToolSynthesisService } from './services/tool-synthesis.service.js';
 
 
@@ -40,6 +42,8 @@ export function createAgent(
       );
     case 'sequential_script':
       return new SequentialScriptAgent(config as SequentialScriptConfig, client);
+    case 'static_replay':
+      return new StaticReplayAgent(config as StaticReplayConfig, client);
     default:
       throw new Error(`Unknown or unsupported strategy type for client-based agent: ${config.strategyType}`);
   }

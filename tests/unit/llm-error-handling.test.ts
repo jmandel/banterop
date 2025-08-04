@@ -157,7 +157,7 @@ describe('LLM Error Handling', () => {
     scenario = {
       id: 'test-scenario',
       agents: [{
-        agentId: { id: 'test-agent', label: 'Test Agent', role: 'test' },
+        id: "test-agent",
         llmEndpoint: { provider: 'test', model: 'test' },
         principal: {
           name: 'Test Principal',
@@ -188,7 +188,7 @@ describe('LLM Error Handling', () => {
     } as any;
     
     const config: ScenarioDrivenAgentConfig = {
-      agentId: { id: 'test-agent', label: 'Test Agent', role: 'test' },
+      id: "test-agent",
       strategyType: 'scenario_driven',
       scenarioId: 'test-scenario'
     };
@@ -256,7 +256,7 @@ describe('LLM Error Handling', () => {
         
         agent = createAgent(
           {
-            agentId: { id: 'test-agent', label: 'Test Agent', role: 'test' },
+            id: "test-agent",
             strategyType: 'scenario_driven',
             scenarioId: 'test-scenario'
           },
@@ -306,7 +306,7 @@ describe('LLM Error Handling', () => {
       
       agent = createAgent(
         {
-          agentId: { id: 'test-agent', label: 'Test Agent', role: 'test' },
+          id: "test-agent",
           strategyType: 'scenario_driven',
           scenarioId: 'test-scenario'
         },

@@ -69,43 +69,8 @@ export class StaticReplayAgent extends BaseAgent {
   }
 
   async onTurnCompleted(event: TurnCompletedEvent): Promise<void> {
-    // Skip if it's our own turn
-    if (event.data.turn.agentId === this.agentId.id) {
-      return;
-    }
-
-    // Check if any script entry matches (allow any trigger, not sequential)
-    for (const entry of this.config.script) {
-      // IMPORTANT: If no trigger is specified, don't respond to anything
-      // This prevents infinite loops with agents responding to each other
-      if (!entry.trigger) {
-        continue;
-      }
-
-      // Check trigger - only respond if it matches
-      const regex = new RegExp(entry.trigger);
-      if (!regex.test(event.data.turn.content)) {
-        continue;
-      }
-
-      // Start a new turn
-      await this.startTurn();
-
-      // Add thoughts if specified
-      if (entry.thoughts) {
-        for (const thought of entry.thoughts) {
-          await this.addThought(thought);
-        }
-      }
-
-      // Wait if delay specified
-      if (entry.delay) {
-        await new Promise(resolve => setTimeout(resolve, entry.delay));
-      }
-
-      // Complete the turn with the response
-      await this.completeTurn(entry.response);
-      break; // Only respond once per turn
-    }
+    // The base agent will call processAndReply, so we don't need to do anything here
+    // This prevents duplicate processing
+    return;
   }
 }

@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { ConversationOrchestrator } from '$backend/core/orchestrator.js';
 import { createLLMProvider } from '$llm/factory.js';
+import { StaticReplayConfig } from '$lib/types.js';
 
 describe('Simple Instructions Test', () => {
   test('should store and pass initiatingInstructions', async () => {
@@ -14,21 +15,19 @@ describe('Simple Instructions Test', () => {
     const instructions = 'Be extra friendly and mention the weather';
     
     const { conversation } = await orchestrator.createConversation({
-      name: 'Test Conversation',
+      metadata: { conversationTitle: "Test Conversation" },
       agents: [{
-        agentId: { id: 'agent1', label: 'Agent 1', role: 'assistant' },
-        strategyType: 'test',
-        messageToUseWhenInitiatingConversation: 'Hello!'
-      }],
-      initiatingAgentId: 'agent1',
-      initiatingInstructions: instructions
+        id: "agent1",
+        strategyType: 'static_replay',
+        script: [],
+        shouldInitiateConversation: true,
+        additionalInstructions: instructions
+      } as StaticReplayConfig]
     });
-
-    // Verify instructions were stored
-    expect(conversation.metadata?.initiatingInstructions).toBe(instructions);
-    
-    // Verify the conversation was created with the right structure
+      
+    expect(conversation.agents.find(a => a.shouldInitiateConversation)?.additionalInstructions).toBe(instructions);
+      
     expect(conversation.id).toBeDefined();
-    expect(conversation.metadata?.initiatingAgentId).toBe('agent1');
+    expect(conversation.agents.find(a => a.shouldInitiateConversation)?.id).toBe('agent1');
   });
 });

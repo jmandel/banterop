@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { ConversationOrchestrator } from '$backend/core/orchestrator.js';
 import { createLLMProvider } from '$llm/factory.js';
+import { StaticReplayConfig } from '$lib/types.js';
 
 describe('Conversation Instructions', () => {
   let orchestrator: ConversationOrchestrator;
@@ -19,29 +20,27 @@ describe('Conversation Instructions', () => {
     const instructions = 'Be extra friendly and mention the weather';
     
     const { conversation } = await orchestrator.createConversation({
-      name: 'Test Conversation',
+      metadata: { conversationTitle: "Test Conversation" },
       agents: [{
-        agentId: { id: 'agent1', label: 'Agent 1', role: 'assistant' },
-        strategyType: 'test'
-      }],
-      initiatingAgentId: 'agent1',
-      initiatingInstructions: instructions
+        id: "agent1",
+        strategyType: 'static_replay',
+        script: []
+      } as StaticReplayConfig]
     });
-
-    // Verify instructions were stored in metadata
-    expect(conversation.metadata?.initiatingInstructions).toBe(instructions);
+      
+    expect(conversation.agents.find(a => a.shouldInitiateConversation)?.additionalInstructions).toBe(instructions);
   });
 
   test('should handle missing instructions', async () => {
     const { conversation } = await orchestrator.createConversation({
-      name: 'Test Conversation',
+      metadata: { conversationTitle: "Test Conversation" },
       agents: [{
-        agentId: { id: 'agent1', label: 'Agent 1', role: 'assistant' },
-        strategyType: 'test'
-      }]
+        id: "agent1",
+        strategyType: 'static_replay',
+        script: []
+      } as StaticReplayConfig]
     });
-
-    // Should not have instructions
-    expect(conversation.metadata?.initiatingInstructions).toBeUndefined();
+      
+    expect(conversation.agents.find(a => a.shouldInitiateConversation)?.additionalInstructions).toBeUndefined();
   });
 });

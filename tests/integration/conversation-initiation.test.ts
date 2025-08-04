@@ -20,30 +20,23 @@ describe('Conversation Initiation Refactor', () => {
     llmProvider = new MockLLMProvider();
     const toolSynthesis = new ToolSynthesisService(llmProvider);
     orchestrator = new ConversationOrchestrator(undefined, llmProvider, toolSynthesis);
-    
-    // Create internal conversation
+      
     const { conversation } = await orchestrator.createConversation({
-      name: 'Test Internal Conversation',
-      managementMode: 'internal',
-      initiatingAgentId: 'test-agent',
-      initiatingInstructions: 'Be friendly',
+      metadata: { conversationTitle: 'Test Internal Conversation' },
       agents: [{
-        agentId: { id: 'test-agent', label: 'Test Agent', role: 'assistant' },
+        id: "test-agent",
         strategyType: 'sequential_script',
         script: [{
           trigger: { type: 'conversation_ready' },
-          action: { type: 'send_message', text: 'Hello from test agent' }
+          steps: [{ type: 'response', content: 'Hello from test agent' }]
         }]
       }]
     });
-    
-    // Verify status is 'created'
+      
     expect(conversation.status).toBe('created');
-    
-    // Call start endpoint
+      
     await orchestrator.startConversation(conversation.id);
-    
-    // Verify status is now 'active'
+      
     const updated = orchestrator.getConversation(conversation.id, false, false);
     expect(updated.status).toBe('active');
   });
@@ -53,23 +46,15 @@ describe('Conversation Initiation Refactor', () => {
     llmProvider = new MockLLMProvider();
     const toolSynthesis = new ToolSynthesisService(llmProvider);
     orchestrator = new ConversationOrchestrator(undefined, llmProvider, toolSynthesis);
-    
-    // Create external conversation
+      
     const { conversation } = await orchestrator.createConversation({
-      name: 'Test External Conversation',
-      managementMode: 'external',
-      initiatingAgentId: 'test-agent',
+      metadata: { conversationTitle: 'Test External Conversation' },
       agents: [{
-        agentId: { id: 'test-agent', label: 'Test Agent', role: 'assistant' },
-        strategyType: 'sequential_script',
-        script: [{
-          trigger: { type: 'conversation_ready' },
-          action: { type: 'send_message', text: 'Hello from test agent' }
-        }]
+        id: "test-agent",
+        strategyType: 'external_websocket_client'
       }]
     });
-    
-    // Attempt to call start endpoint - should throw
+      
     await expect(orchestrator.startConversation(conversation.id)).rejects.toThrow(
       'Cannot explicitly start an externally managed conversation. External conversations are activated by the first turn from a connected agent.'
     );
@@ -79,27 +64,20 @@ describe('Conversation Initiation Refactor', () => {
     // Setup test environment
     const testEnv = new TestEnvironment();
     await testEnv.start(3051);
-    
-    // Create external conversation
+      
     const { conversation, agentTokens } = await testEnv.orchestrator.createConversation({
-      name: 'Test External Conversation',
-      managementMode: 'external',
-      initiatingAgentId: 'test-agent',
+      metadata: { conversationTitle: 'Test External Conversation' },
       agents: [{
-        agentId: { id: 'test-agent', label: 'Test Agent', role: 'assistant' },
+        id: "test-agent",
         strategyType: 'scenario_driven',
-        scenarioId: 'test-scenario',
-        role: 'TestRole'
+        scenarioId: 'test-scenario'
       }]
     });
-    
-    // Verify initial status
+      
     expect(conversation.status).toBe('created');
-    
-    // Connect external agent
+      
     const client = new WebSocketJsonRpcClient(`ws://localhost:3051/api/ws`);
-    
-    // Create mock scenario
+      
     const mockScenario: ScenarioConfiguration = {
       metadata: {
         id: 'test-scenario',
@@ -111,7 +89,7 @@ describe('Conversation Initiation Refactor', () => {
         challenges: ['Test challenge']
       },
       agents: [{
-        agentId: { id: 'test-agent', label: 'Test Agent', role: 'TestRole' },
+        agentId: "test-agent",
         principal: { type: 'individual', name: 'Test Principal', description: 'Test' },
         situation: 'Testing',
         systemPrompt: 'Be a test agent',
@@ -126,7 +104,7 @@ describe('Conversation Initiation Refactor', () => {
       {
         strategyType: 'scenario_driven',
         scenarioId: 'test-scenario',
-        agentId: { id: 'test-agent', label: 'Test Agent', role: 'TestRole' }
+        id: "test-agent"
       } as ScenarioDrivenAgentConfig,
       client,
       {
@@ -136,21 +114,20 @@ describe('Conversation Initiation Refactor', () => {
         scenario: mockScenario
       }
     );
-    
-    // Initialize agent connection
+      
     await agent.initialize(conversation.id, agentTokens['test-agent']);
+      
+    // Start the conversation first (required for internal agents)
+    await testEnv.orchestrator.startConversation(conversation.id);
     
-    // Agent calls initializeConversation (which internally sends first turn)
+    // Now agent can initiate
     await (agent as ScenarioDrivenAgent).initializeConversation('Please be concise');
-    
-    // Wait a bit for async operations
+      
     await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // Verify conversation is now active
+      
     const updated = testEnv.orchestrator.getConversation(conversation.id, false, false);
     expect(updated.status).toBe('active');
-    
-    // Cleanup
+      
     await agent.shutdown();
     await client.disconnect();
     await testEnv.stop();
@@ -160,8 +137,7 @@ describe('Conversation Initiation Refactor', () => {
     // Setup test environment
     const testEnv = new TestEnvironment();
     await testEnv.start(3052);
-    
-    // Create custom mock for this test
+      
     const customMock = new MockLLMProvider();
     customMock.generateResponse = async (request: any) => {
       const prompt = request.messages[0].content;
@@ -172,24 +148,18 @@ describe('Conversation Initiation Refactor', () => {
       }
       return { content: 'Default response' };
     };
-    
-    // Create conversation
+      
     const { conversation, agentTokens } = await testEnv.orchestrator.createConversation({
-      name: 'Test Instructions',
-      managementMode: 'external',
-      initiatingAgentId: 'test-agent',
+      metadata: { conversationTitle: 'Test Instructions' },
       agents: [{
-        agentId: { id: 'test-agent', label: 'Test Agent', role: 'assistant' },
+        id: "test-agent",
         strategyType: 'scenario_driven',
-        scenarioId: 'test-scenario',
-        role: 'TestRole'
+        scenarioId: 'test-scenario'
       }]
     });
-    
-    // Connect external agent
+      
     const client = new WebSocketJsonRpcClient(`ws://localhost:3052/api/ws`);
-    
-    // Create mock scenario
+      
     const mockScenario: ScenarioConfiguration = {
       metadata: {
         id: 'test-scenario',
@@ -201,7 +171,7 @@ describe('Conversation Initiation Refactor', () => {
         challenges: ['Test challenge']
       },
       agents: [{
-        agentId: { id: 'test-agent', label: 'Test Agent', role: 'TestRole' },
+        agentId: "test-agent",
         principal: { type: 'individual', name: 'Test Principal', description: 'Test' },
         situation: 'Testing',
         systemPrompt: 'Be a test agent',
@@ -216,7 +186,7 @@ describe('Conversation Initiation Refactor', () => {
       {
         strategyType: 'scenario_driven',
         scenarioId: 'test-scenario',
-        agentId: { id: 'test-agent', label: 'Test Agent', role: 'TestRole' }
+        id: "test-agent"
       } as ScenarioDrivenAgentConfig,
       client,
       {
@@ -226,28 +196,22 @@ describe('Conversation Initiation Refactor', () => {
         scenario: mockScenario
       }
     );
-    
-    // Initialize agent connection
+      
     await agent.initialize(conversation.id, agentTokens['test-agent']);
-    
-    // Track events to capture the turn content
+      
     let firstTurnContent = '';
     testEnv.orchestrator.subscribeToConversation(conversation.id, (event) => {
       if (event.type === 'turn_completed') {
         firstTurnContent = event.data.turn.content;
       }
     });
-    
-    // Agent calls initializeConversation with instructions
+      
     await (agent as ScenarioDrivenAgent).initializeConversation('Be very brief');
-    
-    // Wait for turn to complete
+      
     await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // Verify the message was modified based on instructions
+      
     expect(firstTurnContent).toBe('Hi.');
-    
-    // Cleanup
+      
     await agent.shutdown();
     await client.disconnect();
     await testEnv.stop();

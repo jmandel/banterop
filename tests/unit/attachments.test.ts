@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { ConversationDatabase } from '$backend/db/database.js';
 import { ConversationOrchestrator } from '$backend/core/orchestrator.js';
 import { InProcessOrchestratorClient } from '$client/impl/in-process.client.js';
-import { Attachment, AttachmentPayload } from '$lib/types.js';
+import { Attachment, AttachmentPayload, StaticReplayConfig } from '$lib/types.js';
 import { createLLMProvider } from '$llm/factory.js';
 
 describe('Attachment System', () => {
@@ -24,11 +24,12 @@ describe('Attachment System', () => {
   test('should create and retrieve attachments atomically', async () => {
     // Create a conversation
     const { conversation } = await orchestrator.createConversation({
-      name: 'Test Conversation',
+      metadata: { conversationTitle: "Test Conversation" },
       agents: [{
-        agentId: { id: 'agent1', label: 'Agent 1', role: 'assistant' },
-        strategyType: 'test'
-      }]
+        id: "agent1",
+        strategyType: 'static_replay',
+        script: []
+      } as StaticReplayConfig]
     });
 
     // Start a turn
@@ -63,7 +64,7 @@ describe('Attachment System', () => {
     // Retrieve the attachment
     const attachment = db.getAttachment(attachmentId);
     expect(attachment).toBeTruthy();
-    expect(attachment?.name).toBe('Test Document.md');
+    expect(conversation.metadata.conversationTitle).toBe('Test Document.md');
     expect(attachment?.contentType).toBe('text/markdown');
     expect(attachment?.content).toBe('# Test Document\n\nThis is a test attachment.');
     expect(attachment?.summary).toBe('A test attachment');
@@ -75,11 +76,12 @@ describe('Attachment System', () => {
   test('should handle multiple attachments in atomic turn completion', async () => {
     // Create a conversation
     const { conversation } = await orchestrator.createConversation({
-      name: 'Test Conversation',
+      metadata: { conversationTitle: "Test Conversation" },
       agents: [{
-        agentId: { id: 'agent1', label: 'Agent 1', role: 'assistant' },
-        strategyType: 'test'
-      }]
+        id: "agent1",
+        strategyType: 'static_replay',
+        script: []
+      } as StaticReplayConfig]
     });
 
     // Start a turn
@@ -124,7 +126,7 @@ describe('Attachment System', () => {
       const attachment = db.getAttachment(attachmentId);
       expect(attachment).toBeTruthy();
       expect(attachment?.docId).toBe(attachmentPayloads[i].docId);
-      expect(attachment?.name).toBe(attachmentPayloads[i].name);
+      expect(conversation.metadata.conversationTitle).toBe(attachmentPayloads[i].name);
       expect(attachment?.content).toBe(attachmentPayloads[i].content);
     }
   });
@@ -132,11 +134,12 @@ describe('Attachment System', () => {
   test('should list attachments by conversation and turn', async () => {
     // Create a conversation
     const { conversation } = await orchestrator.createConversation({
-      name: 'Test Conversation',
+      metadata: { conversationTitle: "Test Conversation" },
       agents: [{
-        agentId: { id: 'agent1', label: 'Agent 1', role: 'assistant' },
-        strategyType: 'test'
-      }]
+        id: "agent1",
+        strategyType: 'static_replay',
+        script: []
+      } as StaticReplayConfig]
     });
 
     // Create turn with attachments
@@ -182,11 +185,12 @@ describe('Attachment System', () => {
   test('should handle atomic attachment creation via client', async () => {
     // Create conversation and client
     const { conversation, agentTokens } = await orchestrator.createConversation({
-      name: 'Test Conversation',
+      metadata: { conversationTitle: "Test Conversation" },
       agents: [{
-        agentId: { id: 'agent1', label: 'Agent 1', role: 'assistant' },
-        strategyType: 'test'
-      }]
+        id: "agent1",
+        strategyType: 'static_replay',
+        script: []
+      } as StaticReplayConfig]
     });
 
     const client = new InProcessOrchestratorClient(orchestrator);
@@ -222,7 +226,7 @@ describe('Attachment System', () => {
     const attachment = await client.getAttachment(attachmentId);
     expect(attachment).toBeTruthy();
     expect(attachment?.docId).toBe('client_doc_1');
-    expect(attachment?.name).toBe('Client Doc.md');
+    expect(conversation.metadata.conversationTitle).toBe('Client Doc.md');
     expect(attachment?.content).toBe('# Client Document');
     expect(attachment?.summary).toBe('Document created via client');
   });

@@ -21,7 +21,7 @@ export const ConversationList: React.FC = () => {
             className={`conversation-item ${activeTab === conv.id ? 'active' : ''}`}
             onClick={() => setActiveTab(conv.id)}
           >
-            <h3>{conv.name}</h3>
+            <h3>{conv.metadata?.conversationTitle || 'Untitled'}</h3>
             <div className="conversation-meta">
               <div>{new Date(conv.createdAt).toLocaleString()}</div>
               {conv.turnCount !== undefined && (

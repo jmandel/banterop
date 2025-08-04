@@ -53,9 +53,9 @@ class E2EUserQueryOrchestrator {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: 'E2E User Query Integration Test',
+        metadata: { conversationTitle: "E2E User Query Integration Test" },
         agents: agentConfigs,
-        managementMode: 'internal'
+        /* managementMode removed */
       })
     });
     
@@ -304,7 +304,7 @@ test('complete multi-agent workflow with user queries and tool usage', async () 
   
   // Define scripted agents exactly as specified in the plan
   const supportAgentConfig: SequentialScriptConfig = {
-    agentId: { id: 'support-agent', label: 'Support Agent', role: 'assistant' },
+    id: "support-agent",
     strategyType: 'sequential_script',
     script: [
       {
@@ -328,7 +328,7 @@ test('complete multi-agent workflow with user queries and tool usage', async () 
   };
   
   const techAgentConfig: SequentialScriptConfig = {
-    agentId: { id: 'tech-specialist', label: 'Tech Specialist', role: 'specialist' },
+    id: "tech-specialist",
     strategyType: 'sequential_script',
     script: [
       {
@@ -390,9 +390,9 @@ test('complete multi-agent workflow with user queries and tool usage', async () 
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      name: 'E2E User Query Integration Test',
+      metadata: { conversationTitle: "E2E User Query Integration Test" },
       agents: [supportAgentConfig, techAgentConfig],
-      managementMode: 'internal'
+      /* managementMode removed */
     })
   });
   

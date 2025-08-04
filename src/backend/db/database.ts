@@ -3,7 +3,7 @@
 import { Database } from 'bun:sqlite';
 import * as fs from 'fs';
 import { 
-  Conversation, ConversationTurn, TraceEntry, AgentId,
+  Conversation, ConversationTurn, TraceEntry,
   ConversationRow, ConversationTurnRow, TraceEntryRow, 
   UserQueryRow, AgentTokenRow, AgentConfig, ScenarioRow,
   ScenarioVersionRow, ScenarioConfiguration, ScenarioItem,
@@ -41,10 +41,9 @@ export class ConversationDatabase {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY,
-        name TEXT,
         created_at TEXT NOT NULL,
         status TEXT NOT NULL,
-        metadata TEXT,
+        metadata TEXT NOT NULL,
         agents TEXT NOT NULL
       )
     `);
@@ -204,16 +203,15 @@ export class ConversationDatabase {
 
   createConversation(conversation: Conversation): void {
     const stmt = this.db.prepare(`
-      INSERT INTO conversations (id, name, created_at, status, metadata, agents)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO conversations (id, created_at, status, metadata, agents)
+      VALUES (?, ?, ?, ?, ?)
     `);
 
     stmt.run(
       conversation.id,
-      conversation.name || null,
       conversation.createdAt.toISOString(),
       conversation.status,
-      JSON.stringify(conversation.metadata || {}),
+      JSON.stringify(conversation.metadata),
       JSON.stringify(conversation.agents)
     );
   }
@@ -612,12 +610,11 @@ export class ConversationDatabase {
   private conversationFromRow(row: ConversationRow, includeTurns = true, includeTrace = false, includeAttachments = false): Conversation {
     const conversation: Conversation = {
       id: row.id,
-      name: row.name || undefined,
       createdAt: new Date(row.created_at),
       agents: JSON.parse(row.agents),
       turns: [],
       status: row.status as any,
-      metadata: row.metadata ? JSON.parse(row.metadata) : undefined
+      metadata: JSON.parse(row.metadata)
     };
 
     if (includeTurns) {

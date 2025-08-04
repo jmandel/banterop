@@ -1,6 +1,8 @@
 // Conversation and Trace Types
 // This file contains all conversation-related type definitions
 
+import type { AgentConfig, AgentInterface } from './agent.types.js';
+
 // ============= Base Types =============
 
 export interface ConversationId {
@@ -92,12 +94,15 @@ export interface InProgressTurn {
 
 export interface Conversation {
   id: string;
-  name?: string;
   createdAt: Date;
-  agents: any[]; // AgentId[] - avoiding circular dependency
+  agents: AgentConfig[]; // Full agent configs, not just IDs
   turns: ConversationTurn[];
   status: 'created' | 'active' | 'completed' | 'failed';
-  metadata?: Record<string, any>;
+  metadata: {
+    scenarioId?: string;
+    conversationTitle?: string;
+    conversationDescription?: string;
+  };
   inProgressTurns?: Record<string, InProgressTurn>; // agentId -> in-progress turn
   attachments?: Attachment[]; // Added for rehydration support
 }
@@ -191,9 +196,9 @@ export interface RehydratedEvent extends ConversationEvent {
  */
 export interface OrchestratorConversationState {
   conversation: Conversation;
-  agentConfigs: Map<string, any>; // AgentConfig - avoiding circular dependency
+  agentConfigs: Map<string, AgentConfig>; // Agent configurations
   agentTokens: Record<string, string>;
-  agents?: Map<string, any>; // AgentInterface - avoiding circular dependency
+  agents?: Map<string, AgentInterface>; // Agent instances
 }
 
 // ============= Attachment Types =============

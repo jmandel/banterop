@@ -47,9 +47,9 @@ export class ScenarioDrivenAgent extends BaseAgent {
     this.toolSynthesis = toolSynthesisService;
     this.scenario = scenario;
 
-    const myConfig = this.scenario.agents.find(a => a.agentId.id === this.agentId.id);
+    const myConfig = this.scenario.agents.find(a => a.agentId === this.agentId);
     if (!myConfig) {
-      throw new Error(`Agent ID ${this.agentId.id} not found in scenario ${config.scenarioId}`);
+      throw new Error(`Agent ID ${this.agentId} not found in scenario ${config.scenarioId}`);
     }
     this.agentConfig = myConfig;
 
@@ -86,10 +86,8 @@ export class ScenarioDrivenAgent extends BaseAgent {
         }
     }
 
-    if (initialConversation.metadata.initiatingAgentId === this.agentId.id) {
-    }
-    else {
-    }
+    // Check if this agent should initiate - this check is no longer needed
+    // as initiation is handled differently in the new model
 
   }
 
@@ -130,7 +128,7 @@ export class ScenarioDrivenAgent extends BaseAgent {
 
   async initializeConversation(instructions?: string): Promise<void> {
     if (!this.agentConfig.messageToUseWhenInitiatingConversation) {
-      console.warn(`Agent ${this.agentId.label} cannot initiate without a configured message.`);
+      console.warn(`Agent ${this.agentId} cannot initiate without a configured message.`);
       return;
     }
     
@@ -239,7 +237,7 @@ export class ScenarioDrivenAgent extends BaseAgent {
     // Process turns chronologically
     const turns = this.getTurns();
     for (const turn of turns) {
-      if (turn.agentId === this.agentId.id) {
+      if (turn.agentId === this.agentId) {
         // Our own turn - use detailed formatting with scratchpad and tool calls
         sections.push(this.formatOwnTurnForHistory(turn));
       } else {
@@ -319,7 +317,7 @@ You are an AI agent in a healthcare interoperability scenario.
 Principal: ${agentConfig.principal.name}
 └─ ${agentConfig.principal.description}
 
-Role: ${agentConfig.agentId.label}
+Role: ${agentConfig.agentId}
 Situation: ${agentConfig.situation}
 
 Instructions: ${agentConfig.systemPrompt}
@@ -446,7 +444,7 @@ Your response MUST follow this EXACT format:
     if (toolCall.name === 'send_message_to_agent_conversation') {
       const { text, attachments_to_include } = toolCall.args;
       if (!text || typeof text !== 'string' || text.trim() === '') {
-        const error = new Error(`${this.agentId.id}: send_message_to_agent_conversation requires non-empty text parameter. Got: ${JSON.stringify(toolCall.args)}`);
+        const error = new Error(`${this.agentId}: send_message_to_agent_conversation requires non-empty text parameter. Got: ${JSON.stringify(toolCall.args)}`);
         console.error('Stack trace:', error.stack);
         throw error;
       }
@@ -461,10 +459,10 @@ Your response MUST follow this EXACT format:
           if (typeof item === 'string') {
             return item;
           } else if (typeof item === 'object' && item.docId) {
-            console.warn(`[${this.agentId.id}] Received object with docId instead of string. Converting...`);
+            console.warn(`[${this.agentId}] Received object with docId instead of string. Converting...`);
             return item.docId;
           } else {
-            console.error(`[${this.agentId.id}] Invalid attachment format:`, item);
+            console.error(`[${this.agentId}] Invalid attachment format:`, item);
             return null;
           }
         }).filter(id => id !== null);
@@ -525,7 +523,7 @@ Your response MUST follow this EXACT format:
     if (toolCall.name === 'ask_question_to_principal') {
       const { text } = toolCall.args;
       if (!text || typeof text !== 'string' || text.trim() === '') {
-        const error = new Error(`${this.agentId.id}: ask_question_to_principal requires non-empty text parameter. Got: ${JSON.stringify(toolCall.args)}`);
+        const error = new Error(`${this.agentId}: ask_question_to_principal requires non-empty text parameter. Got: ${JSON.stringify(toolCall.args)}`);
         console.error('Stack trace:', error.stack);
         throw error;
       }
@@ -574,7 +572,7 @@ Your response MUST follow this EXACT format:
         const historyString = this.buildConversationHistory();
         const currentProcessString = this.formatCurrentProcess(this.getCurrentTurnTrace());
         const fullHistory = historyString + (historyString ? '\n\n' : '') + 
-                           `From: ${this.agentId.label} (IN PROGRESS)\n` +
+                           `From: ${this.agentId} (IN PROGRESS)\n` +
                            `Timestamp: ${new Date().toISOString()}\n\n` +
                            currentProcessString;
         
@@ -582,7 +580,7 @@ Your response MUST follow this EXACT format:
           const synthesisResult = await this.toolSynthesis.execute({ // New call
               toolName: toolCall.name,
               args: toolCall.args,
-              agentId: this.agentId.id,
+              agentId: this.agentId,
               scenario: this.scenario,
               conversationHistory: fullHistory
           });
@@ -955,7 +953,7 @@ Your response MUST follow this EXACT format:
     const turnTraces = this.getTraceForTurn(turn.id);
 
     const parts: string[] = [
-      `From: ${this.agentId.id}`,
+      `From: ${this.agentId}`,
       `Timestamp: ${timestamp}`,
       '' // Empty line after headers
     ];

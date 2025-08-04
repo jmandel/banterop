@@ -6,8 +6,7 @@ import { createAgent } from '$agents/factory.js';
 import { createClient } from '$client/index.js';
 import type { LLMProvider } from 'src/types/llm.types.js';
 import { ToolSynthesisService } from '../../agents/services/tool-synthesis.service.js';
-import type { AgentId, AgentInterface } from '$lib/types.js';
-import { getInitiationDetails } from '$lib/utils/conversation-helpers.js';
+import type { AgentInterface } from '$lib/types.js';
 import {
   Conversation, ConversationTurn, TraceEntry, AgentConfig,
   CreateConversationRequest, CreateConversationResponse,
@@ -57,23 +56,32 @@ export class ConversationOrchestrator {
   async createConversation(request: CreateConversationRequest): Promise<CreateConversationResponse> {
     const conversationId = uuidv4();
     const agentTokens: Record<string, string> = {};
-    const managementMode = request.managementMode || 'internal';
 
+    // Validate request
+    if (!request.agents || request.agents.length === 0) {
+      throw new Error('At least one agent must be provided');
+    }
 
-    // Create conversation with enriched metadata
+    // Validate agent IDs are unique
+    const agentIds = request.agents.map(a => a.id);
+    if (new Set(agentIds).size !== agentIds.length) {
+      throw new Error('Agent IDs must be unique');
+    }
+
+    // Validate at most one shouldInitiateConversation
+    const initiatingAgents = request.agents.filter(a => a.shouldInitiateConversation);
+    if (initiatingAgents.length > 1) {
+      throw new Error('At most one agent can have shouldInitiateConversation set to true');
+    }
+
+    // Create conversation with full agent configs
     const conversation: Conversation = {
       id: conversationId,
-      name: request.name,
       createdAt: new Date(),
-      agents: request.agents.map(a => a.agentId),
+      agents: request.agents, // Store full agent configs
       turns: [],
       status: 'created', // Start in created state
-      metadata: {
-        agentConfigs: request.agents,
-        managementMode,
-        ...(request.initiatingAgentId && { initiatingAgentId: request.initiatingAgentId }),
-        ...(request.initiatingInstructions && { initiatingInstructions: request.initiatingInstructions }),
-      }
+      metadata: request.metadata
     };
 
     this.db.createConversation(conversation);
@@ -81,33 +89,32 @@ export class ConversationOrchestrator {
     // Create tokens for each agent after conversation is created
     for (const config of request.agents) {
       const token = this.generateToken();
-      agentTokens[config.agentId.id] = token;
-      this.db.createAgentToken(token, conversationId, config.agentId.id);
+      agentTokens[config.id] = token;
+      this.db.createAgentToken(token, conversationId, config.id);
     }
 
     // Initialize conversation state (but don't start agents yet)
     this.activeConversations.set(conversationId, {
       conversation,
-      agentConfigs: new Map(request.agents.map(a => [a.agentId.id, a])),
+      agentConfigs: new Map(request.agents.map(a => [a.id, a])),
       agentTokens
     });
 
+    // Determine management mode from agent types
+    const hasInternalAgents = request.agents.some(a => 
+      ['scenario_driven', 'sequential_script', 'static_replay'].includes(a.strategyType)
+    );
+    const managementMode = hasInternalAgents ? 'internal' : 'external';
+
     console.log(`[Orchestrator] Conversation ${conversationId} created in '${managementMode}' mode with ${request.agents.length} agents`);
 
-    // Emit conversation created event - this happens for ALL conversations regardless of management mode
+    // Emit conversation created event - this happens for ALL conversations
     this.emitEvent(conversationId, {
       type: 'conversation_created',
       conversationId,
       timestamp: new Date(),
       data: {
-        conversation: {
-          id: conversation.id,
-          name: conversation.name,
-          managementMode,
-          agents: conversation.agents,
-          status: conversation.status,
-          createdAt: conversation.createdAt
-        }
+        conversation
       }
     });
 
@@ -121,8 +128,12 @@ export class ConversationOrchestrator {
       throw new Error(`Conversation ${conversationId} not found`);
     }
 
-    // ENFORCE: This endpoint is only for internally managed conversations.
-    if (conversation.metadata?.managementMode !== 'internal') {
+    // Check if any agents are internal types
+    const hasInternalAgents = conversation.agents.some(a => 
+      ['scenario_driven', 'sequential_script', 'static_replay'].includes(a.strategyType)
+    );
+    
+    if (!hasInternalAgents) {
       throw new Error(`Cannot explicitly start an externally managed conversation. External conversations are activated by the first turn from a connected agent.`);
     }
 
@@ -148,7 +159,7 @@ export class ConversationOrchestrator {
     
     for (const [agentId, agentConfig] of conversationState.agentConfigs) {
       try {
-        console.log(`[Orchestrator] Creating ${agentConfig.strategyType} agent: ${agentConfig.agentId.label}`);
+        console.log(`[Orchestrator] Creating ${agentConfig.strategyType} agent: ${agentConfig.id}`);
         
         let scenarioForAgent: ScenarioConfiguration | undefined = undefined;
 
@@ -157,7 +168,7 @@ export class ConversationOrchestrator {
           const loadedScenario = this.db.findScenarioByIdAndVersion(scenarioConfig.scenarioId, scenarioConfig.scenarioVersionId);
           
           if (!loadedScenario) {
-            console.error(`[Orchestrator] CRITICAL: Failed to load scenario ${scenarioConfig.scenarioId} for agent ${agentConfig.agentId.label}. Skipping agent.`);
+            console.error(`[Orchestrator] CRITICAL: Failed to load scenario ${scenarioConfig.scenarioId} for agent ${agentConfig.id}. Skipping agent.`);
             continue; // Skip provisioning this agent
           }
           scenarioForAgent = loadedScenario;
@@ -177,7 +188,7 @@ export class ConversationOrchestrator {
         
         // Get the token for this agent
         const token = this.getAgentToken(conversationId, agentId);
-        console.log(`[Orchestrator] Initializing agent ${agentConfig.agentId.label} with token`);
+        console.log(`[Orchestrator] Initializing agent ${agentConfig.id} with token`);
         
         // Store agent reference for cleanup
         if (!conversationState.agents) {
@@ -188,10 +199,10 @@ export class ConversationOrchestrator {
         // Initialize agent synchronously to avoid race conditions
         await this.initializeAgentAsync(agent, conversationId, token);
         
-        console.log(`[Orchestrator] Agent ${agentConfig.agentId.label} provisioned successfully`);
+        console.log(`[Orchestrator] Agent ${agentConfig.id} provisioned successfully`);
         
       } catch (error) {
-        console.error(`[Orchestrator] Failed to provision agent ${agentConfig.agentId.label}:`, error);
+        console.error(`[Orchestrator] Failed to provision agent ${agentConfig.id}:`, error);
       }
     }
     
@@ -205,16 +216,12 @@ export class ConversationOrchestrator {
       data: {}
     });
 
-    // EXPLICITLY TRIGGER the nominated agent.
-    const { initiatingAgentId, instructions } = getInitiationDetails(conversation);
-    if (initiatingAgentId) {
-      const agentInstance = conversationState.agents?.get(initiatingAgentId);
-      if (agentInstance) {
-        console.log(`[Orchestrator] Triggering initial agent ${initiatingAgentId} to start conversation.`);
-        await agentInstance.initializeConversation(instructions);
-      } else {
-        console.error(`[Orchestrator] Could not find instance for initiatingAgentId: ${initiatingAgentId}.`);
-      }
+    // Find agent with shouldInitiateConversation and trigger it
+    const initiatingAgent = conversation.agents.find(a => a.shouldInitiateConversation);
+    if (initiatingAgent && conversationState.agents?.has(initiatingAgent.id)) {
+      const agentInstance = conversationState.agents.get(initiatingAgent.id)!;
+      console.log(`[Orchestrator] Triggering initial agent ${initiatingAgent.id} to start conversation.`);
+      await agentInstance.initializeConversation(initiatingAgent.additionalInstructions);
     }
   }
 
@@ -235,16 +242,16 @@ export class ConversationOrchestrator {
   private async initializeAgentAsync(agent: AgentInterface, conversationId: string, token: string) {
     try {
       await agent.initialize(conversationId, token);
-      console.log(`[Orchestrator] Agent ${agent.agentId.label} initialized and ready`);
+      console.log(`[Orchestrator] Agent ${agent.agentId} initialized and ready`);
       
       // Subscribe to conversation events
       this.subscribeToConversation(conversationId, (event) => {
         agent.onConversationEvent(event);
       });
       
-      console.log(`[Orchestrator] Agent ${agent.agentId.label} subscribed to conversation events`);
+      console.log(`[Orchestrator] Agent ${agent.agentId} subscribed to conversation events`);
     } catch (error) {
-      console.error(`[Orchestrator] Failed to initialize agent ${agent.agentId.label}:`, error);
+      console.error(`[Orchestrator] Failed to initialize agent ${agent.agentId}:`, error);
     }
   }
 
@@ -253,15 +260,22 @@ export class ConversationOrchestrator {
     
     // ACTIVATE: If this is the first turn for an external conversation, activate it.
     const conversation = this.db.getConversation(request.conversationId, false, false);
-    if (conversation?.status === 'created' && conversation.metadata?.managementMode === 'external') {
-      console.log(`[Orchestrator] External conversation ${request.conversationId} being activated by first turn from agent ${request.agentId}`);
-
-      this.db.updateConversationStatus(request.conversationId, 'active');
+    if (conversation?.status === 'created') {
+      // Check if all agents are external types
+      const allExternal = conversation.agents.every(a => 
+        !['scenario_driven', 'sequential_script', 'static_replay'].includes(a.strategyType)
+      );
       
-      // Update in-memory state if it exists
-      const conversationState = this.activeConversations.get(request.conversationId);
-      if (conversationState) {
-        conversationState.conversation.status = 'active';
+      if (allExternal) {
+        console.log(`[Orchestrator] External conversation ${request.conversationId} being activated by first turn from agent ${request.agentId}`);
+
+        this.db.updateConversationStatus(request.conversationId, 'active');
+        
+        // Update in-memory state if it exists
+        const conversationState = this.activeConversations.get(request.conversationId);
+        if (conversationState) {
+          conversationState.conversation.status = 'active';
+        }
       }
     }
     

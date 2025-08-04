@@ -44,7 +44,7 @@ class MockScenarioDrivenAgent {
     }
 
     const parts = [
-        `[${timestamp}] [${this.agentId.label}]`,
+        `[${timestamp}] [${this.agentId}]`,
         scratchpadBlock,
         toolCallBlock,
         toolResultBlock,

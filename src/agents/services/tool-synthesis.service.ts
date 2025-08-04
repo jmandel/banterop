@@ -36,7 +36,7 @@ export class ToolSynthesisService {
   private async synthesizeWithLLM(input: ToolExecutionInput): Promise<ToolExecutionOutput> {
     const { toolName, args, agentId, scenario, conversationHistory } = input;
     
-    const agentConfig = scenario.agents.find(a => a.agentId.id === agentId);
+    const agentConfig = scenario.agents.find(a => a.agentId === agentId);
     if (!agentConfig) throw new Error(`Agent '${agentId}' not found.`);
     const tool = agentConfig.tools.find(t => t.toolName === toolName);
     if (!tool) throw new Error(`Tool '${toolName}' not found for agent '${agentId}'.`);
@@ -79,16 +79,16 @@ ${conversationHistory}
   </CONVERSATION_HISTORY_SO_FAR>
 
   <CALLING_AGENT_PROFILE>
-    Agent: ${agentConfig.agentId.label} (${agentConfig.agentId.id})
+    Agent: ${agentConfig.agentId}
     Principal: ${agentConfig.principal.name}
-    Role: ${agentConfig.agentId.role}
+    Role: ${agentConfig.agentId}
     Situation: ${agentConfig.situation}
     Goals: ${JSON.stringify(agentConfig.goals, null, 2)}
     Knowledge Base: ${JSON.stringify(agentConfig.knowledgeBase, null, 2)}
   </CALLING_AGENT_PROFILE>
 
   <OTHER_AGENTS_IN_SCENARIO>
-${scenario.agents.filter(a => a.agentId.id !== agentConfig.agentId.id).map(a => `    - ${a.agentId.label} (${a.principal.name}): ${a.principal.description}`).join('\n')}
+${scenario.agents.filter(a => a.agentId !== agentConfig.agentId).map(a => `    - ${a.agentId} (${a.principal.name}): ${a.principal.description}`).join('\n')}
   </OTHER_AGENTS_IN_SCENARIO>
 </CONTEXT>
 

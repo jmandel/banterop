@@ -12,7 +12,7 @@ test('basic user query creation and response flow', async () => {
   
   // Define simple agent that creates a user query
   const agentConfig: SequentialScriptConfig = {
-    agentId: { id: 'test-agent', label: 'Test Agent', role: 'assistant' },
+    id: "test-agent",
     strategyType: 'sequential_script',
     script: [
       {
@@ -33,9 +33,9 @@ test('basic user query creation and response flow', async () => {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      name: 'Simple User Query Test',
+      metadata: { conversationTitle: "Simple User Query Test" },
       agents: [agentConfig],
-      managementMode: 'internal'
+      /* managementMode removed */
     })
   });
   

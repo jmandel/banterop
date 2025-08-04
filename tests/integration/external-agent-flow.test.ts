@@ -5,8 +5,7 @@ import { beforeAll, afterAll, beforeEach, afterEach, test, expect, describe } fr
 import { ConversationOrchestrator } from '$backend/core/orchestrator.js';
 import { HonoWebSocketJsonRpcServer } from '$backend/websocket/hono-websocket-server.js';
 import { createLLMProvider } from '$llm/factory.js';
-import type { CreateConversationRequest } from '$lib/types.js';
-import type { AgentId } from '$lib/types.js';
+import type { CreateConversationRequest, ExternalProxyConfig } from '$lib/types.js';
 
 describe('External Agent Flow Integration', () => {
   let orchestrator: ConversationOrchestrator;
@@ -31,23 +30,24 @@ describe('External Agent Flow Integration', () => {
   });
 
   test('should support external agent workflow', async () => {
-    const agentId1: AgentId = { id: 'external-agent-1', label: 'External Agent 1', role: 'responder' };
-    const agentId2: AgentId = { id: 'internal-agent-2', label: 'Internal Agent 2', role: 'initiator' };
+    const agentId1 = 'external-agent-1';
+    const agentId2 = 'internal-agent-2';
 
     // Step 1: Setup Client Creates the Conversation for external management
     const createRequest: CreateConversationRequest = {
-      name: 'External Agent Test',
-      managementMode: 'external', // This conversation will be managed externally
+      metadata: {
+        conversationTitle: 'External Agent Test'
+      },
       agents: [
         { 
-          agentId: agentId1, 
+          id: agentId1, 
           strategyType: 'static_replay',
           script: [
             { trigger: 'hello', response: 'Hello from external agent!' }
           ]
         },
         { 
-          agentId: agentId2, 
+          id: agentId2, 
           strategyType: 'static_replay',
           script: [
             { trigger: 'hello', response: 'Hello back from internal agent!' }
@@ -61,13 +61,13 @@ describe('External Agent Flow Integration', () => {
     // Verify conversation is created but not active
     expect(conversation.status).toBe('created');
     expect(conversation.agents).toHaveLength(2);
-    expect(agentTokens[agentId1.id]).toBeString();
-    expect(agentTokens[agentId2.id]).toBeString();
+    expect(agentTokens[agentId1]).toBeString();
+    expect(agentTokens[agentId2]).toBeString();
 
     // Step 2: Tokens are available for secure distribution
     // The external agent token can now be sent to external process
-    const externalAgentToken = agentTokens[agentId1.id];
-    const internalAgentToken = agentTokens[agentId2.id];
+    const externalAgentToken = agentTokens[agentId1];
+    const internalAgentToken = agentTokens[agentId2];
 
     expect(externalAgentToken).toBeDefined();
     expect(internalAgentToken).toBeDefined();
@@ -81,14 +81,14 @@ describe('External Agent Flow Integration', () => {
     // For this test, we'll use the orchestrator directly to simulate the first turn
     const turnId = orchestrator.startTurn({
       conversationId: conversation.id,
-      agentId: agentId1.id
+      agentId: agentId1
     }).turnId;
 
     // Complete the turn to activate the conversation
     orchestrator.completeTurn({
       conversationId: conversation.id,
       turnId,
-      agentId: agentId1.id,
+      agentId: agentId1,
       content: 'Hello from external agent'
     });
 
@@ -100,37 +100,37 @@ describe('External Agent Flow Integration', () => {
     const tokenValidation = orchestrator.validateAgentToken(externalAgentToken);
     expect(tokenValidation).not.toBeNull();
     expect(tokenValidation!.conversationId).toBe(conversation.id);
-    expect(tokenValidation!.agentId).toBe(agentId1.id);
+    expect(tokenValidation!.agentId).toBe(agentId1);
 
     // Step 5: Test conversation state
     // The conversation should be ready for external agent connections
     const agentIds = updatedConversation!.agents.map((a: any) => a.id);
-    expect(agentIds).toContain(agentId1.id);
-    expect(agentIds).toContain(agentId2.id);
+    expect(agentIds).toContain(agentId1);
+    expect(agentIds).toContain(agentId2);
   });
 
   test('should validate external agent tokens correctly', async () => {
-    const agentId: AgentId = { id: 'test-external', label: 'Test External', role: 'test' };
+    const agentId = 'test-external';
 
     const createRequest: CreateConversationRequest = {
-      name: 'Token Test',
+      metadata: { conversationTitle: "Token Test" },
       agents: [
         { 
-          agentId, 
+          id: agentId, 
           strategyType: 'external_proxy',
-          externalId: 'test-service'
-        }
+          endpoint: 'http://test-service.example.com'
+        } as ExternalProxyConfig
       ]
     };
 
     const { conversation, agentTokens } = await orchestrator.createConversation(createRequest);
-    const token = agentTokens[agentId.id];
+    const token = agentTokens[agentId];
 
     // Valid token should validate correctly
     const validation = orchestrator.validateAgentToken(token);
     expect(validation).not.toBeNull();
     expect(validation!.conversationId).toBe(conversation.id);
-    expect(validation!.agentId).toBe(agentId.id);
+    expect(validation!.agentId).toBe(agentId);
 
     // Invalid token should return null
     const invalidValidation = orchestrator.validateAgentToken('invalid-token');
@@ -138,14 +138,13 @@ describe('External Agent Flow Integration', () => {
   });
 
   test('should support conversation state transitions', async () => {
-    const agentId: AgentId = { id: 'state-test', label: 'State Test', role: 'test' };
+    const agentId = 'state-test';
 
     const createRequest: CreateConversationRequest = {
-      name: 'State Transition Test',
-      managementMode: 'internal', // Use internal mode for this test
+      metadata: { conversationTitle: 'State Transition Test' },
       agents: [
         { 
-          agentId, 
+          id: agentId, 
           strategyType: 'static_replay',
           script: [{ trigger: 'test', response: 'response' }]
         }

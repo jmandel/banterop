@@ -5,23 +5,29 @@ import { ThoughtEntry, ToolCallEntry, ToolResultEntry } from "./conversation.typ
 
 // ============= Base Agent Types =============
 
-export interface AgentId {
-  id: string;
-  label: string; // Human-readable label for @mentions
-  role: string;  // e.g., "assistant", "user", "reviewer", "moderator"
-}
+// AgentId is now just a string
+export type AgentId = string;
 
 export type AgentStrategyType = 
   | 'static_replay' 
   | 'rule_based' 
   | 'external_proxy'
-  | 'hybrid'
   | 'scenario_driven'
-  | 'sequential_script';
+  | 'sequential_script'
+  | 'bridge_to_external_mcp_client'
+  | 'bridge_to_external_mcp_server'
+  | 'bridge_to_external_a2a_client'
+  | 'bridge_to_external_a2a_server'
+  | 'external_websocket_client';
 
 export interface BaseAgentConfig {
-  agentId: AgentId;
+  id: string; // Simple string ID
   strategyType: AgentStrategyType;
+  shouldInitiateConversation?: boolean;
+  additionalInstructions?: string;
+  bridgeConfig?: {
+    externalServerUrl?: string;
+  };
 }
 
 // ============= Strategy-Specific Configurations =============
@@ -54,15 +60,9 @@ export interface ExternalProxyConfig extends BaseAgentConfig {
   timeout?: number;
 }
 
-export interface HybridConfig extends BaseAgentConfig {
-  strategyType: 'hybrid';
-  strategies: AgentConfig[]; // Can combine multiple strategies
-  selector: string; // JS expression to choose strategy
-}
-
 export interface ScenarioDrivenAgentConfig extends BaseAgentConfig {
   strategyType: 'scenario_driven';
-  scenarioId: string;
+  scenarioId?: string; // Optional for scenario-driven agents
   scenarioVersionId?: string; // Optional: to pin a specific version
   // Flexible parameters to allow for variations within a single scenario
   parameters?: Record<string, any>; 
@@ -126,7 +126,6 @@ export type AgentConfig =
   | StaticReplayConfig 
   | RuleBasedConfig 
   | ExternalProxyConfig
-  | HybridConfig
   | ScenarioDrivenAgentConfig
   | SequentialScriptConfig;
 
@@ -147,7 +146,7 @@ export interface ToolDefinition {
 // ============= Agent Interface =============
 
 export interface AgentInterface {
-  agentId: AgentId;
+  agentId: string; // Simple string ID
   config: AgentConfig;
   
   // Lifecycle
@@ -156,6 +155,12 @@ export interface AgentInterface {
   
   // Event handling
   onConversationEvent(event: any): Promise<void>;
+  
+  // Conversation initiation
+  initializeConversation(instructions?: string): Promise<void>;
+  
+  // Process and reply to a turn
+  processAndReply(previousTurn: any): Promise<void>;
   
   // User interaction
   queryUser(question: string, context?: Record<string, any>): Promise<string>;

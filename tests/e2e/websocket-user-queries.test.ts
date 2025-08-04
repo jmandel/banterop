@@ -16,9 +16,9 @@ test('WebSocket clients receive user_query_created events', async () => {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      name: 'WebSocket Query Test',
+      metadata: { conversationTitle: "WebSocket Query Test" },
       agents: [{
-        agentId: { id: 'test-agent', label: 'Test Agent', role: 'assistant' },
+        id: "test-agent",
         strategyType: 'sequential_script',
         script: [{
           trigger: { type: 'message' },  // Use message trigger to control timing

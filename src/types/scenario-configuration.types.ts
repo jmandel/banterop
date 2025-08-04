@@ -48,7 +48,7 @@
  *
  */
 
-import type { AgentId } from './agent.types.js';
+// AgentId is now just a string
 
 /**
  * The root configuration for a complete conversational simulation.
@@ -81,7 +81,7 @@ export interface ScenarioConfiguration {
  * from the underlying knowledge base used by its tools.
  */
 export interface AgentConfiguration {
-  agentId: AgentId;
+  agentId: string; // Simple string ID
   principal: {
     type: 'individual' | 'organization';
     name: string;
@@ -213,7 +213,7 @@ const infliximabScenarioFinal: ScenarioConfiguration = {
   // --- Phases 2 & 3: Participants, World, and Tools ---
   agents: [
     {
-      agentId: { id: "pa-specialist-rheum-clinic", label: "PA Specialist", role: "Provider Representative" },
+      agentId: "pa-specialist-rheum-clinic",
       // --- Phase 2: Participant Definition ---
       principal: {
         type: "organization",
@@ -257,7 +257,7 @@ const infliximabScenarioFinal: ScenarioConfiguration = {
       }
     },
     {
-      agentId: { id: "pa-reviewer-healthfirst", label: "Clinical Reviewer", role: "Payer Representative" },
+      agentId: "pa-reviewer-healthfirst",
       // --- Phase 2: Participant Definition ---
       principal: {
         type: "organization",

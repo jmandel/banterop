@@ -1,4 +1,4 @@
-import type { ConversationEvent, ConversationTurn, TraceEntry } from '$lib/types.js';
+import type { ConversationEvent, ConversationTurn, TraceEntry, AgentConfig } from '$lib/types.js';
 
 export interface EventLogEntry {
   id: string;
@@ -9,10 +9,14 @@ export interface EventLogEntry {
 
 export interface ConversationSummary {
   id: string;
-  name: string;
   createdAt: string;
   status: string;
-  agents: string[];
+  agents: AgentConfig[];
+  metadata: {
+    conversationTitle?: string;
+    conversationDescription?: string;
+    scenarioId?: string;
+  };
   turnCount?: number;
   lastActivity?: Date;
 }

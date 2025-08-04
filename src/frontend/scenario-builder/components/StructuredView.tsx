@@ -45,7 +45,7 @@ export function StructuredView({ config }: StructuredViewProps) {
 
   const AgentCard = ({ agentConfig }: { agentConfig: AgentConfiguration }) => (
     <div className="section-card">
-      <h3 className="section-title">Agent: {agentConfig.agentId.label}</h3>
+      <h3 className="section-title">Agent: {agentConfig.agentId}</h3>
       <div className="field-group">
         <div className="field-label">Principal</div>
         <div className="field-value">{agentConfig.principal.name} ({agentConfig.principal.type})</div>
@@ -107,7 +107,7 @@ export function StructuredView({ config }: StructuredViewProps) {
         </div>
       </div>
       
-      {config.agents.map(agent => <AgentCard key={agent.agentId.id} agentConfig={agent} />)}
+      {config.agents.map(agent => <AgentCard key={agent.agentId} agentConfig={agent} />)}
     </div>
   );
 }

@@ -5,11 +5,10 @@
 
 export interface ConversationRow {
   id: string;
-  name: string | null;
   created_at: string; // ISO timestamp
   status: string;
-  metadata: string; // JSON
-  agents: string; // JSON array of AgentId
+  metadata: string; // JSON with scenarioId, conversationTitle, conversationDescription
+  agents: string; // JSON array of full AgentConfig objects
 }
 
 export interface ConversationTurnRow {

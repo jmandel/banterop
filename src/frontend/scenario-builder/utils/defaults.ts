@@ -17,7 +17,7 @@ export function createDefaultScenario(): ScenarioConfiguration {
     },
     agents: [
       {
-        agentId: { id: 'agent-1', label: 'Agent One', role: 'Initiator' },
+        agentId: 'agent-1',
         principal: {
           type: 'individual',
           name: 'Principal One',
@@ -42,7 +42,7 @@ export function createDefaultScenario(): ScenarioConfiguration {
         messageToUseWhenInitiatingConversation: 'This is the opening message if I start the conversation.'
       },
       {
-        agentId: { id: 'agent-2', label: 'Agent Two', role: 'Responder' },
+        agentId: 'agent-2',
         principal: {
           type: 'organization',
           name: 'Principal Two',
