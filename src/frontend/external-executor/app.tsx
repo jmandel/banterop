@@ -12,6 +12,7 @@ import type {
   Tool
 } from '$lib/types.js';
 import { LLMProvider } from '$lib/types.js';
+import { getInitiationDetails } from '$lib/utils/conversation-helpers.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ScenarioDrivenAgent } from '../../agents/scenario-driven.agent.js';
@@ -272,6 +273,7 @@ function ExternalExecutorApp() {
   const [checkingConnection, setCheckingConnection] = useState<boolean>(true);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [llmAvailable, setLlmAvailable] = useState<boolean>(false);
+  const [initInstructions, setInitInstructions] = useState<string>('Please be concise in your first message.');
 
   globalThis.playbackSpeed = playbackSpeed
   
@@ -423,7 +425,10 @@ function ExternalExecutorApp() {
         body: JSON.stringify({
           name: 'Live In-Browser External Agent Demo',
           managementMode: 'external',
-          initiatingAgentId: "patient-agent",
+          // NOMINATE the initiator.
+          initiatingAgentId: 'patient-agent',
+          // Optionally, add dynamic instructions from the UI.
+          initiatingInstructions: initInstructions || undefined,
           agents: [
             {
               agentId: { id: 'patient-agent', label: 'Browser Patient Agent', role: 'PatientAgent' },
@@ -541,16 +546,33 @@ function ExternalExecutorApp() {
         supplierAgent.initialize(conversation.id, agentTokens['insurance-auth-specialist'])
       ]);
       
-      setAgents([patientAgent, supplierAgent]);
+      const myLocalAgents = [patientAgent, supplierAgent];
+      setAgents(myLocalAgents);
       
-      addLog('Both agents initialized and connected via WebSocket');
+      addLog('Both agents initialized and connected.');
 
-      // Step 8: Start the conversation by having the patient agent send the first turn
-      // This activates the external conversation
-      patientAgent._processAndRespondToTurn(null)
-     
-      addLog('Patient agent sent the first turn. Conversation is now active');
-      addLog('Demo running... Watch for agent interactions and user queries');
+      // --- NEW, CORRECT INITIATION LOGIC ---
+      
+      // 2. Get initiation details from the conversation object returned by the server.
+      const { initiatingAgentId, instructions } = getInitiationDetails(conversation);
+      addLog(`Nominated initiating agent: ${initiatingAgentId}`);
+
+      if (!initiatingAgentId) {
+        throw new Error('No initiating agent was specified for this conversation.');
+      }
+      
+      // 3. Find the local agent instance that corresponds to the ID.
+      const agentToStart = myLocalAgents.find(a => a.agentId.id === initiatingAgentId);
+
+      if (agentToStart) {
+        // 4. Command the nominated agent to start the conversation.
+        addLog(`Commanding ${agentToStart.agentId.label} to initiate the conversation...`);
+        // This single call now correctly kicks off the entire flow.
+        await agentToStart.initializeConversation(instructions);
+        addLog('First turn sent. Conversation is now active.');
+      } else {
+        addLog(`Error: Could not find local agent instance for ID ${initiatingAgentId}`, 'error');
+      }
       
     } catch (error: any) {
       addLog(`Error: ${error.message}`, 'error');
@@ -647,14 +669,35 @@ function ExternalExecutorApp() {
 
           {/* Controls */}
           <div className="p-6 border-b border-gray-200">
-            <div className="flex gap-4 items-center flex-wrap">
-              <button
-                onClick={runDemo}
-                disabled={isLoading}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isLoading ? 'Demo Running...' : 'Run External Agent Demo'}
-              </button>
+            <div className="space-y-4">
+              {/* Initialization Instructions */}
+              <div>
+                <label htmlFor="init-instructions" className="block text-sm font-medium text-gray-700 mb-2">
+                  Initialization Instructions (optional):
+                </label>
+                <input
+                  id="init-instructions"
+                  type="text"
+                  value={initInstructions}
+                  onChange={(e) => setInitInstructions(e.target.value)}
+                  disabled={isLoading}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                  placeholder="e.g., 'Please be concise in your first message.'"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  These instructions will be passed to the initiating agent to modify their opening message.
+                </p>
+              </div>
+
+              {/* Main Controls */}
+              <div className="flex gap-4 items-center flex-wrap">
+                <button
+                  onClick={runDemo}
+                  disabled={isLoading}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isLoading ? 'Demo Running...' : 'Run External Agent Demo'}
+                </button>
               
               {isLoading && (
                 <button
@@ -749,12 +792,13 @@ function ExternalExecutorApp() {
                 )}
               </div>
               
-              {conversationId && (
-                <div className="flex items-center text-sm text-gray-600">
-                  <span className="font-medium">Conversation ID:</span>
-                  <code className="ml-2 px-2 py-1 bg-gray-100 rounded">{conversationId}</code>
-                </div>
-              )}
+                {conversationId && (
+                  <div className="flex items-center text-sm text-gray-600">
+                    <span className="font-medium">Conversation ID:</span>
+                    <code className="ml-2 px-2 py-1 bg-gray-100 rounded">{conversationId}</code>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

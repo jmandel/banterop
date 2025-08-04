@@ -101,8 +101,10 @@ export abstract class BaseAgent implements AgentInterface {
     }
   }
 
-  // Abstract method for subclasses to implement their core logic
-  abstract onTurnCompleted(event: TurnCompletedEvent): Promise<void>;
+  // method for subclasses to implement their core logic
+  onTurnCompleted(event: TurnCompletedEvent): Promise<void> {
+    return;
+  }
 
   // Abstract method for initiating a conversation (no previous turn)
   abstract initializeConversation(instructions?: string): Promise<void>;
@@ -232,12 +234,6 @@ export abstract class BaseAgent implements AgentInterface {
   private async maybeProcessNextOpportunity(): Promise<void> {
     if (!this.isReady || this.currentTurnId || this.conversationEnded) return;
     
-    // Check if we should initiate
-    if (this.turnOrder.length === 0 && this.isInitiator()) {
-      await this.initializeConversation();
-      return;
-    }
-    
     // Check last turn
     const lastTurnId = this.turnOrder[this.turnOrder.length - 1];
     const lastTurn = this.turns.get(lastTurnId);
@@ -246,11 +242,6 @@ export abstract class BaseAgent implements AgentInterface {
       this.lastProcessedTurnId = lastTurn.id;
       await this.processAndReply(lastTurn);
     }
-  }
-  
-  private isInitiator(): boolean {
-    // Check if this agent should initiate based on config
-    return !!(this.config as any).messageToUseWhenInitiatingConversation;
   }
 
   // ============= Simplified Public API (No Turn IDs!) =============

@@ -52,16 +52,22 @@ This reference stack is your primary tool for testing. It supports two main mode
 
 ### Mode 1: Internal Simulation
 
-First, you can run a scenario where all agents are provisioned and managed by the platform. This is perfect for understanding the expected flow of a conversation.
+In this mode, all agents are provisioned and managed by the platform. This is perfect for understanding the expected flow of a conversation.
 
-1.  Navigate to `https://hi.argo.run`. Use the **Dashboard** to create a new conversation.
-2.  Select a pre-built scenario. The orchestrator will automatically start the reference agents.
+1.  Navigate to `https://hi.argo.run`. Use the **Dashboard** to create a new conversation with `managementMode: 'internal'`.
+2.  Select a pre-built scenario. Click **Start Conversation** to trigger the orchestrator to provision and start the reference agents.
 3.  Open the **Conversation Inspector**. A new tab for your conversation will appear automatically.
 4.  Watch the conversation unfold in real-time. Click any turn to see the detailed trace of how the agent reasoned its way to that response.
+
+**Key Point:** For internal conversations, the `POST /conversations/:id/start` endpoint must be called to begin the conversation. The orchestrator will then command the nominated agent (specified by `initiatingAgentId`) to send the first message.
 
 ### Mode 2: Connecting External Agents (MCP & A2A Bridges)
 
 The real power of the stack is its ability to let you **"swap in" your own agent**. This allows you to test your implementation against our transparent reference agents.
+
+In this mode (`managementMode: 'external'`), external agents connect to the conversation and manage their own lifecycle. The conversation is automatically activated when the first agent sends a turn - no explicit start call is needed.
+
+**Key Point:** For external conversations, do NOT call the `/start` endpoint. Instead, the nominated agent (specified by `initiatingAgentId`) should connect and call `initializeConversation()` to begin. The conversation transitions to 'active' automatically upon the first turn.
 
 The reference implementation uses a native, fully asynchronous "chat room" protocol internally. To support external participants, we will provide **bridges** that map this protocol to standard interoperability protocols like MCP and A2A.
 
@@ -105,7 +111,11 @@ Both bridges will accommodate **human-in-the-loop** interactions. While MCP clie
 - **`ConversationTurn`**: An entry in the public conversation log. It is *what* happened.
 - **`TraceEntry`**: A detailed, private step an agent took to produce a `Turn` (e.g., a thought or tool call). It is *how* the agent decided what to do.
 - **`OrchestratorClient`**: A critical abstraction that provides an agent's connection **to the shared conversational environment**, decoupling its logic from the transport layer (in-process vs. WebSocket).
-- **`managementMode`**: A conversation property (`internal` or `external`) that determines whether the orchestrator or an external process is responsible for the agent lifecycle.
+- **`managementMode`**: A conversation property (`internal` or `external`) that determines agent lifecycle management:
+  - `internal`: The orchestrator provisions and manages agents. Use `POST /conversations/:id/start` to begin.
+  - `external`: External processes manage agents. The conversation activates automatically on first turn.
+- **`initiatingAgentId`**: Specifies which agent should send the first message to start the conversation.
+- **`initiatingInstructions`**: Optional runtime instructions that modify how the initiating agent starts the conversation.
 
 ## API Highlights
 
@@ -121,8 +131,8 @@ This is the primary interface for external agents. Key methods include:
 
 #### REST API (`/api`)
 
-- `POST /conversations`: Creates a new conversation.
-- `POST /conversations/:id/start`: Starts an `internal` conversation.
+- `POST /conversations`: Creates a new conversation (specify `managementMode`, `initiatingAgentId`, and optionally `initiatingInstructions`).
+- `POST /conversations/:id/start`: Starts an `internal` conversation ONLY. Returns 400 error for `external` conversations.
 - `GET /conversations/:id`: Retrieves the full state of a conversation.
 - `GET /queries/pending`: Retrieves all pending user queries.
 - `POST /queries/:id/respond`: Allows a human to respond to a query.

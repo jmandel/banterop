@@ -128,45 +128,36 @@ export class ScenarioDrivenAgent extends BaseAgent {
     }
   }
 
-  async onTurnCompleted(event: TurnCompletedEvent): Promise<void> {
-      // BaseAgent will call processAndReply if needed
-      return;
-  }
-
   async initializeConversation(instructions?: string): Promise<void> {
-    // For the initiating agent, we start with the configured initial message
-    if (this.agentConfig.messageToUseWhenInitiatingConversation) {
-      await this.startTurn();
-      
-      // Compose thought with optional instructions
-      let thought = "Starting conversation with configured initial message";
-      if (instructions) {
-        thought += `. Additional instructions: ${instructions}`;
-      }
-      await this.addThought(thought);
-      
-      // If instructions are provided, we might want to process them through the LLM
-      // to potentially modify the initial message
-      let messageToSend = this.agentConfig.messageToUseWhenInitiatingConversation;
-      
-      if (instructions) {
-        // Build a special prompt that includes the instructions
-        const prompt = this.constructFullPrompt({
-          agentConfig: this.agentConfig,
-          tools: this.agentConfig.tools,
-          conversationHistory: `INSTRUCTIONS FOR THIS CONVERSATION: ${instructions}\n\nYou are about to start a conversation. Your configured initial message is: "${messageToSend}"\n\nConsider if you need to adjust this message based on the instructions provided.`,
-          currentProcess: ''
-        });
-        
-        // Get the agent's response considering the instructions
-        const result = await this.extractToolCallsFromLLMResponse(prompt);
-        if (result.tools && result.tools.length === 1 && result.tools[0].name === 'send_message_to_agent_conversation') {
-          messageToSend = result.tools[0].args.text || messageToSend;
-        }
-      }
-      
-      await this.completeTurn(messageToSend);
+    if (!this.agentConfig.messageToUseWhenInitiatingConversation) {
+      console.warn(`Agent ${this.agentId.label} cannot initiate without a configured message.`);
+      return;
     }
+    
+    await this.startTurn();
+    let thought = `I will start the conversation. My default message is: "${this.agentConfig.messageToUseWhenInitiatingConversation}".`;
+    if (instructions) {
+      thought += ` Special instructions: "${instructions}"`;
+    }
+    await this.addThought(thought);
+
+    let messageToSend = this.agentConfig.messageToUseWhenInitiatingConversation;
+
+    if (instructions) {
+      // Use LLM to potentially revise the opening message based on instructions.
+      const prompt = this.constructFullPrompt({
+        agentConfig: this.agentConfig,
+        tools: this.agentConfig.tools,
+        conversationHistory: `INSTRUCTIONS FOR THIS CONVERSATION: ${instructions}\n\nYou are about to start a conversation. Your configured initial message is: "${messageToSend}"\n\nConsider if you need to adjust this message based on the instructions provided.`,
+        currentProcess: ''
+      });
+      const result = await this.extractToolCallsFromLLMResponse(prompt);
+      if (result.tools && result.tools.length === 1 && result.tools[0].name === 'send_message_to_agent_conversation') {
+        messageToSend = result.tools[0].args.text || messageToSend;
+      }
+    }
+    
+    await this.completeTurn(messageToSend);
   }
 
   async processAndReply(previousTurn: ConversationTurn): Promise<void> {
@@ -501,6 +492,12 @@ Your response MUST follow this EXACT format:
             
             if (!doc) {
               console.error(`Could not find document with docId: ${docId}`);
+              continue;
+            }
+            
+            // Skip if content is null/undefined/empty
+            if (!doc.content) {
+              console.warn(`Skipping attachment ${docId} due to missing content`);
               continue;
             }
             

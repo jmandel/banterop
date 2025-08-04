@@ -7,6 +7,7 @@ import { createClient } from '$client/index.js';
 import type { LLMProvider } from 'src/types/llm.types.js';
 import { ToolSynthesisService } from '../../agents/services/tool-synthesis.service.js';
 import type { AgentId, AgentInterface } from '$lib/types.js';
+import { getInitiationDetails } from '$lib/utils/conversation-helpers.js';
 import {
   Conversation, ConversationTurn, TraceEntry, AgentConfig,
   CreateConversationRequest, CreateConversationResponse,
@@ -120,10 +121,9 @@ export class ConversationOrchestrator {
       throw new Error(`Conversation ${conversationId} not found`);
     }
 
-    // Guard clause: Check if conversation is in 'internal' management mode
-    const managementMode = conversation.metadata?.managementMode;
-    if (managementMode !== 'internal') {
-      throw new Error(`Cannot start an externally managed conversation. Management mode: ${managementMode}`);
+    // ENFORCE: This endpoint is only for internally managed conversations.
+    if (conversation.metadata?.managementMode !== 'internal') {
+      throw new Error(`Cannot explicitly start an externally managed conversation. External conversations are activated by the first turn from a connected agent.`);
     }
 
     // Guard clause: Check if conversation status is 'created'
@@ -205,27 +205,15 @@ export class ConversationOrchestrator {
       data: {}
     });
 
-    // Handle initial message from metadata
-    const initiatingAgentId = conversation.metadata?.initiatingAgentId as AgentId['id'];
+    // EXPLICITLY TRIGGER the nominated agent.
+    const { initiatingAgentId, instructions } = getInitiationDetails(conversation);
     if (initiatingAgentId) {
-      const agentConfig = conversationState.agentConfigs.get(initiatingAgentId);
-      
-      if (agentConfig && agentConfig.messageToUseWhenInitiatingConversation) {
+      const agentInstance = conversationState.agents?.get(initiatingAgentId);
+      if (agentInstance) {
         console.log(`[Orchestrator] Triggering initial agent ${initiatingAgentId} to start conversation.`);
-        
-        // Find the initiating agent instance
-        const initiatingAgent = conversationState.agents?.get(initiatingAgentId);
-        if (initiatingAgent) {
-          // Trigger the agent to initialize the conversation
-          try {
-            const instructions = conversation.metadata?.initiatingInstructions as string | undefined;
-            await initiatingAgent.initializeConversation(instructions);
-          } catch (error) {
-            console.error(`[Orchestrator] Failed to trigger initial agent:`, error);
-          }
-        } else {
-          console.error(`[Orchestrator] Could not find agent instance for initiatingAgentId: ${initiatingAgentId}`);
-        }
+        await agentInstance.initializeConversation(instructions);
+      } else {
+        console.error(`[Orchestrator] Could not find instance for initiatingAgentId: ${initiatingAgentId}.`);
       }
     }
   }
@@ -263,13 +251,11 @@ export class ConversationOrchestrator {
   startTurn(request: StartTurnRequest): StartTurnResponse {
     const turnId = uuidv4();
     
-    // Check if this is an external conversation that needs to be activated
+    // ACTIVATE: If this is the first turn for an external conversation, activate it.
     const conversation = this.db.getConversation(request.conversationId, false, false);
-    if (conversation && conversation.status === 'created' && conversation.metadata?.managementMode === 'external') {
+    if (conversation?.status === 'created' && conversation.metadata?.managementMode === 'external') {
       console.log(`[Orchestrator] External conversation ${request.conversationId} being activated by first turn from agent ${request.agentId}`);
 
-      // TODO-JCM: we should not double-set state -- we should have changes flow to all places automatically instead of setting  in db and in active convesrations instead of setting  in db and in active convesrations
-      // Transition to active status for external conversations on first turn
       this.db.updateConversationStatus(request.conversationId, 'active');
       
       // Update in-memory state if it exists
