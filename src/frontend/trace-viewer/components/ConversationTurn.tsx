@@ -26,8 +26,7 @@ export const ConversationTurnComponent: React.FC<ConversationTurnProps> = ({
     try {
       return marked.parse(turn.content, {
         gfm: true,
-        breaks: true,
-        sanitize: false // We'll trust the content for now
+        breaks: true
       });
     } catch (error) {
       console.error('Failed to parse markdown:', error);

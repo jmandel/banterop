@@ -3,7 +3,7 @@
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import {
-  ConversationEvent, SubscriptionOptions, TraceEntry,
+  ConversationEvent, SubscriptionOptions, TraceEntry, TraceEntryInput,
   ConversationTurn, CreateConversationRequest, CreateConversationResponse,
   Attachment, AttachmentPayload
 } from '$lib/types.js';
@@ -282,7 +282,7 @@ export class WebSocketJsonRpcClient extends EventEmitter implements Orchestrator
     return result.turnId;
   }
 
-  async addTrace(turnId: string, entry: Omit<TraceEntry, 'id' | 'timestamp' | 'agentId'>): Promise<void> {
+  async addTrace(turnId: string, entry: TraceEntryInput): Promise<void> {
     return this.sendRequest('addTrace', { turnId, entry });
   }
 

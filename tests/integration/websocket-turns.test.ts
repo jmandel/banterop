@@ -77,9 +77,7 @@ test('should handle completeTurn requests properly', async () => {
   
   await wsClient.addTrace(turnId, TestDataFactory.createTraceEntryPartial('thought', 'Processing...'));
   
-  const completedTurn = await wsClient.completeTurn(turnId, 'Final result', { 
-    completed_at: Date.now() 
-  });
+  const completedTurn = await wsClient.completeTurn(turnId, 'Final result');
   
   expect(completedTurn.content).toBe('Final result');
   expect(completedTurn.trace).toHaveLength(1);

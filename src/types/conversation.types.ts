@@ -54,6 +54,14 @@ export interface UserResponseEntry extends BaseTraceEntry {
 
 export type TraceEntry = ThoughtEntry | ToolCallEntry | ToolResultEntry | UserQueryEntry | UserResponseEntry;
 
+// Helper type for creating trace entries without system fields
+export type TraceEntryInput = 
+  | Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'>
+  | Omit<ToolCallEntry, 'id' | 'timestamp' | 'agentId'>
+  | Omit<ToolResultEntry, 'id' | 'timestamp' | 'agentId'>
+  | Omit<UserQueryEntry, 'id' | 'timestamp' | 'agentId'>
+  | Omit<UserResponseEntry, 'id' | 'timestamp' | 'agentId'>;
+
 // ============= Conversation Types =============
 
 export interface ConversationTurn {

@@ -164,15 +164,13 @@ test('multi-agent workflow with user queries (event-driven)', async () => {
     // Wait for conversation to start
     await waitForCondition(
       () => events.some(e => e.type === 'turn_completed' && e.data.turn.agentId === 'support-agent'),
-      5000,
-      'Waiting for support agent initial turn'
+      5000
     );
     
     // Wait for all expected queries to be handled
     await waitForCondition(
       () => queryResponsesHandled === queryResponses.size,
-      10000,
-      `Waiting for ${queryResponses.size} queries to be handled`
+      10000
     );
     
     // Wait for final response
@@ -182,8 +180,7 @@ test('multi-agent workflow with user queries (event-driven)', async () => {
         e.data.turn.agentId === 'tech-specialist' &&
         e.data.turn.content.includes('connection pooling')
       ),
-      5000,
-      'Waiting for final tech specialist response'
+      5000
     );
     
     // Validate the conversation flow

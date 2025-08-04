@@ -219,7 +219,7 @@ class MockLLMProvider extends LLMProvider {
 class MockToolSynthesisService extends ToolSynthesisService {
 
 
-  override execute(input: ToolExecutionInput): Promise<ToolExecutionOutput> {
+  override async execute(input: ToolExecutionInput): Promise<ToolExecutionOutput> {
   // async synthesizeToolResult(toolName: string, parameters: any, toolDefinition?: Tool): Promise<any> {
     const {toolName, args } = input;
     console.log("Synthesize", toolName, cannedIndex, cannedDiscussionWithQuery[cannedIndex])
@@ -227,7 +227,7 @@ class MockToolSynthesisService extends ToolSynthesisService {
     if (toolName === 'ask_question_to_principal') {
       throw new Error('ask_question_to_principal should be handled by the agent, not synthesized');
     }
-    return cannedDiscussionWithQuery[cannedIndex++].toolResponse
+    return { output: cannedDiscussionWithQuery[cannedIndex++].toolResponse };
   }
 }
 
@@ -340,7 +340,7 @@ function ExternalExecutorApp() {
       console.error('Error checking LLM config:', error);
       setIsConnected(false); // Cannot reach backend at all
       setLlmAvailable(false);
-      setAvailableModels([]);
+      setAvailableModels({ gemini: [], openrouter: [] });
       addLog(`Cannot connect to backend at ${url}: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
     } finally {
       setCheckingConnection(false);

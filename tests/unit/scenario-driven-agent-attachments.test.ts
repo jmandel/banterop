@@ -17,7 +17,7 @@ class MockOrchestratorClient implements Partial<OrchestratorClient> {
   createdAttachments: AttachmentPayload[] = [];
   currentTurnId: string | null = null;
   
-  on(event: string, handler: any) { return this; }
+  on(event: string, handler: any): OrchestratorClient { return this as any; }
   async startTurn() { 
     this.currentTurnId = uuidv4();
     return this.currentTurnId; 
@@ -74,6 +74,10 @@ class MockLLMProvider extends LLMProvider {
   private responses: string[] = [];
   private responseIndex = 0;
 
+  constructor() {
+    super({ provider: 'google', apiKey: 'test-key' });
+  }
+
   setResponses(responses: string[]) {
     this.responses = responses;
     this.responseIndex = 0;
@@ -93,6 +97,7 @@ class MockLLMProvider extends LLMProvider {
 
   validateRequest(request: any): void {}
   formatResponse(response: any): any { return response; }
+  getSupportedModels(): string[] { return ['test-model']; }
 }
 
 class MockToolSynthesis extends ToolSynthesisService {
@@ -120,7 +125,7 @@ describe('ScenarioDrivenAgent Attachment Handling', () => {
   beforeEach(() => {
     mockClient = new MockOrchestratorClient();
     mockLLM = new MockLLMProvider();
-    mockToolSynthesis = new MockToolSynthesis();
+    mockToolSynthesis = new MockToolSynthesis(mockLLM);
     
     scenario = {
       id: 'test-scenario',

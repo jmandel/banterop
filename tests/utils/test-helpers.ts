@@ -9,7 +9,7 @@ import { InProcessOrchestratorClient } from '$client/impl/in-process.client.js';
 import { LLMMessage, LLMProvider, LLMRequest, LLMResponse, LLMTool, LLMToolCall, LLMToolResponse } from '../../src/types/llm.types.js';
 import {
   StaticReplayConfig, CreateConversationRequest, ConversationEvent,
-  AgentId, ConversationTurn, TraceEntry, ThoughtEntry, ToolCallEntry, ToolResultEntry, UserQueryEntry, UserResponseEntry, AttachmentPayload
+  AgentId, ConversationTurn, TraceEntry, TraceEntryInput, ThoughtEntry, ToolCallEntry, ToolResultEntry, UserQueryEntry, UserResponseEntry, AttachmentPayload
 } from '$lib/types.js';
 
 // Mock LLM Provider for testing
@@ -350,7 +350,7 @@ export class WebSocketTestClient {
     return this.client.startTurn(metadata);
   }
 
-  async addTrace(turnId: string, entry: Omit<TraceEntry, 'id' | 'timestamp' | 'agentId'>): Promise<void> {
+  async addTrace(turnId: string, entry: TraceEntryInput): Promise<void> {
     return this.client.addTrace(turnId, entry);
   }
 
@@ -364,7 +364,7 @@ export class WebSocketTestClient {
     
     // Add trace entries
     for (const entry of trace) {
-      let partialEntry: Omit<TraceEntry, 'id' | 'timestamp' | 'agentId'>;
+      let partialEntry: TraceEntryInput;
       
       switch (entry.type) {
         case 'thought':
@@ -623,7 +623,7 @@ export class InProcessTestClient {
     return this.client.startTurn(metadata);
   }
 
-  async addTrace(turnId: string, entry: Omit<TraceEntry, 'id' | 'timestamp' | 'agentId'>): Promise<void> {
+  async addTrace(turnId: string, entry: TraceEntryInput): Promise<void> {
     return this.client.addTrace(turnId, entry);
   }
 
@@ -637,7 +637,7 @@ export class InProcessTestClient {
     
     // Add trace entries
     for (const entry of trace) {
-      let partialEntry: Omit<TraceEntry, 'id' | 'timestamp' | 'agentId'>;
+      let partialEntry: TraceEntryInput;
       
       switch (entry.type) {
         case 'thought':
@@ -742,7 +742,7 @@ export class TestDataFactory {
   }
 
   // For addTrace method (partial trace entry)
-  static createTraceEntryPartial(type: 'thought' | 'tool_call' | 'tool_result', content?: any): Omit<ThoughtEntry, 'id' | 'timestamp' | 'agentId'> | Omit<ToolCallEntry, 'id' | 'timestamp' | 'agentId'> | Omit<ToolResultEntry, 'id' | 'timestamp' | 'agentId'> {
+  static createTraceEntryPartial(type: 'thought' | 'tool_call' | 'tool_result', content?: any): TraceEntryInput {
     switch (type) {
       case 'thought':
         return {

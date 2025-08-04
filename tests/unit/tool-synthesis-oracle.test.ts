@@ -10,7 +10,7 @@ class MockLLMProvider extends LLMProvider {
   public lastRequest?: LLMRequest;
 
   constructor() {
-    super({ provider: 'mock', apiKey: 'test' });
+    super({ provider: 'google', apiKey: 'test' });
   }
 
   async generateResponse(request: LLMRequest): Promise<LLMResponse> {

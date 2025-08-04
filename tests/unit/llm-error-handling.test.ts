@@ -18,7 +18,7 @@ class MockOrchestratorClient implements Partial<OrchestratorClient> {
   currentTurnId: string | null = null;
   conversationEnded = false;
   
-  on(event: string, handler: any) { return this; }
+  on(event: string, handler: any): OrchestratorClient { return this as any; }
   async startTurn() { 
     this.currentTurnId = uuidv4();
     return this.currentTurnId; 
@@ -78,7 +78,7 @@ class FailingLLMProvider extends LLMProvider {
   private failureMessage: string;
   
   constructor(failureMessage: string = 'Simulated LLM failure') {
-    super({ provider: 'failing', apiKey: 'test-key' });
+    super({ provider: 'google' as any, apiKey: 'test-key' });
     this.failureMessage = failureMessage;
   }
 
@@ -92,6 +92,7 @@ class FailingLLMProvider extends LLMProvider {
 
   validateRequest(request: any): void {}
   formatResponse(response: any): any { return response; }
+  getSupportedModels(): string[] { return ['test-model']; }
 }
 
 class MockLLMProvider extends LLMProvider {
@@ -99,7 +100,7 @@ class MockLLMProvider extends LLMProvider {
   private responseIndex = 0;
 
   constructor() {
-    super({ provider: 'mock', apiKey: 'test-key' });
+    super({ provider: 'google' as any, apiKey: 'test-key' });
   }
 
   setResponses(responses: string[]) {
@@ -121,6 +122,7 @@ class MockLLMProvider extends LLMProvider {
 
   validateRequest(request: any): void {}
   formatResponse(response: any): any { return response; }
+  getSupportedModels(): string[] { return ['test-model']; }
 }
 
 class FailingToolSynthesis extends ToolSynthesisService {
@@ -150,7 +152,7 @@ describe('LLM Error Handling', () => {
   beforeEach(() => {
     mockClient = new MockOrchestratorClient();
     failingLLM = new FailingLLMProvider('Network error: 500 Internal Server Error');
-    failingToolSynthesis = new FailingToolSynthesis();
+    failingToolSynthesis = new FailingToolSynthesis(failingLLM);
     
     scenario = {
       id: 'test-scenario',
@@ -218,7 +220,7 @@ describe('LLM Error Handling', () => {
       };
       
       // Process should not throw
-      await expect(agent.processAndReply(mockTurn)).resolves.toBeUndefined();
+      await expect((agent as any).processAndReply(mockTurn)).resolves.toBeUndefined();
       
       // Verify the agent completed a turn with an error message
       expect(mockClient.completeTurnCalls).toHaveLength(1);
@@ -276,7 +278,7 @@ describe('LLM Error Handling', () => {
           status: 'completed' as const
         };
         
-        await expect(agent.processAndReply(mockTurn)).resolves.toBeUndefined();
+        await expect((agent as any).processAndReply(mockTurn)).resolves.toBeUndefined();
         
         // Verify graceful handling
         expect(mockClient.completeTurnCalls).toHaveLength(1);
@@ -330,7 +332,7 @@ describe('LLM Error Handling', () => {
       };
       
       // Process should not throw
-      await expect(agent.processAndReply(mockTurn)).resolves.toBeUndefined();
+      await expect((agent as any).processAndReply(mockTurn)).resolves.toBeUndefined();
       
       // Verify the agent handled the tool error gracefully
       // The agent should continue processing after a tool failure

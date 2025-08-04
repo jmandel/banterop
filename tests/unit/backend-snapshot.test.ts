@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { ConversationOrchestrator } from '$backend/core/orchestrator.js';
 import { MockLLMProvider } from '../utils/test-helpers.js';
 import { v4 as uuidv4 } from 'uuid';
-import { CreateConversationRequest, StaticReplayConfig, AgentId } from '$lib/types.js';
+import { CreateConversationRequest, ScenarioDrivenAgentConfig, AgentId } from '$lib/types.js';
 
 describe('Backend Snapshot Functionality', () => {
   let orchestrator: ConversationOrchestrator;
@@ -26,12 +26,8 @@ describe('Backend Snapshot Functionality', () => {
       agents: [{
         agentId,
         strategyType: 'scenario_driven',
-        scenarioConfig: {
-          principalIdentity: 'test-agent',
-          promptStyle: 'markdown',
-          toolTasks: []
-        }
-      } as StaticReplayConfig]
+        scenarioId: 'test-scenario'
+      } as ScenarioDrivenAgentConfig]
     };
     
     const result = await orchestrator.createConversation(request);

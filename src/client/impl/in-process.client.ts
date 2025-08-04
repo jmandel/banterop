@@ -4,7 +4,7 @@ import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import { ConversationOrchestrator } from '$backend/core/orchestrator.js';
 import {
-  ConversationEvent, SubscriptionOptions, TraceEntry,
+  ConversationEvent, SubscriptionOptions, TraceEntry, TraceEntryInput,
   ConversationTurn, StartTurnRequest, AddTraceEntryRequest,
   CompleteTurnRequest, UserQueryRequest, CreateConversationRequest,
   CreateConversationResponse, Attachment, AttachmentPayload
@@ -128,7 +128,7 @@ export class InProcessOrchestratorClient extends EventEmitter implements Orchest
     return response.turnId;
   }
 
-  async addTrace(turnId: string, entry: Omit<TraceEntry, 'id' | 'timestamp' | 'agentId'>): Promise<void> {
+  async addTrace(turnId: string, entry: TraceEntryInput): Promise<void> {
     if (!this.authenticated || !this.conversationId || !this.agentId) {
       throw new Error('Client not authenticated');
     }

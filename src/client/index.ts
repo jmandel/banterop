@@ -6,7 +6,7 @@ import { ConversationOrchestrator } from '$backend/core/orchestrator.js';
 import { InProcessOrchestratorClient } from './impl/in-process.client.js';
 import { WebSocketJsonRpcClient } from './impl/websocket.client.js';
 import {
-  ConversationEvent, SubscriptionOptions, TraceEntry,
+  ConversationEvent, SubscriptionOptions, TraceEntry, TraceEntryInput,
   ConversationTurn, CreateConversationRequest, CreateConversationResponse,
   Conversation, Attachment, AttachmentPayload
 } from '$lib/types.js';
@@ -32,7 +32,7 @@ export interface OrchestratorClient extends EventEmitter {
   
   // Turn management
   startTurn(metadata?: Record<string, any>): Promise<string>;
-  addTrace(turnId: string, entry: Partial<TraceEntry>): Promise<void>;
+  addTrace(turnId: string, entry: TraceEntryInput): Promise<void>;
   completeTurn(turnId: string, content: string, isFinalTurn?: boolean, metadata?: Record<string, any>, attachments?: AttachmentPayload[]): Promise<ConversationTurn>;
   
   // Attachment management

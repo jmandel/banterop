@@ -4,6 +4,7 @@ import { WebSocketJsonRpcClient } from '$client/impl/websocket.client.js';
 import { MockLLMProvider, TestEnvironment } from '../utils/test-helpers.js';
 import { ToolSynthesisService } from '$agents/services/tool-synthesis.service.js';
 import { createAgent } from '$agents/factory.js';
+import { ScenarioDrivenAgent } from '$agents/scenario-driven.agent.js';
 import type { ScenarioDrivenAgentConfig, ScenarioConfiguration } from '$lib/types.js';
 
 describe('Conversation Initiation Refactor', () => {
@@ -100,30 +101,25 @@ describe('Conversation Initiation Refactor', () => {
     
     // Create mock scenario
     const mockScenario: ScenarioConfiguration = {
-      id: 'test-scenario',
-      schemaVersion: '2.4',
-      name: 'Test Scenario',
-      description: 'Test scenario for initiation',
-      principalIdentity: {
-        domain: 'test.com',
-        subdomain: 'unit-test'
+      metadata: {
+        id: 'test-scenario',
+        title: 'Test Scenario',
+        description: 'Test scenario for initiation'
       },
-      scenarioMetadata: {
-        createdBy: 'test',
-        createdDate: new Date().toISOString()
+      scenario: {
+        background: 'Testing conversation initiation',
+        challenges: ['Test challenge']
       },
       agents: [{
         agentId: { id: 'test-agent', label: 'Test Agent', role: 'TestRole' },
-        principal: { name: 'Test Principal', description: 'Test' },
+        principal: { type: 'individual', name: 'Test Principal', description: 'Test' },
         situation: 'Testing',
         systemPrompt: 'Be a test agent',
         goals: ['Test'],
         tools: [],
+        knowledgeBase: {},
         messageToUseWhenInitiatingConversation: 'Hello, I am starting the conversation'
-      }],
-      patientAgent: {} as any,
-      supplierAgent: {} as any,
-      interactionDynamics: {} as any
+      }]
     };
     
     const agent = createAgent(
@@ -145,7 +141,7 @@ describe('Conversation Initiation Refactor', () => {
     await agent.initialize(conversation.id, agentTokens['test-agent']);
     
     // Agent calls initializeConversation (which internally sends first turn)
-    await agent.initializeConversation('Please be concise');
+    await (agent as ScenarioDrivenAgent).initializeConversation('Please be concise');
     
     // Wait a bit for async operations
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -195,30 +191,25 @@ describe('Conversation Initiation Refactor', () => {
     
     // Create mock scenario
     const mockScenario: ScenarioConfiguration = {
-      id: 'test-scenario',
-      schemaVersion: '2.4',
-      name: 'Test Scenario',
-      description: 'Test scenario for initiation',
-      principalIdentity: {
-        domain: 'test.com',
-        subdomain: 'unit-test'
+      metadata: {
+        id: 'test-scenario',
+        title: 'Test Scenario',
+        description: 'Test scenario for initiation'
       },
-      scenarioMetadata: {
-        createdBy: 'test',
-        createdDate: new Date().toISOString()
+      scenario: {
+        background: 'Testing conversation initiation with custom instructions',
+        challenges: ['Test challenge']
       },
       agents: [{
         agentId: { id: 'test-agent', label: 'Test Agent', role: 'TestRole' },
-        principal: { name: 'Test Principal', description: 'Test' },
+        principal: { type: 'individual', name: 'Test Principal', description: 'Test' },
         situation: 'Testing',
         systemPrompt: 'Be a test agent',
         goals: ['Test'],
         tools: [],
+        knowledgeBase: {},
         messageToUseWhenInitiatingConversation: 'Hello, this is my default long message'
-      }],
-      patientAgent: {} as any,
-      supplierAgent: {} as any,
-      interactionDynamics: {} as any
+      }]
     };
     
     const agent = createAgent(
@@ -248,7 +239,7 @@ describe('Conversation Initiation Refactor', () => {
     });
     
     // Agent calls initializeConversation with instructions
-    await agent.initializeConversation('Be very brief');
+    await (agent as ScenarioDrivenAgent).initializeConversation('Be very brief');
     
     // Wait for turn to complete
     await new Promise(resolve => setTimeout(resolve, 100));

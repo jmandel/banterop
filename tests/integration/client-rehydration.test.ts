@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { TestEnvironment, waitForCondition, WebSocketTestClient } from '../utils/test-helpers.js';
+import { TestEnvironment, waitForCondition, WebSocketTestClient, TestDataFactory } from '../utils/test-helpers.js';
 import type { ConversationEvent, ThoughtEntry } from '$lib/types.js';
 
 describe('Client Rehydration', () => {
@@ -53,7 +53,7 @@ describe('Client Rehydration', () => {
     
     // Create some state
     const turnId = await client.startTurn();
-    await client.addTrace(turnId, { type: 'thought', content: 'Test thought' } as Partial<ThoughtEntry>);
+    await client.addTrace(turnId, TestDataFactory.createTraceEntryPartial('thought', 'Test thought'));
     await client.completeTurn(turnId, 'Test message');
     
     // Wait for turn completion
