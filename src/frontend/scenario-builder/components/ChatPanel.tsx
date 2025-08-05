@@ -11,9 +11,14 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   onSendMessage: (message: string) => void;
   isLoading: boolean;
+  onStop?: () => void;
+  lastUserMessage?: string;
+  selectedModel: string;
+  onModelChange: (model: string) => void;
+  availableProviders: Array<{ name: string; models: string[] }>;
 }
 
-export function ChatPanel({ messages, onSendMessage, isLoading }: ChatPanelProps) {
+export function ChatPanel({ messages, onSendMessage, isLoading, onStop, lastUserMessage, selectedModel, onModelChange, availableProviders }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -21,6 +26,13 @@ export function ChatPanel({ messages, onSendMessage, isLoading }: ChatPanelProps
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
   }, [messages]);
+  
+  // Restore input when loading is cancelled
+  useEffect(() => {
+    if (!isLoading && lastUserMessage && input === '') {
+      setInput(lastUserMessage);
+    }
+  }, [isLoading, lastUserMessage]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +52,29 @@ export function ChatPanel({ messages, onSendMessage, isLoading }: ChatPanelProps
   return (
     <div className="chat-panel">
       <div className="chat-header">
-        Scenario Builder Assistant
+        <div className="chat-header-title">Scenario Builder Assistant</div>
+        {availableProviders.length > 0 && (
+          <div className="chat-header-model-selector">
+            <label htmlFor="model-select" className="model-label">Model:</label>
+            <select
+              id="model-select"
+              className="model-select"
+              value={selectedModel}
+              onChange={(e) => onModelChange(e.target.value)}
+              disabled={isLoading}
+            >
+              {availableProviders.map(provider => (
+                <optgroup key={provider.name} label={provider.name}>
+                  {provider.models.map(model => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       <div className="chat-messages">
@@ -73,6 +107,13 @@ export function ChatPanel({ messages, onSendMessage, isLoading }: ChatPanelProps
             </div>
           ))
         )}
+        {isLoading && (
+          <div className="chat-message assistant loading">
+            <div className="message-bubble">
+              <span className="loading-dots">Thinking</span>
+            </div>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
 
@@ -86,13 +127,23 @@ export function ChatPanel({ messages, onSendMessage, isLoading }: ChatPanelProps
             onChange={(e) => setInput(e.target.value)}
             disabled={isLoading}
           />
-          <button
-            type="submit"
-            className="chat-send-btn"
-            disabled={!input.trim() || isLoading}
-          >
-            Send
-          </button>
+          {isLoading && onStop ? (
+            <button
+              type="button"
+              className="chat-stop-btn"
+              onClick={onStop}
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className="chat-send-btn"
+              disabled={!input.trim() || isLoading}
+            >
+              Send
+            </button>
+          )}
         </form>
       </div>
     </div>

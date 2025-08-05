@@ -19,18 +19,22 @@
     "typecheck:tests": "tsc --project tsconfig.tests.json"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.1",
     "@types/marked": "^6.0.0",
     "bun-plugin-tailwind": "^0.0.15",
     "events": "^3.3.0",
     "hono": "^4.8.9",
     "marked": "^16.1.1",
     "openai": "^5.11.0",
+    "react-router-dom": "^7.7.1",
     "uuid": "^11.1.0",
+    "zod": "^3.23.8",
     "zustand": "^5.0.7"
   },
   "devDependencies": {
     "@types/bun": "^1.2.19",
     "@types/node": "^24.1.0",
+    "@types/react-router-dom": "^5.3.3",
     "@types/uuid": "^10.0.0",
     "autoprefixer": "^10.4.21",
     "bun-types": "^1.2.19",

@@ -26,13 +26,36 @@ export function StructuredView({ config }: StructuredViewProps) {
       <div className="tools-list">
         {tools.map((tool, index) => {
           const isTerminal = !!tool.endsConversation;
-          const toolType = isTerminal ? (tool.toolName.toLowerCase().includes('success') ? 'success' : 'failure') : 'ongoing';
+          let toolType = 'ongoing';
+          let statusText = 'Ongoing';
+          
+          if (isTerminal) {
+            // Use conversationEndStatus if specified, otherwise infer from tool name
+            if (tool.conversationEndStatus) {
+              toolType = tool.conversationEndStatus;
+              statusText = tool.conversationEndStatus.charAt(0).toUpperCase() + tool.conversationEndStatus.slice(1);
+            } else {
+              // Fallback to name-based detection
+              const toolNameLower = tool.toolName.toLowerCase();
+              if (toolNameLower.includes('success') || toolNameLower.includes('approval') || toolNameLower.includes('approve')) {
+                toolType = 'success';
+                statusText = 'Success';
+              } else if (toolNameLower.includes('failure') || toolNameLower.includes('denial') || toolNameLower.includes('deny') || toolNameLower.includes('noslots')) {
+                toolType = 'failure';
+                statusText = 'Failure';
+              } else {
+                toolType = 'neutral';
+                statusText = 'Neutral';
+              }
+            }
+          }
+          
           return (
             <div key={index} className="tool-item">
               <div className="tool-name">
                 {tool.toolName}
-                <span className={`tool-type ${toolType}`}>
-                  {isTerminal ? 'Terminal' : 'Ongoing'}
+                <span className={`tool-type tool-status-${toolType}`}>
+                  {isTerminal ? `Terminal (${statusText})` : 'Ongoing'}
                 </span>
               </div>
               <div className="tool-description">{tool.description}</div>

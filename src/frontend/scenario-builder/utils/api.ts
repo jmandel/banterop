@@ -1,4 +1,4 @@
-import type { ScenarioConfiguration, CreateConversationRequest, CreateConversationResponse } from '$lib/types.js';
+import type { ScenarioConfiguration, CreateConversationRequest, CreateConversationResponse, LLMRequest, LLMResponse } from '$lib/types.js';
 
 interface ChatMessage {
   id: string;
@@ -108,6 +108,27 @@ export const api = {
     const response = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/start`, {
       method: 'POST'
     });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return response.json();
+  },
+  
+  async generateLLM(request: LLMRequest, signal?: AbortSignal) {
+    const response = await fetch(`${API_BASE_URL}/api/llm/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+      signal
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return response.json();
+  },
+  
+  async getLLMConfig() {
+    const response = await fetch(`${API_BASE_URL}/api/llm/config`);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
