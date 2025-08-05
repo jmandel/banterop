@@ -155,7 +155,7 @@ class TerminalAwareMockLLMProvider extends LLMProvider {
       
     `<scratchpad>Providing status update.</scratchpad>\n\`\`\`json\n{"name": "send_message_to_agent_conversation", "args": {"text": "Your authorization is being processed."}}\n\`\`\``,
       
-    `<scratchpad>Authorization complete, approving request.</scratchpad>\n\`\`\`json\n{"name": "mri_authorization_Success", "args": {"reason": "Conservative therapy requirements met", "authNumber": "AUTH-123", "validityPeriod": "60 days"}}\n\`\`\``
+    `<scratchpad>Authorization complete, approving request.</scratchpad>\n\`\`\`json\n{"name": "mri_authorization_approval", "args": {"reason": "Conservative therapy requirements met", "authNumber": "AUTH-123", "validityPeriod": "60 days"}}\n\`\`\``
   ];
 
   constructor() {
@@ -197,7 +197,7 @@ class TerminalAwareMockLLMProvider extends LLMProvider {
             notes: "Persistent anterior instability with functional activities" 
           }
         },
-        "mri_authorization_Success": {
+        "mri_authorization_approval": {
           reasoning: "Authorization approved based on meeting conservative therapy requirements.",
           output: { authNumber: "AUTH-123", status: "approved", validity: "60 days" }
         }
@@ -469,7 +469,7 @@ describe('Integration Test: Scenario-Driven Agent Conversation', () => {
       
         `<scratchpad>Now I'll send the policy document to the patient.</scratchpad>\n\`\`\`json\n{"name": "send_message_to_agent_conversation", "args": {"text": "I've found the relevant medical policy. Please see the attached document for the full requirements.", "attachments_to_include": ["doc_policy_mri_knee_2024"]}}\n\`\`\``,
       
-        `<scratchpad>Authorization complete with policy provided.</scratchpad>\n\`\`\`json\n{"name": "mri_authorization_Success", "args": {"reason": "Policy reviewed and requirements met", "authNumber": "AUTH-456"}}\n\`\`\``
+        `<scratchpad>Authorization complete with policy provided.</scratchpad>\n\`\`\`json\n{"name": "mri_authorization_approval", "args": {"reason": "Policy reviewed and requirements met", "authNumber": "AUTH-456"}}\n\`\`\``
       ];
 
       async generateContent(request: LLMRequest): Promise<LLMResponse> {

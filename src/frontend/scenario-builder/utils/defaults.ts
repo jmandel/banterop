@@ -28,11 +28,12 @@ export function createDefaultScenario(): ScenarioConfiguration {
         goals: ['List the high-level objectives for this agent.'],
         tools: [
           {
-            toolName: 'perform_action_Success',
+            toolName: 'complete_action',
             description: 'A tool that represents a successful conclusion to the workflow.',
             inputSchema: { type: 'object', properties: { reason: { type: 'string' } } },
             synthesisGuidance: 'Return a confirmation message indicating success.',
-            endsConversation: true
+            endsConversation: true,
+            conversationEndStatus: 'success'
           }
         ],
         knowledgeBase: {

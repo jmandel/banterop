@@ -1,4 +1,4 @@
-import type { ScenarioConfiguration } from '$lib/types.js';
+import type { ScenarioConfiguration, CreateConversationRequest, CreateConversationResponse } from '$lib/types.js';
 
 interface ChatMessage {
   id: string;
@@ -8,10 +8,15 @@ interface ChatMessage {
 }
 
 // API base URL - configurable for development vs production
-const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL || 'http://localhost:3001';
+// When served via Bun's HTML dev server, import.meta.env may not be available
+const API_BASE_URL = import.meta.env?.API_BASE_URL || 'http://localhost:3001';
 
 // API client functions
 export const api = {
+  getBaseUrl() {
+    return API_BASE_URL;
+  },
+  
   async getScenarios() {
     const response = await fetch(`${API_BASE_URL}/api/scenarios`);
     if (!response.ok) {
@@ -79,6 +84,29 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, history })
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return response.json();
+  },
+  
+  async createConversation(config: CreateConversationRequest) {
+    const response = await fetch(`${API_BASE_URL}/api/conversations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data: CreateConversationResponse = await response.json();
+    return { success: true, data };
+  },
+  
+  async startConversation(conversationId: string) {
+    const response = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/start`, {
+      method: 'POST'
     });
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);

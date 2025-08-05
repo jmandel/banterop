@@ -186,6 +186,25 @@ export interface Tool {
    * Bad examples: request_more_info, put_on_hold, ask_for_clarification
    */
   endsConversation?: boolean;
+
+  /**
+   * Specifies the outcome type when this tool ends the conversation.
+   * Used in conjunction with endsConversation: true to indicate whether
+   * the conversation ended with a successful outcome, failure, or neutral result.
+   * 
+   * - 'success': The request was approved, granted, or successfully completed
+   *   Examples: authorization approved, appointment scheduled, coverage confirmed
+   * 
+   * - 'failure': The request was denied, rejected, or could not be fulfilled
+   *   Examples: authorization denied, no appointments available, coverage denied
+   * 
+   * - 'neutral': The conversation ended without a clear success/failure outcome
+   *   Examples: information provided, referral to another department, request withdrawn
+   * 
+   * This field should only be set when endsConversation is true.
+   * If not specified for terminal tools, the outcome is considered neutral.
+   */
+  conversationEndStatus?: 'success' | 'failure' | 'neutral';
 }
 
 
@@ -304,14 +323,16 @@ const infliximabScenarioFinal: ScenarioConfiguration = {
           description: "Approves the prior authorization request. This is a final decision that concludes the conversation.",
           inputSchema: { type: 'object', properties: { authorization_number: { type: 'string' }, approval_details: { type: 'string' } } },
           synthesisGuidance: "Act as the authorization system. Generate a formal approval letter with the authorization number, effective dates, and any conditions. Include member cost-sharing information based on their benefit status.",
-          endsConversation: true
+          endsConversation: true,
+          conversationEndStatus: 'success'
         },
         {
           toolName: "deny_authorization",
           description: "Denies the prior authorization request with specific policy-based reasons. This is a final decision that concludes the conversation.",
           inputSchema: { type: 'object', properties: { denial_reasons: { type: 'string' }, appeal_rights: { type: 'string' } } },
           synthesisGuidance: "Act as the denial notification system. Generate a formal denial letter citing specific policy criteria not met. Include appeal rights and timelines as required by regulations.",
-          endsConversation: true
+          endsConversation: true,
+          conversationEndStatus: 'failure'
         }
       ],
       knowledgeBase: {

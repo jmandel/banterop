@@ -7,6 +7,7 @@ import { HonoWebSocketJsonRpcServer } from './websocket/hono-websocket-server.js
 import { seedDatabase } from './db/seed.js';
 import { createScenarioRoutes } from './api/scenarios.js';
 import { createLLMRoutes } from './api/llm.js';
+import { createBridgeRoutes } from './api/bridge.js';
 import { createLLMProvider } from '$llm/factory.js';
 import { LLMProviderConfig, LLMProvider } from 'src/types/llm.types.js';
 import {
@@ -93,6 +94,8 @@ apiApp.route('/scenarios', createScenarioRoutes(orchestrator.getDbInstance()));
 console.log('[Backend] Mounting LLM routes at /llm');
 // Inject the single LLM provider instance into the LLM API routes.
 apiApp.route('/llm', createLLMRoutes(orchestrator.getDbInstance(), defaultLlmProvider));
+console.log('[Backend] Mounting bridge routes at /bridge');
+apiApp.route('/bridge', createBridgeRoutes(orchestrator));
 console.log('[Backend] All routes mounted successfully');
 
 // --- 6. Core Conversation Endpoints ---
@@ -389,6 +392,7 @@ console.log('[Backend]   - /api/ws (WebSocket)');
 console.log('[Backend]   - /api/scenarios (HTTP)');
 console.log('[Backend]   - /api/conversations (HTTP)');
 console.log('[Backend]   - /api/llm (HTTP)');
+console.log('[Backend]   - /api/bridge/mcp (HTTP Streaming)');
 
 // --- 8. Export server configuration for testing ---
 console.log('[Backend] Creating server configuration for export');

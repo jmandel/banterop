@@ -9,6 +9,8 @@ interface ScenarioEditorProps {
   onViewModeChange: (mode: 'structured' | 'rawJson') => void;
   onConfigChange: (config: ScenarioConfiguration) => void;
   scenarioName: string;
+  scenarioId?: string;
+  isViewMode?: boolean;
 }
 
 export function ScenarioEditor({
@@ -16,14 +18,14 @@ export function ScenarioEditor({
   viewMode,
   onViewModeChange,
   onConfigChange,
-  scenarioName
+  scenarioName,
+  scenarioId,
+  isViewMode
 }: ScenarioEditorProps) {
   return (
     <div className="editor-panel">
       <div className="editor-header">
-        <h2 style={{ fontSize: '20px', fontWeight: 600, color: '#1a1a1a' }}>
-          {scenarioName}
-        </h2>
+        <h2 className="editor-title">{scenarioName}</h2>
         <div className="view-toggle">
           <button
             className={`toggle-btn ${viewMode === 'structured' ? 'active' : ''}`}
@@ -40,11 +42,13 @@ export function ScenarioEditor({
         </div>
       </div>
 
-      {viewMode === 'structured' ? (
-        <StructuredView config={config} />
-      ) : (
-        <RawJsonEditor config={config} onChange={onConfigChange} />
-      )}
+      <div className="editor-body">
+        {viewMode === 'structured' ? (
+          <StructuredView config={config} />
+        ) : (
+          <RawJsonEditor config={config} onChange={onConfigChange} />
+        )}
+      </div>
     </div>
   );
 }

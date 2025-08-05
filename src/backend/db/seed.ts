@@ -180,7 +180,7 @@ export function seedDatabase(db: ConversationDatabase): void {
             synthesisGuidance: "Create detailed case notes documenting every aspect of the review. Include all documentation reviewed, any missing or unclear items, specific dates and details verified, and areas where additional clarification might strengthen the case. Be thorough in documenting the decision rationale with reference to each policy criterion."
           },
           {
-            toolName: "mri_authorization_Success",
+            toolName: "mri_authorization_approval",
             description: "Terminal tool: Approve the MRI authorization request.",
             inputSchema: { 
               type: "object",
@@ -192,10 +192,11 @@ export function seedDatabase(db: ConversationDatabase): void {
               } 
             },
             synthesisGuidance: "Generate auth number (e.g., PA2024070123456), valid for 60 days, include member cost-share info.",
-            endsConversation: true
+            endsConversation: true,
+            conversationEndStatus: 'success'
           },
           {
-            toolName: "mri_authorization_Denial",
+            toolName: "mri_authorization_denial",
             description: "Terminal tool: Deny the MRI authorization request.",
             inputSchema: { 
               type: "object",
@@ -207,7 +208,8 @@ export function seedDatabase(db: ConversationDatabase): void {
               } 
             },
             synthesisGuidance: "Generate a clear denial with specific unmet criteria and appeal instructions.",
-            endsConversation: true
+            endsConversation: true,
+            conversationEndStatus: 'failure'
           }
         ],
         knowledgeBase: {
@@ -352,14 +354,16 @@ export function seedDatabase(db: ConversationDatabase): void {
             description: "Terminal tool: Confirm and book the appointment.",
             inputSchema: { type: "object", properties: { dateTime: { type: "string" }, providerName: { type: "string" }, visitType: { type: "string" }, preparationInstructions: { type: "string" } } },
             synthesisGuidance: "Generate a comprehensive appointment confirmation including date/time, provider, location, preparation instructions, and what to bring.",
-            endsConversation: true
+            endsConversation: true,
+            conversationEndStatus: 'success'
           },
           {
             toolName: "no_availability",
             description: "Terminal tool: No appointments available within requested timeframe.",
             inputSchema: { type: "object", properties: { reason: { type: "string" }, alternativeOptions: { type: "string" }, waitlistOption: { type: "boolean" } } },
             synthesisGuidance: "Explain lack of availability and provide alternative options such as waitlist, different timeframes, or urgent care options if clinically appropriate.",
-            endsConversation: true
+            endsConversation: true,
+            conversationEndStatus: 'failure'
           }
         ],
         knowledgeBase: {

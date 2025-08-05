@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { applyPatch } from 'fast-json-patch';
 import type { ScenarioConfiguration, ScenarioItem, JSONPatchOperation } from '$lib/types.js';
-import { ScenarioList } from './ScenarioList.js';
 import { ChatPanel } from './ChatPanel.js';
 import { ScenarioEditor } from './ScenarioEditor.js';
 import { SaveBar } from './SaveBar.js';
@@ -27,6 +27,10 @@ interface BuilderState {
 }
 
 export function ScenarioBuilderPage() {
+  const { scenarioId } = useParams<{ scenarioId?: string }>();
+  const navigate = useNavigate();
+  const isViewMode = window.location.hash.includes('/view');
+  
   const [state, setState] = useState<BuilderState>({
     scenarios: [],
     activeScenarioId: null,
@@ -42,6 +46,21 @@ export function ScenarioBuilderPage() {
   useEffect(() => {
     loadScenarios();
   }, []);
+
+  // Handle route changes
+  useEffect(() => {
+    if (scenarioId && scenarioId !== state.activeScenarioId) {
+      selectScenario(scenarioId);
+    } else if (!scenarioId && state.activeScenarioId) {
+      // Clear selection when navigating to /scenarios
+      setState(prev => ({
+        ...prev,
+        activeScenarioId: null,
+        pendingConfig: null,
+        chatHistory: []
+      }));
+    }
+  }, [scenarioId]);
 
   const loadScenarios = async () => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
@@ -90,6 +109,10 @@ export function ScenarioBuilderPage() {
     }
   };
 
+  const handleScenarioSelect = (id: string) => {
+    navigate(`/scenarios/${id}/edit`);
+  };
+
   const createNewScenario = async () => {
     const name = prompt('Enter scenario name:');
     if (!name) return;
@@ -99,7 +122,7 @@ export function ScenarioBuilderPage() {
       const response = await api.createScenario(name, config);
       if (response.success) {
         await loadScenarios();
-        selectScenario(response.data.id);
+        navigate(`/scenarios/${response.data.id}/edit`);
       } else {
         throw new Error(response.error || 'Failed to create scenario');
       }
@@ -263,39 +286,53 @@ export function ScenarioBuilderPage() {
   const hasUnsavedChanges = state.pendingConfig !== null;
 
   return (
-    <div className="app-container">
-      <ScenarioList
-        scenarios={state.scenarios}
-        activeScenarioId={state.activeScenarioId}
-        onSelect={selectScenario}
-        onCreate={createNewScenario}
-        onDelete={deleteScenario}
-      />
-      
-      <div className="main-content">
-        {activeScenario && currentConfig ? (
-          <>
+    <div className="run-container">
+      {activeScenario && currentConfig ? (
+        <>
+          <div className="run-header">
+            <div className="header-title-section">
+              <h1 className="run-title">{activeScenario.config.metadata.title || activeScenario.name}</h1>
+              <p className="run-description">
+                {activeScenario.config.metadata.description || 'Configure and test interoperability conversations'}
+              </p>
+            </div>
+            <div className="header-actions">
+              {state.activeScenarioId && (
+                <>
+                  <a href={`#/scenarios/${state.activeScenarioId}/run`} className="btn-action-header btn-run-header">
+                    Run
+                  </a>
+                  <a href={`#/scenarios/${state.activeScenarioId}/run?mode=plugin`} className="btn-action-header btn-plugin-header">
+                    Plug In
+                  </a>
+                </>
+              )}
+            </div>
+          </div>
+          <div className="run-content">
             <ScenarioEditor
               config={currentConfig}
               viewMode={state.viewMode}
               onViewModeChange={toggleViewMode}
               onConfigChange={updateConfigFromEditor}
               scenarioName={activeScenario.name}
+              scenarioId={state.activeScenarioId}
+              isViewMode={isViewMode}
             />
             <ChatPanel
               messages={state.chatHistory}
               onSendMessage={sendMessage}
               isLoading={false}
             />
-          </>
-        ) : (
-          <div className="editor-panel">
-            <div className="loading">
-              {state.isLoading ? 'Loading...' : 'Select a scenario to begin'}
-            </div>
           </div>
-        )}
-      </div>
+        </>
+      ) : (
+        <div className="empty-state">
+          <p className="empty-state-text">
+            {state.isLoading ? 'Loading scenario...' : 'Scenario not found'}
+          </p>
+        </div>
+      )}
 
       {hasUnsavedChanges && (
         <SaveBar
@@ -306,7 +343,7 @@ export function ScenarioBuilderPage() {
       )}
 
       {state.error && (
-        <div className="error">
+        <div className="error-toast">
           {state.error}
         </div>
       )}

@@ -19,7 +19,7 @@ export function ChatPanel({ messages, onSendMessage, isLoading }: ChatPanelProps
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
   }, [messages]);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -45,19 +45,13 @@ export function ChatPanel({ messages, onSendMessage, isLoading }: ChatPanelProps
 
       <div className="chat-messages">
         {messages.length === 0 ? (
-          <div style={{ textAlign: 'center', color: '#666', padding: '40px' }}>
-            <p>Welcome to the Scenario Builder!</p>
-            <p style={{ marginTop: '16px', fontSize: '14px' }}>
+          <div className="chat-welcome">
+            <p className="welcome-title">Welcome to the Scenario Builder!</p>
+            <p className="welcome-subtitle">
               I can help you modify your scenario through natural conversation.
               Try asking me to:
             </p>
-            <ul style={{ 
-              textAlign: 'left', 
-              display: 'inline-block', 
-              marginTop: '16px',
-              fontSize: '14px',
-              lineHeight: '1.8'
-            }}>
+            <ul className="welcome-list">
               <li>Update agent information (principal, goals, situation)</li>
               <li>Add or modify tools for any agent</li>
               <li>Change agent knowledge base entries</li>
