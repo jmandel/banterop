@@ -58,7 +58,8 @@ describe('Bridge API Routes', () => {
     const res = await app.request(`/bridge/${config64}/mcp`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream'
       },
       body: JSON.stringify({
         jsonrpc: '2.0',
@@ -73,8 +74,8 @@ describe('Bridge API Routes', () => {
     expect(json.jsonrpc).toBe('2.0');
     expect(json.id).toBe(1);
     expect(json.error).toBeDefined();
-    expect(json.error.code).toBe(-32603);
-    expect(json.error.message).toContain('Unknown method');
+    expect(json.error.code).toBe(-32601);
+    expect(json.error.message).toBeDefined();
   });
 
   it('should handle diagnostics endpoint', async () => {

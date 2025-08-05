@@ -264,8 +264,13 @@ export function ScenarioConfiguredPage() {
         <h2 className="text-lg font-semibold text-gray-900 mb-3">Configuration Details</h2>
         <div className="space-y-2 text-sm">
           <div>
-            <span className="font-medium text-gray-700">Scenario ID:</span>{' '}
-            <span className="text-gray-900">{config?.metadata?.scenarioId}</span>
+            <span className="font-medium text-gray-700">Scenario:</span>{' '}
+            <a 
+              href={`/scenario-builder#/scenarios/${config?.metadata?.scenarioId}`}
+              className="text-blue-600 hover:text-blue-700 hover:underline"
+            >
+              {config?.metadata?.scenarioId}
+            </a>
           </div>
           <div>
             <span className="font-medium text-gray-700">Agents:</span>

@@ -53,7 +53,6 @@ export function ChatPanel({ messages, onSendMessage, isLoading, onStop, lastUser
   return (
     <div className="rounded-lg border border-gray-200 bg-white flex flex-col h-full overflow-hidden">
       <div className="border-b bg-white px-3 py-2 flex items-center justify-between">
-        <div className="text-sm font-semibold">Assistant</div>
         {availableProviders.length > 0 && (
           <div className="flex items-center gap-2">
             <label htmlFor="model-select" className="text-xs text-gray-600">Model:</label>

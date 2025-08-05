@@ -11,6 +11,32 @@ describe('MCP Bridge Unit Tests', () => {
   let config: CreateConversationRequest;
   let config64: string;
   
+  // Helper function to make MCP requests
+  const makeMcpRequest = async (body: any): Promise<any> => {
+    const mockReq = {
+      method: 'POST',
+      headers: { 
+        'content-type': 'application/json',
+        'accept': 'application/json, text/event-stream'
+      }
+    };
+    
+    let responseData: any = null;
+    const mockRes = {
+      on: mock(() => {}),
+      writeHead: mock(function() { return this; }),
+      end: mock(function(data: string) { 
+        if (data) {
+          responseData = JSON.parse(data); 
+        }
+        return this;
+      })
+    };
+    
+    await mcpBridge.handleRequest(mockReq, mockRes, body);
+    return responseData;
+  };
+  
   beforeEach(() => {
     // Mock LLM provider that never gets called in unit tests
     const mockLLMProvider = {
@@ -51,14 +77,14 @@ describe('MCP Bridge Unit Tests', () => {
   });
   
   test('should list available MCP tools', async () => {
-    const request = {
+    const requestBody = {
       jsonrpc: '2.0',
       id: 'list-1',
       method: 'tools/list',
       params: {}
     };
     
-    const response = await mcpBridge.handleRequest(request);
+    const response = await makeMcpRequest(requestBody);
     
     expect(response.jsonrpc).toBe('2.0');
     expect(response.id).toBe('list-1');
@@ -81,7 +107,7 @@ describe('MCP Bridge Unit Tests', () => {
       }
     };
     
-    const response = await mcpBridge.handleRequest(request);
+    const response = await makeMcpRequest(request);
     
     expect(response.jsonrpc).toBe('2.0');
     expect(response.id).toBe('begin-1');
@@ -111,7 +137,7 @@ describe('MCP Bridge Unit Tests', () => {
       }
     };
     
-    const response = await mcpBridge.handleRequest(request);
+    const response = await makeMcpRequest(request);
     
     expect(response.jsonrpc).toBe('2.0');
     expect(response.id).toBe('send-no-conv');
@@ -121,7 +147,7 @@ describe('MCP Bridge Unit Tests', () => {
   
   test('should handle wait_for_reply without pending reply', async () => {
     // First create a conversation
-    const beginResponse = await mcpBridge.handleRequest({
+    const beginResponse = await makeMcpRequest({
       jsonrpc: '2.0',
       id: 'begin-2',
       method: 'tools/call',
@@ -141,7 +167,7 @@ describe('MCP Bridge Unit Tests', () => {
       }
     };
     
-    const response = await mcpBridge.handleRequest(waitRequest);
+    const response = await makeMcpRequest(waitRequest);
     
     expect(response.jsonrpc).toBe('2.0');
     expect(response.id).toBe('wait-no-pending');
@@ -157,7 +183,7 @@ describe('MCP Bridge Unit Tests', () => {
       params: {}
     };
     
-    const response = await mcpBridge.handleRequest(request);
+    const response = await makeMcpRequest(request);
     
     expect(response.jsonrpc).toBe('2.0');
     expect(response.id).toBe('unknown-1');
@@ -177,7 +203,7 @@ describe('MCP Bridge Unit Tests', () => {
       }
     };
     
-    const response = await mcpBridge.handleRequest(request);
+    const response = await makeMcpRequest(request);
     
     expect(response.jsonrpc).toBe('2.0');
     expect(response.id).toBe('unknown-tool');
@@ -248,7 +274,7 @@ describe('MCP Bridge Unit Tests', () => {
   
   test('should handle send_message_to_chat_thread successfully', async () => {
     // First begin a chat thread
-    const beginResponse = await mcpBridge.handleRequest({
+    const beginResponse = await makeMcpRequest({
       jsonrpc: '2.0',
       id: 'begin-send-test',
       method: 'tools/call',
@@ -275,7 +301,7 @@ describe('MCP Bridge Unit Tests', () => {
     };
     
     // The send will timeout because no other agent responds in tests
-    const response = await mcpBridge.handleRequest(sendRequest);
+    const response = await makeMcpRequest(sendRequest);
     
     expect(response.jsonrpc).toBe('2.0');
     expect(response.id).toBe('send-success');
@@ -288,7 +314,7 @@ describe('MCP Bridge Unit Tests', () => {
   
   test('should handle send_message with attachments', async () => {
     // First begin a chat thread
-    const beginResponse = await mcpBridge.handleRequest({
+    const beginResponse = await makeMcpRequest({
       jsonrpc: '2.0',
       id: 'begin-attach',
       method: 'tools/call',
@@ -321,7 +347,7 @@ describe('MCP Bridge Unit Tests', () => {
       }
     };
     
-    const response = await mcpBridge.handleRequest(sendRequest);
+    const response = await makeMcpRequest(sendRequest);
     
     expect(response.jsonrpc).toBe('2.0');
     expect(response.id).toBe('send-attach');

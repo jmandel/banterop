@@ -3,10 +3,13 @@ import type { ScenarioConfiguration, Tool, AgentConfiguration } from '$lib/types
 
 interface StructuredViewProps {
   config: ScenarioConfiguration;
+  onConfigChange?: (config: ScenarioConfiguration) => void;
+  isReadOnly?: boolean;
+  scenarioId?: string;
+  isEditMode?: boolean;
 }
 
-export function StructuredView({ config }: StructuredViewProps) {
-
+export function StructuredView({ config, onConfigChange, isReadOnly = true, scenarioId, isEditMode }: StructuredViewProps) {
   const renderJsonPreview = (data: any, label: string) => {
     if (!data || Object.keys(data).length === 0) {
       return <div className="text-gray-500 italic">No {label} defined</div>;
@@ -117,6 +120,36 @@ export function StructuredView({ config }: StructuredViewProps) {
 
   return (
     <div className="space-y-4">
+
+      <div className="rounded-md border border-gray-200 bg-white p-4">
+        <h3 className="text-sm font-semibold text-slate-700 mb-3">Metadata</h3>
+        <div className="space-y-3">
+          <div>
+            <div className="text-xs font-medium text-gray-600 mb-1">Title</div>
+            <div className="text-sm">{config.metadata.title}</div>
+          </div>
+          <div>
+            <div className="text-xs font-medium text-gray-600 mb-1">Description</div>
+            <div className="text-sm">{config.metadata.description || <span className="text-gray-500 italic">No description</span>}</div>
+          </div>
+          <div>
+            <div className="text-xs font-medium text-gray-600 mb-1">Tags</div>
+            <div className="flex flex-wrap gap-2 items-center">
+              {config.metadata.tags?.map((tag, index) => (
+                <span 
+                  key={index} 
+                  className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full"
+                >
+                  {tag}
+                </span>
+              ))}
+              {(!config.metadata.tags || config.metadata.tags.length === 0) && (
+                <span className="text-gray-500 italic text-xs">No tags</span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div className="rounded-md border border-gray-200 bg-white p-4">
         <h3 className="text-sm font-semibold text-slate-700 mb-3">Narrative</h3>

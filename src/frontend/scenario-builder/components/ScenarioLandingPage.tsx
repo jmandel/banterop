@@ -193,30 +193,30 @@ export function ScenarioLandingPage() {
                 </div>
 
                 <div className="flex gap-2">
-                  <button
-                    className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
-                    onClick={() => navigate(`/scenarios/${scenario.id}/view`)}
+                  <a
+                    href={`#/scenarios/${scenario.id}`}
+                    className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 inline-block text-center"
                   >
                     View
-                  </button>
-                  <button
-                    className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
-                    onClick={() => navigate(`/scenarios/${scenario.id}/edit`)}
+                  </a>
+                  <a
+                    href={`#/scenarios/${scenario.id}/edit`}
+                    className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 inline-block text-center"
                   >
                     Edit
-                  </button>
-                  <button
-                    className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
-                    onClick={() => navigate(`/scenarios/${scenario.id}/run`)}
+                  </a>
+                  <a
+                    href={`#/scenarios/${scenario.id}/run`}
+                    className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 inline-block text-center"
                   >
                     Run
-                  </button>
-                  <button
-                    className="px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700"
-                    onClick={() => navigate(`/scenarios/${scenario.id}/run?mode=plugin`)}
+                  </a>
+                  <a
+                    href={`#/scenarios/${scenario.id}/run?mode=plugin`}
+                    className="px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 inline-block text-center"
                   >
                     Plug In
-                  </button>
+                  </a>
                 </div>
               </div>
             ))

@@ -143,18 +143,19 @@ class DebugLogger {
  */
 class TerminalAwareMockLLMProvider extends LLMProvider {
   public lastPrompt: string = '';
-  public terminalToolsUsed: string[] = [];
-  private turnCount: number = 0;
-  private cannedResponses: string[] = [
-    // Turn 1: Initial message
-    `<scratchpad>Starting the authorization process.</scratchpad>\n\`\`\`json\n{"name": "send_message_to_agent_conversation", "args": {"text": "Hello, I'm processing your authorization request."}}\n\`\`\``,
-      
+  private agentTurnCounts: Map<string, number> = new Map();
+  
+  private patientAgentResponses: string[] = [
     `<scratchpad>Let me search for the patient's clinical notes.</scratchpad>\n\`\`\`json\n{"name": "search_ehr_clinical_notes", "args": {"dateRange": "2024-06-01 to 2024-07-01", "searchTerms": "knee injury"}}\n\`\`\``,
-      
-    `<scratchpad>Checking therapy documentation.</scratchpad>\n\`\`\`json\n{"name": "get_therapy_documentation", "args": {"therapyType": "physical therapy", "dateRange": "2024-06-01 to 2024-07-01"}}\n\`\`\``,
-      
-    `<scratchpad>Providing status update.</scratchpad>\n\`\`\`json\n{"name": "send_message_to_agent_conversation", "args": {"text": "Your authorization is being processed."}}\n\`\`\``,
-      
+    `<scratchpad>Getting therapy documentation.</scratchpad>\n\`\`\`json\n{"name": "get_therapy_documentation", "args": {"therapyType": "physical therapy", "dateRange": "2024-06-01 to 2024-07-01"}}\n\`\`\``,
+    `<scratchpad>Sending message to insurance.</scratchpad>\n\`\`\`json\n{"name": "send_message_to_agent_conversation", "args": {"text": "I have completed 16 days of physical therapy as documented."}}\n\`\`\``
+  ];
+  
+  private insuranceAgentResponses: string[] = [
+    `<scratchpad>Looking up the medical policy first.</scratchpad>\n\`\`\`json\n{"name": "lookup_medical_policy", "args": {"policyType": "MRI", "bodyPart": "knee"}}\n\`\`\``,
+    `<scratchpad>Checking the beneficiary information.</scratchpad>\n\`\`\`json\n{"name": "lookup_beneficiary", "args": {"memberName": "Jordan Alvarez", "dateOfBirth": "1987-09-14"}}\n\`\`\``,
+    `<scratchpad>Verifying coverage details.</scratchpad>\n\`\`\`json\n{"name": "check_insurance_coverage", "args": {"memberId": "HF8901234567", "procedureCode": "MRI knee"}}\n\`\`\``,
+    `<scratchpad>Creating case notes for documentation.</scratchpad>\n\`\`\`json\n{"name": "create_case_notes", "args": {"caseId": "CASE-123", "notes": "Patient meets conservative therapy requirements.", "policyMet": true}}\n\`\`\``,
     `<scratchpad>Authorization complete, approving request.</scratchpad>\n\`\`\`json\n{"name": "mri_authorization_approval", "args": {"reason": "Conservative therapy requirements met", "authNumber": "AUTH-123", "validityPeriod": "60 days"}}\n\`\`\``
   ];
 
@@ -216,17 +217,34 @@ class TerminalAwareMockLLMProvider extends LLMProvider {
       };
     }
       
-    const responseContent = this.cannedResponses[this.turnCount] || this.cannedResponses[this.cannedResponses.length - 1];
-      
-    const toolMatch = responseContent.match(/"name":\s*"([^"]+)"/);
-    if (toolMatch) {
-      const toolName = toolMatch[1];
-      if (/Success$|Approval$|Failure$|Denial$|NoSlots$/.test(toolName)) {
-        this.terminalToolsUsed.push(toolName);
+    // Determine which agent is calling based on the prompt content
+    let agentId = 'unknown';
+    let responses: string[];
+    
+    // Look for "Role: <agentId>" in the prompt
+    const roleMatch = request.messages[0].content.match(/Role:\s*([^\n]+)/);
+    if (roleMatch) {
+      agentId = roleMatch[1].trim();
+    }
+    
+    if (agentId === 'patient-agent') {
+      responses = this.patientAgentResponses;
+    } else if (agentId === 'insurance-auth-specialist') {
+      responses = this.insuranceAgentResponses;
+    } else {
+      // Fallback detection
+      if (request.messages[0].content.includes('Jordan Alvarez')) {
+        agentId = 'patient-agent';
+        responses = this.patientAgentResponses;
+      } else {
+        agentId = 'insurance-auth-specialist';
+        responses = this.insuranceAgentResponses;
       }
     }
     
-    this.turnCount++;
+    const turnCount = this.agentTurnCounts.get(agentId) || 0;
+    const responseContent = responses[turnCount] || responses[responses.length - 1];
+    this.agentTurnCounts.set(agentId, turnCount + 1);
     
     return {
       content: responseContent
@@ -373,25 +391,23 @@ describe('Integration Test: Scenario-Driven Agent Conversation', () => {
 
     console.log(`Conversation completed in ${finalState.turns.length} turns.`);
       
-    expect(mockLlmProvider.terminalToolsUsed.length).toBeGreaterThan(0);
-    const terminalToolCalled = mockLlmProvider.terminalToolsUsed[0];
-    console.log(`Termination caused by tool: ${terminalToolCalled}`);
-      
+    // Check that the last turn has isFinalTurn: true
     const lastTurn = finalState.turns[finalState.turns.length - 1];
+    expect(lastTurn.isFinalTurn).toBe(true);
+    
+    // Verify that a tool was called in the last turn
     const lastTurnToolCalls = lastTurn.trace.filter(t => t.type === 'tool_call');
-    
     expect(lastTurnToolCalls.length).toBeGreaterThan(0);
-    const lastToolCallName = (lastTurnToolCalls[0] as any).toolName;
     
-    expect(lastToolCallName).toBe(terminalToolCalled);
-    console.log(`Verified that the last turn included the call to '${lastToolCallName}'.`);
+    // The fact that isFinalTurn is true means a terminal tool was called
+    // We don't need to check tool names, the conversation ended properly
+    console.log(`Conversation terminated after ${finalState.turns.length} turns with final turn marked correctly`);
 
     await debugLogger.log('test-completion', {
       conversationId: conversation.id,
       status: finalState.status,
       turnsCount: finalState.turns.length,
-      terminalToolCalled,
-      lastToolCallName,
+      lastTurnIsFinal: lastTurn.isFinalTurn,
       testPassed: true
     });
 

@@ -65,7 +65,8 @@ describe('Bridge API Integration', () => {
         params: {}
       }),
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream'
       }
     });
     
@@ -110,7 +111,8 @@ describe('Bridge API Integration', () => {
         }
       }),
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream'
       }
     });
     
@@ -152,7 +154,8 @@ describe('Bridge API Integration', () => {
         }
       }),
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream'
       }
     });
     
@@ -161,7 +164,7 @@ describe('Bridge API Integration', () => {
     expect(data.jsonrpc).toBe('2.0');
     expect(data.id).toBe('789');
     expect(data.error).toBeDefined();
-    expect(data.error.code).toBe(-32603);
-    expect(data.error.message).toContain('Unknown tool: invalid_tool');
+    expect(data.error.code).toBe(-32602);
+    expect(data.error.message).toContain('Tool invalid_tool not found');
   });
 });

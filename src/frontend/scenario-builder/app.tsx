@@ -20,9 +20,9 @@ function App() {
           {/* Landing page with scenario cards */}
           <Route path="/scenarios" element={<ScenarioLandingPage />} />
           
-          {/* Scenario editing and viewing */}
+          {/* Scenario viewing (default) and editing */}
+          <Route path="/scenarios/:scenarioId" element={<ScenarioBuilderPage />} />
           <Route path="/scenarios/:scenarioId/edit" element={<ScenarioBuilderPage />} />
-          <Route path="/scenarios/:scenarioId/view" element={<ScenarioBuilderPage />} />
           
           {/* Run and plugin routes */}
           <Route path="/scenarios/:scenarioId/run" element={<ScenarioRunPage />} />

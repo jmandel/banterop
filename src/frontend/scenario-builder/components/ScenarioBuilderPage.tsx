@@ -43,7 +43,8 @@ interface BuilderState {
 export function ScenarioBuilderPage() {
   const { scenarioId } = useParams<{ scenarioId?: string }>();
   const navigate = useNavigate();
-  const isViewMode = window.location.hash.includes('/view');
+  const isEditMode = window.location.hash.includes('/edit');
+  const isViewMode = !isEditMode;
   
   const [state, setState] = useState<BuilderState>({
     scenarios: [],
@@ -247,7 +248,9 @@ export function ScenarioBuilderPage() {
     const active = state.scenarios.find(s => s.id === state.activeScenarioId);
     if (!active) return;
 
-    const currentScenario = state.pendingConfig || active.config;
+    // Always clone before patching to avoid in-place mutation
+    const baseScenario = state.pendingConfig || active.config;
+    const currentScenario = JSON.parse(JSON.stringify(baseScenario)); // Deep clone
     
     // Create new abort controller for this request
     const controller = new AbortController();
@@ -365,7 +368,9 @@ export function ScenarioBuilderPage() {
       let nextScenario = currentScenario;
       if (builderResult.patches && builderResult.patches.length > 0) {
         try {
-          nextScenario = applyPatch(currentScenario, builderResult.patches).newDocument as typeof currentScenario;
+          // Use the 4th parameter (false) to prevent mutation
+          const patchResult = applyPatch(currentScenario, builderResult.patches, false, false);
+          nextScenario = patchResult.newDocument as typeof currentScenario;
         } catch (patchErr) {
           const errorMsg = {
             id: `msg_${Date.now() + 2}`,
@@ -415,7 +420,7 @@ export function ScenarioBuilderPage() {
       setState(prev => ({
         ...prev,
         chatHistory: [...prev.chatHistory, assistantMsg],
-        pendingConfig: nextScenario,
+        pendingConfig: nextScenario, // Already a new object from cloning above
         isWaitingForLLM: false
       }));
     } catch (error) {
@@ -482,6 +487,7 @@ export function ScenarioBuilderPage() {
   };
 
   const updateConfigFromEditor = (newConfig: ScenarioConfiguration) => {
+    console.log('[ScenarioBuilderPage] updateConfigFromEditor called, setting pendingConfig');
     setState(prev => ({ ...prev, pendingConfig: newConfig }));
   };
 
@@ -490,35 +496,19 @@ export function ScenarioBuilderPage() {
   };
 
   const activeScenario = state.scenarios.find(s => s.id === state.activeScenarioId);
-  const currentConfig = state.pendingConfig || activeScenario?.config || null;
+  // Use useMemo to ensure currentConfig reference changes when pendingConfig changes
+  const currentConfig = React.useMemo(() => {
+    return state.pendingConfig || activeScenario?.config || null;
+  }, [state.pendingConfig, activeScenario?.config]);
   const hasUnsavedChanges = state.pendingConfig !== null;
+  
 
   return (
     <div className="min-h-screen">
       {activeScenario && currentConfig ? (
         <div>
           <div className="container mx-auto px-4 py-4">
-            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-4">
-              <div className="flex-1">
-                <h1 className="text-2xl lg:text-3xl font-semibold text-gray-900">{activeScenario.config.metadata.title || activeScenario.name}</h1>
-                <p className="text-sm text-gray-600 mt-1">
-                  {activeScenario.config.metadata.description || 'Configure and test interoperability conversations'}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                {state.activeScenarioId && (
-                  <>
-                    <a href={`#/scenarios/${state.activeScenarioId}/run`} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">
-                      Run
-                    </a>
-                    <a href={`#/scenarios/${state.activeScenarioId}/run?mode=plugin`} className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded hover:bg-purple-700">
-                      Plug In
-                    </a>
-                  </>
-                )}
-              </div>
-            </div>
-            <div className="grid items-start grid-cols-1 lg:grid-cols-[1fr_20rem] gap-4">
+            <div className={`grid items-start gap-4 ${isEditMode ? 'grid-cols-1 lg:grid-cols-[1fr_20rem]' : 'grid-cols-1'}`}>
               <main className="min-w-0">
                 <ScenarioEditor
                   config={currentConfig}
@@ -528,23 +518,26 @@ export function ScenarioBuilderPage() {
                   scenarioName={activeScenario.name}
                   scenarioId={state.activeScenarioId}
                   isViewMode={isViewMode}
+                  isEditMode={isEditMode}
                 />
               </main>
-              <aside className="lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)]">
-                <div className="h-full">
-                  <ChatPanel
-                    messages={state.chatHistory}
-                    onSendMessage={sendMessage}
-                    isLoading={state.isWaitingForLLM}
-                    onStop={stopGeneration}
-                    lastUserMessage={state.lastUserMessage}
-                    wasCancelled={state.wasCancelled}
-                    selectedModel={state.selectedModel}
-                    onModelChange={(model) => setState(prev => ({ ...prev, selectedModel: model }))}
-                    availableProviders={state.availableProviders}
-                  />
-                </div>
-              </aside>
+              {isEditMode && (
+                <aside className="lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)]">
+                  <div className="h-full">
+                    <ChatPanel
+                      messages={state.chatHistory}
+                      onSendMessage={sendMessage}
+                      isLoading={state.isWaitingForLLM}
+                      onStop={stopGeneration}
+                      lastUserMessage={state.lastUserMessage}
+                      wasCancelled={state.wasCancelled}
+                      selectedModel={state.selectedModel}
+                      onModelChange={(model) => setState(prev => ({ ...prev, selectedModel: model }))}
+                      availableProviders={state.availableProviders}
+                    />
+                  </div>
+                </aside>
+              )}
             </div>
           </div>
         </div>

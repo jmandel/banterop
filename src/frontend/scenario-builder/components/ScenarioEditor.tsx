@@ -11,6 +11,7 @@ interface ScenarioEditorProps {
   scenarioName: string;
   scenarioId?: string;
   isViewMode?: boolean;
+  isEditMode?: boolean;
 }
 
 export function ScenarioEditor({
@@ -20,7 +21,8 @@ export function ScenarioEditor({
   onConfigChange,
   scenarioName,
   scenarioId,
-  isViewMode
+  isViewMode,
+  isEditMode
 }: ScenarioEditorProps) {
   return (
     <div className="rounded-md border border-slate-200 bg-white">
@@ -47,13 +49,44 @@ export function ScenarioEditor({
             Raw JSON
           </button>
         </div>
+        {scenarioId && (
+          <div className="flex gap-2">
+            {isEditMode ? (
+              <a href={`#/scenarios/${scenarioId}`} className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">
+                View
+              </a>
+            ) : (
+              <>
+                <a href={`#/scenarios/${scenarioId}/edit`} className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">
+                  Edit
+                </a>
+                <a href={`#/scenarios/${scenarioId}/run`} className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">
+                  Run
+                </a>
+                <a href={`#/scenarios/${scenarioId}/run?mode=plugin`} className="px-3 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700">
+                  Plug In
+                </a>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="p-3 lg:p-4">
         {viewMode === 'structured' ? (
-          <StructuredView config={config} />
+          <StructuredView 
+            config={config} 
+            onConfigChange={onConfigChange}
+            isReadOnly={isViewMode}
+            scenarioId={scenarioId}
+            isEditMode={isEditMode}
+          />
         ) : (
-          <RawJsonEditor config={config} onChange={onConfigChange} />
+          <RawJsonEditor 
+            config={config}
+            onChange={onConfigChange} 
+            isReadOnly={isViewMode} 
+          />
         )}
       </div>
     </div>
