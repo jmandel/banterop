@@ -14,6 +14,7 @@
     "baseUrl": ".",
     "jsx": "react-jsx",
     "paths": {
+      "$src/*": ["src/*"],
       "$lib/*": ["src/lib/*"],
       "$backend/*": ["src/backend/*"],  
       "$client/*": ["src/client/*"],

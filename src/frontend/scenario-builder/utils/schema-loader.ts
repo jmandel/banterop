@@ -2,7 +2,7 @@
 // This ensures the prompt always has the latest schema documentation
 
 // Import the schema file content directly using Bun's text import
-import schemaFileContent from '../../../types/scenario-configuration.types.ts' with { type: 'text' };
+import schemaFileContent from '$src/types/scenario-configuration.types.ts' with { type: 'text' };
 
 // Parse the schema content once at module load time
 const lines = schemaFileContent.split('\n');
