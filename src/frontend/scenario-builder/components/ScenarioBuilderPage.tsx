@@ -37,6 +37,7 @@ interface BuilderState {
   isWaitingForLLM: boolean;
   lastUserMessage: string;
   availableProviders: Array<{ name: string; models: string[] }>;
+  wasCancelled: boolean;
 }
 
 export function ScenarioBuilderPage() {
@@ -58,7 +59,8 @@ export function ScenarioBuilderPage() {
     examplesText: '',
     isWaitingForLLM: false,
     lastUserMessage: '',
-    availableProviders: []
+    availableProviders: [],
+    wasCancelled: false
   });
   
   // Store the abort controller outside of state
@@ -263,7 +265,8 @@ export function ScenarioBuilderPage() {
       ...prev,
       chatHistory: [...prev.chatHistory, userMessage],
       isWaitingForLLM: true,
-      lastUserMessage: userText
+      lastUserMessage: userText,
+      wasCancelled: false
     }));
 
     try {
@@ -304,7 +307,8 @@ export function ScenarioBuilderPage() {
           setState(prev => ({
             ...prev,
             chatHistory: prev.chatHistory.slice(0, -1), // Remove last message
-            isWaitingForLLM: false
+            isWaitingForLLM: false,
+            wasCancelled: true
           }));
           return;
         }
@@ -515,6 +519,7 @@ export function ScenarioBuilderPage() {
               isLoading={state.isWaitingForLLM}
               onStop={stopGeneration}
               lastUserMessage={state.lastUserMessage}
+              wasCancelled={state.wasCancelled}
               selectedModel={state.selectedModel}
               onModelChange={(model) => setState(prev => ({ ...prev, selectedModel: model }))}
               availableProviders={state.availableProviders}

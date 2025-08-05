@@ -13,12 +13,13 @@ interface ChatPanelProps {
   isLoading: boolean;
   onStop?: () => void;
   lastUserMessage?: string;
+  wasCancelled?: boolean;
   selectedModel: string;
   onModelChange: (model: string) => void;
   availableProviders: Array<{ name: string; models: string[] }>;
 }
 
-export function ChatPanel({ messages, onSendMessage, isLoading, onStop, lastUserMessage, selectedModel, onModelChange, availableProviders }: ChatPanelProps) {
+export function ChatPanel({ messages, onSendMessage, isLoading, onStop, lastUserMessage, wasCancelled, selectedModel, onModelChange, availableProviders }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -27,12 +28,12 @@ export function ChatPanel({ messages, onSendMessage, isLoading, onStop, lastUser
     messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
   }, [messages]);
   
-  // Restore input when loading is cancelled
+  // Restore input only when loading is cancelled (not on normal completion)
   useEffect(() => {
-    if (!isLoading && lastUserMessage && input === '') {
+    if (!isLoading && wasCancelled && lastUserMessage && input === '') {
       setInput(lastUserMessage);
     }
-  }, [isLoading, lastUserMessage]);
+  }, [isLoading, wasCancelled, lastUserMessage]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
