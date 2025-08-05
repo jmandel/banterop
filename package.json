@@ -6,8 +6,10 @@
   "scripts": {
     "//--- DEVELOPMENT ---": "",
     "dev:backend": "bun --watch src/backend/index.ts",
-    "dev:frontend": "bun --port 3000 src/frontend/trace-viewer/index.html src/frontend/external-executor/index.html src/frontend/**/*.html",
+    "dev:frontend": "bun --port 3003 src/frontend/trace-viewer/index.html src/frontend/external-executor/index.html src/frontend/**/*.html",
     "build:css": "bunx tailwindcss -i ./src/frontend/external-executor/styles.css -o ./src/frontend/external-executor/styles.compiled.css --watch",
+    "build:tailwind": "./tailwindcss-linux-x64 -i ./src/frontend/scenario-builder/tailwind.css -o ./src/frontend/scenario-builder/output.css --minify",
+    "build:tailwind:watch": "./tailwindcss-linux-x64 -i ./src/frontend/scenario-builder/tailwind.css -o ./src/frontend/scenario-builder/output.css --watch",
     "//--- PRODUCTION ---": "",
     "build": "bun build ./src/frontend/**/*.tsx --outdir ./dist --target browser",
     "start": "NODE_ENV=production bun src/backend/index.ts",

@@ -15,7 +15,7 @@ export function ScenarioRunPage() {
   const [config, setConfig] = useState<CreateConversationRequest | null>(null);
   const [runMode, setRunMode] = useState<'internal' | 'plugin'>(isPluginMode ? 'plugin' : 'internal');
   const [selectedPluginRole, setSelectedPluginRole] = useState<string>('');
-  const [conversationInitiator, setConversationInitiator] = useState<string>('patient');
+  const [conversationInitiator, setConversationInitiator] = useState<string>('');
   const [additionalInstructions, setAdditionalInstructions] = useState<Record<string, string>>({});
   const [conversationTitle, setConversationTitle] = useState('');
   const [conversationDescription, setConversationDescription] = useState('');
@@ -58,6 +58,12 @@ export function ScenarioRunPage() {
         } else {
           setConversationTitle(isPluginMode ? 'MCP Plugin Session' : 'Test Conversation');
         }
+        
+        // Set default initiator to the first agent if not already set
+        const agentsList = configData.agents || [];
+        if (agentsList.length > 0 && !conversationInitiator) {
+          setConversationInitiator(agentsList[0].agentId);
+        }
       } else {
         setError('Failed to load scenario');
       }
@@ -71,30 +77,35 @@ export function ScenarioRunPage() {
   const buildConfig = () => {
     if (!scenario) return;
 
-    // Build agent configs from scenario
+    // Build agent configs from scenario - use actual agent IDs from the scenario
     const agents: AgentConfig[] = [];
     
-    // Add patient agent
+    // Get the actual agent IDs from the scenario config
+    const scenarioAgents = scenario.config?.agents || [];
+    
+    if (scenarioAgents.length < 2) {
+      console.error('Scenario must have at least 2 agents defined', scenario);
+      return;
+    }
+    
     const isPlugin = runMode === 'plugin' && selectedPluginRole;
     
-    const patientConfig: AgentConfig = {
-      id: 'patient',
-      strategyType: (isPlugin && selectedPluginRole === 'patient') ? 'bridge_to_external_mcp_server' : 'scenario_driven',
-      shouldInitiateConversation: isPlugin ? (selectedPluginRole === 'patient') : (conversationInitiator === 'patient'),
-      scenarioId: scenario.id,
-      additionalInstructions: additionalInstructions['patient']
-    };
-    agents.push(patientConfig);
-
-    // Add supplier agent
-    const supplierConfig: AgentConfig = {
-      id: 'supplier',
-      strategyType: (isPlugin && selectedPluginRole === 'supplier') ? 'bridge_to_external_mcp_server' : 'scenario_driven',
-      shouldInitiateConversation: isPlugin ? (selectedPluginRole === 'supplier') : (conversationInitiator === 'supplier'),
-      scenarioId: scenario.id,
-      additionalInstructions: additionalInstructions['supplier']
-    };
-    agents.push(supplierConfig);
+    // Map over the actual agents defined in the scenario
+    scenarioAgents.forEach((scenarioAgent) => {
+      const agentId = scenarioAgent.agentId;
+      
+      // Determine if this agent should be bridged or scenario-driven
+      const isBridgedAgent = isPlugin && selectedPluginRole === agentId;
+      
+      const agentConfig: AgentConfig = {
+        id: agentId, // Use the actual agent ID from the scenario
+        strategyType: isBridgedAgent ? 'bridge_to_external_mcp_server' : 'scenario_driven',
+        shouldInitiateConversation: isPlugin ? isBridgedAgent : (conversationInitiator === agentId),
+        scenarioId: scenario.config?.metadata?.id || scenario.id,
+        additionalInstructions: additionalInstructions[agentId]
+      };
+      agents.push(agentConfig);
+    });
 
     // Build the configuration
     const newConfig: CreateConversationRequest = {
@@ -201,7 +212,7 @@ export function ScenarioRunPage() {
           </div>
 
           {/* Plugin Role Selection - Only show in plugin mode */}
-          {runMode === 'plugin' && (
+          {runMode === 'plugin' && scenario && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 External Plugin Role
@@ -212,8 +223,11 @@ export function ScenarioRunPage() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="">Select a role...</option>
-                <option value="patient">Patient (External MCP Client)</option>
-                <option value="supplier">Supplier (External MCP Client)</option>
+                {(scenario.config?.agents || []).map((agent) => (
+                  <option key={agent.agentId} value={agent.agentId}>
+                    {agent.agentId} {agent.principal?.name ? `(${agent.principal.name})` : ''} - External MCP Client
+                  </option>
+                ))}
               </select>
               <p className="mt-1 text-sm text-gray-600">
                 Select which role should be controlled by an external MCP client
@@ -222,7 +236,7 @@ export function ScenarioRunPage() {
           )}
           
           {/* Conversation Initiator - Only show in internal mode */}
-          {runMode === 'internal' && (
+          {runMode === 'internal' && scenario && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Conversation Initiator
@@ -232,8 +246,11 @@ export function ScenarioRunPage() {
                 onChange={(e) => setConversationInitiator(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
-                <option value="patient">Patient</option>
-                <option value="supplier">Supplier</option>
+                {(scenario.config?.agents || []).map((agent) => (
+                  <option key={agent.agentId} value={agent.agentId}>
+                    {agent.agentId} {agent.principal?.name ? `(${agent.principal.name})` : ''}
+                  </option>
+                ))}
               </select>
               <p className="mt-1 text-sm text-gray-600">
                 Select which agent should start the conversation
@@ -242,43 +259,31 @@ export function ScenarioRunPage() {
           )}
 
           {/* Additional Instructions */}
-          <div>
-            <h3 className="text-sm font-medium text-gray-700 mb-3">Additional Instructions (optional)</h3>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Patient Agent
-                </label>
-                <textarea
-                  value={additionalInstructions['patient'] || ''}
-                  onChange={(e) => setAdditionalInstructions({
-                    ...additionalInstructions,
-                    patient: e.target.value
-                  })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Additional instructions for patient agent..."
-                  rows={2}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Supplier Agent
-                </label>
-                <textarea
-                  value={additionalInstructions['supplier'] || ''}
-                  onChange={(e) => setAdditionalInstructions({
-                    ...additionalInstructions,
-                    supplier: e.target.value
-                  })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Additional instructions for supplier agent..."
-                  rows={2}
-                />
+          {scenario && (
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Additional Instructions (optional)</h3>
+              
+              <div className="space-y-4">
+                {(scenario.config?.agents || []).map((agent) => (
+                  <div key={agent.agentId}>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      {agent.agentId} {agent.principal?.name ? `(${agent.principal.name})` : ''}
+                    </label>
+                    <textarea
+                      value={additionalInstructions[agent.agentId] || ''}
+                      onChange={(e) => setAdditionalInstructions({
+                        ...additionalInstructions,
+                        [agent.agentId]: e.target.value
+                      })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
+                      placeholder={`Additional instructions for ${agent.agentId}...`}
+                      rows={2}
+                    />
+                  </div>
+                ))}
               </div>
             </div>
-          </div>
+          )}
 
           {/* Validation Messages */}
           {validationErrors.length > 0 && (

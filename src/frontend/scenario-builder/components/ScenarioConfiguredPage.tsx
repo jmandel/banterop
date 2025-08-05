@@ -5,6 +5,15 @@ import { decodeConfigFromBase64URL } from '$lib/utils/config-encoding.js';
 import { WebSocketJsonRpcClient } from '$client/impl/websocket.client.js';
 import { api } from '../utils/api.js';
 
+// SHA256 utility function
+async function sha256(str: string): Promise<string> {
+  const bytes = new TextEncoder().encode(str);
+  const hash = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(hash))
+    .map(x => x.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 interface ConversationRecord {
   id: string;
   title: string;
@@ -12,6 +21,7 @@ interface ConversationRecord {
   status: 'active' | 'completed' | 'failed';
   turnCount: number;
   endStatus?: 'success' | 'failure' | 'neutral';
+  isNew?: boolean; // For showing "New" badge
 }
 
 export function ScenarioConfiguredPage() {
@@ -23,10 +33,13 @@ export function ScenarioConfiguredPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [conversations, setConversations] = useState<ConversationRecord[]>([]);
   const [copied, setCopied] = useState(false);
+  const [configHash, setConfigHash] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [autoFollow, setAutoFollow] = useState(true);
   const wsClientRef = useRef<WebSocketJsonRpcClient | null>(null);
   const subscriptionIdRef = useRef<string | null>(null);
   
-  // Decode configuration on mount
+  // Decode configuration and compute hash on mount
   useEffect(() => {
     if (!config64) {
       setError('No configuration provided');
@@ -36,6 +49,11 @@ export function ScenarioConfiguredPage() {
     try {
       const decoded = decodeConfigFromBase64URL(config64);
       setConfig(decoded);
+      
+      // Compute config hash
+      sha256(config64).then(hash => {
+        setConfigHash(hash);
+      });
     } catch (err) {
       setError('Invalid configuration: ' + (err instanceof Error ? err.message : 'Unknown error'));
     }
@@ -96,9 +114,26 @@ export function ScenarioConfiguredPage() {
           title: event.data.conversation.metadata.conversationTitle || 'Untitled',
           startTime: Date.now(),
           status: 'active',
-          turnCount: 0
+          turnCount: 0,
+          isNew: true
         };
-        setConversations(prev => [newConvo, ...prev]);
+        setConversations(prev => {
+          // Mark older conversations as not new
+          const updated = prev.map(c => ({ ...c, isNew: false }));
+          return [newConvo, ...updated];
+        });
+        
+        // Auto-select if auto-follow is enabled
+        if (autoFollow) {
+          setSelectedId(event.conversationId);
+        }
+        
+        // Remove "New" badge after 10 seconds
+        setTimeout(() => {
+          setConversations(prev => prev.map(c => 
+            c.id === event.conversationId ? { ...c, isNew: false } : c
+          ));
+        }, 10000);
         break;
         
       case 'turn_completed':
@@ -132,19 +167,47 @@ export function ScenarioConfiguredPage() {
   };
   
   const isRelevantConversation = (event: ConversationEvent): boolean => {
-    // Check if this event is for a conversation using our configuration
-    // This would need to be implemented based on how we track config usage
-    return true; // For now, show all conversations
+    if (!configHash || !event.data?.conversation?.metadata) return false;
+    
+    const metadata = event.data.conversation.metadata;
+    
+    // Primary match: configHash
+    if (metadata.configHash === configHash) {
+      return true;
+    }
+    
+    // Fallback match: scenarioId + agent IDs
+    if (config && metadata.scenarioId === config.metadata?.scenarioId) {
+      // Check if agent IDs match
+      const eventAgentIds = event.data.conversation.agents?.map((a: any) => a.id).sort();
+      const configAgentIds = config.agents.map(a => a.id).sort();
+      
+      if (JSON.stringify(eventAgentIds) === JSON.stringify(configAgentIds)) {
+        return true;
+      }
+    }
+    
+    return false;
   };
   
   const handleRunInternal = async () => {
-    if (!config) return;
+    if (!config || !configHash || !config64) return;
     
     setIsCreating(true);
     setError(null);
     
     try {
-      const response = await api.createConversation(config);
+      // Add configHash and encodedConfig64 to metadata
+      const enrichedConfig: CreateConversationRequest = {
+        ...config,
+        metadata: {
+          ...config.metadata,
+          configHash,
+          encodedConfig64: config64
+        }
+      };
+      
+      const response = await api.createConversation(enrichedConfig);
       if (response.success && response.data) {
         // Start the conversation only for internal simulations
         if (!isPluginMode) {
@@ -165,7 +228,7 @@ export function ScenarioConfiguredPage() {
   };
   
   const isPluginMode = config?.agents.some(a => a.strategyType === 'bridge_to_external_mcp_server');
-  const mcpEndpoint = isPluginMode ? `${window.location.origin}/api/bridge/${config64}/mcp` : null;
+  const mcpEndpoint = isPluginMode ? `${api.getBaseUrl()}/api/bridge/${config64}/mcp` : null;
   
   if (error) {
     return (
@@ -194,6 +257,42 @@ export function ScenarioConfiguredPage() {
         <p className="text-gray-600">
           {config.metadata?.conversationDescription || (isPluginMode ? 'External MCP Bridge' : 'Internal Simulation')}
         </p>
+      </div>
+      
+      {/* Configuration Details */}
+      <div className="mb-6 bg-gray-50 rounded-lg p-4">
+        <h2 className="text-lg font-semibold text-gray-900 mb-3">Configuration Details</h2>
+        <div className="space-y-2 text-sm">
+          <div>
+            <span className="font-medium text-gray-700">Scenario ID:</span>{' '}
+            <span className="text-gray-900">{config?.metadata?.scenarioId}</span>
+          </div>
+          <div>
+            <span className="font-medium text-gray-700">Agents:</span>
+            <ul className="mt-1 ml-4 space-y-1">
+              {config?.agents.map(agent => (
+                <li key={agent.id} className="text-gray-900">
+                  • {agent.id} ({agent.strategyType})
+                  {agent.shouldInitiateConversation && (
+                    <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">initiator</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <span className="font-medium text-gray-700">Config Hash:</span>{' '}
+            <span className="font-mono text-xs text-gray-600">{configHash?.substring(0, 12)}...</span>
+          </div>
+        </div>
+        <details className="mt-3">
+          <summary className="cursor-pointer text-sm text-blue-600 hover:text-blue-700">
+            View Full Configuration
+          </summary>
+          <pre className="mt-2 p-3 bg-white rounded border border-gray-200 text-xs overflow-x-auto">
+{JSON.stringify(config, null, 2)}
+          </pre>
+        </details>
       </div>
       
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -287,6 +386,18 @@ export function ScenarioConfiguredPage() {
         <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
           <h2 className="text-xl font-semibold text-gray-900 mb-4">Conversations Based on This Configuration</h2>
           
+          <div className="mb-4 flex items-center justify-between">
+            <label className="flex items-center text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={autoFollow}
+                onChange={(e) => setAutoFollow(e.target.checked)}
+                className="mr-2"
+              />
+              Auto-follow newest conversation
+            </label>
+          </div>
+          
           {conversations.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-gray-600 mb-2">No conversations yet</p>
@@ -297,50 +408,53 @@ export function ScenarioConfiguredPage() {
               </p>
             </div>
           ) : (
-            <div className="space-y-3">
-              {conversations.map(conv => (
-                <a 
-                  key={conv.id} 
-                  href={`/trace-viewer#/conversations/${conv.id}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`block p-4 rounded-lg border transition-all hover:shadow-sm ${
-                    conv.status === 'active' ? 'border-blue-200 bg-blue-50' :
-                    conv.status === 'completed' ? 'border-green-200 bg-green-50' :
-                    'border-red-200 bg-red-50'
-                  }`}
-                >
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-medium text-gray-900">{conv.title}</h3>
-                    <span className={`px-2 py-1 text-xs rounded-full ${
+            <ul className="space-y-2">
+              {conversations.map(conv => {
+                const shortId = conv.id.slice(0, 8);
+                const timeStr = new Date(conv.startTime).toLocaleTimeString('en-US', { 
+                  hour12: false,
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit'
+                });
+                
+                return (
+                  <li key={conv.id} className="flex items-center gap-2 text-sm">
+                    <span className="text-gray-500">•</span>
+                    <span className="font-mono text-xs text-gray-600">[{timeStr}]</span>
+                    <span className={`px-1.5 py-0.5 text-xs rounded ${
                       conv.status === 'active' ? 'bg-blue-100 text-blue-700' :
                       conv.status === 'completed' ? 'bg-green-100 text-green-700' :
                       'bg-red-100 text-red-700'
                     }`}>
                       {conv.status}
                     </span>
-                  </div>
-                  
-                  <div className="flex gap-4 text-sm text-gray-600">
-                    <span>
-                      {new Date(conv.startTime).toLocaleTimeString()}
-                    </span>
-                    <span>
-                      {conv.turnCount} turns
-                    </span>
-                    {conv.endStatus && (
-                      <span className={`font-medium ${
-                        conv.endStatus === 'success' ? 'text-green-700' :
-                        conv.endStatus === 'failure' ? 'text-red-700' :
-                        'text-gray-700'
-                      }`}>
-                        {conv.endStatus}
+                    <span className="text-gray-600">{conv.turnCount} turns</span>
+                    <a 
+                      href={`/trace-viewer#/conversations/${conv.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => {
+                        setSelectedId(conv.id);
+                        setConversations(prev => prev.map(c => 
+                          c.id === conv.id ? { ...c, isNew: false } : c
+                        ));
+                      }}
+                      className={`font-mono text-xs hover:underline ${
+                        selectedId === conv.id ? 'text-blue-600 font-semibold' : 'text-blue-500'
+                      }`}
+                    >
+                      {shortId}
+                    </a>
+                    {conv.isNew && (
+                      <span className="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded font-semibold">
+                        New
                       </span>
                     )}
-                  </div>
-                </a>
-              ))}
-            </div>
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </div>
       </div>

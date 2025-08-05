@@ -121,20 +121,23 @@ export class ConversationOrchestrator {
     return { conversation, agentTokens };
   }
 
-  async startConversation(conversationId: string): Promise<void> {
+  async startConversation(conversationId: string, agentIdsToStart?: string[]): Promise<void> {
     // Fetch the conversation from the database
     const conversation = this.db.getConversation(conversationId, false, false);
     if (!conversation) {
       throw new Error(`Conversation ${conversationId} not found`);
     }
 
-    // Check if any agents are internal types
-    const hasInternalAgents = conversation.agents.some(a => 
-      ['scenario_driven', 'sequential_script', 'static_replay'].includes(a.strategyType)
-    );
-    
-    if (!hasInternalAgents) {
-      throw new Error(`Cannot explicitly start an externally managed conversation. External conversations are activated by the first turn from a connected agent.`);
+    // If specific agent IDs provided, start only those
+    // Otherwise, check if we have internal agents to start
+    if (!agentIdsToStart) {
+      const hasInternalAgents = conversation.agents.some(a => 
+        ['scenario_driven', 'sequential_script', 'static_replay'].includes(a.strategyType)
+      );
+      
+      if (!hasInternalAgents) {
+        throw new Error(`Cannot explicitly start an externally managed conversation. External conversations are activated by the first turn from a connected agent.`);
+      }
     }
 
     // Guard clause: Check if conversation status is 'created'
@@ -155,9 +158,13 @@ export class ConversationOrchestrator {
     conversationState.conversation.status = 'active';
 
     // Execute the agent provisioning logic
-    console.log(`[Orchestrator] Starting conversation ${conversationId}, provisioning ${conversationState.agentConfigs.size} agents`);
+    const agentsToProvision = agentIdsToStart 
+      ? Array.from(conversationState.agentConfigs.entries()).filter(([id]) => agentIdsToStart.includes(id))
+      : Array.from(conversationState.agentConfigs.entries());
     
-    for (const [agentId, agentConfig] of conversationState.agentConfigs) {
+    console.log(`[Orchestrator] Starting conversation ${conversationId}, provisioning ${agentsToProvision.length} agents`);
+    
+    for (const [agentId, agentConfig] of agentsToProvision) {
       try {
         console.log(`[Orchestrator] Creating ${agentConfig.strategyType} agent: ${agentConfig.id}`);
         
@@ -171,20 +178,47 @@ export class ConversationOrchestrator {
             console.error(`[Orchestrator] CRITICAL: Failed to load scenario ${scenarioConfig.scenarioId} for agent ${agentConfig.id}. Skipping agent.`);
             continue; // Skip provisioning this agent
           }
+          
+          // Log scenario agents for debugging
+          console.log(`[Orchestrator] Scenario ${scenarioConfig.scenarioId} defines agents:`, 
+            loadedScenario.agents.map(a => a.agentId).join(', '));
+          console.log(`[Orchestrator] Looking for agent ID: ${agentConfig.id}`);
+          
+          // Check if the agent ID exists in the scenario
+          const agentInScenario = loadedScenario.agents.find(a => a.agentId === agentConfig.id);
+          if (!agentInScenario) {
+            console.error(`[Orchestrator] ERROR: Agent ID '${agentConfig.id}' not found in scenario ${scenarioConfig.scenarioId}.`);
+            console.error(`[Orchestrator] Available agent IDs in scenario: ${loadedScenario.agents.map(a => a.agentId).join(', ')}`);
+            console.error(`[Orchestrator] Please update your configuration to use one of the available agent IDs.`);
+            throw new Error(`Agent ID '${agentConfig.id}' not found in scenario ${scenarioConfig.scenarioId}. Available IDs: ${loadedScenario.agents.map(a => a.agentId).join(', ')}`);
+          }
+          
           scenarioForAgent = loadedScenario;
         }
         
-        const client = createClient('in-process', this);
-        const agent = createAgent(
-          agentConfig, 
-          client,
-          { // Pass the new dependencies object
-            db: this.db,
-            llmProvider: this.llmProvider,
-            toolSynthesisService: this.toolSynthesisService,
-            scenario: scenarioForAgent // Pass the pre-loaded scenario
-          }
-        );
+        // Bridge agents need special handling - they're already created externally
+        // So we'll check if an agent instance already exists
+        let agent;
+        const existingAgent = conversationState.agents?.get(agentId);
+        
+        if (existingAgent) {
+          // Agent already exists (e.g., bridge agent created by MCP server)
+          console.log(`[Orchestrator] Using existing agent instance for ${agentConfig.id}`);
+          agent = existingAgent;
+        } else {
+          // Create new agent
+          const client = createClient('in-process', this);
+          agent = createAgent(
+            agentConfig, 
+            client,
+            { // Pass the new dependencies object
+              db: this.db,
+              llmProvider: this.llmProvider,
+              toolSynthesisService: this.toolSynthesisService,
+              scenario: scenarioForAgent // Pass the pre-loaded scenario
+            }
+          );
+        }
         
         // Get the token for this agent
         const token = this.getAgentToken(conversationId, agentId);

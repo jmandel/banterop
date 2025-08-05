@@ -3,12 +3,16 @@ import { McpBridgeServer } from '../bridge/mcp-server.js';
 import { ConversationOrchestrator } from '../core/orchestrator.js';
 import { decodeConfigFromBase64URL } from '$lib/utils/config-encoding.js';
 import { validateCreateConversationConfigV2 } from '$lib/utils/config-validation.js';
+import { 
+  HonoIncomingMessage, 
+  HonoServerResponse
+} from '../bridge/hono-node-adapters.js';
 
 export function createBridgeRoutes(orchestrator: ConversationOrchestrator) {
   const app = new Hono();
 
-  // Stateless MCP server endpoint
-  app.post('/:config64/mcp', async (c) => {
+  // MCP server endpoint - handles both POST and GET for SSE
+  app.all('/:config64/mcp', async (c) => {
     try {
       const config64 = c.req.param('config64');
       
@@ -27,17 +31,37 @@ export function createBridgeRoutes(orchestrator: ConversationOrchestrator) {
         sessionId
       );
       
-      // Get request body as JSON-RPC message
-      const requestBody = await c.req.json();
+      // Parse body first if it's a POST request, before creating adapters
+      let requestBody = null;
+      if (c.req.method === 'POST') {
+        requestBody = await c.req.json();
+      }
       
-      // Handle the JSON-RPC request through MCP server
-      const response = await mcpBridge.handleRequest(requestBody);
+      // Create a unified response adapter that can handle both JSON and SSE
+      const res = new HonoServerResponse(c);
+      const req = new HonoIncomingMessage(c, requestBody);
       
-      // Clean up is handled automatically by stateless design
-      
-      return c.json(response, 200, {
-        'Content-Type': 'application/json'
+      // Set up promise to wait for the response to be written
+      const responsePromise = new Promise<Response>((resolve, reject) => {
+        res.once('close', () => {
+          console.log('[Bridge] Response close event received');
+          if (c.res) {
+            console.log('[Bridge] Response found on context');
+            resolve(c.res);
+          } else {
+            console.log('[Bridge] Response not set on context');
+            reject(new Error('Response not set after close'));
+          }
+        });
       });
+      
+      // Start handling the request - the transport will decide JSON vs SSE
+      mcpBridge.handleRequest(req, res, requestBody).catch(err => {
+        console.error('[Bridge] Error in handleRequest:', err);
+      });
+      
+      // Wait for the response to be ready
+      return await responsePromise;
     } catch (error) {
       console.error('MCP bridge error:', error);
       return c.json({
@@ -49,6 +73,12 @@ export function createBridgeRoutes(orchestrator: ConversationOrchestrator) {
         id: null
       }, 500);
     }
+  });
+
+  // Test SSE endpoint
+  app.get('/:config64/mcp/test-sse', async (c) => {
+    c.header('Accept', 'text/event-stream');
+    return c.text('SSE test endpoint - redirect to /:config64/mcp with Accept: text/event-stream header');
   });
 
   // Optional diagnostics endpoint (development only)

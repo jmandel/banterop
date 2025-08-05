@@ -33,13 +33,13 @@ export class BridgeAgent extends BaseAgent {
    * Bridge an external client's turn into the conversation
    * @param message The message from the external client
    * @param attachments Optional attachments
-   * @param timeoutMs Timeout in milliseconds (default 30 seconds)
+   * @param timeoutMs Timeout in milliseconds (default 3 minutes)
    * @returns Promise that resolves with the other agent's reply
    */
   async bridgeExternalClientTurn(
     message: string, 
     attachments?: AttachmentPayload[],
-    timeoutMs: number = 30000
+    timeoutMs: number = 180000 // 3 minutes default
   ): Promise<BridgeReply> {
     // Start a new turn using the BaseAgent method
     await this.startTurn();
@@ -81,7 +81,7 @@ export class BridgeAgent extends BaseAgent {
    * Wait for a pending reply if there is one
    * Used when a previous bridgeExternalClientTurn timed out
    */
-  async waitForPendingReply(timeoutMs: number = 60000): Promise<BridgeReply> {
+  async waitForPendingReply(timeoutMs: number = 180000): Promise<BridgeReply> { // 3 minutes default
     if (!this.pendingReplyPromise) {
       throw new Error('No pending reply to wait for');
     }
