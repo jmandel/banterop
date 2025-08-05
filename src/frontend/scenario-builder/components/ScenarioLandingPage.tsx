@@ -145,74 +145,74 @@ export function ScenarioLandingPage() {
 
   if (isLoading) {
     return (
-      <div className="landing-container">
-        <div className="loading">Loading scenarios...</div>
+      <div className="container mx-auto px-4 py-8">
+        <div className="text-center text-gray-600">Loading scenarios...</div>
       </div>
     );
   }
 
   return (
-    <div className="landing-page">
-      <div className="scenarios-section">
+    <div className="container mx-auto px-4 py-4 space-y-4">
+      <div className="space-y-4">
         <input
           type="text"
-          className="search-input-full"
+          className="w-full px-4 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           placeholder="Search scenarios by name, description, or agents..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
 
         {error && (
-          <div className="error-banner">
+          <div className="p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md">
             {error}
           </div>
         )}
 
-        <div className="scenarios-grid">
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
           {filteredScenarios.length === 0 ? (
-            <div className="empty-state">
-              <p className="empty-state-text">
+            <div className="col-span-full text-center py-8">
+              <p className="text-gray-500">
                 {searchTerm ? 'No scenarios found matching your search' : 'No scenarios available'}
               </p>
             </div>
           ) : (
             filteredScenarios.map((scenario) => (
-              <div key={scenario.id} className="scenario-card">
-                <div className="scenario-card-content">
-                  <h3 className="scenario-card-title">
+              <div key={scenario.id} className="rounded-md border border-gray-200 p-3 hover:shadow-sm transition bg-white">
+                <div className="mb-3">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-1">
                     {scenario.config.metadata.title || scenario.name}
                   </h3>
                   
-                  <div className="scenario-card-agents">
+                  <div className="text-xs text-blue-600 mb-2">
                     {getAgentNames(scenario)}
                   </div>
                   
-                  <p className="scenario-card-description">
+                  <p className="text-xs text-gray-600 line-clamp-2">
                     {scenario.config.metadata.description || 'Configure and test interoperability conversations'}
                   </p>
                 </div>
 
-                <div className="scenario-card-actions">
+                <div className="flex gap-2">
                   <button
-                    className="btn-card-action"
+                    className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
                     onClick={() => navigate(`/scenarios/${scenario.id}/view`)}
                   >
                     View
                   </button>
                   <button
-                    className="btn-card-action"
+                    className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
                     onClick={() => navigate(`/scenarios/${scenario.id}/edit`)}
                   >
                     Edit
                   </button>
                   <button
-                    className="btn-card-action btn-card-primary"
+                    className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
                     onClick={() => navigate(`/scenarios/${scenario.id}/run`)}
                   >
                     Run
                   </button>
                   <button
-                    className="btn-card-action btn-card-secondary"
+                    className="px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700"
                     onClick={() => navigate(`/scenarios/${scenario.id}/run?mode=plugin`)}
                   >
                     Plug In
@@ -224,28 +224,31 @@ export function ScenarioLandingPage() {
         </div>
       </div>
       
-      <div className="create-scenario-hero">
-        <h2 className="hero-title">Create New Scenario</h2>
-        <div className="create-scenario-box">
-          <textarea
-            className="scenario-name-input"
-            placeholder="Enter scenario description..."
-            value={newScenarioName}
-            onChange={(e) => setNewScenarioName(e.target.value)}
-            onKeyPress={handleCreateKeyPress}
-            disabled={isCreating}
-            rows={2}
-          />
-          <button 
-            className="dice-button" 
-            onClick={() => setNewScenarioName(getRandomIdea())}
-            disabled={isCreating}
-            title="Random scenario idea"
-          >
-            <span className="dice-icon">⚄</span>
-          </button>
+      <div className="mt-6 p-4 bg-gray-50 rounded-md border border-gray-200">
+        <h2 className="text-lg font-semibold text-gray-900 mb-3">Create New Scenario</h2>
+        <div className="space-y-3">
+          <div className="flex gap-2">
+            <textarea
+              className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              placeholder="Enter scenario description..."
+              value={newScenarioName}
+              onChange={(e) => setNewScenarioName(e.target.value)}
+              onKeyPress={handleCreateKeyPress}
+              disabled={isCreating}
+              rows={2}
+            />
+            <button 
+              className="flex items-center justify-center text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 flex-shrink-0 aspect-square" 
+              style={{ width: '68px', height: '68px' }}
+              onClick={() => setNewScenarioName(getRandomIdea())}
+              disabled={isCreating}
+              title="Random scenario idea"
+            >
+              <span className="text-3xl leading-none" style={{ fontSize: '2.5rem' }}>⚄</span>
+            </button>
+          </div>
           <button
-            className="btn-create-scenario"
+            className="w-full px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
             onClick={createNewScenario}
             disabled={!newScenarioName.trim() || isCreating}
           >

@@ -7,6 +7,7 @@ import { ScenarioBuilderPage } from './components/ScenarioBuilderPage.js';
 import { ScenarioRunPage } from './components/ScenarioRunPage.js';
 import { ScenarioPluginPage } from './components/ScenarioPluginPage.js';
 import { ScenarioConfiguredPage } from './components/ScenarioConfiguredPage.js';
+import "./output.css";
 
 function App() {
   return (

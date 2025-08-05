@@ -253,8 +253,8 @@ export function ScenarioBuilderPage() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
     
-    // Add user message to chat
-    const userMessage: ChatMessage = {
+    // Create new user message
+    const newUserMessage: ChatMessage = {
       id: `msg_${Date.now()}`,
       role: 'user',
       content: userText,
@@ -263,7 +263,7 @@ export function ScenarioBuilderPage() {
 
     setState(prev => ({
       ...prev,
-      chatHistory: [...prev.chatHistory, userMessage],
+      chatHistory: [...prev.chatHistory, newUserMessage],
       isWaitingForLLM: true,
       lastUserMessage: userText,
       wasCancelled: false
@@ -275,13 +275,21 @@ export function ScenarioBuilderPage() {
         await loadSchemaAndConfig();
       }
       
-      // 1) Build prompt - include ALL conversation history up to this point
-      // Since setState is async, we need to include the history manually
-      const fullHistory = [...state.chatHistory]; // This already has all previous messages
+      // Use effectiveHistory including the new user turn
+      const effectiveHistory = [...state.chatHistory, newUserMessage];
+      
+      console.log('=== CHAT HISTORY DEBUG ===');
+      console.log('State chat history length:', state.chatHistory.length);
+      console.log('Effective history length:', effectiveHistory.length);
+      console.log('Effective history:', effectiveHistory.map(h => ({
+        role: h.role,
+        content: h.content.substring(0, 100) + (h.content.length > 100 ? '...' : ''),
+        toolCalls: h.toolCalls
+      })));
       
       const prompt = buildScenarioBuilderPrompt({
         scenario: currentScenario,
-        history: fullHistory.map(h => ({ 
+        history: effectiveHistory.map(h => ({ 
           role: h.role, 
           content: h.content,
           toolCalls: h.toolCalls 
@@ -291,6 +299,12 @@ export function ScenarioBuilderPage() {
         examplesText: state.examplesText,
         modelCapabilitiesNote: '' // optional
       });
+      
+      console.log('=== GENERATED PROMPT ===');
+      console.log('Prompt length:', prompt.length);
+      console.log('Full prompt:');
+      console.log(prompt);
+      console.log('=== END PROMPT ===');
       
       // 2) Call LLM generate (server routing, no scenario-chat endpoint)
       let llmResponse;
@@ -480,70 +494,94 @@ export function ScenarioBuilderPage() {
   const hasUnsavedChanges = state.pendingConfig !== null;
 
   return (
-    <div className="run-container">
+    <div className="min-h-screen">
       {activeScenario && currentConfig ? (
-        <>
-          <div className="run-header">
-            <div className="header-title-section">
-              <h1 className="run-title">{activeScenario.config.metadata.title || activeScenario.name}</h1>
-              <p className="run-description">
-                {activeScenario.config.metadata.description || 'Configure and test interoperability conversations'}
-              </p>
+        <div>
+          <div className="container mx-auto px-4 py-4">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-4">
+              <div className="flex-1">
+                <h1 className="text-2xl lg:text-3xl font-semibold text-gray-900">{activeScenario.config.metadata.title || activeScenario.name}</h1>
+                <p className="text-sm text-gray-600 mt-1">
+                  {activeScenario.config.metadata.description || 'Configure and test interoperability conversations'}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                {state.activeScenarioId && (
+                  <>
+                    <a href={`#/scenarios/${state.activeScenarioId}/run`} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">
+                      Run
+                    </a>
+                    <a href={`#/scenarios/${state.activeScenarioId}/run?mode=plugin`} className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded hover:bg-purple-700">
+                      Plug In
+                    </a>
+                  </>
+                )}
+              </div>
             </div>
-            <div className="header-actions">
-              {state.activeScenarioId && (
-                <>
-                  <a href={`#/scenarios/${state.activeScenarioId}/run`} className="btn-action-header btn-run-header">
-                    Run
-                  </a>
-                  <a href={`#/scenarios/${state.activeScenarioId}/run?mode=plugin`} className="btn-action-header btn-plugin-header">
-                    Plug In
-                  </a>
-                </>
-              )}
+            <div className="grid items-start grid-cols-1 lg:grid-cols-[1fr_20rem] gap-4">
+              <main className="min-w-0">
+                <ScenarioEditor
+                  config={currentConfig}
+                  viewMode={state.viewMode}
+                  onViewModeChange={toggleViewMode}
+                  onConfigChange={updateConfigFromEditor}
+                  scenarioName={activeScenario.name}
+                  scenarioId={state.activeScenarioId}
+                  isViewMode={isViewMode}
+                />
+              </main>
+              <aside className="lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)]">
+                <div className="h-full">
+                  <ChatPanel
+                    messages={state.chatHistory}
+                    onSendMessage={sendMessage}
+                    isLoading={state.isWaitingForLLM}
+                    onStop={stopGeneration}
+                    lastUserMessage={state.lastUserMessage}
+                    wasCancelled={state.wasCancelled}
+                    selectedModel={state.selectedModel}
+                    onModelChange={(model) => setState(prev => ({ ...prev, selectedModel: model }))}
+                    availableProviders={state.availableProviders}
+                  />
+                </div>
+              </aside>
             </div>
           </div>
-          <div className="run-content">
-            <ScenarioEditor
-              config={currentConfig}
-              viewMode={state.viewMode}
-              onViewModeChange={toggleViewMode}
-              onConfigChange={updateConfigFromEditor}
-              scenarioName={activeScenario.name}
-              scenarioId={state.activeScenarioId}
-              isViewMode={isViewMode}
-            />
-            <ChatPanel
-              messages={state.chatHistory}
-              onSendMessage={sendMessage}
-              isLoading={state.isWaitingForLLM}
-              onStop={stopGeneration}
-              lastUserMessage={state.lastUserMessage}
-              wasCancelled={state.wasCancelled}
-              selectedModel={state.selectedModel}
-              onModelChange={(model) => setState(prev => ({ ...prev, selectedModel: model }))}
-              availableProviders={state.availableProviders}
-            />
-          </div>
-        </>
+        </div>
       ) : (
-        <div className="empty-state">
-          <p className="empty-state-text">
+        <div className="flex items-center justify-center py-12">
+          <p className="text-gray-500">
             {state.isLoading ? 'Loading scenario...' : 'Scenario not found'}
           </p>
         </div>
       )}
 
       {hasUnsavedChanges && (
-        <SaveBar
-          onSave={saveChanges}
-          onDiscard={discardChanges}
-          isSaving={state.isSaving}
-        />
+        <div className="fixed bottom-0 left-0 lg:w-[66%] right-0 lg:right-auto bg-amber-50 border-t border-amber-200 p-3 flex justify-between items-center shadow-lg z-20">
+          <div className="text-sm text-amber-800">
+            You have unsaved changes
+          </div>
+          <div className="flex gap-2">
+            <button
+              className="px-3 py-1.5 text-sm border border-gray-300 bg-white rounded hover:bg-gray-50 disabled:opacity-50"
+              onClick={discardChanges}
+              disabled={state.isSaving}
+            >
+              Discard Changes
+            </button>
+            <button
+              className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              onClick={saveChanges}
+              disabled={state.isSaving}
+            >
+              {state.isSaving ? 'Saving...' : 'Save to Backend'}
+            </button>
+          </div>
+        </div>
       )}
 
       {state.error && (
-        <div className="error-toast">
+        <div className="fixed bottom-4 right-4 p-3 bg-red-50 text-red-700 border border-red-200 rounded-md shadow-lg">
           {state.error}
         </div>
       )}

@@ -86,6 +86,10 @@ ${JSON.stringify(scenario, null, 2)}
 \`\`\`
 </CURRENT_SCENARIO>`.trim();
 
+  console.log('=== PROMPT BUILDER: Building conversation history ===');
+  console.log('History length:', history.length);
+  console.log('History entries:', history);
+  
   const conversationHistorySection = `
 <CONVERSATION_HISTORY>
 ${history.length === 0 ? '(This is the start of our builder conversation)' :
@@ -103,7 +107,11 @@ ${history.length === 0 ? '(This is the start of our builder conversation)' :
     
     return entry;
   }).join('\n')}
+^^ Reply to this last user turn
 </CONVERSATION_HISTORY>`.trim();
+  
+  console.log('=== CONVERSATION HISTORY SECTION ===');
+  console.log(conversationHistorySection);
 
   const responseInstructionsSection = `
 <RESPONSE_INSTRUCTIONS>
@@ -143,11 +151,6 @@ Do NOT include any text outside the code block. Do NOT return both "patches" and
 Never modify metadata.id unless explicitly asked.
 </RESPONSE_INSTRUCTIONS>`.trim();
 
-  const userRequestSection = `
-<USER_REQUEST>
-${userMessage}
-</USER_REQUEST>`.trim();
-
   const modelNote = modelCapabilitiesNote
     ? `\n<MODEL_CAPABILITIES>\n${modelCapabilitiesNote}\n</MODEL_CAPABILITIES>\n`
     : '';
@@ -165,11 +168,10 @@ Produce your response now, following the exact schema, as a single JSON code blo
     SEP,
     currentScenarioSection,
     SEP,
-    conversationHistorySection,
-    SEP,
     responseInstructionsSection,
     SEP,
-    userRequestSection,
+    conversationHistorySection,
+    SEP,
     modelNote,
     SEP,
     finalNudge

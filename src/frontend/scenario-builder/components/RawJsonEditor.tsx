@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { ScenarioConfiguration } from '$lib/types.js';
 
 interface RawJsonEditorProps {
@@ -10,6 +10,7 @@ export function RawJsonEditor({ config, onChange }: RawJsonEditorProps) {
   const [jsonText, setJsonText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Initialize text from config
   useEffect(() => {
@@ -17,6 +18,14 @@ export function RawJsonEditor({ config, onChange }: RawJsonEditorProps) {
     setIsDirty(false);
     setError(null);
   }, [config]);
+
+  // Auto-resize textarea on mount and when text changes
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+    }
+  }, [jsonText]);
 
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setJsonText(e.target.value);
@@ -66,42 +75,39 @@ export function RawJsonEditor({ config, onChange }: RawJsonEditorProps) {
   };
 
   return (
-    <div className="json-editor">
+    <div>
       <textarea
-        className="json-textarea"
+        ref={textareaRef}
+        className="w-full font-mono text-xs border rounded-md p-3 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none overflow-hidden"
         value={jsonText}
         onChange={handleTextChange}
         placeholder="Enter valid scenario JSON..."
         spellCheck={false}
+        style={{ 
+          minHeight: '500px',
+          height: 'auto',
+          overflowY: 'hidden'
+        }}
       />
       
       {error && (
-        <div style={{
-          marginTop: '8px',
-          padding: '8px 12px',
-          backgroundColor: '#fee',
-          border: '1px solid #fcc',
-          borderRadius: '4px',
-          color: '#c00',
-          fontSize: '14px'
-        }}>
+        <div className="mt-2 p-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded">
           {error}
         </div>
       )}
 
-      <div className="json-editor-actions">
+      <div className="mt-3 flex justify-end gap-2">
         <button
-          className="btn-secondary"
+          className="px-3 py-1.5 text-sm border border-gray-300 bg-white rounded hover:bg-gray-50 disabled:opacity-50"
           onClick={handleCancel}
           disabled={!isDirty}
         >
           Cancel
         </button>
         <button
-          className="btn-primary"
+          className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
           onClick={handleSave}
           disabled={!isDirty}
-          style={{ padding: '8px 16px' }}
         >
           Save to Pending
         </button>

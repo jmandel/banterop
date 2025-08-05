@@ -23,18 +23,25 @@ export function ScenarioEditor({
   isViewMode
 }: ScenarioEditorProps) {
   return (
-    <div className="editor-panel">
-      <div className="editor-header">
-        <h2 className="editor-title">{scenarioName}</h2>
-        <div className="view-toggle">
+    <div className="rounded-md border border-slate-200 bg-white">
+      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b p-2 lg:p-3 flex items-center justify-between">
+        <div className="flex gap-1 p-0.5 bg-slate-100 rounded">
           <button
-            className={`toggle-btn ${viewMode === 'structured' ? 'active' : ''}`}
+            className={`px-3 py-1 text-xs rounded transition ${
+              viewMode === 'structured' 
+                ? 'bg-white text-slate-900 shadow-sm' 
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
             onClick={() => onViewModeChange('structured')}
           >
             Structured View
           </button>
           <button
-            className={`toggle-btn ${viewMode === 'rawJson' ? 'active' : ''}`}
+            className={`px-3 py-1 text-xs rounded transition ${
+              viewMode === 'rawJson' 
+                ? 'bg-white text-slate-900 shadow-sm' 
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
             onClick={() => onViewModeChange('rawJson')}
           >
             Raw JSON
@@ -42,7 +49,7 @@ export function ScenarioEditor({
         </div>
       </div>
 
-      <div className="editor-body">
+      <div className="p-3 lg:p-4">
         {viewMode === 'structured' ? (
           <StructuredView config={config} />
         ) : (

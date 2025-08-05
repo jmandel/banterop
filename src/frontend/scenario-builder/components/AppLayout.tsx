@@ -42,25 +42,25 @@ export function AppLayout({ children }: AppLayoutProps) {
   const breadcrumbs = getBreadcrumbs();
 
   return (
-    <div className="app-layout">
-      <header className="app-header">
-        <div className="header-content">
-          <Link to="/scenarios" className="header-logo">
-            <img src={logoImage} alt="Logo" className="logo-image" />
-            <h1 className="logo-title">Scenario Tool</h1>
+    <div className="min-h-screen flex flex-col bg-gray-50">
+      <header className="sticky top-0 z-30 border-b bg-white/90 backdrop-blur">
+        <div className="container mx-auto px-4 py-2 flex items-center justify-between">
+          <Link to="/scenarios" className="flex items-center gap-3 text-gray-900 no-underline hover:text-gray-700 transition-colors">
+            <img src={logoImage} alt="Logo" className="w-10 h-10 object-contain" />
+            <h1 className="text-xl font-semibold">Scenario Tool</h1>
           </Link>
           
           {breadcrumbs && breadcrumbs.length > 0 && (
-            <nav className="header-breadcrumbs">
+            <nav className="flex items-center gap-2 text-sm">
               {breadcrumbs.map((crumb, index) => (
                 <React.Fragment key={index}>
-                  {index > 0 && <span className="breadcrumb-separator">/</span>}
+                  {index > 0 && <span className="text-gray-400">/</span>}
                   {crumb.path ? (
-                    <Link to={crumb.path} className="breadcrumb-link">
+                    <Link to={crumb.path} className="text-blue-600 hover:text-blue-800 no-underline">
                       {crumb.label}
                     </Link>
                   ) : (
-                    <span className="breadcrumb-current">{crumb.label}</span>
+                    <span className="text-gray-600">{crumb.label}</span>
                   )}
                 </React.Fragment>
               ))}
@@ -69,25 +69,26 @@ export function AppLayout({ children }: AppLayoutProps) {
         </div>
       </header>
 
-      <main className="app-main">
+      <main className="flex-1 bg-gray-50">
         {children}
       </main>
 
-      <footer className="app-footer">
-        <div className="footer-content">
-          <p className="footer-text">Conversational Interoperability - Testing healthcare workflows through dialogue</p>
-          <div className="footer-links">
+      <footer className="border-t bg-white">
+        <div className="container mx-auto px-4 py-2 flex items-center justify-between">
+          <p className="text-xs text-gray-600">Conversational Interoperability - Testing healthcare workflows through dialogue</p>
+          <div className="flex gap-4 text-xs">
             <a 
               href="https://github.com/jmandel/conversational-interop" 
-              className="footer-link"
+              className="text-blue-600 hover:text-blue-800 no-underline"
               target="_blank"
               rel="noopener noreferrer"
             >
               Reference Implementation
             </a>
+            <span className="text-gray-400">•</span>
             <a 
               href="https://confluence.hl7.org/spaces/FHIR/pages/358260686/2025+-+09+Language+First+Interoperability" 
-              className="footer-link"
+              className="text-blue-600 hover:text-blue-800 no-underline"
               target="_blank"
               rel="noopener noreferrer"
             >
