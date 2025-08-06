@@ -8,6 +8,7 @@ import type { LLMProvider } from 'src/types/llm.types.js';
 import { ToolSynthesisService } from '../../agents/services/tool-synthesis.service.js';
 import type { AgentInterface } from '$lib/types.js';
 import { isServerManaged, hasServerManagedAgents } from '$lib/utils/agent-helpers.js';
+import { OrchestratorConfig, OrchestratorConfigLoader } from '../config/orchestrator-config.js';
 import {
   Conversation, ConversationTurn, TraceEntry, AgentConfig,
   CreateConversationRequest, CreateConversationResponse,
@@ -32,16 +33,23 @@ export class ConversationOrchestrator {
   private inProgressTurns: Map<string, InProgressTurnState>;
   private llmProvider: LLMProvider;
   private toolSynthesisService: ToolSynthesisService;
+  private config: OrchestratorConfig;
 
   constructor(
     dbPath?: string,
     llmProvider?: LLMProvider,
-    toolSynthesisService?: ToolSynthesisService
+    toolSynthesisService?: ToolSynthesisService,
+    config?: Partial<OrchestratorConfig>
   ) {
     this.db = new ConversationDatabase(dbPath);
     this.eventListeners = new Map();
     this.activeConversations = new Map();
     this.inProgressTurns = new Map();
+    
+    // Load config with defaults and env vars
+    this.config = config 
+      ? OrchestratorConfigLoader.fromPartial(config)
+      : OrchestratorConfigLoader.load();
     
     // LLM provider is now required - no more fallback to default
     if (!llmProvider) {
@@ -430,8 +438,6 @@ export class ConversationOrchestrator {
     });
   }
 
-  // REMOVED: registerAttachment - now handled atomically in completeTurn
-
   completeTurn(request: CompleteTurnRequest): ConversationTurn {
     const inProgress = this.inProgressTurns.get(request.turnId);
     if (!inProgress) {
@@ -792,26 +798,29 @@ export class ConversationOrchestrator {
     this.db.cleanupExpiredTokens();
   }
 
-  cancelTurn(turnId: string): void {
-    const inProgress = this.inProgressTurns.get(turnId);
-    if (!inProgress) {
-      throw new Error(`Turn ${turnId} not found or already completed`);
-    }
+  // cancelTurn(turnId: string): boolean {
+  //   const inProgress = this.inProgressTurns.get(turnId);
+  //   if (!inProgress) {
+  //     throw new Error(`Turn ${turnId} not found or already completed`);
+  //   }
+  //   console.log("Canceling turn", turnId, "for conversation", inProgress.conversationId, "by agent", inProgress.agentId);
 
-    // Update status to cancelled
-    this.db.updateTurnStatus(turnId, 'cancelled');
+  //   // Update status to canceled
+  //   this.db.updateTurnStatus(turnId, 'canceled');
     
-    // Clean up
-    this.inProgressTurns.delete(turnId);
+  //   // Clean up
+  //   this.inProgressTurns.delete(turnId);
 
-    // Emit cancellation event
-    this.emitEvent(inProgress.conversationId, {
-      type: 'turn_cancelled',
-      conversationId: inProgress.conversationId,
-      timestamp: new Date(),
-      data: { turnId, agentId: inProgress.agentId }
-    });
-  }
+  //   // Emit cancelation event
+  //   this.emitEvent(inProgress.conversationId, {
+  //     type: 'turn_canceled',
+  //     conversationId: inProgress.conversationId,
+  //     timestamp: new Date(),
+  //     data: { turnId, agentId: inProgress.agentId }
+  //   });
+
+  //   return true;
+  // }
 
   // Additional query methods for API endpoints
     /**
@@ -925,6 +934,8 @@ export class ConversationOrchestrator {
       throw new Error(`Conversation ${conversationId} not found`);
     }
 
+    conversation.turns = conversation.turns.filter(t => t.status === 'completed');
+
     // Get tokens for this conversation
     const agentTokens = this.db.getTokensForConversation(conversationId);
 
@@ -1007,9 +1018,21 @@ export class ConversationOrchestrator {
     console.log(`[Orchestrator] Resurrecting active conversations...`);
     
     try {
-      const activeConversations = this.db.getActiveConversations();
+      // Config already has the right value (default or env var)
+      const lookbackHours = this.config.resurrectionLookbackHours;
+      console.log(`[Orchestrator] Using resurrection lookback period of ${lookbackHours} hours`);
+      
+      // Step 1: Mark stale conversations as inactive
+      const staleCount = this.db.markStaleConversationsInactive(lookbackHours);
+      if (staleCount > 0) {
+        console.log(`[Orchestrator] Marked ${staleCount} stale conversations as inactive`);
+      }
+      
+      // Step 2: Get active conversations with recent activity
+      const activeConversations = this.db.getActiveConversationsWithRecentActivity(lookbackHours);
       console.log(`[Orchestrator] Found ${activeConversations.length} active conversations to resurrect`);
       
+      // Step 3: Resurrect each conversation
       for (const conversation of activeConversations) {
         try {
           await this.rehydrateConversation(conversation.id);
@@ -1025,6 +1048,15 @@ export class ConversationOrchestrator {
   }
 
   close(): void {
+    // Send conversation_ended event to all active conversations to stop agents
+    for (const [conversationId, state] of this.activeConversations) {
+      this.emitEvent(conversationId, { type: 'conversation_ended' });
+    }
+    
+    // Clear all active conversation state
+    this.activeConversations.clear();
+    
+    // Close the database
     this.db.close();
   }
 }

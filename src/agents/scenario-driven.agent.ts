@@ -7,9 +7,7 @@ import {
   ConversationTurn,
   LLMProvider, LLMMessage, LLMRequest,
   ScenarioDrivenAgentConfig,
-  TraceEntry,
-  TurnCompletedEvent,
-  ToolResultEntry,
+  TraceEntry, ToolResultEntry,
   ThoughtEntry,
   ToolCallEntry,
   Attachment,
@@ -166,22 +164,30 @@ export class ScenarioDrivenAgent extends BaseAgent {
 
    async _processAndRespondToTurn(triggeringTurn: ConversationTurn): Promise<void> {
     if (this.processingTurn) return; // Prevent concurrent processing
+    
+    if (this.getCurrentTurnId()) {
+      throw new Error("Cannot start processing a new turn while another is in progress.");
+    }
+
+    await this.startTurn()
     this.processingTurn = true;
+    let timeToConcludeConversation = false;
 
     try {
       // Guard against double turn start (e.g. after rehydration)
-      if (!this.getCurrentTurnId()) {
-        await this.startTurn();
-      }
       
       let MAX_STEPS = 10;
       let stepCount = 0;
-      let isInFinalTurn = false; // Track if we're sending the final message after a terminal tool
+
+      
       while (stepCount++ < MAX_STEPS) {
+        console.log(`Processing step ${stepCount} of ${MAX_STEPS} for agent ${this.agentId}`);
           const historyString = this.buildConversationHistory();
           const currentProcessString = this.formatCurrentProcess(this.getCurrentTurnTrace());
           
-          const remainingSteps = MAX_STEPS - stepCount + 1;
+          // Calculate remaining steps (will be 0 on the last iteration)
+          const remainingSteps = MAX_STEPS - stepCount;
+          
           const prompt = this.constructFullPrompt({
               agentConfig: this.agentConfig,
               tools: this.agentConfig.tools,
@@ -189,11 +195,14 @@ export class ScenarioDrivenAgent extends BaseAgent {
               currentProcess: currentProcessString,
               remainingSteps
           });
+
+          console.log("prompting LLM with constructed prompt:", prompt.length, "characters");
           
           // The rest of the agent's logic proceeds from here
-          let result;
+          let result: ParsedResponse;
           try {
             result = await this.extractToolCallsFromLLMResponse(prompt);
+            console.log(`LLM response received for agent ${this.agentId}:`, result);
           } catch (llmError) {
             console.error("LLM request failed:", llmError);
             await this.addThought(`LLM request failed: ${llmError.message}. I'll try to recover gracefully.`);
@@ -208,46 +217,52 @@ export class ScenarioDrivenAgent extends BaseAgent {
             continue; // Try again on the next iteration
           }
           
-          if (!result.tools || !result.message) {
+          if (!result.tools?.length || !result.message) {
             console.error("Missing thoughts or tools, ending turn")
             await this.completeTurn("Turn ended with error");
-            this.client.endConversation(this.conversationId)
+            // this.client.endConversation(this.conversationId)
             break;
           }
 
           await this.addThought(result.message);
 
-          const stepResult = await this.executeSingleToolCallWithReasoning(result, isInFinalTurn);
+          const stepResult = await this.executeSingleToolCallWithReasoning(result, timeToConcludeConversation);
           if (stepResult.completedTurn) {
-            // If we just completed the final turn after a terminal tool, end the conversation
-            if (isInFinalTurn && this.conversationId) {
-              await this.client.endConversation(this.conversationId);
-            }
             break;
           }
-          
-          // If this was a terminal tool, the next message should be the final one
-          if (stepResult.isTerminal) {
-            // Continue for one more iteration to send the concluding message
-            // The thought we added will guide the LLM to send a final message
-            isInFinalTurn = true;
-            continue;
+
+          if (timeToConcludeConversation) {
+            // this step should have concluded but it failed to
+            await this.completeTurn("I was supposed to conclude this convesration but I didn't send a message. Ending converation with error.", true);
+            break;
           }
+
+          if (stepResult.isTerminal) {
+            timeToConcludeConversation = true;
+            console.log(`Agent ${this.agentId} reached terminal state, will break on next turn`);
+          }
+          
         }
+        
+        // If we exited the loop due to MAX_STEPS and haven't completed the turn
         if (stepCount > MAX_STEPS) {
-          console.error("MAX STEPS reaached, bailing")
+          console.error("MAX STEPS reached, completing turn with error message");
           try {
-            await this.completeTurn("Error: Max steps reached");
+            // Check if turn is still in progress
+            await this.completeTurn("Error: Max steps reached without sending a message", timeToConcludeConversation);
           } catch (error) {
-            // Turn might have already been completed by a terminal tool
+            // Turn might have already been completed
+            console.error("Failed to complete turn after max steps:", error);
+            throw error;
           }
         }
     } catch (error) {
       console.error("Error in _processAndRespondToTurn:", error);
       try {
-        await this.completeTurn("I encountered an unexpected error and need to end this conversation.");
+        await this.completeTurn("I encountered an unexpected error and need to end this turn.", timeToConcludeConversation);
       } catch (completeError) {
         console.error("Failed to complete turn after error:", completeError);
+        throw completeError;
       }
     } finally {
       this.processingTurn = false;
@@ -383,7 +398,16 @@ ${currentProcess}
 </CURRENT_STATUS>` : '';
 
     // Add warning if approaching MAX_STEPS
-    if (remainingSteps !== undefined && remainingSteps <= 5) {
+    if (remainingSteps === 0) {
+      const criticalSection = `
+<CRITICAL_FINAL_STEP>
+🛑 THIS IS YOUR FINAL STEP - YOU HAVE 0 STEPS REMAINING!
+You MUST send a message using send_message_to_agent_conversation NOW.
+This is your LAST CHANCE. If you don't send a message, the turn will end with an error.
+Do not call any other tools except send_message_to_agent_conversation.
+</CRITICAL_FINAL_STEP>`;
+      currentStatusSection = criticalSection + currentStatusSection;
+    } else if (remainingSteps <= 3) {
       const warningSection = `
 <IMPORTANT_WARNING>
 ⚠️ You have only ${remainingSteps} step${remainingSteps === 1 ? '' : 's'} remaining in this turn!
@@ -448,7 +472,7 @@ Your response MUST follow this EXACT format:
   }
 
   // Execute single tool call with reasoning capture (following single-action constraint)
-  private async executeSingleToolCallWithReasoning(result: ParsedResponse, isFinalTurn: boolean = false): Promise<{completedTurn: boolean, isTerminal?: boolean}> {
+  private async executeSingleToolCallWithReasoning(result: ParsedResponse, timeToConcludeConversation = false): Promise<{completedTurn: boolean, isTerminal?: boolean}> {
     const { message, tools } = result;
     
     // Handle case where no tool call was made
@@ -459,7 +483,7 @@ Your response MUST follow this EXACT format:
 
     // Handle built-in communication tools
     if (toolCall.name === 'no_response_needed') {
-      await this.completeTurn("No response");
+      await this.completeTurn("No response", timeToConcludeConversation);
       return {completedTurn: true};
     }
 
@@ -538,7 +562,7 @@ Your response MUST follow this EXACT format:
         }
       }
       
-      await this.completeTurn(text, isFinalTurn, attachmentPayloads);
+      await this.completeTurn(text, timeToConcludeConversation, attachmentPayloads);
       return {completedTurn: true};
     }
 
@@ -644,7 +668,7 @@ Your response MUST follow this EXACT format:
         // Add a thought indicating we're ready to conclude
         await this.addThought(
           `With this final tool result, I'm ready to conclude the conversation. ` +
-          `I'll write a message to the agent conversation thread and if relevant I will attach any final documents.`
+          `I'll call send_message_to_agent_conversation and if relevant I will attach any final documents.`
         );
         
         // Mark that we're in a terminal state but should continue for one more step to send final message
@@ -657,7 +681,7 @@ Your response MUST follow this EXACT format:
       await this.addToolResult(toolCallId, null, error.message);
       
       // Complete turn with error response
-      await this.completeTurn(`I encountered an error: ${error.message}`);
+      await this.completeTurn(`I encountered an error: ${error.message}`, timeToConcludeConversation);
       console.error("Error", error)
       console.trace()
       return {completedTurn: true};
@@ -709,34 +733,6 @@ Your response MUST follow this EXACT format:
     }
   }
 
-  /**
-   * Recursively finds a document by docId within a nested structure
-   */
-  private findDocumentByDocId(obj: any, targetDocId: string): any | null {
-    if (!obj || typeof obj !== 'object') {
-      return null;
-    }
-
-    // If this object has the target docId, return it
-    if (obj.docId === targetDocId) {
-      return obj;
-    }
-
-    // Recursively search arrays and objects
-    if (Array.isArray(obj)) {
-      for (const item of obj) {
-        const found = this.findDocumentByDocId(item, targetDocId);
-        if (found) return found;
-      }
-    } else {
-      for (const key of Object.keys(obj)) {
-        const found = this.findDocumentByDocId(obj[key], targetDocId);
-        if (found) return found;
-      }
-    }
-
-    return null;
-  }
 
   private async checkExistingAttachment(docId: string): Promise<Attachment | null> {
     try {
@@ -760,23 +756,6 @@ Your response MUST follow this EXACT format:
     }
   }
 
-  // Format tool response for the conversation
-  private formatToolResponse(toolName: string, result: any): string {
-    const isTerminal = this.isTerminalTool(toolName);
-    
-    if (isTerminal) {
-      // Terminal tools end the conversation
-      return `I have completed my action using ${toolName}. Result: ${JSON.stringify(result)}`;
-    } else {
-      // Non-terminal tools continue the conversation
-      return `I used ${toolName} and got: ${JSON.stringify(result)}. How would you like to proceed?`;
-    }
-  }
-
-  private isTerminalTool(toolName: string): boolean {
-    const toolDef = this.getToolDefinition(toolName);
-    return toolDef?.endsConversation ?? false;
-  }
 
   // Get built-in communication tools (copied from AgentRuntime)
   private getBuiltInTools(): Partial<Tool[]> & Pick<Tool, 'toolName'| 'description'| 'inputSchema'>[] {

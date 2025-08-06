@@ -20,6 +20,7 @@ export function isServerManaged(agent: AgentConfig): boolean {
     'scenario_driven',
     'sequential_script',
     'static_replay',
+    'simple_resumable',
     'bridge_to_external_mcp_client',
     'bridge_to_external_mcp_server',
     'bridge_to_external_a2a_client',

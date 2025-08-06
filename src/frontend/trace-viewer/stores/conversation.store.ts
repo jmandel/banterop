@@ -116,7 +116,7 @@ export const conversationStore = create<ConversationState>((set, get) => ({
       eventData.hasTrace = true;
     } else if (event.type === 'agent_thinking' || event.type === 'tool_executing') {
       eventData.agentId = event.data.agentId;
-    } else if (event.type === 'turn_cancelled') {
+    } else if (event.type === 'turn_canceled') {
       eventData.turnId = event.data.turnId;
     }
     
@@ -128,7 +128,7 @@ export const conversationStore = create<ConversationState>((set, get) => ({
     let turnId: string | undefined;
     let agentId: string | undefined;
     
-    if (event.type === 'turn_cancelled') {
+    if (event.type === 'turn_canceled') {
       turnId = event.data.turnId;
     } else if (event.type === 'trace_added') {
       turnId = event.data.turn.id;
@@ -390,8 +390,8 @@ export const conversationStore = create<ConversationState>((set, get) => ({
         });
         break;
         
-      case 'turn_cancelled':
-        addEvent(`❌ Turn cancelled: ${event.data.turnId}`);
+      case 'turn_canceled':
+        addEvent(`❌ Turn canceled: ${event.data.turnId}`);
         break;
     }
   },

@@ -1,0 +1,37 @@
+<scratchpad>
+The `lookup_medical_policy` tool has returned the policy document "HF-MRI-KNEE-2024". This document details the criteria for MRI of the knee, which aligns with the patient's request. It also lists the required documentation.
+
+My next steps are:
+1. Acknowledge receipt of the policy document to the patient and confirm I have it.
+2. Inform the patient about the required documentation based on the policy.
+3. Ask the patient for the specific details required by the policy, such as the start and end dates of conservative therapy, documentation of functional limitations, clinical findings, and provider information.
+4. Since the policy mentions provider network status, I will need to ask for the NPI numbers of the ordering physician and the imaging facility.
+5. I will also need to verify the member's information, so I will use the `lookup_beneficiary` tool. However, I don't have the member ID yet. The patient has not provided their member ID, name, or DOB. I will need to ask for this information.
+
+For now, I will focus on responding to the patient with the policy information and requesting the necessary documentation. I will then ask for their identifying information.
+</scratchpad>
+I have reviewed the applicable medical policy, "HF-MRI-KNEE-2024", which outlines the criteria for an MRI of the knee.
+
+To proceed with your prior authorization request, I require the following documentation and information as per the policy:
+
+*   **Initial Injury Date and Mechanism of Injury:** Please provide the exact date of the injury and how it occurred.
+*   **Conservative Therapy Details:**
+    *   A minimum of 14 consecutive days of documented conservative therapy must have been completed. Please provide the start and end dates of this therapy.
+    *   Detailed progress notes for each physical therapy visit during this period, including specific exercises, patient response, and objective measurements.
+    *   Documentation of any prescribed home exercise programs.
+*   **Functional Limitations:** Please provide specific, quantifiable functional limitations resulting from the injury (e.g., inability to bear weight, specific range of motion deficits, instability during specific movements).
+*   **Clinical Findings:** The ordering physician must document positive clinical examination findings. This includes results of specific tests for ligamentous integrity (e.g., Lachman test, anterior/posterior drawer test, varus/valgus stress tests) and the quality of the endpoint.
+*   **Failure of Conservative Treatment:** Provider notes must explicitly state the failure of conservative management to resolve symptoms or restore function.
+*   **Provider Information:**
+    *   NPI number of the ordering physician.
+    *   NPI number of the imaging facility.
+
+Additionally, could you please provide your full name, date of birth, and member ID so I can look up your beneficiary information?
+<send_message_to_agent_conversation>
+{
+  "text": "I have reviewed the applicable medical policy, \"HF-MRI-KNEE-2024\", which outlines the criteria for an MRI of the knee.\n\nTo proceed with your prior authorization request, I require the following documentation and information as per the policy:\n\n*   **Initial Injury Date and Mechanism of Injury:** Please provide the exact date of the injury and how it occurred.\n*   **Conservative Therapy Details:**\n    *   A minimum of 14 consecutive days of documented conservative therapy must have been completed. Please provide the start and end dates of this therapy.\n    *   Detailed progress notes for each physical therapy visit during this period, including specific exercises, patient response, and objective measurements.\n    *   Documentation of any prescribed home exercise programs.\n*   **Functional Limitations:** Please provide specific, quantifiable functional limitations resulting from the injury (e.g., inability to bear weight, specific range of motion deficits, instability during specific movements).\n*   **Clinical Findings:** The ordering physician must document positive clinical examination findings. This includes results of specific tests for ligamentous integrity (e.g., Lachman test, anterior/posterior drawer test, varus/valgus stress tests) and the quality of the endpoint.\n*   **Failure of Conservative Treatment:** Provider notes must explicitly state the failure of conservative management to resolve symptoms or restore function.\n*   **Provider Information:**\n    *   NPI number of the ordering physician.\n    *   NPI number of the imaging facility.\n\nAdditionally, could you please provide your full name, date of birth, and member ID so I can look up your beneficiary information?",
+  "attachments_to_include": [
+    "HF-MRI-KNEE-2024"
+  ]
+}
+```

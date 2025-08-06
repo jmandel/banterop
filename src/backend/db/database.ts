@@ -14,9 +14,11 @@ export class ConversationDatabase {
   private db: Database;
 
   constructor(dbPath: string = './dbs/conversations.db') {
-    // Use in-memory database if dbPath is ':memory:' or if in test environment
-    const isTest = process.env.NODE_ENV === 'test' || dbPath.includes('test-');
-    const finalPath = isTest && dbPath !== ':memory:' ? ':memory:' : dbPath;
+    // Use in-memory database only if explicitly requested or if in test mode without a specific path
+    // Allow resurrection tests to use file-based databases by checking for 'resurrection' in path
+    const isResurrectionTest = dbPath.includes('resurrection') || dbPath.includes('resumable');
+    const isTest = process.env.NODE_ENV === 'test' && !isResurrectionTest;
+    const finalPath = (dbPath === ':memory:' || (isTest && !dbPath.startsWith('/tmp/'))) ? ':memory:' : dbPath;
     
     // Ensure dbs directory exists for persistent databases
     if (finalPath !== ':memory:' && finalPath.startsWith('./dbs/')) {
@@ -999,6 +1001,10 @@ export class ConversationDatabase {
    * Used for resurrection on orchestrator startup
    * @returns Array of full conversation objects with turns, traces, and attachments
    */
+  /**
+   * Get all active conversations (status = 'active')
+   * This is a pure getter with no side effects
+   */
   getActiveConversations(): Conversation[] {
     const stmt = this.db.prepare(`
       SELECT * FROM conversations 
@@ -1007,6 +1013,61 @@ export class ConversationDatabase {
     `);
     
     const rows = stmt.all() as ConversationRow[];
+    
+    // Return full conversation objects with all data for rehydration
+    return rows.map(row => this.conversationFromRow(row, true, true, true));
+  }
+
+  /**
+   * Mark stale conversations as inactive based on last activity
+   * @param lookbackHours - Consider conversations stale if no activity within this many hours
+   * @returns Number of conversations marked as inactive
+   */
+  markStaleConversationsInactive(lookbackHours: number): number {
+    const cutoffTime = new Date(Date.now() - lookbackHours * 60 * 60 * 1000).toISOString();
+    
+    const updateStmt = this.db.prepare(`
+      UPDATE conversations 
+      SET status = 'inactive'
+      WHERE status = 'active' 
+      AND id NOT IN (
+        SELECT DISTINCT conversation_id 
+        FROM conversation_turns 
+        WHERE timestamp > ?
+      )
+    `);
+    
+    const staleCount = updateStmt.run(cutoffTime).changes;
+    
+    if (staleCount > 0) {
+      console.log(`[Database] Marked ${staleCount} stale conversations as inactive (no activity since ${cutoffTime})`);
+    }
+    
+    return staleCount;
+  }
+
+  /**
+   * Get active conversations with recent activity
+   * @param lookbackHours - Only return conversations with activity within this many hours
+   */
+  getActiveConversationsWithRecentActivity(lookbackHours: number): Conversation[] {
+    const cutoffTime = new Date(Date.now() - lookbackHours * 60 * 60 * 1000).toISOString();
+    
+    const stmt = this.db.prepare(`
+      SELECT DISTINCT c.* 
+      FROM conversations c
+      WHERE c.status = 'active'
+      AND EXISTS (
+        SELECT 1 FROM conversation_turns t 
+        WHERE t.conversation_id = c.id 
+        AND t.timestamp > ?
+      )
+      ORDER BY c.created_at ASC
+    `);
+    
+    const rows = stmt.all(cutoffTime) as ConversationRow[];
+    
+    console.log(`[Database] Found ${rows.length} active conversations with activity within ${lookbackHours} hours`);
     
     // Return full conversation objects with all data for rehydration
     return rows.map(row => this.conversationFromRow(row, true, true, true));

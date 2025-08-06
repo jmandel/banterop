@@ -224,4 +224,34 @@ I have successfully retrieved the full medical policy for an MRI of the knee (do
     expect(result.tools[0].name).toBe('nested');
     expect(result.tools[0].args.level1.level2.value).toBe('test');
   });
+
+  test('should parse malformed agent response with content between scratchpad and JSON', async () => {
+    // Read the actual malformed test case
+    const fs = await import('fs');
+    const path = await import('path');
+    const malformedContent = fs.readFileSync(
+      path.join(import.meta.dir, 'fixtures', 'malformed.txt'),
+      'utf-8'
+    );
+    
+    const result = parseToolsFromResponse(malformedContent);
+    
+    // Should find the send_message_to_agent_conversation tool
+    expect(result.tools).toHaveLength(1);
+    expect(result.tools[0].name).toBe('send_message_to_agent_conversation');
+    
+    // Check the text argument contains the expected content
+    const textArg = result.tools[0].args.text;
+    expect(textArg).toContain('I have reviewed the applicable medical policy');
+    expect(textArg).toContain('HF-MRI-KNEE-2024');
+    expect(textArg).toContain('Initial Injury Date and Mechanism of Injury');
+    expect(textArg).toContain('Conservative Therapy Details');
+    
+    // Check attachments array
+    expect(result.tools[0].args.attachments_to_include).toEqual(['HF-MRI-KNEE-2024']);
+    
+    // The message should be the scratchpad content
+    expect(result.message).toContain('lookup_medical_policy');
+    expect(result.message).toContain('My next steps are');
+  });
 });

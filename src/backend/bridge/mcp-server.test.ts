@@ -3,27 +3,17 @@ import { McpBridgeServer } from './mcp-server.js';
 import { ConversationOrchestrator } from '../core/orchestrator.js';
 import { encodeConfigToBase64URL } from '$lib/utils/config-encoding.js';
 import { CreateConversationRequest } from '$lib/types.js';
-import { Database } from 'bun:sqlite';
 
 describe('McpBridgeServer', () => {
   let orchestrator: ConversationOrchestrator;
   let mcpServer: McpBridgeServer;
   let config: CreateConversationRequest;
   let config64: string;
-  let db: Database;
 
   beforeEach(() => {
-    // Create in-memory database
-    db = new Database(':memory:');
-    
-    // Create orchestrator with mock LLM provider
-    orchestrator = new ConversationOrchestrator(db as any, {
-      generateContent: async () => ({ content: 'Mock response' }),
-      generateScenarioContent: async () => ({
-        patientAgent: { clinicalSketch: {} },
-        supplierAgent: { operationalContext: {} },
-        interactionDynamics: { behavioralParameters: {} }
-      })
+    // Create orchestrator with in-memory database and mock LLM provider
+    orchestrator = new ConversationOrchestrator(':memory:', {
+      generateResponse: async () => ({ content: 'Mock response' })
     } as any);
 
     // Create test config
@@ -58,7 +48,6 @@ describe('McpBridgeServer', () => {
 
   afterEach(async () => {
     await mcpServer.cleanup();
-    db.close();
   });
 
   it('should create MCP server instance', () => {

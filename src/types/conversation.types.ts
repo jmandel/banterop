@@ -73,7 +73,7 @@ export interface ConversationTurn {
   timestamp: Date;
   content: string;
   metadata?: Record<string, any>;
-  status: 'in_progress' | 'completed' | 'cancelled';
+  status: 'in_progress' | 'completed' | 'canceled';
   startedAt: Date;
   completedAt?: Date;
   trace?: TraceEntry[]; // Embedded trace entries when requested
@@ -110,7 +110,7 @@ export interface Conversation {
 // ============= Event Types =============
 
 export interface ConversationEvent {
-  type: 'turn_started' | 'trace_added' | 'turn_completed' | 'turn_cancelled' |
+  type: 'turn_started' | 'trace_added' | 'turn_completed' | 'turn_canceled' |
         'conversation_created' | 'conversation_ended' | 'conversation_ready' | 'user_query_created' | 
         'user_query_answered' | 'agent_thinking' | 'tool_executing' | 'rehydrated';
   conversationId: string;
@@ -140,8 +140,8 @@ export interface TurnCompletedEvent extends ConversationEvent {
   };
 }
 
-export interface TurnCancelledEvent extends ConversationEvent {
-  type: 'turn_cancelled';
+export interface TurncanceledEvent extends ConversationEvent {
+  type: 'turn_canceled';
   data: {
     turnId: string;
     reason?: string;
@@ -220,7 +220,7 @@ export type SpecificConversationEvent =
   | TurnStartedEvent
   | TraceAddedEvent
   | TurnCompletedEvent
-  | TurnCancelledEvent
+  | TurncanceledEvent
   | AgentThinkingEvent
   | ToolExecutingEvent
   | UserQueryCreatedEvent

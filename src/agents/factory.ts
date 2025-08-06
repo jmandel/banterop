@@ -14,6 +14,7 @@ import { ScenarioDrivenAgent } from './scenario-driven.agent.js';
 import { SequentialScriptAgent } from './sequential-script.agent.js';
 import { StaticReplayAgent } from './static-replay.agent.js';
 import { BridgeAgent } from './bridge.agent.js';
+import { SimpleResumableAgent } from './simple-resumable.agent.js';
 import { ToolSynthesisService } from './services/tool-synthesis.service.js';
 
 
@@ -48,6 +49,8 @@ export function createAgent(
     case 'bridge_to_external_mcp_server':
     case 'bridge_to_external_mcp_client':
       return new BridgeAgent(config as any, client);
+    case 'simple_resumable':
+      return new SimpleResumableAgent(config, client);
     default:
       throw new Error(`Unknown or unsupported strategy type for client-based agent: ${config.strategyType}`);
   }

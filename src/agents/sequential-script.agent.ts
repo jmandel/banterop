@@ -23,6 +23,7 @@ export class SequentialScriptAgent extends BaseAgent {
   declare config: SequentialScriptConfig;
   private currentScript?: SequentialScriptEntry;
   private currentStepIndex: number = 0;
+  private isExecutingScript: boolean = false;
 
   constructor(config: SequentialScriptConfig, client: any) {
     super(config, client);
@@ -180,7 +181,14 @@ export class SequentialScriptAgent extends BaseAgent {
    * Each script entry runs to completion - no pausing/resuming
    */
   private async executeScript(scriptEntry: SequentialScriptEntry): Promise<void> {
+    // Prevent concurrent script execution
+    if (this.isExecutingScript) {
+      console.log(`${this.agentId} already executing a script, skipping`);
+      return;
+    }
+    
     try {
+      this.isExecutingScript = true;
       this.currentScript = scriptEntry;
       this.currentStepIndex = 0;
       
@@ -348,6 +356,7 @@ export class SequentialScriptAgent extends BaseAgent {
   private resetScriptState(): void {
     this.currentScript = undefined;
     this.currentStepIndex = 0;
+    this.isExecutingScript = false;
   }
 
   /**

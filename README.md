@@ -117,6 +117,94 @@ Both bridges will accommodate **human-in-the-loop** interactions. While MCP clie
 - **`initiatingAgentId`**: Specifies which agent should send the first message to start the conversation.
 - **`initiatingInstructions`**: Optional runtime instructions that modify how the initiating agent starts the conversation.
 
+## Automatic Conversation Resurrection
+
+The orchestrator provides **automatic resurrection** of active conversations after server restarts, crashes, or deployments. This ensures zero downtime for ongoing agent interactions.
+
+### How It Works
+
+When the server starts:
+
+1. **Automatic Discovery**: The orchestrator constructor automatically queries the database for all conversations with `status='active'` that have had activity within the lookback period (default: 24 hours).
+2. **Stale Conversation Cleanup**: Conversations marked as 'active' but with no turns within the lookback window are automatically marked as 'inactive' to prevent resurrection of stale conversations.
+3. **Agent Resurrection**: For each active conversation with recent activity, the system:
+   - Recreates the conversation state in memory
+   - **Automatically recreates all server-managed agents** (scenario_driven, sequential_script, etc.)
+   - Re-initializes agents with their original tokens
+   - Subscribes agents to conversation events
+3. **Rehydration Event**: Once resurrection is complete, a `rehydrated` event is emitted containing:
+   - The full conversation history (all turns, traces, attachments)
+   - Current conversation state
+   - In-progress turn information (if any)
+4. **Agent Continuation**: Agents receive the rehydration event and can:
+   - Analyze the conversation history
+   - Abort any in-progress turns (with an appropriate message)
+   - Continue the conversation from where it left off
+
+### What Gets Resurrected
+
+✅ **Automatically Resurrected:**
+- Internal/server-managed agents (scenario_driven, sequential_script, etc.)
+- Full conversation state (all turns, traces, attachments)
+- Agent tokens and authentication
+- Event subscriptions
+
+⚠️ **Handled Gracefully:**
+- In-progress turns are detected and aborted with a message about the interruption
+- Agents can recover and continue after analyzing the conversation state
+
+❌ **Must Reconnect Manually:**
+- External agents (WebSocket clients, MCP bridges, etc.)
+- These agents must detect disconnection and reconnect themselves
+- Upon reconnection, they receive the full conversation state via rehydration
+
+### Example Scenario
+
+1. **Active Conversation**: A prior authorization discussion is ongoing between a patient agent and insurance agent
+2. **Server Restart**: The server crashes or is redeployed
+3. **Automatic Resurrection**: When the server starts:
+   - Finds the active conversation in the database
+   - Recreates both agents automatically
+   - Agents receive full conversation history
+4. **Seamless Continuation**: The agents continue negotiating the authorization without manual intervention
+
+### Implementation Details
+
+The resurrection logic is built into the `ConversationOrchestrator` constructor:
+
+```typescript
+constructor(dbPath?: string, llmProvider?: LLMProvider) {
+  // ... initialization ...
+  
+  // Resurrect active conversations on startup
+  this.resurrectActiveConversations().catch(error => {
+    console.error('[Orchestrator] Failed to resurrect active conversations:', error);
+  });
+}
+```
+
+This ensures that **no manual intervention** is required - the server automatically recovers its state and continues all active conversations after any restart.
+
+### Configuring Resurrection Lookback Period
+
+The resurrection lookback period determines how old a conversation's last turn can be before it's considered stale and excluded from resurrection. This prevents the system from attempting to resurrect very old conversations that are likely no longer relevant.
+
+**Default**: 24 hours
+
+**Configuration via Environment Variable**:
+```bash
+# Set lookback to 48 hours
+export RESURRECTION_LOOKBACK_HOURS=48
+
+# Set lookback to 12 hours  
+export RESURRECTION_LOOKBACK_HOURS=12
+```
+
+**Behavior**:
+- Conversations with no turns within the lookback period are marked as 'inactive'
+- Only conversations with recent activity (within lookback window) are resurrected
+- Invalid environment variable values fall back to the 24-hour default
+
 ## API Highlights
 
 The backend exposes both a REST API and a WebSocket JSON-RPC API at `https://hi.argo.run/api`.

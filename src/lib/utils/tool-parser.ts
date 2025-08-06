@@ -27,43 +27,79 @@ export interface ParsedResponse {
  * - "Quick search {\"name\": \"searchRecords\", \"args\": {\"query\": \"test\"}}"
  */
 export function parseToolsFromResponse(llmOutput: string): ParsedResponse {
-    // Find the last occurrence of a ```json ... ``` block
-    const jsonBlockMatch = findLastJsonCodeBlock(llmOutput);
+    // Step 1: Extract scratchpad content if present
+    let reasoning = '';
+    const scratchpadMatch = llmOutput.match(/<scratchpad>\s*([\s\S]*?)\s*<\/scratchpad>/);
+    if (scratchpadMatch) {
+      reasoning = scratchpadMatch[1].trim();
+    }
     
+    // Step 2: Look for JSON at the end - could be in ``` blocks, wrapped in tags, or bare
+    // Try multiple strategies to find the JSON
+    
+    // Strategy 1: Look for ```json or ``` code blocks
+    const jsonBlockMatch = findLastJsonCodeBlock(llmOutput);
     if (jsonBlockMatch) {
       try {
-        // Parse the JSON with tolerant parsing
         const parsed = parseTolerantJSON(jsonBlockMatch.content);
-        
-        // Validate it looks like a tool call
         if (isValidToolCall(parsed)) {
-          const toolCall: ToolCall = {
-            name: parsed.name,
-            args: parsed.args || {},
-            rawMatch: jsonBlockMatch.fullMatch
-          };
-          
-          // Everything before the JSON block is the reasoning/scratchpad
-          let reasoning = llmOutput.substring(0, jsonBlockMatch.start).trim();
-          
-          // Extract content from <scratchpad> tags if present
-          const scratchpadMatch = reasoning.match(/<scratchpad>\s*([\s\S]*?)\s*<\/scratchpad>/);
-          if (scratchpadMatch) {
-            reasoning = scratchpadMatch[1].trim();
-          }
-          
           return {
-            message: reasoning,
-            tools: [toolCall]
+            message: reasoning || llmOutput.substring(0, jsonBlockMatch.start).trim(),
+            tools: [{
+              name: parsed.name,
+              args: parsed.args || {},
+              rawMatch: jsonBlockMatch.fullMatch
+            }]
           };
         }
       } catch (error) {
-        console.warn(`Failed to parse JSON block: ${jsonBlockMatch.content.slice(0, 100)}...`);
-        console.warn(`Parse error: ${error instanceof Error ? error.message : error}`);
+        console.warn(`Failed to parse JSON block: ${error instanceof Error ? error.message : error}`);
       }
     }
     
-    // Fallback to legacy parsing for backward compatibility
+    // Strategy 2: Look for JSON wrapped in XML-like tags (e.g., <tool_name>{...}</tool_name> or <tool_name>{...}```)
+    const taggedJsonMatch = findTaggedJSON(llmOutput);
+    if (taggedJsonMatch) {
+      try {
+        const parsed = parseTolerantJSON(taggedJsonMatch.content);
+        // Use the tag name as the tool name if JSON doesn't have a name field
+        const toolName = parsed.name || taggedJsonMatch.tagName;
+        return {
+          message: reasoning || llmOutput.substring(0, taggedJsonMatch.start).trim(),
+          tools: [{
+            name: toolName,
+            args: parsed.name ? (parsed.args || {}) : parsed, // If no name field, entire object is args
+            rawMatch: taggedJsonMatch.fullMatch
+          }]
+        };
+      } catch (error) {
+        console.warn(`Failed to parse tagged JSON: ${error instanceof Error ? error.message : error}`);
+      }
+    }
+    
+    // Strategy 3: Look for bare JSON at the end (possibly after other content)
+    const bareJsonMatch = findBareJSONAtEnd(llmOutput);
+    if (bareJsonMatch) {
+      try {
+        const parsed = parseTolerantJSON(bareJsonMatch.content);
+        if (isValidToolCall(parsed)) {
+          // If we have scratchpad reasoning, use that; otherwise remove the JSON from the output
+          const messageText = reasoning || llmOutput.replace(bareJsonMatch.content, '').trim();
+          return {
+            message: messageText,
+            tools: [{
+              name: parsed.name,
+              args: parsed.args || {},
+              rawMatch: bareJsonMatch.content
+            }]
+          };
+        }
+      } catch (error) {
+        console.warn(`Failed to parse bare JSON: ${error instanceof Error ? error.message : error}`);
+      }
+    }
+    
+    // Fallback to legacy parsing for inline JSON
     return parseToolsFromResponseLegacy(llmOutput);
   }
 
@@ -120,6 +156,64 @@ function parseToolsFromResponseLegacy(llmOutput: string): ParsedResponse {
     };
   }
   
+/**
+ * Find JSON wrapped in XML-like tags
+ * e.g., <send_message>{...}</send_message> or <send_message>{...}```
+ */
+function findTaggedJSON(text: string): {content: string, tagName: string, start: number, fullMatch: string} | null {
+  // Look for pattern like <tagname>\n{...}</tagname> or <tagname>\n{...}```
+  // Note: We require a newline after the opening tag to avoid matching inline JSON
+  const taggedJsonRegex = /<([a-zA-Z_][a-zA-Z0-9_]*?)>\s*\n\s*(\{[\s\S]*?\})\s*(?:<\/\1>|```)?/g;
+  
+  let match;
+  let lastMatch = null;
+  
+  while ((match = taggedJsonRegex.exec(text)) !== null) {
+    const tagName = match[1];
+    const jsonContent = match[2];
+    
+    // Validate tag name looks like a tool name
+    if (validateToolName(tagName)) {
+      lastMatch = {
+        content: jsonContent.trim(),
+        tagName: tagName,
+        start: match.index,
+        fullMatch: match[0]
+      };
+    }
+  }
+  
+  return lastMatch;
+}
+
+/**
+ * Find bare JSON at the end of the text (not in code blocks)
+ * This looks for the LAST occurrence of a JSON object that contains "name"
+ * Often appears after scratchpad or other content
+ */
+function findBareJSONAtEnd(text: string): {content: string, start: number, end: number} | null {
+    // Look for the last { that could start a JSON object
+    let lastValidJson = null;
+    
+    for (let i = text.length - 1; i >= 0; i--) {
+      if (text[i] === '{') {
+        // Try to extract JSON from this position
+        const jsonStr = extractJSONObject(text, i);
+        if (jsonStr && (jsonStr.includes('"name"') || jsonStr.includes("'name'") || /\bname\s*:/.test(jsonStr))) {
+          // This looks like it could be a tool call
+          lastValidJson = {
+            content: jsonStr,
+            start: i,
+            end: i + jsonStr.length
+          };
+          break; // We want the last one, and we're searching backwards
+        }
+      }
+    }
+    
+    return lastValidJson;
+  }
+
 /**
  * Find the last occurrence of a code block (```json or ``` without language)
  */

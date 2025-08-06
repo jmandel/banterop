@@ -9,7 +9,8 @@ import {
   ThoughtEntry, ToolCallEntry, ToolResultEntry,
   TurnCompletedEvent, TurnStartedEvent, TraceAddedEvent,
   UserQueryAnsweredEvent, RehydratedEvent,
-  TraceEntry, Attachment, AttachmentPayload
+  TraceEntry, Attachment, AttachmentPayload,
+  TurncanceledEvent
 } from '$lib/types.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -84,6 +85,9 @@ export abstract class BaseAgent implements AgentInterface {
       case 'turn_completed':
         await this.onTurnCompletedInternal(event as TurnCompletedEvent);
         break;
+      case 'turn_canceled':
+        await this.onTurnCanceledInternal(event as TurncanceledEvent);
+        break;
       case 'trace_added':
         await this.onTraceAdded(event as TraceAddedEvent);
         break;
@@ -98,6 +102,11 @@ export abstract class BaseAgent implements AgentInterface {
         this.conversationEnded = true;
         break;
     }
+  }
+  onTurnCanceledInternal(event: TurncanceledEvent) {
+   console.log("Agent canceling turn")
+   this.turns.delete(event.data.turnId);
+   this.turnOrder = this.turnOrder.filter(id => id !== event.data.turnId);
   }
 
   // method for subclasses to implement their core logic
@@ -116,7 +125,10 @@ export abstract class BaseAgent implements AgentInterface {
   private async onTurnStarted(event: TurnStartedEvent): Promise<void> {
     const turn = event.data.turn;
     this.turns.set(turn.id, turn);
-    this.turnOrder.push(turn.id);
+    // Only add to turnOrder if not already present (avoid duplicates)
+    if (!this.turnOrder.includes(turn.id)) {
+      this.turnOrder.push(turn.id);
+    }
   }
   
   private async onTurnCompletedInternal(event: TurnCompletedEvent): Promise<void> {
@@ -209,7 +221,7 @@ export abstract class BaseAgent implements AgentInterface {
     
     // Clear pending queries as they are now stale
     for (const [queryId, { reject }] of this.pendingUserQueries) {
-      reject(new Error('Query cancelled due to rehydration'));
+      reject(new Error('Query canceled due to rehydration'));
     }
     this.pendingUserQueries.clear();
     
@@ -217,14 +229,14 @@ export abstract class BaseAgent implements AgentInterface {
     await this.maybeProcessNextOpportunity();
   }
   
-  private async _abortCurrentTurn(turnId: string): Promise<void> {
-    try {
-      const abortMessage = this.getAbortMessage();
-      await this.client.completeTurn(turnId, abortMessage);
-    } catch (error) {
-      console.error(`Failed to abort turn ${turnId}:`, error);
-    }
-  }
+  // private async _abortCurrentTurn(turnId: string): Promise<void> {
+  //   try {
+  //     const abortMessage = this.getAbortMessage();
+  //     await this.client.cancelTurn(turnId);
+  //   } catch (error) {
+  //     console.error(`Failed to abort turn ${turnId}:`, error);
+  //   }
+  // }
   
   protected getAbortMessage(): string {
     return "I encountered a brief connection issue and had to abort my previous action. I will now re-evaluate the situation.";

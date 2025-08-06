@@ -4,19 +4,14 @@ import { createBridgeRoutes } from './bridge.js';
 import { ConversationOrchestrator } from '../core/orchestrator.js';
 import { encodeConfigToBase64URL } from '$lib/utils/config-encoding.js';
 import { CreateConversationRequest } from '$lib/types.js';
-import { Database } from 'bun:sqlite';
 
 describe('Bridge API Routes', () => {
   let app: Hono;
   let orchestrator: ConversationOrchestrator;
-  let db: Database;
 
   beforeEach(() => {
-    // Create in-memory database
-    db = new Database(':memory:');
-    
     // Create orchestrator with mock LLM provider
-    orchestrator = new ConversationOrchestrator(db as any, {
+    orchestrator = new ConversationOrchestrator(':memory:', {
       generateContent: async () => ({ content: 'Mock response' }),
       generateScenarioContent: async () => ({
         patientAgent: { clinicalSketch: {} },
@@ -31,7 +26,7 @@ describe('Bridge API Routes', () => {
   });
 
   afterEach(() => {
-    db.close();
+    orchestrator.close();
   });
 
   it('should handle MCP endpoint with unknown method', async () => {

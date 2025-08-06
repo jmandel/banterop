@@ -161,7 +161,20 @@ export class InProcessOrchestratorClient extends EventEmitter implements Orchest
     return this.orchestrator.completeTurn(request);
   }
 
-  // REMOVED: registerAttachment - now handled atomically in completeTurn
+
+  // async cancelTurn(turnId: string): Promise<boolean> {
+  //   if (!this.authenticated || !this.conversationId || !this.agentId) {
+  //     throw new Error('Client not authenticated');
+  //   }
+
+  //   const request: { conversationId: string; turnId: string; agentId: string } = {
+  //     conversationId: this.conversationId,
+  //     turnId,
+  //     agentId: this.agentId
+  //   };
+
+  //   return this.orchestrator.cancelTurn(request);
+  // }
 
   async getAttachment(attachmentId: string): Promise<Attachment | null> {
     return this.orchestrator.getDbInstance().getAttachment(attachmentId);

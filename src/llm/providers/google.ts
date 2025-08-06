@@ -1,5 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { LLMProvider, LLMProviderMetadata, LLMRequest, LLMResponse, LLMMessage, LLMTool, LLMToolCall, LLMToolResponse } from 'src/types/llm.types.js';
+import fs from 'fs';
+import path from 'path';
 
 export class GoogleLLMProvider extends LLMProvider {
   static readonly metadata: LLMProviderMetadata = {
@@ -50,6 +52,28 @@ export class GoogleLLMProvider extends LLMProvider {
     try {
       // Convert messages to Google format
       const contents = this.convertMessagesToGoogleFormat(request.messages);
+      
+      console.log("Send llm query to google", request.messages[0].content.length)
+      
+      // Debug: Save full message content to timestamped file
+      const debugDir = './debug';
+      if (!fs.existsSync(debugDir)) {
+        fs.mkdirSync(debugDir, { recursive: true });
+      }
+      const timestamp = new Date().toISOString().replace(/:/g, '-').replace(/\./g, '_');
+      const debugFile = path.join(debugDir, `google-llm-${timestamp}.json`);
+      fs.writeFileSync(debugFile, JSON.stringify({
+        timestamp: new Date().toISOString(),
+        // messages: request.messages,
+        // fullFirstMessageContent: request.messages[0]?.content,
+        model: request.model || this.config.model || GoogleLLMProvider.metadata.defaultModel,
+        temperature: request.temperature,
+        maxTokens: request.maxTokens
+      }, null, 2));
+
+      // then appepnd
+      fs.writeFileSync(debugFile, `\n\nFull message content:\n\n${request.messages[0].content}`, { flag: 'a' });
+      console.log(`Debug: Saved full message content to ${debugFile}`);
       
       const response = await this.client.models.generateContent({
         model: request.model || this.config.model || GoogleLLMProvider.metadata.defaultModel,

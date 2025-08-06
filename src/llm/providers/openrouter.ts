@@ -51,6 +51,7 @@ export class OpenRouterLLMProvider extends LLMProvider {
     }
     
     try {
+      console.log("Send llm query to open router", request)
       const completion = await this.client.chat.completions.create({
         model: request.model || this.config.model || OpenRouterLLMProvider.metadata.defaultModel,
         messages: request.messages.map(msg => ({
