@@ -246,8 +246,6 @@ export class ConversationOrchestrator {
           conversationState.agents = new Map();
         }
         conversationState.agents.set(agentId, agent);
-        
-        // Initialize agent synchronously to avoid race conditions
         await this.initializeAgentAsync(agent, conversationId, token);
         
         console.log(`[Orchestrator] Agent ${agentConfig.id} provisioned successfully`);
@@ -295,10 +293,10 @@ export class ConversationOrchestrator {
       await agent.initialize(conversationId, token);
       console.log(`[Orchestrator] Agent ${agent.agentId} initialized and ready`);
       
-      // Subscribe to conversation events
-      this.subscribeToConversation(conversationId, (event) => {
-        agent.onConversationEvent(event);
-      });
+      // // Subscribe to conversation events
+      // this.subscribeToConversation(conversationId, (event) => {
+      //   agent.onConversationEvent(event);
+      // });
       
       console.log(`[Orchestrator] Agent ${agent.agentId} subscribed to conversation events`);
     } catch (error) {
@@ -481,7 +479,7 @@ export class ConversationOrchestrator {
           timestamp: new Date(),
           type: 'tool_result',
           toolCallId: 'attachment_creation',
-          result: { attachmentId, docId: payload.docId, name: payload.name }
+          result: { attachmentId, name: payload.name }
         };
         
         this.db.addTraceEntry(request.conversationId, traceEntry, request.turnId);
@@ -527,6 +525,10 @@ export class ConversationOrchestrator {
       data: { turn } // Full turn object with trace included
     });
 
+    // If this is a final turn, end the conversation
+    if (request.isFinalTurn) {
+      this.endConversation(request.conversationId);
+    }
 
     return turn;
   }
@@ -798,30 +800,6 @@ export class ConversationOrchestrator {
     this.db.cleanupExpiredTokens();
   }
 
-  // cancelTurn(turnId: string): boolean {
-  //   const inProgress = this.inProgressTurns.get(turnId);
-  //   if (!inProgress) {
-  //     throw new Error(`Turn ${turnId} not found or already completed`);
-  //   }
-  //   console.log("Canceling turn", turnId, "for conversation", inProgress.conversationId, "by agent", inProgress.agentId);
-
-  //   // Update status to canceled
-  //   this.db.updateTurnStatus(turnId, 'canceled');
-    
-  //   // Clean up
-  //   this.inProgressTurns.delete(turnId);
-
-  //   // Emit cancelation event
-  //   this.emitEvent(inProgress.conversationId, {
-  //     type: 'turn_canceled',
-  //     conversationId: inProgress.conversationId,
-  //     timestamp: new Date(),
-  //     data: { turnId, agentId: inProgress.agentId }
-  //   });
-
-  //   return true;
-  // }
-
   // Additional query methods for API endpoints
     /**
    * Get pending user queries for a specific conversation
@@ -990,8 +968,8 @@ export class ConversationOrchestrator {
           continue;
         }
 
-        await this.initializeAgentAsync(agent, conversationId, token);
         conversationState.agents!.set(agentConfig.id, agent);
+        await this.initializeAgentAsync(agent, conversationId, token);
         
         console.log(`[Orchestrator] Agent ${agentConfig.id} rehydrated successfully`);
       } catch (error) {

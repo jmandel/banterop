@@ -13,7 +13,7 @@ import {
   Attachment,
   AttachmentPayload
 } from '$lib/types.js';
-import type { ScenarioConfiguration, AgentConfiguration, Tool } from '$lib/types.js';
+import type { ScenarioConfiguration, AgentConfiguration, Tool, RehydratedEvent } from '$lib/types.js';
 import { ParsedResponse, parseToolsFromResponse } from '$lib/utils/tool-parser.js';
 import { BaseAgent } from './base.agent.js';
 import { ToolSynthesisService } from './services/tool-synthesis.service.js';
@@ -61,21 +61,18 @@ export class ScenarioDrivenAgent extends BaseAgent {
     }
   }
 
-  async initialize(conversationId: string, authToken: string): Promise<void> {
-    // Call parent initialization first - BaseAgent now handles all state management
-    await super.initialize(conversationId, authToken);
+  async onRehydrated(event: RehydratedEvent): Promise<void> {
+    await super.onRehydrated(event);
     
-    // ONE-TIME-FETCH to hydrate state on startup
-    const initialConversation = await this.client.getConversation();
-    
-    // Extract available documents from all turns (BaseAgent handles turns/traces/attachments)
     this.availableDocuments.clear();
-    
     const turns = this.getTurns();
     for (const turn of turns) {
+      if (turn.agentId !== this.agentId) {
+        continue
+      }
         const traces = this.getTraceForTurn(turn.id);
         for (const entry of traces) {
-            if (entry.type === 'tool_result' && (entry as ToolResultEntry).result) {
+            if (entry.type === 'tool_result' && (entry as ToolResultEntry).result && entry.agentId === this.agentId) {
                 const documents = this.extractDocuments((entry as ToolResultEntry).result);
                 for (const [docId, doc] of documents) {
                     this.availableDocuments.set(docId, doc);
@@ -83,15 +80,16 @@ export class ScenarioDrivenAgent extends BaseAgent {
             }
         }
     }
-
-    // Check if this agent should initiate - this check is no longer needed
-    // as initiation is handled differently in the new model
-
   }
 
   async onConversationEvent(event: ConversationEvent): Promise<void> {
     // Let BaseAgent handle the main event processing
     await super.onConversationEvent(event);
+
+    if (event.data?.agentId && event.data.agentId !== this.agentId) {
+      // Ignore attachment scans for other agents.
+      return;
+    }
 
     // Handle specific events for document extraction
     switch (event.type) {
@@ -217,11 +215,15 @@ export class ScenarioDrivenAgent extends BaseAgent {
             continue; // Try again on the next iteration
           }
           
-          if (!result.tools?.length || !result.message) {
-            console.error("Missing thoughts or tools, ending turn")
-            await this.completeTurn("Turn ended with error");
-            // this.client.endConversation(this.conversationId)
-            break;
+          if (!result?.tools?.length) {
+            await this.addThought("I did not produce a valid tool call JSON block after my scratchpad block. I will try again.");
+            console.trace()
+            continue;
+          }
+
+          if (!result.message) {
+            await this.addThought("I did not provide any reasoning in the <scratchpad> block. I will try again, producing <scratchpad>thoughts</scratchpad> followed by a json tool call.");
+            continue;
           }
 
           await this.addThought(result.message);
@@ -272,8 +274,8 @@ export class ScenarioDrivenAgent extends BaseAgent {
   private buildConversationHistory(): string {
     const sections: string[] = [];
     
-    // Process turns chronologically
-    const turns = this.getTurns();
+    // Process only completed turns chronologically
+    const turns = this.getTurns().filter(t => t.status === 'completed');
     for (const turn of turns) {
       if (turn.agentId === this.agentId) {
         // Our own turn - use detailed formatting with scratchpad and tool calls
@@ -381,6 +383,7 @@ ATTACHMENT GUIDANCE:
   2. Use send_message_to_agent_conversation with attachments_to_include as an array of docId strings
   Example: attachments_to_include: ["doc_policy_123", "doc_report_456"]
 - Never claim "see attached" without including actual attachments.
+- Never re-attach a document within the same conversation! Once is plenty.
 
 </AVAILABLE_TOOLS>`;
 
@@ -602,6 +605,11 @@ Your response MUST follow this EXACT format:
         const existingAttachment = await this.checkExistingAttachment(toolCall.args.refToDocId as string);
         
         if (existingAttachment) {
+          if (!existingAttachment.content) {
+            console.log(toolCall, existingAttachment)
+            
+            throw new Error(`Document with docId ${toolCall.args.refToDocId} exists but has no content.`);
+          }
           toolOutput = {
             docId: existingAttachment.docId,
             name: existingAttachment.name,
@@ -668,7 +676,7 @@ Your response MUST follow this EXACT format:
         // Add a thought indicating we're ready to conclude
         await this.addThought(
           `With this final tool result, I'm ready to conclude the conversation. ` +
-          `I'll call send_message_to_agent_conversation and if relevant I will attach any final documents.`
+          `I'll attach this final result's docId via send_message_to_agent_conversation, explaining the outcome.`
         );
         
         // Mark that we're in a terminal state but should continue for one more step to send final message
@@ -736,10 +744,11 @@ Your response MUST follow this EXACT format:
 
   private async checkExistingAttachment(docId: string): Promise<Attachment | null> {
     try {
-      // Check if we have this document in our local map
+      // First check if we have this document in our local scenario documents map
       const doc = this.availableDocuments.get(docId);
       if (doc) {
         // Convert to Attachment format if found
+        console.log(`Found existing document in availableDocuments: ${docId}`, doc);
         return {
           id: doc.id || docId,
           docId: docId,
@@ -749,6 +758,22 @@ Your response MUST follow this EXACT format:
           summary: doc.summary
         } as Attachment;
       }
+      
+      // Now check attachments received from other agents in previous turns
+      for (const [turnId, attachments] of this.attachmentsByTurnId) {
+        const foundAttachment = attachments.find(att => att.docId === docId || att.id === docId);
+        if (foundAttachment) {
+          // Return the actual attachment with its content
+          return foundAttachment;
+        }
+      }
+      
+      // Finally, try to fetch from database using the client
+      const attachment = await this.client.getAttachmentByDocId(this.conversationId, docId);
+      if (attachment) {
+        return attachment;
+      }
+      
       return null;
     } catch (error) {
       console.error(`Failed to check existing attachment for docId ${docId}:`, error);
@@ -1012,7 +1037,10 @@ Your response MUST follow this EXACT format:
   }
 
   private formatCurrentProcess(currentTurnTrace: TraceEntry[]): string {
-    if (currentTurnTrace.length === 0) {
+    // Deduplicate traces before formatting
+    const dedupedTraces = this.deduplicateTraces(currentTurnTrace);
+    
+    if (dedupedTraces.length === 0) {
         return `<!-- No actions taken yet in this turn -->
 ***=>>YOU ARE HERE<<=***`;
     }
@@ -1020,20 +1048,20 @@ Your response MUST follow this EXACT format:
     const steps: string[] = [];
     let i = 0;
     
-    while (i < currentTurnTrace.length) {
-      const trace = currentTurnTrace[i];
+    while (i < dedupedTraces.length) {
+      const trace = dedupedTraces[i];
       
       if (trace.type === 'thought') {
         // Collect all consecutive thoughts
         const thoughts: string[] = [];
-        while (i < currentTurnTrace.length && currentTurnTrace[i].type === 'thought') {
-          thoughts.push((currentTurnTrace[i] as ThoughtEntry).content);
+        while (i < dedupedTraces.length && dedupedTraces[i].type === 'thought') {
+          thoughts.push((dedupedTraces[i] as ThoughtEntry).content);
           i++;
         }
         
         // Check if there's a tool call following
-        if (i < currentTurnTrace.length && currentTurnTrace[i].type === 'tool_call') {
-          const toolCall = currentTurnTrace[i] as ToolCallEntry;
+        if (i < dedupedTraces.length && dedupedTraces[i].type === 'tool_call') {
+          const toolCall = dedupedTraces[i] as ToolCallEntry;
           const toolCallJson = JSON.stringify({ name: toolCall.toolName, args: toolCall.parameters }, null, 2);
           
           // Format as a complete LLM response
@@ -1048,8 +1076,8 @@ ${toolCallJson}
           i++; // Move past the tool call
           
           // Check for tool result
-          if (i < currentTurnTrace.length && currentTurnTrace[i].type === 'tool_result') {
-            const toolResult = currentTurnTrace[i] as ToolResultEntry;
+          if (i < dedupedTraces.length && dedupedTraces[i].type === 'tool_result') {
+            const toolResult = dedupedTraces[i] as ToolResultEntry;
             const resultJson = toolResult.error 
               ? JSON.stringify({ error: toolResult.error }, null, 2)
               : JSON.stringify(toolResult.result, null, 2);
@@ -1077,6 +1105,35 @@ ${thoughts.join('\n')}
       : '***=>>YOU ARE HERE<<=***';
 
     return processContent;
+  }
+  
+  private deduplicateTraces(traces: TraceEntry[]): TraceEntry[] {
+    const seen = new Set<string>();
+    const deduped: TraceEntry[] = [];
+    
+    for (const trace of traces) {
+      // Create a key for comparison (excluding id and timestamp)
+      let key: string;
+      
+      if (trace.type === 'thought') {
+        key = `thought:${(trace as ThoughtEntry).content}`;
+      } else if (trace.type === 'tool_call') {
+        const tc = trace as ToolCallEntry;
+        key = `tool_call:${tc.toolCallId}:${tc.toolName}:${JSON.stringify(tc.parameters)}`;
+      } else if (trace.type === 'tool_result') {
+        const tr = trace as ToolResultEntry;
+        key = `tool_result:${tr.toolCallId}:${JSON.stringify(tr.result)}:${tr.error || ''}`;
+      } else {
+        key = JSON.stringify(trace);
+      }
+      
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(trace);
+      }
+    }
+    
+    return deduped;
   }
 
   // Get conversation from client

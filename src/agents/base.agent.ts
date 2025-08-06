@@ -30,6 +30,9 @@ export abstract class BaseAgent implements AgentInterface {
   private attachmentsByTurnId: Map<string, Attachment[]> = new Map();
   private pendingUserQueries: Map<string, { resolve: Function, reject: Function }> = new Map();
   
+  // Duplicate detection sets
+  private seenTraceIdsByTurnId: Map<string, Set<string>> = new Map();
+  
   // Current turn tracking
   private currentTurnId: string | null = null;
   private lastProcessedTurnId: string | null = null;
@@ -135,20 +138,44 @@ export abstract class BaseAgent implements AgentInterface {
     const turn = event.data.turn;
     this.turns.set(turn.id, turn);
     
-    // Store traces if present
+    // Store traces if present, but skip duplicates (they may have already been added via trace_added events)
     if (turn.trace && turn.trace.length > 0) {
-      this.tracesByTurnId.set(turn.id, turn.trace);
+      const existingTraces = this.tracesByTurnId.get(turn.id) || [];
+      const seenIds = this.seenTraceIdsByTurnId.get(turn.id) || new Set();
+      
+      for (const trace of turn.trace) {
+        // Skip if we've already seen this trace
+        if (seenIds.has(trace.id)) {
+          continue;
+        }
+        
+        // Check for other duplicate conditions
+        try {
+          existingTraces.push(trace);
+          seenIds.add(trace.id);
+        } catch (error) {
+          // Log but don't throw - this might be expected if we got the trace via trace_added
+          console.log(`[${this.agentId}] Skipping duplicate trace in onTurnCompletedInternal: ${trace.id}`);
+        }
+      }
+      
+      this.tracesByTurnId.set(turn.id, existingTraces);
+      this.seenTraceIdsByTurnId.set(turn.id, seenIds);
     }
     
     // Process attachments if present
     if (turn.attachments && turn.attachments.length > 0) {
+      console.log("Processing attachments for turn", turn.id, turn.attachments);
       const attachments: Attachment[] = [];
       for (const attachmentId of turn.attachments) {
         const attachment = await this.client.getAttachment(attachmentId);
         if (attachment) {
           attachments.push(attachment);
+        } else {
+          console.error(`[${this.agentId}] Failed to retrieve attachment ${attachmentId} for turn ${turn.id}`);
         }
       }
+      console.log("Set atahmetns", this.agentId, turn.id, attachments);
       this.attachmentsByTurnId.set(turn.id, attachments);
     }
     
@@ -165,9 +192,20 @@ export abstract class BaseAgent implements AgentInterface {
     const turnId = event.data.turn.id;
     const trace = event.data.trace;
     
+    // Check if we've already seen this trace
+    const seenIds = this.seenTraceIdsByTurnId.get(turnId) || new Set();
+    if (seenIds.has(trace.id)) {
+      console.log(`[${this.agentId}] Skipping duplicate trace in onTraceAdded: ${trace.id}`);
+      return;
+    }
+    
     const existingTraces = this.tracesByTurnId.get(turnId) || [];
     existingTraces.push(trace);
     this.tracesByTurnId.set(turnId, existingTraces);
+    
+    // Mark this trace as seen
+    seenIds.add(trace.id);
+    this.seenTraceIdsByTurnId.set(turnId, seenIds);
   }
   
   private async onUserQueryAnswered(event: UserQueryAnsweredEvent): Promise<void> {
@@ -179,7 +217,7 @@ export abstract class BaseAgent implements AgentInterface {
     }
   }
   
-  private async onRehydrated(event: RehydratedEvent): Promise<void> {
+  protected async onRehydrated(event: RehydratedEvent): Promise<void> {
     console.log(`Agent ${this.agentId} received rehydration event`);
     
     // Clear and rebuild all state from snapshot
@@ -187,6 +225,7 @@ export abstract class BaseAgent implements AgentInterface {
     this.turnOrder = [];
     this.tracesByTurnId.clear();
     this.attachmentsByTurnId.clear();
+    this.seenTraceIdsByTurnId.clear();
     
     const conversation = event.data.conversation;
     
@@ -197,6 +236,13 @@ export abstract class BaseAgent implements AgentInterface {
       
       if (turn.trace && turn.trace.length > 0) {
         this.tracesByTurnId.set(turn.id, turn.trace);
+        
+        // Mark all traces as seen
+        const seenIds = new Set<string>();
+        for (const trace of turn.trace) {
+          seenIds.add(trace.id);
+        }
+        this.seenTraceIdsByTurnId.set(turn.id, seenIds);
       }
     }
     
@@ -209,16 +255,6 @@ export abstract class BaseAgent implements AgentInterface {
       }
     }
     
-    // Check if we had an in-progress turn
-    const inProgressTurn = conversation.turns.find(
-      t => t.status === 'in_progress' && t.agentId === this.agentId
-    );
-    
-    if (inProgressTurn) {
-      console.log(`Agent ${this.agentId} aborting in-progress turn ${inProgressTurn.id}`);
-      await this._abortCurrentTurn(inProgressTurn.id);
-    }
-    
     // Clear pending queries as they are now stale
     for (const [queryId, { reject }] of this.pendingUserQueries) {
       reject(new Error('Query canceled due to rehydration'));
@@ -228,15 +264,6 @@ export abstract class BaseAgent implements AgentInterface {
     // Check if we should take a turn
     await this.maybeProcessNextOpportunity();
   }
-  
-  // private async _abortCurrentTurn(turnId: string): Promise<void> {
-  //   try {
-  //     const abortMessage = this.getAbortMessage();
-  //     await this.client.cancelTurn(turnId);
-  //   } catch (error) {
-  //     console.error(`Failed to abort turn ${turnId}:`, error);
-  //   }
-  // }
   
   protected getAbortMessage(): string {
     return "I encountered a brief connection issue and had to abort my previous action. I will now re-evaluate the situation.";
@@ -271,16 +298,7 @@ export abstract class BaseAgent implements AgentInterface {
   protected async addThought(thought: string): Promise<void> {
     if (!this.currentTurnId) throw new Error('No turn in progress');
     const entry = await this.client.addTrace(this.currentTurnId, { type: 'thought', content: thought });
-    // Update local state
-    const existingTraces = this.tracesByTurnId.get(this.currentTurnId) || [];
-    existingTraces.push({
-      id: uuidv4(),
-      agentId: this.agentId,
-      timestamp: new Date(),
-      type: 'thought',
-      content: thought
-    } as ThoughtEntry);
-    this.tracesByTurnId.set(this.currentTurnId, existingTraces);
+    // Do NOT update local state - let onTraceAdded handle it to avoid duplicates
   }
   
   protected async addToolCall(toolName: string, parameters: any): Promise<string> {
@@ -292,18 +310,7 @@ export abstract class BaseAgent implements AgentInterface {
       parameters, 
       toolCallId 
     });
-    // Update local state
-    const existingTraces = this.tracesByTurnId.get(this.currentTurnId) || [];
-    existingTraces.push({
-      id: uuidv4(),
-      agentId: this.agentId,
-      timestamp: new Date(),
-      type: 'tool_call',
-      toolName,
-      parameters,
-      toolCallId
-    } as ToolCallEntry);
-    this.tracesByTurnId.set(this.currentTurnId, existingTraces);
+    // Do NOT update local state - let onTraceAdded handle it to avoid duplicates
     return toolCallId;
   }
   
@@ -315,18 +322,7 @@ export abstract class BaseAgent implements AgentInterface {
       result, 
       error 
     });
-    // Update local state
-    const existingTraces = this.tracesByTurnId.get(this.currentTurnId) || [];
-    existingTraces.push({
-      id: uuidv4(),
-      agentId: this.agentId,
-      timestamp: new Date(),
-      type: 'tool_result',
-      toolCallId,
-      result,
-      error
-    } as ToolResultEntry);
-    this.tracesByTurnId.set(this.currentTurnId, existingTraces);
+    // Do NOT update local state - let onTraceAdded handle it to avoid duplicates
   }
   
   async queryUser(question: string, context?: Record<string, any>): Promise<string> {
@@ -373,5 +369,6 @@ export abstract class BaseAgent implements AgentInterface {
   protected getCurrentTurnId(): string | null {
     return this.currentTurnId;
   }
+
 
 }
