@@ -173,8 +173,8 @@ export interface Tool {
 
   /**
    * Indicates whether this tool's execution should end the conversation.
-   * The orchestrator uses this to determine when an agent has reached a
-   * conclusive outcome (e.g., approval, denial, no slots available).
+   * 
+   * When true, the agent will use this tool call result to help conclude the conversation.
    * 
    * IMPORTANT: Only use this for FINAL DECISIONS that complete the interaction.
    * Do NOT use this for:

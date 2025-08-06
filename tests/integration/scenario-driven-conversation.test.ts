@@ -170,6 +170,13 @@ class TerminalAwareMockLLMProvider extends LLMProvider {
   async generateContent(request: LLMRequest): Promise<LLMResponse> {
     this.lastPrompt = request.messages[0].content;
       
+    // Check if the prompt contains the terminal tool thought indicating we need to send a final message
+    if (request.messages[0].content.includes("With this final tool result, I'm ready to conclude the conversation")) {
+      // Return a final send_message_to_agent_conversation response
+      const finalResponse = `<scratchpad>The authorization has been completed. I'll send a final message summarizing the outcome.</scratchpad>\n\`\`\`json\n{"name": "send_message_to_agent_conversation", "args": {"text": "The MRI authorization has been approved. Your authorization number is AUTH-123 and it's valid for 60 days. Please proceed with scheduling your MRI."}}\n\`\`\``;
+      return { content: finalResponse };
+    }
+      
     if (request.messages[0].content.includes("<YOUR_TASK>")) {
       // This is an Oracle tool synthesis call - return a proper Oracle response
       const oracleResponses: Record<string, any> = {
@@ -476,8 +483,16 @@ describe('Integration Test: Scenario-Driven Agent Conversation', () => {
     console.log('\n--- Starting Attachment Flow Test ---');
       
     class AttachmentFlowMockLLMProvider extends TerminalAwareMockLLMProvider {
-      private attachmentTurnCount: number = 0;
-      private attachmentResponses: string[] = [
+      private patientTurnCount: number = 0;
+      private insuranceTurnCount: number = 0;
+      
+      // Patient agent should just respond to messages, not use authorization tools
+      private patientResponses: string[] = [
+        `<scratchpad>I need to respond to the insurance specialist.</scratchpad>\n\`\`\`json\n{"name": "send_message_to_agent_conversation", "args": {"text": "Thank you for providing the policy document. I've reviewed it and understand the requirements."}}\n\`\`\``
+      ];
+      
+      // Insurance agent has the authorization tools
+      private insuranceResponses: string[] = [
         // Turn 1: Initial tool call that returns a document reference
         `<scratchpad>Let me look up the medical policy first.</scratchpad>\n\`\`\`json\n{"name": "lookup_medical_policy", "args": {"policyType": "MRI", "bodyPart": "knee"}}\n\`\`\``,
       
@@ -492,10 +507,39 @@ describe('Integration Test: Scenario-Driven Agent Conversation', () => {
         this.lastPrompt = request.messages[0].content;
         await debugLogger.logLLMRequest(request);
         
-        const response = this.attachmentTurnCount < this.attachmentResponses.length 
-          ? this.attachmentResponses[this.attachmentTurnCount] 
-          : this.attachmentResponses[this.attachmentResponses.length - 1];
-        this.attachmentTurnCount++;
+        // Check if the prompt contains the terminal tool thought indicating we need to send a final message
+        if (request.messages[0].content.includes("With this final tool result, I'm ready to conclude the conversation")) {
+          // Return a final send_message_to_agent_conversation response
+          const finalResponse = `<scratchpad>The authorization has been completed. I'll send a final message with the authorization details.</scratchpad>\n\`\`\`json\n{"name": "send_message_to_agent_conversation", "args": {"text": "Your MRI authorization has been approved. Authorization number AUTH-456 is valid for 60 days. The medical policy document has been provided for your records."}}\n\`\`\``;
+          const llmResponse = { content: finalResponse };
+          await debugLogger.logLLMResponse(llmResponse);
+          return llmResponse;
+        }
+        
+        // Determine which agent is calling based on the prompt content
+        let response: string;
+        const roleMatch = request.messages[0].content.match(/Role:\s*([^\n]+)/);
+        if (roleMatch) {
+          const agentId = roleMatch[1].trim();
+          
+          if (agentId === 'patient-agent') {
+            response = this.patientTurnCount < this.patientResponses.length 
+              ? this.patientResponses[this.patientTurnCount] 
+              : this.patientResponses[this.patientResponses.length - 1];
+            this.patientTurnCount++;
+          } else {
+            response = this.insuranceTurnCount < this.insuranceResponses.length 
+              ? this.insuranceResponses[this.insuranceTurnCount] 
+              : this.insuranceResponses[this.insuranceResponses.length - 1];
+            this.insuranceTurnCount++;
+          }
+        } else {
+          // Fallback to insurance responses if we can't determine the agent
+          response = this.insuranceTurnCount < this.insuranceResponses.length 
+            ? this.insuranceResponses[this.insuranceTurnCount] 
+            : this.insuranceResponses[this.insuranceResponses.length - 1];
+          this.insuranceTurnCount++;
+        }
       
         const toolNameMatch = response.match(/"name":\s*"([^"]+)"/);
         if (toolNameMatch) {

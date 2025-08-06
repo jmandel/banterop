@@ -173,6 +173,7 @@ export class ScenarioDrivenAgent extends BaseAgent {
       
       let MAX_STEPS = 10;
       let stepCount = 0;
+      let isInFinalTurn = false; // Track if we're sending the final message after a terminal tool
       while (stepCount++ < MAX_STEPS) {
           const historyString = this.buildConversationHistory();
           const currentProcessString = this.formatCurrentProcess(this.getCurrentTurnTrace());
@@ -213,9 +214,21 @@ export class ScenarioDrivenAgent extends BaseAgent {
 
           await this.addThought(result.message);
 
-          const stepResult = await this.executeSingleToolCallWithReasoning(result);
+          const stepResult = await this.executeSingleToolCallWithReasoning(result, isInFinalTurn);
           if (stepResult.completedTurn) {
+            // If we just completed the final turn after a terminal tool, end the conversation
+            if (isInFinalTurn && this.conversationId) {
+              await this.client.endConversation(this.conversationId);
+            }
             break;
+          }
+          
+          // If this was a terminal tool, the next message should be the final one
+          if (stepResult.isTerminal) {
+            // Continue for one more iteration to send the concluding message
+            // The thought we added will guide the LLM to send a final message
+            isInFinalTurn = true;
+            continue;
           }
         }
         if (stepCount > MAX_STEPS) {
@@ -313,8 +326,9 @@ export class ScenarioDrivenAgent extends BaseAgent {
     conversationHistory?: string;
     currentProcess?: string;
     remainingSteps?: number;
+    terminalToolResult?: { toolName: string; result: any };
   }): string {
-    const { agentConfig, tools, conversationHistory, currentProcess, remainingSteps } = params;
+    const { agentConfig, tools, conversationHistory, currentProcess, remainingSteps, terminalToolResult } = params;
 
     const separator = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
 
@@ -431,7 +445,7 @@ Your response MUST follow this EXACT format:
   }
 
   // Execute single tool call with reasoning capture (following single-action constraint)
-  private async executeSingleToolCallWithReasoning(result: ParsedResponse): Promise<{completedTurn: boolean}> {
+  private async executeSingleToolCallWithReasoning(result: ParsedResponse, isFinalTurn: boolean = false): Promise<{completedTurn: boolean, isTerminal?: boolean}> {
     const { message, tools } = result;
     
     // Handle case where no tool call was made
@@ -521,7 +535,7 @@ Your response MUST follow this EXACT format:
         }
       }
       
-      await this.completeTurn(text, false, attachmentPayloads);
+      await this.completeTurn(text, isFinalTurn, attachmentPayloads);
       return {completedTurn: true};
     }
 
@@ -624,13 +638,14 @@ Your response MUST follow this EXACT format:
       await this.addToolResult(toolCallId, toolOutput);
       
       if (toolDef?.endsConversation) {
-        const resultMessage = `Action complete. Result: ${JSON.stringify(toolOutput)}`;
-        await this.completeTurn(resultMessage, true);
+        // Add a thought indicating we're ready to conclude
+        await this.addThought(
+          `With this final tool result, I'm ready to conclude the conversation. ` +
+          `I'll write a message to the agent conversation thread and if relevant I will attach any final documents.`
+        );
         
-        if (this.conversationId) {
-            await this.client.endConversation(this.conversationId);
-        }
-        return {completedTurn: true}
+        // Mark that we're in a terminal state but should continue for one more step to send final message
+        return {completedTurn: false, isTerminal: true}
       } 
 
       return {completedTurn: false}
