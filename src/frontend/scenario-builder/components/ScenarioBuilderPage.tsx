@@ -6,7 +6,7 @@ import { ChatPanel } from './ChatPanel.js';
 import { ScenarioEditor } from './ScenarioEditor.js';
 import { SaveBar } from './SaveBar.js';
 import { api } from '../utils/api.js';
-import { createDefaultScenario } from '../utils/defaults.js';
+import { createDefaultScenario, createBlankScenario } from '../utils/defaults.js';
 import { buildScenarioBuilderPrompt } from '../utils/prompt-builder.js';
 import { parseBuilderLLMResponse } from '../utils/response-parser.js';
 import { getCuratedSchemaText, getExampleScenarioText } from '../utils/schema-loader.js';
@@ -43,8 +43,33 @@ interface BuilderState {
 export function ScenarioBuilderPage() {
   const { scenarioId } = useParams<{ scenarioId?: string }>();
   const navigate = useNavigate();
-  const isEditMode = window.location.hash.includes('/edit');
+  const isCreateMode = window.location.hash.includes('/create');
+  const isEditMode = window.location.hash.includes('/edit') || isCreateMode;
   const isViewMode = !isEditMode;
+  
+  // Get scenario idea from URL params
+  const getScenarioIdea = () => {
+    const params = new URLSearchParams(window.location.hash.split('?')[1] || '');
+    const idea = params.get('idea');
+    if (idea) {
+      try {
+        return decodeURIComponent(idea);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  };
+  
+  // Get saved model from localStorage or use default
+  const getSavedModel = () => {
+    try {
+      const saved = localStorage.getItem('scenario-builder-preferred-model');
+      return saved || 'gemini-2.5-flash-lite';
+    } catch {
+      return 'gemini-2.5-flash-lite';
+    }
+  };
   
   const [state, setState] = useState<BuilderState>({
     scenarios: [],
@@ -55,7 +80,7 @@ export function ScenarioBuilderPage() {
     isLoading: true,
     error: null,
     isSaving: false,
-    selectedModel: 'gemini-2.5-pro',
+    selectedModel: getSavedModel(),
     schemaText: '',
     examplesText: '',
     isWaitingForLLM: false,
@@ -66,16 +91,31 @@ export function ScenarioBuilderPage() {
   
   // Store the abort controller outside of state
   const abortControllerRef = React.useRef<AbortController | null>(null);
+  const hasAutoSubmittedRef = React.useRef(false);
 
   // Load scenarios and schema on mount
   useEffect(() => {
-    loadScenarios();
+    // Only load scenarios if not in create mode
+    if (!isCreateMode) {
+      loadScenarios();
+    }
     loadSchemaAndConfig();
   }, []);
 
   // Handle route changes
   useEffect(() => {
-    if (scenarioId && scenarioId !== state.activeScenarioId) {
+    if (isCreateMode) {
+      // Initialize create mode with blank scenario
+      const blankScenario = createBlankScenario();
+      
+      setState(prev => ({
+        ...prev,
+        activeScenarioId: 'new',
+        pendingConfig: blankScenario,
+        chatHistory: [], // Start with empty history - auto-submit will add the message
+        isLoading: false
+      }));
+    } else if (scenarioId && scenarioId !== state.activeScenarioId) {
       selectScenario(scenarioId);
     } else if (!scenarioId && state.activeScenarioId) {
       // Clear selection when navigating to /scenarios
@@ -86,7 +126,36 @@ export function ScenarioBuilderPage() {
         chatHistory: []
       }));
     }
-  }, [scenarioId]);
+  }, [scenarioId, isCreateMode]);
+
+  // Auto-submit message in create mode once schema is loaded
+  useEffect(() => {
+    console.log('[Auto-submit] Checking conditions:');
+    console.log('  isCreateMode:', isCreateMode);
+    console.log('  state.schemaText:', !!state.schemaText);
+    console.log('  state.activeScenarioId:', state.activeScenarioId);
+    console.log('  hasAutoSubmittedRef.current:', hasAutoSubmittedRef.current);
+    console.log('  state.chatHistory.length:', state.chatHistory.length);
+    console.log('  state.isWaitingForLLM:', state.isWaitingForLLM);
+    
+    if (isCreateMode && state.schemaText && state.activeScenarioId === 'new' && !hasAutoSubmittedRef.current && !state.isWaitingForLLM) {
+      const scenarioIdea = getScenarioIdea();
+      console.log('[Auto-submit] Scenario idea:', scenarioIdea);
+      
+      if (scenarioIdea && state.chatHistory.length === 0) { // Check for empty history
+        console.log('[Auto-submit] All conditions met, triggering auto-submit');
+        hasAutoSubmittedRef.current = true;
+        
+        const message = `I want to create a new scenario: ${scenarioIdea}\n\nPlease help me build this scenario with appropriate agents, tools, and interaction dynamics.`;
+        
+        // Small delay to ensure all state is ready
+        setTimeout(() => {
+          console.log('[Auto-submit] Calling sendMessage now');
+          sendMessage(message);
+        }, 500);
+      }
+    }
+  }, [isCreateMode, state.schemaText, state.activeScenarioId, state.chatHistory.length, state.isWaitingForLLM]);
 
   const loadScenarios = async () => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
@@ -120,22 +189,49 @@ export function ScenarioBuilderPage() {
       const llmConfig = await api.getLLMConfig();
       
       if (llmConfig.success && llmConfig.data?.providers) {
-        // Find the first provider with a 'pro' model, otherwise use first model of first provider
-        let defaultModel = 'gemini-2.5-pro';
         const providers = llmConfig.data.providers;
+        const savedModel = getSavedModel();
         
-        // Try to find a 'pro' model
+        // Check if saved model is still available in the providers
+        let modelExists = false;
         for (const provider of providers) {
-          const proModel = provider.models?.find((m: string) => m.includes('pro'));
-          if (proModel) {
-            defaultModel = proModel;
+          if (provider.models?.includes(savedModel)) {
+            modelExists = true;
             break;
           }
         }
         
-        // If no 'pro' model found, use first available model
-        if (defaultModel === 'gemini-2.5-pro' && providers.length > 0 && providers[0].models?.length > 0) {
-          defaultModel = providers[0].models[0];
+        let defaultModel = savedModel;
+        
+        // If saved model doesn't exist, find a new default
+        if (!modelExists) {
+          defaultModel = 'gemini-2.5-flash-lite';
+          
+          // Try to find a 'lite' model first
+          for (const provider of providers) {
+            const liteModel = provider.models?.find((m: string) => m.includes('lite'));
+            if (liteModel) {
+              defaultModel = liteModel;
+              break;
+            }
+          }
+          
+          // If no 'lite' model found, try 'flash'
+          if (!providers.some(p => p.models?.some((m: string) => m.includes('lite')))) {
+            for (const provider of providers) {
+              const flashModel = provider.models?.find((m: string) => m.includes('flash'));
+              if (flashModel) {
+                defaultModel = flashModel;
+                break;
+              }
+            }
+          }
+          
+          // If no 'lite' or 'flash' model found, use first available model
+          if (!providers.some(p => p.models?.some((m: string) => m.includes('lite') || m.includes('flash'))) 
+              && providers.length > 0 && providers[0].models?.length > 0) {
+            defaultModel = providers[0].models[0];
+          }
         }
         
         setState(prev => ({
@@ -243,13 +339,32 @@ export function ScenarioBuilderPage() {
   };
 
   const sendMessage = async (userText: string) => {
+    console.log('[sendMessage] Called with:', userText);
+    console.log('[sendMessage] activeScenarioId:', state.activeScenarioId);
+    console.log('[sendMessage] isWaitingForLLM:', state.isWaitingForLLM);
+    
     if (!state.activeScenarioId || state.isWaitingForLLM) return;
 
-    const active = state.scenarios.find(s => s.id === state.activeScenarioId);
-    if (!active) return;
+    // In create mode (activeScenarioId === 'new'), there's no active scenario in the list
+    const active = state.activeScenarioId === 'new' 
+      ? null 
+      : state.scenarios.find(s => s.config.metadata.id === state.activeScenarioId);
+    
+    console.log('[sendMessage] Found active scenario:', active);
+    
+    // In create mode, we use pendingConfig; otherwise use the active scenario's config
+    if (!active && state.activeScenarioId !== 'new') {
+      console.log('[sendMessage] No active scenario found and not in create mode, returning');
+      return;
+    }
 
     // Always clone before patching to avoid in-place mutation
-    const baseScenario = state.pendingConfig || active.config;
+    const baseScenario = state.pendingConfig || active?.config;
+    if (!baseScenario) {
+      console.log('[sendMessage] No base scenario available, returning');
+      return;
+    }
+    
     const currentScenario = JSON.parse(JSON.stringify(baseScenario)); // Deep clone
     
     // Create new abort controller for this request
@@ -452,25 +567,52 @@ export function ScenarioBuilderPage() {
     if (!state.activeScenarioId || !state.pendingConfig) return;
 
     setState(prev => ({ ...prev, isSaving: true, error: null }));
+    
     try {
-      const response = await api.updateScenarioConfig(
-        state.activeScenarioId,
-        state.pendingConfig
-      );
-
-      if (response.success) {
-        // Update local state
-        setState(prev => ({
-          ...prev,
-          scenarios: prev.scenarios.map(s =>
-            s.id === state.activeScenarioId
-              ? { ...s, config: state.pendingConfig!, modified: Date.now() }
-              : s
-          ),
-          pendingConfig: null,
-          isSaving: false
-        }));
+      let response;
+      
+      if (state.activeScenarioId === 'new') {
+        // Create new scenario
+        const name = state.pendingConfig.metadata.title || 'Untitled Scenario';
+        response = await api.createScenario(name, state.pendingConfig);
+        
+        if (response.success) {
+          // Navigate to the new scenario's edit page using metadata.id
+          const newId = response.data.config.metadata.id;
+          await loadScenarios(); // Refresh the scenarios list
+          navigate(`/scenarios/${newId}/edit`);
+          
+          // Update local state with the new scenario
+          setState(prev => ({
+            ...prev,
+            activeScenarioId: newId,
+            pendingConfig: null,
+            isSaving: false
+          }));
+        }
       } else {
+        // Update existing scenario
+        response = await api.updateScenarioConfig(
+          state.activeScenarioId,
+          state.pendingConfig
+        );
+
+        if (response.success) {
+          // Update local state
+          setState(prev => ({
+            ...prev,
+            scenarios: prev.scenarios.map(s =>
+              s.config.metadata.id === state.activeScenarioId
+                ? { ...s, config: state.pendingConfig!, modified: Date.now() }
+                : s
+            ),
+            pendingConfig: null,
+            isSaving: false
+          }));
+        }
+      }
+      
+      if (!response.success) {
         throw new Error(response.error || 'Failed to save changes');
       }
     } catch (error) {
@@ -495,17 +637,25 @@ export function ScenarioBuilderPage() {
     setState(prev => ({ ...prev, viewMode: mode }));
   };
 
-  const activeScenario = state.scenarios.find(s => s.id === state.activeScenarioId);
+  const activeScenario = state.scenarios.find(s => s.config.metadata.id === state.activeScenarioId);
   // Use useMemo to ensure currentConfig reference changes when pendingConfig changes
   const currentConfig = React.useMemo(() => {
     return state.pendingConfig || activeScenario?.config || null;
   }, [state.pendingConfig, activeScenario?.config]);
-  const hasUnsavedChanges = state.pendingConfig !== null;
+  // Show unsaved changes when there's pending config with meaningful content
+  const hasUnsavedChanges = state.pendingConfig !== null && (
+    // Has a metadata.id (even if empty string initially)
+    state.pendingConfig.metadata?.id !== undefined &&
+    // And has some meaningful content (agents or background)
+    (state.pendingConfig.agents?.length > 0 || 
+     state.pendingConfig.scenario?.background?.trim() ||
+     state.pendingConfig.metadata?.description?.trim())
+  );
   
 
   return (
     <div className="min-h-screen">
-      {activeScenario && currentConfig ? (
+      {(activeScenario || isCreateMode) && currentConfig ? (
         <div>
           <div className="container mx-auto px-4 py-4">
             <div className={`grid items-start gap-4 ${isEditMode ? 'grid-cols-1 lg:grid-cols-[1fr_20rem]' : 'grid-cols-1'}`}>
@@ -515,8 +665,8 @@ export function ScenarioBuilderPage() {
                   viewMode={state.viewMode}
                   onViewModeChange={toggleViewMode}
                   onConfigChange={updateConfigFromEditor}
-                  scenarioName={activeScenario.name}
-                  scenarioId={state.activeScenarioId}
+                  scenarioName={activeScenario?.name || 'New Scenario'}
+                  scenarioId={isCreateMode ? undefined : state.activeScenarioId}
                   isViewMode={isViewMode}
                   isEditMode={isEditMode}
                 />
@@ -532,7 +682,15 @@ export function ScenarioBuilderPage() {
                       lastUserMessage={state.lastUserMessage}
                       wasCancelled={state.wasCancelled}
                       selectedModel={state.selectedModel}
-                      onModelChange={(model) => setState(prev => ({ ...prev, selectedModel: model }))}
+                      onModelChange={(model) => {
+                        // Save to localStorage
+                        try {
+                          localStorage.setItem('scenario-builder-preferred-model', model);
+                        } catch (e) {
+                          console.error('Failed to save model preference:', e);
+                        }
+                        setState(prev => ({ ...prev, selectedModel: model }));
+                      }}
                       availableProviders={state.availableProviders}
                     />
                   </div>
@@ -567,7 +725,7 @@ export function ScenarioBuilderPage() {
               onClick={saveChanges}
               disabled={state.isSaving}
             >
-              {state.isSaving ? 'Saving...' : 'Save to Backend'}
+              {state.isSaving ? 'Saving...' : (isCreateMode ? 'Create Scenario' : 'Save to Backend')}
             </button>
           </div>
         </div>

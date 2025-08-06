@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import type { ScenarioConfiguration, CreateConversationRequest, AgentConfig } from '$lib/types.js';
+import type { ScenarioItem, ScenarioConfiguration, CreateConversationRequest, AgentConfig } from '$lib/types.js';
 import { encodeConfigToBase64URL } from '$lib/utils/config-encoding.js';
 import { validateCreateConversationConfigV2 } from '$lib/utils/config-validation.js';
 import { api } from '../utils/api.js';
@@ -11,7 +11,7 @@ export function ScenarioRunPage() {
   const [searchParams] = React.useState(() => new URLSearchParams(window.location.hash.split('?')[1] || ''));
   const isPluginMode = searchParams.get('mode') === 'plugin';
   
-  const [scenario, setScenario] = useState<ScenarioConfiguration | null>(null);
+  const [scenario, setScenario] = useState<ScenarioItem | null>(null);
   const [config, setConfig] = useState<CreateConversationRequest | null>(null);
   const [runMode, setRunMode] = useState<'internal' | 'plugin'>(isPluginMode ? 'plugin' : 'internal');
   const [selectedPluginRole, setSelectedPluginRole] = useState<string>('');
@@ -81,7 +81,7 @@ export function ScenarioRunPage() {
     const agents: AgentConfig[] = [];
     
     // Get the actual agent IDs from the scenario config
-    const scenarioAgents = scenario.config?.agents || [];
+    const scenarioAgents = scenario.config.agents || [];
     
     if (scenarioAgents.length < 2) {
       console.error('Scenario must have at least 2 agents defined', scenario);
@@ -89,6 +89,9 @@ export function ScenarioRunPage() {
     }
     
     const isPlugin = runMode === 'plugin' && selectedPluginRole;
+    
+    // Use the database scenario ID consistently (which should be the metadata.id when available)
+    const scenarioId = scenario.config.metadata.id;
     
     // Map over the actual agents defined in the scenario
     scenarioAgents.forEach((scenarioAgent) => {
@@ -101,7 +104,7 @@ export function ScenarioRunPage() {
         id: agentId, // Use the actual agent ID from the scenario
         strategyType: isBridgedAgent ? 'bridge_to_external_mcp_server' : 'scenario_driven',
         shouldInitiateConversation: isPlugin ? isBridgedAgent : (conversationInitiator === agentId),
-        scenarioId: scenario.config?.metadata?.id || scenario.id,
+        scenarioId: scenarioId, // Use consistent scenario ID
         additionalInstructions: additionalInstructions[agentId]
       };
       agents.push(agentConfig);
@@ -110,7 +113,7 @@ export function ScenarioRunPage() {
     // Build the configuration
     const newConfig: CreateConversationRequest = {
       metadata: {
-        scenarioId: scenario.id,
+        scenarioId: scenarioId, // Use same scenario ID
         conversationTitle,
         conversationDescription: conversationDescription || (runMode === 'plugin' ? `MCP bridge with ${selectedPluginRole || 'external client'}` : 'Internal agent simulation')
       },
@@ -148,8 +151,8 @@ export function ScenarioRunPage() {
   return (
     <div className="max-w-4xl mx-auto p-6">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">{scenario.metadata?.title || scenario.title || scenario.name}</h1>
-        <p className="text-gray-600">{scenario.metadata?.description || scenario.description || ''}</p>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">{scenario.config.metadata?.title || scenario.name}</h1>
+        <p className="text-gray-600">{scenario.config.metadata?.description || ''}</p>
       </div>
 
       <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
@@ -223,7 +226,7 @@ export function ScenarioRunPage() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="">Select a role...</option>
-                {(scenario.config?.agents || []).map((agent) => (
+                {(scenario.config.agents || []).map((agent) => (
                   <option key={agent.agentId} value={agent.agentId}>
                     {agent.agentId} {agent.principal?.name ? `(${agent.principal.name})` : ''} - External MCP Client
                   </option>
@@ -246,7 +249,7 @@ export function ScenarioRunPage() {
                 onChange={(e) => setConversationInitiator(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
-                {(scenario.config?.agents || []).map((agent) => (
+                {(scenario.config.agents || []).map((agent) => (
                   <option key={agent.agentId} value={agent.agentId}>
                     {agent.agentId} {agent.principal?.name ? `(${agent.principal.name})` : ''}
                   </option>
@@ -264,7 +267,7 @@ export function ScenarioRunPage() {
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Additional Instructions (optional)</h3>
               
               <div className="space-y-4">
-                {(scenario.config?.agents || []).map((agent) => (
+                {(scenario.config.agents || []).map((agent) => (
                   <div key={agent.agentId}>
                     <label className="block text-sm font-medium text-gray-600 mb-1">
                       {agent.agentId} {agent.principal?.name ? `(${agent.principal.name})` : ''}

@@ -106,8 +106,20 @@ router.post('/', async (c) => {
       return c.json(createResponse(false, undefined, 'Invalid scenario configuration structure - must have metadata, scenario, and agents array'), 400);
     }
 
-    // Generate unique ID for scenario
-    const scenarioId = `scen_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    // Ensure metadata.id is set
+    if (!config.metadata.id) {
+      config.metadata.id = `scen_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+    
+    // Use metadata.id as the primary database ID
+    const scenarioId = config.metadata.id;
+    
+    // Check if scenario with this ID already exists
+    const existingScenario = db.findScenarioById(scenarioId);
+    if (existingScenario) {
+      return c.json(createResponse(false, undefined, `Scenario with ID '${scenarioId}' already exists`), 409);
+    }
+    
     const now = Date.now();
     
     // Create scenario using database method

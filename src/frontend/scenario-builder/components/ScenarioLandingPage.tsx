@@ -37,15 +37,15 @@ export function ScenarioLandingPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [newScenarioName, setNewScenarioName] = useState('');
-  const [isCreating, setIsCreating] = useState(false);
+  const [newScenarioIdea, setNewScenarioIdea] = useState('');
+  const [isWiggling, setIsWiggling] = useState(false);
   
   const getRandomIdea = () => {
     return SCENARIO_IDEAS[Math.floor(Math.random() * SCENARIO_IDEAS.length)];
   };
   
   useEffect(() => {
-    setNewScenarioName(getRandomIdea());
+    setNewScenarioIdea(getRandomIdea());
   }, []);
 
   useEffect(() => {
@@ -69,42 +69,11 @@ export function ScenarioLandingPage() {
       setIsLoading(false);
     }
   };
-
-  const createNewScenario = async () => {
-    if (!newScenarioName.trim() || isCreating) return;
-    
-    setIsCreating(true);
-    try {
-      const config = {
-        metadata: {
-          title: newScenarioName,
-          description: 'Configure agents and tools for this interoperability scenario',
-          schemaVersion: '2.4'
-        },
-        agents: [],
-        interactionDynamics: {
-          tools: []
-        }
-      };
-      
-      const response = await api.createScenario(newScenarioName, config);
-      if (response.success) {
-        await loadScenarios();
-        navigate(`/scenarios/${response.data.id}/edit`);
-      } else {
-        throw new Error(response.error || 'Failed to create scenario');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create scenario');
-    } finally {
-      setIsCreating(false);
-    }
-  };
   
-  const handleCreateKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      createNewScenario();
-    }
+  const createNewScenario = () => {
+    // Pass the scenario idea as plain text in URL
+    const ideaParam = encodeURIComponent(newScenarioIdea);
+    navigate(`/scenarios/create?idea=${ideaParam}`);
   };
 
   const deleteScenario = async (id: string, e: React.MouseEvent) => {
@@ -140,7 +109,7 @@ export function ScenarioLandingPage() {
   };
 
   const getAgentNames = (scenario: ScenarioItem) => {
-    return scenario.config.agents.map(a => a.principal?.name || a.id || 'Unknown').join(' ↔ ');
+    return scenario.config.agents.map(a => a.principal?.name || a.agentId || 'Unknown').join(' ↔ ');
   };
 
   if (isLoading) {
@@ -150,6 +119,16 @@ export function ScenarioLandingPage() {
       </div>
     );
   }
+
+  const triggerWiggle = () => {
+    setIsWiggling(true);
+    setTimeout(() => setIsWiggling(false), 300);
+  };
+
+  const handleDiceClick = () => {
+    triggerWiggle();
+    setNewScenarioIdea(getRandomIdea());
+  };
 
   return (
     <div className="container mx-auto px-4 py-4 space-y-4">
@@ -177,7 +156,7 @@ export function ScenarioLandingPage() {
             </div>
           ) : (
             filteredScenarios.map((scenario) => (
-              <div key={scenario.id} className="rounded-md border border-gray-200 p-3 hover:shadow-sm transition bg-white">
+              <div key={scenario.config.metadata.id} className="rounded-md border border-gray-200 p-3 hover:shadow-sm transition bg-white">
                 <div className="mb-3">
                   <h3 className="text-sm font-semibold text-gray-900 mb-1">
                     {scenario.config.metadata.title || scenario.name}
@@ -194,25 +173,25 @@ export function ScenarioLandingPage() {
 
                 <div className="flex gap-2">
                   <a
-                    href={`#/scenarios/${scenario.id}`}
+                    href={`#/scenarios/${scenario.config.metadata.id}`}
                     className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 inline-block text-center"
                   >
                     View
                   </a>
                   <a
-                    href={`#/scenarios/${scenario.id}/edit`}
+                    href={`#/scenarios/${scenario.config.metadata.id}/edit`}
                     className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 inline-block text-center"
                   >
                     Edit
                   </a>
                   <a
-                    href={`#/scenarios/${scenario.id}/run`}
+                    href={`#/scenarios/${scenario.config.metadata.id}/run`}
                     className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 inline-block text-center"
                   >
                     Run
                   </a>
                   <a
-                    href={`#/scenarios/${scenario.id}/run?mode=plugin`}
+                    href={`#/scenarios/${scenario.config.metadata.id}/run?mode=plugin`}
                     className="px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 inline-block text-center"
                   >
                     Plug In
@@ -231,28 +210,42 @@ export function ScenarioLandingPage() {
             <textarea
               className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
               placeholder="Enter scenario description..."
-              value={newScenarioName}
-              onChange={(e) => setNewScenarioName(e.target.value)}
-              onKeyPress={handleCreateKeyPress}
-              disabled={isCreating}
+              value={newScenarioIdea}
+              onChange={(e) => setNewScenarioIdea(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  createNewScenario();
+                }
+              }}
               rows={2}
             />
             <button 
-              className="flex items-center justify-center text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 flex-shrink-0 aspect-square" 
+              className="flex items-center justify-center text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 flex-shrink-0 aspect-square" 
               style={{ width: '68px', height: '68px' }}
-              onClick={() => setNewScenarioName(getRandomIdea())}
-              disabled={isCreating}
+              onClick={handleDiceClick}
+              onMouseEnter={triggerWiggle}
               title="Random scenario idea"
             >
-              <span className="text-3xl leading-none" style={{ fontSize: '2.5rem' }}>⚄</span>
+              <span 
+                className="text-3xl leading-none" 
+                style={{ 
+                  fontSize: '2.5rem', 
+                  display: 'inline-block',
+                  transform: isWiggling ? 'rotate(-10deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.15s ease-in-out'
+                }}
+              >
+                ⚄
+              </span>
             </button>
           </div>
           <button
             className="w-full px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
             onClick={createNewScenario}
-            disabled={!newScenarioName.trim() || isCreating}
+            disabled={!newScenarioIdea.trim()}
           >
-            {isCreating ? 'Creating...' : 'Create Scenario'}
+            Create Scenario
           </button>
         </div>
       </div>

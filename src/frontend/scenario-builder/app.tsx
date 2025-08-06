@@ -20,6 +20,9 @@ function App() {
           {/* Landing page with scenario cards */}
           <Route path="/scenarios" element={<ScenarioLandingPage />} />
           
+          {/* Create new scenario */}
+          <Route path="/scenarios/create" element={<ScenarioBuilderPage />} />
+          
           {/* Scenario viewing (default) and editing */}
           <Route path="/scenarios/:scenarioId" element={<ScenarioBuilderPage />} />
           <Route path="/scenarios/:scenarioId/edit" element={<ScenarioBuilderPage />} />

@@ -69,6 +69,11 @@ export function StructuredView({ config, onConfigChange, isReadOnly = true, scen
                 </span>
               </div>
               <div className="text-xs text-gray-600 leading-relaxed">{tool.description}</div>
+              {tool.synthesisGuidance && (
+                <div className="text-xs text-gray-500 italic mt-1">
+                  <span className="font-medium">Synthesis:</span> {tool.synthesisGuidance}
+                </div>
+              )}
             </div>
           );
         })}

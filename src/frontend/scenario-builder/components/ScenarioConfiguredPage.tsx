@@ -207,17 +207,26 @@ export function ScenarioConfiguredPage() {
         }
       };
       
+      console.log('[handleRunInternal] Creating conversation with config:', enrichedConfig);
       const response = await api.createConversation(enrichedConfig);
+      console.log('[handleRunInternal] Create response:', response);
+      
       if (response.success && response.data) {
+        const conversationId = response.data.conversation.id;
+        console.log('[handleRunInternal] Conversation created with ID:', conversationId);
+        
         // Start the conversation only for internal simulations
         if (!isPluginMode) {
-          await api.startConversation(response.data.conversation.id);
-          console.log('Conversation created and started:', response.data.conversation.id);
+          console.log('[handleRunInternal] Starting conversation (internal mode)...');
+          const startResponse = await api.startConversation(conversationId);
+          console.log('[handleRunInternal] Start response:', startResponse);
+          console.log('Conversation created and started:', conversationId);
         } else {
-          console.log('Conversation created, waiting for MCP client to start:', response.data.conversation.id);
+          console.log('Conversation created, waiting for MCP client to start:', conversationId);
         }
         // The conversation will appear in our list via the event subscription
       } else {
+        console.error('[handleRunInternal] Failed to create conversation:', response);
         throw new Error(response.error || 'Failed to create conversation');
       }
     } catch (err) {

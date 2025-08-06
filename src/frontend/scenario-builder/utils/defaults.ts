@@ -1,5 +1,21 @@
 import type { ScenarioConfiguration } from '$lib/types.js';
 
+export function createBlankScenario(): ScenarioConfiguration {
+  return {
+    metadata: {
+      id: '',
+      title: 'Untitled Scenario',
+      description: '',
+      tags: []
+    },
+    scenario: {
+      background: '',
+      challenges: []
+    },
+    agents: []
+  };
+}
+
 export function createDefaultScenario(): ScenarioConfiguration {
   return {
     metadata: {

@@ -52,9 +52,9 @@ export function ScenarioList({
         ) : (
           filteredScenarios.map(scenario => (
             <div
-              key={scenario.id}
-              className={`scenario-item ${scenario.id === activeScenarioId ? 'active' : ''}`}
-              onClick={() => onSelect(scenario.id)}
+              key={scenario.config.metadata.id}
+              className={`scenario-item ${scenario.config.metadata.id === activeScenarioId ? 'active' : ''}`}
+              onClick={() => onSelect(scenario.config.metadata.id)}
             >
               <div className="scenario-name">{scenario.name}</div>
               <div className="scenario-meta">
