@@ -114,11 +114,16 @@ describe('MCP Bridge Unit Tests', () => {
     // Create proper HTTP response mock
     const mockRes = new MockServerResponse();
     
+    // Create a promise that resolves when the response ends
+    const responsePromise = new Promise<void>((resolve) => {
+      mockRes.once('finish', resolve);
+    });
+    
     // Call the handler
     await mcpBridge.handleRequest(mockReq, mockRes, body);
     
-    // Wait a bit for async operations
-    await new Promise(resolve => setTimeout(resolve, 150));
+    // Wait for the response to actually finish
+    await responsePromise;
     
     // Parse the captured response
     const responseData = mockRes.getData();
