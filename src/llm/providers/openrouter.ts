@@ -1,7 +1,22 @@
 import OpenAI from 'openai';
-import { LLMProvider, LLMRequest, LLMResponse, LLMMessage } from 'src/types/llm.types.js';
+import { LLMProvider, LLMProviderMetadata, LLMRequest, LLMResponse, LLMMessage } from 'src/types/llm.types.js';
 
 export class OpenRouterLLMProvider extends LLMProvider {
+  static readonly metadata: LLMProviderMetadata = {
+    name: 'openrouter',
+    description: 'OpenRouter multi-model gateway via OpenAI SDK',
+    models: [
+      'openrouter/horizon-beta',
+      'openai/gpt-oss-120b:nitro',
+      'openai/gpt-oss-20b:nitro'
+    ],
+    defaultModel: 'openrouter/horizon-beta'
+  };
+
+  static isAvailable(): boolean {
+    return !!process.env.OPENROUTER_API_KEY;
+  }
+
   private client: OpenAI | null = null;
   
   constructor(config: { apiKey?: string; model?: string }) {
@@ -11,7 +26,7 @@ export class OpenRouterLLMProvider extends LLMProvider {
     super({
       provider: 'openrouter',
       apiKey: apiKey,
-      model: config.model || 'openrouter/horizon-beta'
+      model: config.model || OpenRouterLLMProvider.metadata.defaultModel
     });
     
     if (apiKey) {
@@ -23,23 +38,11 @@ export class OpenRouterLLMProvider extends LLMProvider {
   }
   
   getSupportedModels(): string[] {
-    // OpenRouter supports many models - these are some popular ones
-    return [
-      'openrouter/horizon-beta',
-      'anthropic/claude-3.5-sonnet',
-      'anthropic/claude-3-opus',
-      'anthropic/claude-3-sonnet',
-      'anthropic/claude-3-haiku',
-      'google/gemini-2.0-flash-exp:free',
-      'google/gemini-1.5-flash',
-      'google/gemini-1.5-pro',
-      'meta-llama/llama-3.3-70b-instruct',
-      'meta-llama/llama-3.1-405b-instruct',
-      'deepseek/deepseek-v3',
-      'qwen/qwen-2-72b-instruct',
-      'mistralai/mistral-7b-instruct',
-      'mistralai/mixtral-8x7b-instruct',
-    ];
+    return OpenRouterLLMProvider.metadata.models;
+  }
+  
+  getDescription(): string {
+    return OpenRouterLLMProvider.metadata.description;
   }
   
   async generateResponse(request: LLMRequest): Promise<LLMResponse> {
@@ -49,7 +52,7 @@ export class OpenRouterLLMProvider extends LLMProvider {
     
     try {
       const completion = await this.client.chat.completions.create({
-        model: request.model || this.config.model || 'openrouter/horizon-beta',
+        model: request.model || this.config.model || OpenRouterLLMProvider.metadata.defaultModel,
         messages: request.messages.map(msg => ({
           role: msg.role as 'system' | 'user' | 'assistant',
           content: msg.content

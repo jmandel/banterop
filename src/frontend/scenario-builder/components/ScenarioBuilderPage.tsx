@@ -658,7 +658,7 @@ export function ScenarioBuilderPage() {
       {(activeScenario || isCreateMode) && currentConfig ? (
         <div>
           <div className="container mx-auto px-4 py-4">
-            <div className={`grid items-start gap-4 ${isEditMode ? 'grid-cols-1 lg:grid-cols-[1fr_20rem]' : 'grid-cols-1'}`}>
+            <div className={`grid items-start gap-4 ${(isEditMode || isCreateMode) ? 'grid-cols-1 lg:grid-cols-[1fr_20rem]' : 'grid-cols-1'}`}>
               <main className="min-w-0">
                 <ScenarioEditor
                   config={currentConfig}
@@ -671,7 +671,7 @@ export function ScenarioBuilderPage() {
                   isEditMode={isEditMode}
                 />
               </main>
-              {isEditMode && (
+              {(isEditMode || isCreateMode) && (
                 <aside className="lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)]">
                   <div className="h-full">
                     <ChatPanel

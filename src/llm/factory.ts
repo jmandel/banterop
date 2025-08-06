@@ -1,4 +1,4 @@
-import { LLMProvider, LLMProviderConfig } from '../types/llm.types.js';
+import { LLMProvider, LLMProviderConfig, LLMProviderMetadata } from '../types/llm.types.js';
 import { GoogleLLMProvider } from './providers/google.js';
 import { OpenRouterLLMProvider } from './providers/openrouter.js';
 
@@ -36,25 +36,18 @@ export function createOpenRouterProvider(apiKey?: string, model?: string): OpenR
 
 // Auto-detect and create provider based on available API keys
 
-// Get information about all available providers
-export function getAvailableProviders(): Array<{
-  name: SupportedProvider;
-  description: string;
-  models: string[];
-}> {
-  return [
-    {
-      name: 'google',
-      description: 'Google Gemini models via @google/genai',
-      models: ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro']
-    },
-    {
-      name: 'openrouter',
-      description: 'OpenRouter multi-model gateway via OpenAI SDK',
-      models: ['openrouter/horizon-beta']
-    },
-    // Add other providers here as they're implemented
-  ];
+// Type for provider classes with static metadata and availability check
+interface LLMProviderClass {
+  new (config: any): LLMProvider;
+  readonly metadata: LLMProviderMetadata;
+  isAvailable(): boolean;
+}
+
+// Get information about all available providers (filtered by API key availability)
+export function getAvailableProviders(): LLMProviderMetadata[] {
+  return Object.values(LLM_PROVIDERS)
+    .filter(ProviderClass => (ProviderClass as LLMProviderClass).isAvailable())
+    .map(ProviderClass => (ProviderClass as LLMProviderClass).metadata);
 }
 
 // Utility to check which providers can be initialized with given config

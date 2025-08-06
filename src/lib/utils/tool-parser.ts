@@ -244,12 +244,13 @@ function isValidToolCall(obj: any): obj is {name: string, args?: Record<string, 
  * - Trailing commas
  * - Unquoted property names
  * - Single quotes
+ * - Missing closing braces/brackets
  */
 function parseTolerantJSON(jsonStr: string): any {
     try {
       // Try standard JSON first
       return JSON.parse(jsonStr);
-    } catch {
+    } catch (firstError) {
       // Fall back to tolerant parsing
       let cleaned = jsonStr.trim();
       
@@ -265,10 +266,168 @@ function parseTolerantJSON(jsonStr: string): any {
       // Convert single quotes to double quotes
       cleaned = fixSingleQuotes(cleaned);
       
-      return JSON.parse(cleaned);
+      try {
+        return JSON.parse(cleaned);
+      } catch (secondError) {
+        // Try rescue heuristics for missing closing braces/brackets
+        const rescued = applyRescueHeuristics(cleaned);
+        if (rescued !== cleaned) {
+          try {
+            return JSON.parse(rescued);
+          } catch (rescueError) {
+            // If rescue also fails, throw the original error
+            throw firstError;
+          }
+        }
+        throw firstError;
+      }
     }
   }
   
+/**
+ * Apply rescue heuristics to fix common JSON structure issues
+ */
+function applyRescueHeuristics(jsonStr: string): string {
+  // First, try a smarter approach: balance the JSON by inserting missing brackets/braces
+  // in the right positions
+  const smartFixed = smartBalanceJSON(jsonStr);
+  if (smartFixed !== jsonStr) {
+    try {
+      JSON.parse(smartFixed);
+      return smartFixed;
+    } catch {
+      // Smart fix didn't work, fall back to simple approach
+    }
+  }
+  
+  // Simple approach: just append missing brackets/braces at the end
+  // Count opening and closing braces/brackets
+  let openBraces = 0;
+  let closeBraces = 0;
+  let openBrackets = 0;
+  let closeBrackets = 0;
+  let inString = false;
+  let escapeNext = false;
+  
+  for (let i = 0; i < jsonStr.length; i++) {
+    const char = jsonStr[i];
+    
+    if (escapeNext) {
+      escapeNext = false;
+      continue;
+    }
+    
+    if (char === '\\') {
+      escapeNext = true;
+      continue;
+    }
+    
+    if (char === '"' && !escapeNext) {
+      inString = !inString;
+      continue;
+    }
+    
+    if (!inString) {
+      if (char === '{') openBraces++;
+      else if (char === '}') closeBraces++;
+      else if (char === '[') openBrackets++;
+      else if (char === ']') closeBrackets++;
+    }
+  }
+  
+  // Add missing closing brackets first, then braces
+  const missingBrackets = openBrackets - closeBrackets;
+  const missingBraces = openBraces - closeBraces;
+  
+  let fixed = jsonStr;
+  if (missingBrackets > 0) {
+    fixed += ']'.repeat(missingBrackets);
+  }
+  if (missingBraces > 0) {
+    fixed += '}'.repeat(missingBraces);
+  }
+  
+  return fixed;
+}
+
+/**
+ * Smart JSON balancing - tries to insert missing brackets/braces in contextually appropriate places
+ */
+function smartBalanceJSON(jsonStr: string): string {
+  // For the common case of arrays missing closing brackets before object closes
+  // e.g., ["item1", "item2"}} -> ["item1", "item2"]}}
+  
+  // Track the stack of open structures
+  const stack: ('array' | 'object')[] = [];
+  let result = '';
+  let inString = false;
+  let escapeNext = false;
+  
+  for (let i = 0; i < jsonStr.length; i++) {
+    const char = jsonStr[i];
+    
+    if (escapeNext) {
+      escapeNext = false;
+      result += char;
+      continue;
+    }
+    
+    if (char === '\\') {
+      escapeNext = true;
+      result += char;
+      continue;
+    }
+    
+    if (char === '"' && !escapeNext) {
+      inString = !inString;
+      result += char;
+      continue;
+    }
+    
+    if (!inString) {
+      if (char === '[') {
+        stack.push('array');
+        result += char;
+      } else if (char === '{') {
+        stack.push('object');
+        result += char;
+      } else if (char === ']') {
+        if (stack[stack.length - 1] === 'array') {
+          stack.pop();
+        }
+        result += char;
+      } else if (char === '}') {
+        // Check if we have an unclosed array that should be closed here
+        if (stack[stack.length - 1] === 'array' && stack[stack.length - 2] === 'object') {
+          // We're trying to close an object but have an unclosed array
+          result += ']'; // Close the array first
+          stack.pop(); // Remove array from stack
+        }
+        if (stack[stack.length - 1] === 'object') {
+          stack.pop();
+        }
+        result += char;
+      } else {
+        result += char;
+      }
+    } else {
+      result += char;
+    }
+  }
+  
+  // Add any remaining closes
+  while (stack.length > 0) {
+    const structure = stack.pop();
+    if (structure === 'array') {
+      result += ']';
+    } else {
+      result += '}';
+    }
+  }
+  
+  return result;
+}
+
 /**
  * Remove JavaScript-style comments
  */

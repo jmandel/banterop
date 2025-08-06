@@ -44,6 +44,7 @@ router.post('/generate', async (c) => {
     // Determine which provider to use based on model name
     let selectedProvider: LLMProvider | null = null;
     
+    console.log('Available providers:', Object.keys(providers).map(p => providers[p].getSupportedModels()));
     // Check if model matches any provider's supported models
     if (providers.google && providers.google.getSupportedModels().includes(model || '')) {
       selectedProvider = providers.google;

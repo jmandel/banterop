@@ -38,6 +38,14 @@ export interface LLMToolResponse {
   error?: string;
 }
 
+// Provider metadata - static information about a provider
+export interface LLMProviderMetadata {
+  name: string;
+  description: string;
+  models: string[];
+  defaultModel: string;
+}
+
 // Provider configuration
 export interface LLMProviderConfig {
   provider: 'google' | 'openai' | 'anthropic' | 'local' | 'remote' | 'openrouter'
@@ -57,4 +65,6 @@ export abstract class LLMProvider {
   abstract generateResponse(request: LLMRequest): Promise<LLMResponse>;
   
   abstract getSupportedModels(): string[];
+  
+  abstract getDescription(): string;
 }

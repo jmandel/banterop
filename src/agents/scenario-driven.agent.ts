@@ -197,6 +197,13 @@ export class ScenarioDrivenAgent extends BaseAgent {
             break;
           }
           
+          // Check if the response had no valid tools due to parsing issues
+          if (result.tools.length === 0 && result.message.includes('```json')) {
+            // The response contained JSON but it couldn't be parsed
+            await this.addThought(`My last response was not valid JSON. There may have been a formatting error. I should fix and try again.`);
+            continue; // Try again on the next iteration
+          }
+          
           if (!result.tools || !result.message) {
             console.error("Missing thoughts or tools, ending turn")
             await this.completeTurn("Turn ended with error");

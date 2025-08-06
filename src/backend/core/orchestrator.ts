@@ -51,6 +51,19 @@ export class ConversationOrchestrator {
     this.toolSynthesisService = toolSynthesisService || new ToolSynthesisService(this.llmProvider);
   }
 
+  // ============= State Management Helpers =============
+
+  private updateConversationStatus(conversationId: string, status: 'created' | 'active' | 'completed'): void {
+    // Update database first (source of truth)
+    this.db.updateConversationStatus(conversationId, status);
+    
+    // Then update in-memory state if it exists
+    const conversationState = this.activeConversations.get(conversationId);
+    if (conversationState) {
+      conversationState.conversation.status = status;
+    }
+  }
+
   // ============= Core Methods =============
 
   async createConversation(request: CreateConversationRequest): Promise<CreateConversationResponse> {
@@ -145,17 +158,11 @@ export class ConversationOrchestrator {
       throw new Error(`Conversation has already been started. Current status: ${conversation.status}`);
     }
 
-    // Update the conversation status to 'active' in the database
-    this.db.updateConversationStatus(conversationId, 'active');
+    // Update the conversation status to 'active'
+    this.updateConversationStatus(conversationId, 'active');
 
-    // Get conversation state with agent configs
-    const conversationState = this.activeConversations.get(conversationId);
-    if (!conversationState) {
-      throw new Error(`Conversation ${conversationId} not found in active conversations`);
-    }
-
-    // Update in-memory state
-    conversationState.conversation.status = 'active';
+    // Get conversation state with agent configs (guaranteed to exist after createConversation)
+    const conversationState = this.activeConversations.get(conversationId)!
 
     // Execute the agent provisioning logic
     const agentsToProvision = agentIdsToStart 
@@ -302,18 +309,10 @@ export class ConversationOrchestrator {
       
       if (allExternal) {
         console.log(`[Orchestrator] External conversation ${request.conversationId} being activated by first turn from agent ${request.agentId}`);
-
-        this.db.updateConversationStatus(request.conversationId, 'active');
-        
-        // Update in-memory state if it exists
-        const conversationState = this.activeConversations.get(request.conversationId);
-        if (conversationState) {
-          conversationState.conversation.status = 'active';
-        }
+        this.updateConversationStatus(request.conversationId, 'active');
       }
     }
     
-    // TODO-JCM: we should not double-set state -- we should have changes flow to all places automatically instead of setting  in db and in active convesrations instead of setting  in db and in active convesrations
     // Create in-progress turn in database
     this.db.startTurn(turnId, request.conversationId, request.agentId, request.metadata);
 
@@ -632,7 +631,7 @@ export class ConversationOrchestrator {
   }
 
   endConversation(conversationId: string): void {
-    this.db.updateConversationStatus(conversationId, 'completed');
+    this.updateConversationStatus(conversationId, 'completed');
     
     const event: ConversationEvent = {
       type: 'conversation_ended',

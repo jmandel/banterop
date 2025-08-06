@@ -260,7 +260,7 @@ function ExternalExecutorApp() {
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [llmProvider, setLlmProvider] = useState<'mock' | 'gemini' | 'openrouter'>('mock');
   const [availableModels, setAvailableModels] = useState<{ gemini: string[], openrouter: string[] }>({ gemini: [], openrouter: [] });
-  const [selectedModel, setSelectedModel] = useState<string>('gemini-2.5-flash-lite');
+  const [selectedModel, setSelectedModel] = useState<string>('openai/gpt-oss-20b');
   const [backendUrl, setBackendUrl] = useState<string>(() => {
     // Load from localStorage or use default
     const stored = localStorage.getItem('external-executor-backend-url');

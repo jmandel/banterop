@@ -173,4 +173,55 @@ describe('ToolParser', () => {
     expect(result.message).toBe('Direct reasoning without tags.');
     expect(result.tools).toHaveLength(1);
   });
+
+  test('should handle missing closing brace in JSON block', () => {
+    const output = '<scratchpad>\nI need to send a message with attachments.\n</scratchpad>\n```json\n{\n  "name": "send_message_to_agent_conversation",\n  "args": {\n    "text": "Hello, here is the documentation.",\n    "attachments_to_include": [\n      "policy_HF-MRI-KNEE-2024"\n    ]\n  }\n```';
+    const result = parseToolsFromResponse(output);
+    
+    expect(result.message).toBe('I need to send a message with attachments.');
+    expect(result.tools).toHaveLength(1);
+    expect(result.tools[0].name).toBe('send_message_to_agent_conversation');
+    expect(result.tools[0].args.text).toBe('Hello, here is the documentation.');
+    expect(result.tools[0].args.attachments_to_include).toEqual(['policy_HF-MRI-KNEE-2024']);
+  });
+
+  test('should handle missing closing bracket in array', () => {
+    const output = '```json\n{"name": "test_tool", "args": {"items": ["item1", "item2"}}\n```';
+    const result = parseToolsFromResponse(output);
+    
+    expect(result.tools).toHaveLength(1);
+    expect(result.tools[0].name).toBe('test_tool');
+    expect(result.tools[0].args.items).toEqual(['item1', 'item2']);
+  });
+
+  test('should handle multi-line text fields with missing closing brace', () => {
+    const output = `<scratchpad>
+I have successfully retrieved the full medical policy for an MRI of the knee (docId: policy_HF-MRI-KNEE-2024).
+</scratchpad>
+\`\`\`json
+{
+  "name": "send_message_to_agent_conversation",
+  "args": {
+    "text": "Hello Jordan Alvarez (Member ID: HF8901234567),\\n\\nThank you for your inquiry regarding the prior authorization request for a right knee MRI.\\n\\n**Documentation required:**\\n1. Physician Order for the MRI\\n2. Initial Injury Report\\n3. Physical Therapy Progress Notes\\n\\nPlease submit all documents within this conversation thread.\\n\\nRegards,\\nPrior Authorization Specialist",
+    "attachments_to_include": [
+      "policy_HF-MRI-KNEE-2024"
+    ]
+  }
+\`\`\``;
+    const result = parseToolsFromResponse(output);
+    
+    expect(result.tools).toHaveLength(1);
+    expect(result.tools[0].name).toBe('send_message_to_agent_conversation');
+    expect(result.tools[0].args.text).toContain('Hello Jordan Alvarez');
+    expect(result.tools[0].args.attachments_to_include).toEqual(['policy_HF-MRI-KNEE-2024']);
+  });
+
+  test('should handle missing multiple closing braces', () => {
+    const output = '```json\n{"name": "nested", "args": {"level1": {"level2": {"value": "test"}\n```';
+    const result = parseToolsFromResponse(output);
+    
+    expect(result.tools).toHaveLength(1);
+    expect(result.tools[0].name).toBe('nested');
+    expect(result.tools[0].args.level1.level2.value).toBe('test');
+  });
 });
