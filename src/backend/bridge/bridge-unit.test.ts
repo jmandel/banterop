@@ -4,6 +4,8 @@ import { McpBridgeServer } from './mcp-server.js';
 import { BridgeAgent } from '../../agents/bridge.agent.js';
 import { encodeConfigToBase64URL } from '$lib/utils/config-encoding.js';
 import { CreateConversationRequest, ConversationTurn } from '$lib/types.js';
+import { EventEmitter } from 'events';
+import { Readable } from 'stream';
 
 describe('MCP Bridge Unit Tests', () => {
   let orchestrator: ConversationOrchestrator;
@@ -11,30 +13,124 @@ describe('MCP Bridge Unit Tests', () => {
   let config: CreateConversationRequest;
   let config64: string;
   
+  // Create proper HTTP mocks for the StreamableHTTPServerTransport
+  class MockIncomingMessage extends Readable {
+    method: string;
+    headers: any;
+    url: string;
+    httpVersion: string;
+    complete: boolean;
+    
+    constructor(method: string, headers: any, body?: any) {
+      super();
+      this.method = method;
+      this.headers = headers;
+      this.url = '/';
+      this.httpVersion = '1.1';
+      this.complete = true;
+      
+      // Push body if provided
+      if (body) {
+        this.push(JSON.stringify(body));
+      }
+      this.push(null);
+    }
+    
+    _read() {}
+  }
+  
+  class MockServerResponse extends EventEmitter {
+    statusCode: number;
+    statusMessage: string;
+    headersSent: boolean;
+    _headers: any;
+    _data: any[];
+    _ended: boolean;
+    
+    constructor() {
+      super();
+      this.statusCode = 200;
+      this.statusMessage = 'OK';
+      this.headersSent = false;
+      this._headers = {};
+      this._data = [];
+      this._ended = false;
+    }
+    
+    writeHead(statusCode: number, statusMessage?: any, headers?: any) {
+      this.statusCode = statusCode;
+      if (typeof statusMessage === 'string') {
+        this.statusMessage = statusMessage;
+      } else {
+        headers = statusMessage;
+      }
+      if (headers) {
+        Object.assign(this._headers, headers);
+      }
+      this.headersSent = true;
+      return this;
+    }
+    
+    setHeader(name: string, value: any) {
+      this._headers[name.toLowerCase()] = value;
+      return this;
+    }
+    
+    getHeader(name: string) {
+      return this._headers[name.toLowerCase()];
+    }
+    
+    write(chunk: any, encoding?: any) {
+      if (chunk) {
+        this._data.push(chunk);
+      }
+      return true;
+    }
+    
+    end(chunk?: any, encoding?: any) {
+      if (chunk) {
+        this._data.push(chunk);
+      }
+      this._ended = true;
+      this.emit('finish');
+      return this;
+    }
+    
+    getData() {
+      return this._data.map(d => 
+        Buffer.isBuffer(d) ? d.toString() : String(d)
+      ).join('');
+    }
+  }
+
   // Helper function to make MCP requests
   const makeMcpRequest = async (body: any): Promise<any> => {
-    const mockReq = {
-      method: 'POST',
-      headers: { 
-        'content-type': 'application/json',
-        'accept': 'application/json, text/event-stream'
-      }
-    };
+    // Create proper HTTP request mock
+    const mockReq = new MockIncomingMessage('POST', {
+      'content-type': 'application/json',
+      'accept': 'application/json, text/event-stream'
+    }, body);
     
-    let responseData: any = null;
-    const mockRes = {
-      on: mock(() => {}),
-      writeHead: mock(function() { return this; }),
-      end: mock(function(data: string) { 
-        if (data) {
-          responseData = JSON.parse(data); 
-        }
-        return this;
-      })
-    };
+    // Create proper HTTP response mock
+    const mockRes = new MockServerResponse();
     
+    // Call the handler
     await mcpBridge.handleRequest(mockReq, mockRes, body);
-    return responseData;
+    
+    // Wait a bit for async operations
+    await new Promise(resolve => setTimeout(resolve, 150));
+    
+    // Parse the captured response
+    const responseData = mockRes.getData();
+    if (responseData) {
+      try {
+        return JSON.parse(responseData);
+      } catch (e) {
+        return responseData;
+      }
+    }
+    
+    return null;
   };
   
   beforeEach(() => {
@@ -59,7 +155,8 @@ describe('MCP Bridge Unit Tests', () => {
         },
         {
           id: 'other-agent',
-          strategyType: 'scenario_driven'
+          strategyType: 'static_replay',
+          script: []
         }
       ]
     };
@@ -69,10 +166,7 @@ describe('MCP Bridge Unit Tests', () => {
   });
   
   afterEach(() => {
-    // Clear any active bridge agents to avoid leaking state
-    if (mcpBridge.__test) {
-      mcpBridge.__test.clearActiveBridgeAgents();
-    }
+    // Close the database instance
     orchestrator.getDbInstance().close();
   });
   
@@ -141,8 +235,10 @@ describe('MCP Bridge Unit Tests', () => {
     
     expect(response.jsonrpc).toBe('2.0');
     expect(response.id).toBe('send-no-conv');
-    expect(response.error).toBeDefined();
-    expect(response.error.message).toContain('No active conversation');
+    // MCP SDK returns errors in result.isError, not error field
+    expect(response.result).toBeDefined();
+    expect(response.result.isError).toBe(true);
+    expect(response.result.content[0].text).toContain('not found');
   });
   
   test('should handle wait_for_reply without pending reply', async () => {
@@ -171,8 +267,10 @@ describe('MCP Bridge Unit Tests', () => {
     
     expect(response.jsonrpc).toBe('2.0');
     expect(response.id).toBe('wait-no-pending');
-    expect(response.error).toBeDefined();
-    expect(response.error.message).toContain('No pending reply');
+    // MCP SDK returns errors in result.isError, not error field
+    expect(response.result).toBeDefined();
+    expect(response.result.isError).toBe(true);
+    expect(response.result.content[0].text).toContain('No pending reply');
   });
   
   test('should handle unknown method', async () => {
@@ -188,8 +286,9 @@ describe('MCP Bridge Unit Tests', () => {
     expect(response.jsonrpc).toBe('2.0');
     expect(response.id).toBe('unknown-1');
     expect(response.error).toBeDefined();
-    expect(response.error.code).toBe(-32603);
-    expect(response.error.message).toContain('Unknown method');
+    // The MCP SDK transport uses -32601 for method not found
+    expect(response.error.code).toBe(-32601);
+    expect(response.error.message).toContain('Method not found');
   });
   
   test('should handle unknown tool', async () => {
@@ -208,7 +307,7 @@ describe('MCP Bridge Unit Tests', () => {
     expect(response.jsonrpc).toBe('2.0');
     expect(response.id).toBe('unknown-tool');
     expect(response.error).toBeDefined();
-    expect(response.error.message).toContain('Unknown tool');
+    expect(response.error.message).toContain('not found');
   });
   
   test('should handle invalid configuration', async () => {
@@ -232,11 +331,34 @@ describe('MCP Bridge Unit Tests', () => {
       params: { name: 'begin_chat_thread', arguments: {} }
     };
     
-    const response = await invalidBridge.handleRequest(request);
+    // Use proper HTTP mocks
+    const mockReq = new MockIncomingMessage('POST', {
+      'content-type': 'application/json',
+      'accept': 'application/json, text/event-stream'
+    }, request);
+    
+    const mockRes = new MockServerResponse();
+    
+    await invalidBridge.handleRequest(mockReq, mockRes, request);
+    
+    // Wait for async operations
+    await new Promise(resolve => setTimeout(resolve, 10));
+    
+    // Parse response
+    const responseData = mockRes.getData();
+    let response = null;
+    if (responseData) {
+      try {
+        response = JSON.parse(responseData);
+      } catch (e) {
+        response = responseData;
+      }
+    }
     
     expect(response.jsonrpc).toBe('2.0');
-    expect(response.error).toBeDefined();
-    expect(response.error.message).toBeDefined(); // Empty agents array causes different error
+    // MCP SDK returns errors in result.isError, not error field
+    expect(response.result).toBeDefined();
+    expect(response.result.isError).toBe(true);
   });
   
   test('should validate agent strategy type', async () => {
@@ -265,11 +387,34 @@ describe('MCP Bridge Unit Tests', () => {
       params: { name: 'begin_chat_thread', arguments: {} }
     };
     
-    const response = await wrongBridge.handleRequest(request);
+    // Use proper HTTP mocks
+    const mockReq = new MockIncomingMessage('POST', {
+      'content-type': 'application/json',
+      'accept': 'application/json, text/event-stream'
+    }, request);
+    
+    const mockRes = new MockServerResponse();
+    
+    await wrongBridge.handleRequest(mockReq, mockRes, request);
+    
+    // Wait for async operations
+    await new Promise(resolve => setTimeout(resolve, 10));
+    
+    // Parse response
+    const responseData = mockRes.getData();
+    let response = null;
+    if (responseData) {
+      try {
+        response = JSON.parse(responseData);
+      } catch (e) {
+        response = responseData;
+      }
+    }
     
     expect(response.jsonrpc).toBe('2.0');
-    expect(response.error).toBeDefined();
-    // Should complain about no bridged agent or invalid strategy type
+    // MCP SDK returns errors in result.isError, not error field
+    expect(response.result).toBeDefined();
+    expect(response.result.isError).toBe(true);
   });
   
   test('should handle send_message_to_chat_thread successfully', async () => {

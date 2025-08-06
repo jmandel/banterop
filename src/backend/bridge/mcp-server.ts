@@ -9,7 +9,6 @@ import {
 } from '$lib/types.js';
 import { decodeConfigFromBase64URL } from '$lib/utils/config-encoding.js';
 import { validateCreateConversationConfigV2, getBridgedAgent } from '$lib/utils/config-validation.js';
-import { InProcessOrchestratorClient } from '$client/impl/in-process.client.js';
 import { ConversationOrchestrator } from '../core/orchestrator.js';
 import { BridgeAgent, BridgeReply } from '../../agents/bridge.agent.js';
 
@@ -29,9 +28,6 @@ const sendMessageSchema = {
 const waitForReplySchema = {
   conversationId: z.string()
 };
-
-// Global map from conversation ID to BridgeAgent instance
-const activeBridgeAgents = new Map<string, BridgeAgent>();
 
 export class McpBridgeServer {
   private mcpServer: McpServer;
@@ -57,11 +53,25 @@ export class McpBridgeServer {
     }
     
     return {
-      activeBridgeAgents,
-      getActiveBridgeAgent: (conversationId: string) => activeBridgeAgents.get(conversationId),
-      clearActiveBridgeAgents: () => activeBridgeAgents.clear(),
-      setTestTimeout: (conversationId: string, timeout: number) => {
-        const agent = activeBridgeAgents.get(conversationId);
+      getActiveBridgeAgent: async (conversationId: string): Promise<BridgeAgent | undefined> => {
+        // Look up the bridged agent config
+        const config = decodeConfigFromBase64URL(this.config64);
+        const bridgedAgent = getBridgedAgent(config);
+        if (!bridgedAgent) return undefined;
+        
+        try {
+          const agent = await this.orchestrator.ensureAgentInstance(conversationId, bridgedAgent.id);
+          return agent as BridgeAgent;
+        } catch {
+          return undefined;
+        }
+      },
+      setTestTimeout: async (conversationId: string, timeout: number) => {
+        const config = decodeConfigFromBase64URL(this.config64);
+        const bridgedAgent = getBridgedAgent(config);
+        if (!bridgedAgent) return;
+        
+        const agent = await this.orchestrator.ensureAgentInstance(conversationId, bridgedAgent.id);
         if (agent) {
           (agent as any).__testTimeout = timeout;
         }
@@ -88,11 +98,7 @@ export class McpBridgeServer {
           throw new Error(`Invalid configuration: ${validation.errors.join(', ')}`);
         }
         
-        // Create conversation
-        const response = await this.createConversation(config);
-        const conversationId = response.conversation.id;
-        
-        // Find the bridged agent in the config
+        // Find the bridged agent in the config to validate it exists
         const bridgedAgent = getBridgedAgent(config);
         if (!bridgedAgent) {
           throw new Error('No bridged agent found in configuration');
@@ -104,44 +110,13 @@ export class McpBridgeServer {
           throw new Error('Invalid bridge agent strategy type');
         }
         
-        // Get the agent token for the bridged agent
-        const agentToken = response.agentTokens[bridgedAgent.id];
+        // Create conversation
+        const response = await this.createConversation(config);
+        const conversationId = response.conversation.id;
         
-        // Create in-process client for the bridge agent
-        const inProcessClient = new InProcessOrchestratorClient(this.orchestrator);
-        
-        // Create BridgeAgent instance with properly typed config
-        const bridgeAgent = new BridgeAgent(bridgedAgent, inProcessClient);
-        
-        // Initialize the bridge agent
-        await bridgeAgent.initialize(conversationId, agentToken);
-        
-        // Store the bridge agent for this conversation in the orchestrator's state
-        const conversationState = (this.orchestrator as any).activeConversations.get(conversationId);
-        if (conversationState) {
-          if (!conversationState.agents) {
-            conversationState.agents = new Map();
-          }
-          conversationState.agents.set(bridgedAgent.id, bridgeAgent);
-        }
-        
-        // Store the bridge agent in our local map for quick access
-        activeBridgeAgents.set(conversationId, bridgeAgent);
-        
-        // Use orchestrator's startConversation to initialize ALL agents
-        // This will start all agents including scenario_driven ones
-        console.log('[McpBridgeServer] Starting conversation through orchestrator');
-        try {
-          // Start all agents in the conversation
-          await this.orchestrator.startConversation(conversationId);
-          console.log('[McpBridgeServer] All agents started successfully');
-        } catch (error) {
-          console.error('[McpBridgeServer] Error starting conversation:', error);
-          // If it fails because conversation already started, that's fine
-          if (error instanceof Error && !error.message.includes('already been started')) {
-            throw error;
-          }
-        }
+        // Start the conversation - this will provision all server-managed agents
+        // including the BridgeAgent and any scenario-driven agents
+        await this.orchestrator.startConversation(conversationId);
         
         // For MCP server mode, the external client is the initiator
         // The bridge agent will wait for external input before taking any action
@@ -169,10 +144,17 @@ export class McpBridgeServer {
       try {
         const conversationId = params.conversationId;
         
-        // Get the bridge agent for this conversation
-        const bridgeAgent = activeBridgeAgents.get(conversationId);
-        if (!bridgeAgent) {
-          throw new Error('No active conversation. Call begin_chat_thread first.');
+        // Get the bridged agent ID from config
+        const config = decodeConfigFromBase64URL(this.config64);
+        const bridgedAgent = getBridgedAgent(config);
+        if (!bridgedAgent) {
+          throw new Error('No bridged agent found in configuration');
+        }
+        
+        // Get the bridge agent instance via orchestrator
+        const agent = await this.orchestrator.ensureAgentInstance(conversationId, bridgedAgent.id);
+        if (!(agent instanceof BridgeAgent)) {
+          throw new Error(`Agent ${bridgedAgent.id} is not a BridgeAgent`);
         }
         
         // Convert MCP attachments to AttachmentPayload format
@@ -183,7 +165,7 @@ export class McpBridgeServer {
         }));
         
         // Use BridgeAgent to bridge the external client's turn
-        const reply = await bridgeAgent.bridgeExternalClientTurn(
+        const reply = await agent.bridgeExternalClientTurn(
           params.message, 
           attachments
           // Use BridgeAgent's default timeout
@@ -220,14 +202,21 @@ export class McpBridgeServer {
       try {
         const conversationId = params.conversationId;
         
-        // Get the bridge agent for this conversation
-        const bridgeAgent = activeBridgeAgents.get(conversationId);
-        if (!bridgeAgent) {
-          throw new Error('No active conversation. Call begin_chat_thread first.');
+        // Get the bridged agent ID from config
+        const config = decodeConfigFromBase64URL(this.config64);
+        const bridgedAgent = getBridgedAgent(config);
+        if (!bridgedAgent) {
+          throw new Error('No bridged agent found in configuration');
+        }
+        
+        // Get the bridge agent instance via orchestrator
+        const agent = await this.orchestrator.ensureAgentInstance(conversationId, bridgedAgent.id);
+        if (!(agent instanceof BridgeAgent)) {
+          throw new Error(`Agent ${bridgedAgent.id} is not a BridgeAgent`);
         }
         
         // Use BridgeAgent to wait for pending reply
-        const reply = await bridgeAgent.waitForPendingReply(); // Use BridgeAgent's default timeout
+        const reply = await agent.waitForPendingReply(); // Use BridgeAgent's default timeout
         
         return {
           content: [{ 
@@ -263,10 +252,6 @@ export class McpBridgeServer {
    * This now works with our Hono-to-Node adapters
    */
   public async handleRequest(req: any, res: any, body: any): Promise<void> {
-    console.log('[McpBridgeServer] handleRequest called');
-    console.log('[McpBridgeServer] Request method:', req.method);
-    console.log('[McpBridgeServer] Request headers:', req.headers);
-    console.log('[McpBridgeServer] Request body:', body);
     
     // Create a new transport for this request (stateless mode)
     const transport = new StreamableHTTPServerTransport({
@@ -276,7 +261,6 @@ export class McpBridgeServer {
     
     // Clean up transport when response closes
     res.on('close', () => {
-      console.log('[McpBridgeServer] Response closed');
       transport.close();
     });
     
@@ -288,276 +272,11 @@ export class McpBridgeServer {
       
       // Let the transport handle the request
       // This delegates all MCP protocol handling to the SDK
-      console.log('[McpBridgeServer] Calling transport.handleRequest');
       await transport.handleRequest(req, res, body);
-      console.log('[McpBridgeServer] transport.handleRequest completed');
     } catch (error) {
       console.error('Error handling MCP request:', error);
       // Error handling is done by the response adapter
       throw error;
-    }
-  }
-  
-  /**
-   * Alternative handler for direct Hono integration (without transport)
-   * Kept for backwards compatibility or simpler use cases
-   */
-  public async handleRequestDirect(body: any): Promise<any> {
-    const { method, params, id } = body;
-    
-    try {
-      // Handle core MCP protocol methods
-      switch (method) {
-        case 'initialize':
-          return {
-            jsonrpc: '2.0',
-            id,
-            result: {
-              protocolVersion: '2024-11-05',
-              capabilities: {
-                tools: {}
-              },
-              serverInfo: {
-                name: 'language-track-bridge',
-                version: '1.0.0'
-              }
-            }
-          };
-          
-        case 'tools/list':
-          return {
-            jsonrpc: '2.0',
-            id,
-            result: {
-              tools: [
-                {
-                  name: 'begin_chat_thread',
-                  description: 'Create a new conversation session for this MCP client',
-                  inputSchema: {
-                    type: 'object',
-                    properties: {}
-                  }
-                },
-                {
-                  name: 'send_message_to_chat_thread',
-                  description: 'Send a message to the conversation and wait for reply',
-                  inputSchema: {
-                    type: 'object',
-                    properties: {
-                      conversationId: { type: 'string' },
-                      message: { type: 'string' },
-                      attachments: {
-                        type: 'array',
-                        items: {
-                          type: 'object',
-                          properties: {
-                            name: { type: 'string' },
-                            contentType: { type: 'string' },
-                            content: { type: 'string' }
-                          }
-                        }
-                      }
-                    },
-                    required: ['conversationId', 'message']
-                  }
-                },
-                {
-                  name: 'wait_for_reply',
-                  description: 'Wait for the next reply from the other agent',
-                  inputSchema: {
-                    type: 'object',
-                    properties: {
-                      conversationId: { type: 'string' }
-                    },
-                    required: ['conversationId']
-                  }
-                }
-              ]
-            }
-          };
-          
-        case 'tools/call':
-          // Handle tool calls
-          const toolName = params.name;
-          const toolArgs = params.arguments || {};
-          
-          let result;
-          switch (toolName) {
-            case 'begin_chat_thread':
-              result = await this.handleBeginChatThread();
-              break;
-            case 'send_message_to_chat_thread':
-              result = await this.handleSendMessage(toolArgs);
-              break;
-            case 'wait_for_reply':
-              result = await this.handleWaitForReply(toolArgs);
-              break;
-            default:
-              throw new Error(`Unknown tool: ${toolName}`);
-          }
-          
-          return {
-            jsonrpc: '2.0',
-            id,
-            result
-          };
-          
-        default:
-          throw new Error(`Unknown method: ${method}`);
-      }
-    } catch (error) {
-      return {
-        jsonrpc: '2.0',
-        id,
-        error: {
-          code: -32603,
-          message: error instanceof Error ? error.message : 'Internal error'
-        }
-      };
-    }
-  }
-  
-  // Remove duplicate methods - these are now only needed if using handleRequestDirect
-  private async handleBeginChatThread(): Promise<any> {
-    try {
-      // Decode and validate config
-      const config = decodeConfigFromBase64URL(this.config64);
-      const validation = validateCreateConversationConfigV2(config);
-      
-      if (!validation.valid) {
-        throw new Error(`Invalid configuration: ${validation.errors.join(', ')}`);
-      }
-      
-      // Create conversation
-      const response = await this.createConversation(config);
-      const conversationId = response.conversation.id;
-      
-      // Find the bridged agent in the config
-      const bridgedAgent = getBridgedAgent(config);
-      if (!bridgedAgent) {
-        throw new Error('No bridged agent found in configuration');
-      }
-      
-      // Validate that it's a bridge agent config
-      if (bridgedAgent.strategyType !== 'bridge_to_external_mcp_server' && 
-          bridgedAgent.strategyType !== 'bridge_to_external_mcp_client') {
-        throw new Error('Invalid bridge agent strategy type');
-      }
-      
-      // Get the agent token for the bridged agent
-      const agentToken = response.agentTokens[bridgedAgent.id];
-      
-      // Create in-process client for the bridge agent
-      const inProcessClient = new InProcessOrchestratorClient(this.orchestrator);
-      
-      // Create BridgeAgent instance with properly typed config
-      const bridgeAgent = new BridgeAgent(bridgedAgent, inProcessClient);
-      
-      // Initialize the bridge agent
-      await bridgeAgent.initialize(conversationId, agentToken);
-      
-      // Store the bridge agent in orchestrator's state
-      const conversationState = (this.orchestrator as any).activeConversations.get(conversationId);
-      if (conversationState) {
-        if (!conversationState.agents) conversationState.agents = new Map();
-        conversationState.agents.set(bridgedAgent.id, bridgeAgent);
-      }
-      
-      // Store the bridge agent for this conversation
-      activeBridgeAgents.set(conversationId, bridgeAgent);
-      
-      // Use orchestrator's startConversation to initialize ALL agents
-      try {
-        await this.orchestrator.startConversation(conversationId);
-      } catch (error) {
-        if (error instanceof Error && !error.message.includes('already been started')) {
-          throw error;
-        }
-      }
-      
-      return {
-        content: [{ 
-          type: 'text', 
-          text: JSON.stringify({ conversationId }) 
-        }]
-      };
-    } catch (error) {
-      throw new Error(`Failed to begin chat thread: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-  
-  private async handleSendMessage(params: any): Promise<any> {
-    try {
-      const conversationId = params.conversationId;
-      
-      // Get the bridge agent for this conversation
-      const bridgeAgent = activeBridgeAgents.get(conversationId);
-      if (!bridgeAgent) {
-        throw new Error('No active conversation. Call begin_chat_thread first.');
-      }
-      
-      // Convert MCP attachments to AttachmentPayload format
-      const attachments: AttachmentPayload[] | undefined = params.attachments?.map((att: any) => ({
-        name: att.name,
-        contentType: att.contentType,
-        content: att.content
-      }));
-      
-      // Use BridgeAgent to bridge the external client's turn
-      const reply = await bridgeAgent.bridgeExternalClientTurn(
-        params.message, 
-        attachments
-        // Use BridgeAgent's default timeout
-      );
-      
-      return {
-        content: [{ 
-          type: 'text', 
-          text: JSON.stringify(reply) 
-        }]
-      };
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('Timeout')) {
-        return {
-          content: [{ 
-            type: 'text', 
-            text: JSON.stringify({ timeout: true }) 
-          }]
-        };
-      }
-      throw new Error(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-  
-  private async handleWaitForReply(params: any): Promise<any> {
-    try {
-      const conversationId = params.conversationId;
-      
-      // Get the bridge agent for this conversation
-      const bridgeAgent = activeBridgeAgents.get(conversationId);
-      if (!bridgeAgent) {
-        throw new Error('No active conversation. Call begin_chat_thread first.');
-      }
-      
-      // Use BridgeAgent to wait for pending reply
-      const reply = await bridgeAgent.waitForPendingReply(); // Use BridgeAgent's default timeout
-      
-      return {
-        content: [{ 
-          type: 'text', 
-          text: JSON.stringify(reply) 
-        }]
-      };
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('Timeout')) {
-        return {
-          content: [{ 
-            type: 'text', 
-            text: JSON.stringify({ timeout: true }) 
-          }]
-        };
-      }
-      throw new Error(`Failed to wait for reply: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 

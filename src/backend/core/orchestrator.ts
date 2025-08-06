@@ -7,6 +7,7 @@ import { createClient } from '$client/index.js';
 import type { LLMProvider } from 'src/types/llm.types.js';
 import { ToolSynthesisService } from '../../agents/services/tool-synthesis.service.js';
 import type { AgentInterface } from '$lib/types.js';
+import { isServerManaged, hasServerManagedAgents } from '$lib/utils/agent-helpers.js';
 import {
   Conversation, ConversationTurn, TraceEntry, AgentConfig,
   CreateConversationRequest, CreateConversationResponse,
@@ -49,6 +50,11 @@ export class ConversationOrchestrator {
     
     this.llmProvider = llmProvider;
     this.toolSynthesisService = toolSynthesisService || new ToolSynthesisService(this.llmProvider);
+    
+    // Resurrect active conversations on startup
+    this.resurrectActiveConversations().catch(error => {
+      console.error('[Orchestrator] Failed to resurrect active conversations on startup:', error);
+    });
   }
 
   // ============= State Management Helpers =============
@@ -114,9 +120,7 @@ export class ConversationOrchestrator {
     });
 
     // Determine management mode from agent types
-    const hasInternalAgents = request.agents.some(a => 
-      ['scenario_driven', 'sequential_script', 'static_replay'].includes(a.strategyType)
-    );
+    const hasInternalAgents = hasServerManagedAgents(request.agents);
     const managementMode = hasInternalAgents ? 'internal' : 'external';
 
     console.log(`[Orchestrator] Conversation ${conversationId} created in '${managementMode}' mode with ${request.agents.length} agents`);
@@ -142,11 +146,9 @@ export class ConversationOrchestrator {
     }
 
     // If specific agent IDs provided, start only those
-    // Otherwise, check if we have internal agents to start
+    // Otherwise, check if we have server-managed agents to start
     if (!agentIdsToStart) {
-      const hasInternalAgents = conversation.agents.some(a => 
-        ['scenario_driven', 'sequential_script', 'static_replay'].includes(a.strategyType)
-      );
+      const hasInternalAgents = hasServerManagedAgents(conversation.agents);
       
       if (!hasInternalAgents) {
         throw new Error(`Cannot explicitly start an externally managed conversation. External conversations are activated by the first turn from a connected agent.`);
@@ -164,10 +166,10 @@ export class ConversationOrchestrator {
     // Get conversation state with agent configs (guaranteed to exist after createConversation)
     const conversationState = this.activeConversations.get(conversationId)!
 
-    // Execute the agent provisioning logic
+    // Execute the agent provisioning logic - only provision server-managed agents
     const agentsToProvision = agentIdsToStart 
       ? Array.from(conversationState.agentConfigs.entries()).filter(([id]) => agentIdsToStart.includes(id))
-      : Array.from(conversationState.agentConfigs.entries());
+      : Array.from(conversationState.agentConfigs.entries()).filter(([_, config]) => isServerManaged(config));
     
     console.log(`[Orchestrator] Starting conversation ${conversationId}, provisioning ${agentsToProvision.length} agents`);
     
@@ -303,9 +305,7 @@ export class ConversationOrchestrator {
     const conversation = this.db.getConversation(request.conversationId, false, false);
     if (conversation?.status === 'created') {
       // Check if all agents are external types
-      const allExternal = conversation.agents.every(a => 
-        !['scenario_driven', 'sequential_script', 'static_replay'].includes(a.strategyType)
-      );
+      const allExternal = conversation.agents.every(a => !isServerManaged(a));
       
       if (allExternal) {
         console.log(`[Orchestrator] External conversation ${request.conversationId} being activated by first turn from agent ${request.agentId}`);
@@ -851,6 +851,177 @@ export class ConversationOrchestrator {
 
   getDbInstance(): ConversationDatabase {
     return this.db;
+  }
+
+  /**
+   * Get an agent instance from an active conversation
+   * @param conversationId - The conversation ID
+   * @param agentId - The agent ID
+   * @returns The agent instance if found, undefined otherwise
+   */
+  getAgentInstance(conversationId: string, agentId: string): AgentInterface | undefined {
+    const conversationState = this.activeConversations.get(conversationId);
+    if (!conversationState || !conversationState.agents) {
+      return undefined;
+    }
+    return conversationState.agents.get(agentId);
+  }
+
+  /**
+   * Ensure an agent instance exists in an active conversation
+   * Will rehydrate the conversation if needed
+   * @param conversationId - The conversation ID
+   * @param agentId - The agent ID
+   * @returns The agent instance
+   * @throws Error if agent is not server-managed or config is missing
+   */
+  async ensureAgentInstance(conversationId: string, agentId: string): Promise<AgentInterface> {
+    // Try to get existing agent
+    let agent = this.getAgentInstance(conversationId, agentId);
+    if (agent) {
+      return agent;
+    }
+
+    // If conversation not loaded, rehydrate it
+    const conversationState = this.activeConversations.get(conversationId);
+    if (!conversationState) {
+      await this.rehydrateConversation(conversationId);
+      // Try again after rehydration
+      agent = this.getAgentInstance(conversationId, agentId);
+      if (agent) {
+        return agent;
+      }
+    }
+
+    // If agent still not found, throw error
+    const conversation = this.db.getConversation(conversationId, false, false);
+    if (!conversation) {
+      throw new Error(`Conversation ${conversationId} not found`);
+    }
+
+    const agentConfig = conversation.agents.find(a => a.id === agentId);
+    if (!agentConfig) {
+      throw new Error(`Agent ${agentId} not found in conversation ${conversationId}`);
+    }
+
+    if (!isServerManaged(agentConfig)) {
+      throw new Error(`Agent ${agentId} is not server-managed and cannot be instantiated by orchestrator`);
+    }
+
+    throw new Error(`Failed to instantiate agent ${agentId} in conversation ${conversationId}`);
+  }
+
+  /**
+   * Rehydrate a conversation from the database
+   * Rebuilds in-memory state and instantiates server-managed agents
+   * @param conversationId - The conversation ID to rehydrate
+   */
+  async rehydrateConversation(conversationId: string): Promise<void> {
+    console.log(`[Orchestrator] Rehydrating conversation ${conversationId}`);
+    
+    // Load full conversation snapshot from database
+    const conversation = this.db.getConversation(conversationId, true, true, true);
+    if (!conversation) {
+      throw new Error(`Conversation ${conversationId} not found`);
+    }
+
+    // Get tokens for this conversation
+    const agentTokens = this.db.getTokensForConversation(conversationId);
+
+    // Build in-memory state
+    const conversationState: OrchestratorConversationState = {
+      conversation,
+      agentConfigs: new Map(conversation.agents.map(a => [a.id, a])),
+      agentTokens,
+      agents: new Map()
+    };
+
+    this.activeConversations.set(conversationId, conversationState);
+
+    // Instantiate and initialize server-managed agents
+    for (const agentConfig of conversation.agents) {
+      if (!isServerManaged(agentConfig)) {
+        console.log(`[Orchestrator] Skipping external agent ${agentConfig.id} during rehydration`);
+        continue;
+      }
+
+      try {
+        console.log(`[Orchestrator] Rehydrating server-managed agent ${agentConfig.id}`);
+        
+        // Load scenario if needed
+        let scenarioForAgent: ScenarioConfiguration | undefined = undefined;
+        if (agentConfig.strategyType === 'scenario_driven') {
+          const scenarioConfig = agentConfig as ScenarioDrivenAgentConfig;
+          scenarioForAgent = this.db.findScenarioByIdAndVersion(scenarioConfig.scenarioId, scenarioConfig.scenarioVersionId);
+          if (!scenarioForAgent) {
+            console.error(`[Orchestrator] Failed to load scenario for agent ${agentConfig.id} during rehydration`);
+            continue;
+          }
+        }
+
+        // Create agent
+        const client = createClient('in-process', this);
+        const agent = createAgent(
+          agentConfig,
+          client,
+          {
+            db: this.db,
+            llmProvider: this.llmProvider,
+            toolSynthesisService: this.toolSynthesisService,
+            scenario: scenarioForAgent
+          }
+        );
+
+        // Initialize agent
+        const token = agentTokens[agentConfig.id];
+        if (!token) {
+          console.error(`[Orchestrator] No token found for agent ${agentConfig.id} during rehydration`);
+          continue;
+        }
+
+        await this.initializeAgentAsync(agent, conversationId, token);
+        conversationState.agents!.set(agentConfig.id, agent);
+        
+        console.log(`[Orchestrator] Agent ${agentConfig.id} rehydrated successfully`);
+      } catch (error) {
+        console.error(`[Orchestrator] Failed to rehydrate agent ${agentConfig.id}:`, error);
+      }
+    }
+
+    // Emit rehydrated event with full conversation snapshot
+    this.emitEvent(conversationId, {
+      type: 'rehydrated',
+      conversationId,
+      timestamp: new Date(),
+      data: { conversation }
+    });
+
+    console.log(`[Orchestrator] Conversation ${conversationId} rehydration complete`);
+  }
+
+  /**
+   * Resurrect all active conversations on startup
+   * Called automatically in constructor
+   */
+  async resurrectActiveConversations(): Promise<void> {
+    console.log(`[Orchestrator] Resurrecting active conversations...`);
+    
+    try {
+      const activeConversations = this.db.getActiveConversations();
+      console.log(`[Orchestrator] Found ${activeConversations.length} active conversations to resurrect`);
+      
+      for (const conversation of activeConversations) {
+        try {
+          await this.rehydrateConversation(conversation.id);
+        } catch (error) {
+          console.error(`[Orchestrator] Failed to resurrect conversation ${conversation.id}:`, error);
+        }
+      }
+      
+      console.log(`[Orchestrator] Resurrection complete`);
+    } catch (error) {
+      console.error(`[Orchestrator] Failed to resurrect conversations:`, error);
+    }
   }
 
   close(): void {

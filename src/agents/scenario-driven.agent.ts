@@ -169,7 +169,10 @@ export class ScenarioDrivenAgent extends BaseAgent {
     this.processingTurn = true;
 
     try {
-      await this.startTurn();
+      // Guard against double turn start (e.g. after rehydration)
+      if (!this.getCurrentTurnId()) {
+        await this.startTurn();
+      }
       
       let MAX_STEPS = 10;
       let stepCount = 0;

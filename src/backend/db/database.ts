@@ -994,6 +994,47 @@ export class ConversationDatabase {
     };
   }
 
+  /**
+   * Get all active conversations (status = 'active')
+   * Used for resurrection on orchestrator startup
+   * @returns Array of full conversation objects with turns, traces, and attachments
+   */
+  getActiveConversations(): Conversation[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM conversations 
+      WHERE status = 'active'
+      ORDER BY created_at ASC
+    `);
+    
+    const rows = stmt.all() as ConversationRow[];
+    
+    // Return full conversation objects with all data for rehydration
+    return rows.map(row => this.conversationFromRow(row, true, true, true));
+  }
+
+  /**
+   * Get all tokens for a specific conversation
+   * Used during rehydration to authenticate agents
+   * @param conversationId - The conversation ID
+   * @returns Map of agentId to token
+   */
+  getTokensForConversation(conversationId: string): Record<string, string> {
+    const stmt = this.db.prepare(`
+      SELECT agent_id, token 
+      FROM agent_tokens 
+      WHERE conversation_id = ?
+    `);
+    
+    const rows = stmt.all(conversationId) as Array<{ agent_id: string; token: string }>;
+    
+    const tokens: Record<string, string> = {};
+    for (const row of rows) {
+      tokens[row.agent_id] = row.token;
+    }
+    
+    return tokens;
+  }
+
   close(): void {
     this.db.close();
   }
