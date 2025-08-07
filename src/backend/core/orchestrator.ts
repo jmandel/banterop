@@ -361,6 +361,8 @@ export class ConversationOrchestrator {
       agentId: request.agentId,
       timestamp: new Date()
     } as TraceEntry;
+    
+    console.log(`[Orchestrator] Adding trace entry - type: ${entry.type}, agentId: ${entry.agentId}, turnId: ${request.turnId}`);
 
     // Add to database with turn ID
     this.db.addTraceEntry(request.conversationId, entry, request.turnId);
@@ -774,8 +776,14 @@ export class ConversationOrchestrator {
     // Notify global listeners
     this.globalEventListeners.forEach(callback => callback(event));
     
-    // Log for debugging
-    console.log(`Event emitted for ${conversationId}:`, event.type, event.data?.agentId);
+    // Log for debugging - show correct agentId for different event types
+    let agentId = event.data?.agentId;
+    if (event.type === 'trace_added' && event.data?.trace) {
+      agentId = event.data.trace.agentId;
+    } else if (event.type === 'turn_started' || event.type === 'turn_completed') {
+      agentId = event.data?.turn?.agentId;
+    }
+    console.log(`Event emitted for ${conversationId}:`, event.type, agentId);
   }
 
   private notifyAgent(conversationId: string, event: ConversationEvent): void {
@@ -838,6 +846,10 @@ export class ConversationOrchestrator {
 
   getDbInstance(): ConversationDatabase {
     return this.db;
+  }
+
+  getConfig(): OrchestratorConfig {
+    return this.config;
   }
 
   /**

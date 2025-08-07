@@ -45,13 +45,7 @@ export function createBridgeRoutes(orchestrator: ConversationOrchestrator) {
       const responsePromise = new Promise<Response>((resolve, reject) => {
         res.once('close', () => {
           console.log('[Bridge] Response close event received');
-          if (c.res) {
-            console.log('[Bridge] Response found on context');
-            resolve(c.res);
-          } else {
-            console.log('[Bridge] Response not set on context');
-            reject(new Error('Response not set after close'));
-          }
+          resolve(c.res);
         });
       });
       

@@ -1,11 +1,13 @@
 export interface OrchestratorConfig {
   resurrectionLookbackHours: number;
+  bridgeReplyTimeoutMs: number;
   // Add other config options here as needed
 }
 
 export class OrchestratorConfigLoader {
   private static readonly DEFAULTS: OrchestratorConfig = {
-    resurrectionLookbackHours: 24
+    resurrectionLookbackHours: 24,
+    bridgeReplyTimeoutMs: 5000 // 5 seconds default (for testing)
   };
 
   /**
@@ -30,6 +32,19 @@ export class OrchestratorConfigLoader {
       console.log(`[Config] Using default resurrection lookback: ${config.resurrectionLookbackHours} hours`);
     }
 
+    // Load bridge reply timeout from environment
+    if (process.env.BRIDGE_REPLY_TIMEOUT_MS) {
+      const timeout = parseInt(process.env.BRIDGE_REPLY_TIMEOUT_MS, 10);
+      if (!isNaN(timeout) && timeout > 0) {
+        config.bridgeReplyTimeoutMs = timeout;
+        console.log(`[Config] Using BRIDGE_REPLY_TIMEOUT_MS from env: ${timeout}ms`);
+      } else {
+        console.warn(`[Config] Invalid BRIDGE_REPLY_TIMEOUT_MS env value: ${process.env.BRIDGE_REPLY_TIMEOUT_MS}, using default: ${config.bridgeReplyTimeoutMs}`);
+      }
+    } else {
+      console.log(`[Config] Using default bridge reply timeout: ${config.bridgeReplyTimeoutMs}ms`);
+    }
+
     return config;
   }
 
@@ -45,6 +60,13 @@ export class OrchestratorConfigLoader {
       const hours = parseInt(process.env.RESURRECTION_LOOKBACK_HOURS, 10);
       if (!isNaN(hours) && hours > 0) {
         config.resurrectionLookbackHours = hours;
+      }
+    }
+    
+    if (process.env.BRIDGE_REPLY_TIMEOUT_MS) {
+      const timeout = parseInt(process.env.BRIDGE_REPLY_TIMEOUT_MS, 10);
+      if (!isNaN(timeout) && timeout > 0) {
+        config.bridgeReplyTimeoutMs = timeout;
       }
     }
     

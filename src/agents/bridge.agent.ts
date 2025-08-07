@@ -3,8 +3,9 @@
 // It just provides a method to bridge external turns into the conversation
 
 import { BaseAgent } from './base.agent.js';
-import { ConversationTurn, AttachmentPayload, BridgeToExternalMCPServerConfig, BridgeToExternalMCPClientConfig } from '$lib/types.js';
+import { ConversationTurn, AttachmentPayload, BridgeToExternalMCPServerConfig, BridgeToExternalMCPClientConfig, ScenarioConfiguration, ConversationEvent } from '$lib/types.js';
 import type { OrchestratorClient } from '$client/index.js';
+import type { ConversationDatabase } from '../backend/db/database.js';
 
 export type BridgeAgentConfig = BridgeToExternalMCPServerConfig | BridgeToExternalMCPClientConfig;
 
@@ -17,6 +18,41 @@ export interface BridgeReply {
   }>;
 }
 
+export interface BridgeContext {
+  scenario: {
+    id: string;
+    title: string;
+    description: string;
+    tags?: string[];
+  };
+  bridgedAgent: {
+    id: string;
+    principal: any;
+    situation: string;
+    goals: string[];
+    systemPrompt?: string;
+  };
+  counterparties: Array<{
+    id: string;
+    principal: any;
+    situation?: string;
+    systemPrompt?: string;
+    tools: Array<{
+      toolName: string;
+      description: string;
+    }>;
+  }>;
+}
+
+export interface OtherAgentStats {
+  otherAgentActions: number;
+  currentTurnStartedAt?: string;
+  lastActionAt?: string;
+  lastActionType?: string;
+  agentName?: string;
+  agentId?: string;
+}
+
 export class BridgeAgent extends BaseAgent {
   private pendingReplyPromise?: Promise<BridgeReply>;
   private pendingReplyResolvers?: {
@@ -24,9 +60,109 @@ export class BridgeAgent extends BaseAgent {
     reject: (error: Error) => void;
     timeoutId?: NodeJS.Timeout;
   };
+  private defaultTimeoutMs = 5000; // 5 seconds default
+  private otherAgentStats: OtherAgentStats = {
+    otherAgentActions: 0
+  };
   
   constructor(config: BridgeAgentConfig, client: OrchestratorClient) {
     super(config, client);
+  }
+
+  /**
+   * Get current stats about other agents' actions
+   */
+  getOtherAgentStats(): OtherAgentStats {
+    return { ...this.otherAgentStats };
+  }
+
+  /**
+   * Override to track stats about other agents' actions
+   */
+  async onConversationEvent(event: ConversationEvent): Promise<void> {
+    // Track stats before delegating to parent
+    if (event.type === 'turn_started') {
+      const turn = (event as any).data.turn;
+      if (turn && turn.agentId !== this.agentId) {
+        this.otherAgentStats.currentTurnStartedAt = new Date().toISOString();
+        this.otherAgentStats.agentId = turn.agentId;
+        console.log(`[BridgeAgent ${this.agentId}] Other agent (${turn.agentId}) started turn`);
+      }
+    } else if (event.type === 'trace_added') {
+      const trace = (event as any).data.trace;
+      if (trace && trace.agentId && trace.agentId !== this.agentId) {
+        this.otherAgentStats.otherAgentActions++;
+        this.otherAgentStats.lastActionAt = new Date().toISOString();
+        this.otherAgentStats.lastActionType = trace.type;
+        this.otherAgentStats.agentId = trace.agentId;
+        console.log(`[BridgeAgent ${this.agentId}] Other agent (${trace.agentId}) performed action: ${trace.type}, total actions: ${this.otherAgentStats.otherAgentActions}`);
+      }
+    } else if (event.type === 'conversation_ended') {
+      // Reset stats
+      this.otherAgentStats = {
+        otherAgentActions: 0
+      };
+    }
+    
+    // Delegate to parent for normal processing
+    await super.onConversationEvent(event);
+  }
+
+  /**
+   * Get bridge context from a scenario configuration without instantiating agents
+   * @param db - Database instance to query scenarios
+   * @param scenarioId - The scenario ID
+   * @param bridgedAgentId - The ID of the bridged agent
+   * @returns Bridge context with scenario and agent metadata
+   */
+  static async getBridgeContextFromScenario(
+    db: ConversationDatabase,
+    scenarioId: string,
+    bridgedAgentId: string
+  ): Promise<BridgeContext> {
+    // Find the scenario - returns the active version's configuration
+    const scenarioItem = db.findScenarioById(scenarioId);
+    if (!scenarioItem) {
+      throw new Error(`Scenario ${scenarioId} not found`);
+    }
+    
+    // The config is the ScenarioConfiguration
+    const scenario = scenarioItem.config;
+
+    // Find the bridged agent in the scenario
+    const bridgedAgentConfig = scenario.agents.find(a => a.agentId === bridgedAgentId);
+    if (!bridgedAgentConfig) {
+      throw new Error(`Bridged agent ${bridgedAgentId} not found in scenario ${scenarioId}`);
+    }
+
+    // Extract counterparty agents
+    const counterpartyConfigs = scenario.agents.filter(a => a.agentId !== bridgedAgentId);
+
+    return {
+      scenario: {
+        id: scenario.metadata.id,
+        title: scenario.metadata?.title || 'Untitled Scenario',
+        description: scenario.metadata?.description || '',
+        tags: scenario.metadata?.tags
+      },
+      bridgedAgent: {
+        id: bridgedAgentConfig.agentId,
+        principal: bridgedAgentConfig.principal,
+        situation: bridgedAgentConfig.situation || '',
+        goals: bridgedAgentConfig.goals || [],
+        systemPrompt: bridgedAgentConfig.systemPrompt
+      },
+      counterparties: counterpartyConfigs.map(config => ({
+        id: config.agentId,
+        principal: config.principal,
+        situation: config.situation,
+        systemPrompt: config.systemPrompt,
+        tools: (config.tools || []).map(tool => ({
+          toolName: tool.toolName,
+          description: tool.description || ''
+        }))
+      }))
+    };
   }
 
   /**
@@ -39,8 +175,7 @@ export class BridgeAgent extends BaseAgent {
   async bridgeExternalClientTurn(
     message: string, 
     attachments?: AttachmentPayload[],
-    // timeoutMs: number = 180000 // 3 minutes default
-    timeoutMs: number = 5 * 1000 // .5min for testing
+    timeoutMs?: number
   ): Promise<BridgeReply> {
     // Generate unique request ID for correlation
     const requestId = `bridge_${Date.now()}_${Math.random().toString(36).substring(7)}`;
@@ -58,8 +193,8 @@ export class BridgeAgent extends BaseAgent {
     // Complete the turn with the external message
     await this.completeTurn(message, false, attachments);
     
-    // Use test timeout if available
-    const effectiveTimeout = (this as any).__testTimeout || timeoutMs;
+    // Use test timeout if available, then passed timeout, then default
+    const effectiveTimeout = (this as any).__testTimeout ?? timeoutMs ?? this.defaultTimeoutMs;
     
     console.log(`[${new Date().toISOString()}] [BridgeAgent ${this.agentId}] Setting timeout for ${effectiveTimeout}ms - requestId=${requestId}`);
     
@@ -104,7 +239,7 @@ export class BridgeAgent extends BaseAgent {
    * Wait for a pending reply if there is one
    * Used when a previous bridgeExternalClientTurn timed out or to check for already-available replies
    */
-  async waitForPendingReply(timeoutMs: number = 5 * 1000): Promise<BridgeReply> { // 3 minutes default
+  async waitForPendingReply(timeoutMs?: number): Promise<BridgeReply> {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] [BridgeAgent ${this.agentId}] waitForPendingReply called - conversationId=${this.conversationId}`);
     
@@ -153,12 +288,13 @@ export class BridgeAgent extends BaseAgent {
     }
     
     // Create a new promise for all waiters to share
+    const effectiveTimeout = (this as any).__testTimeout ?? timeoutMs ?? this.defaultTimeoutMs;
     this.pendingReplyPromise = new Promise<BridgeReply>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         this.pendingReplyResolvers = undefined;
         this.pendingReplyPromise = undefined;
         reject(new Error('Timeout waiting for reply'));
-      }, timeoutMs);
+      }, effectiveTimeout);
       
       this.pendingReplyResolvers = {
         resolve,
