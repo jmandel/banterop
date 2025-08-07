@@ -1,0 +1,126 @@
+import { Hono } from 'hono';
+import { createBunWebSocket } from 'hono/bun';
+import type { WSContext } from 'hono/ws';
+import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
+import type { MessagePayload, TracePayload, Finality } from '$src/types/event.types';
+import type { JsonRpcRequest, JsonRpcResponse } from '$src/types/api.types';
+
+const { upgradeWebSocket, websocket } = createBunWebSocket();
+
+export function createWebSocketServer(orchestrator: OrchestratorService) {
+  const app = new Hono();
+
+  // Store subscription IDs per connection
+  const connectionSubs = new WeakMap<WSContext, Set<string>>();
+
+  app.get(
+    '/api/ws',
+    upgradeWebSocket(() => ({
+      onOpen(_evt, ws) {
+        connectionSubs.set(ws, new Set());
+        ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'welcome', params: { ok: true } }));
+      },
+      onMessage(evt, ws) {
+        try {
+          const req = JSON.parse(evt.data.toString()) as JsonRpcRequest;
+          handleRpc(orchestrator, ws, req, connectionSubs.get(ws) || new Set());
+        } catch (err) {
+          ws.send(JSON.stringify(errResp(null, -32700, 'Parse error')));
+        }
+      },
+      onClose(_evt, ws) {
+        // Cleanup subscriptions
+        const subs = connectionSubs.get(ws);
+        if (subs) {
+          for (const subId of subs) {
+            orchestrator.unsubscribe(subId);
+          }
+          connectionSubs.delete(ws);
+        }
+      },
+    }))
+  );
+
+  return app;
+}
+
+function ok(id: string | number | null | undefined, result: unknown): JsonRpcResponse {
+  return { id: id ?? null, result, jsonrpc: '2.0' };
+}
+
+function errResp(id: string | number | null | undefined, code: number, message: string, data?: unknown): JsonRpcResponse {
+  return { id: id ?? null, error: { code, message, data }, jsonrpc: '2.0' };
+}
+
+function handleRpc(
+  orchestrator: OrchestratorService,
+  ws: { send: (data: string) => void },
+  req: JsonRpcRequest,
+  activeSubs: Set<string>
+) {
+  const { id = null, method, params = {} } = req;
+
+  if (method === 'subscribe') {
+    const { conversationId } = params as { conversationId: number };
+    const subId = orchestrator.subscribe(conversationId, (e) => {
+      ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: e }));
+    });
+    activeSubs.add(subId);
+    ws.send(JSON.stringify(ok(id, { subId })));
+    return;
+  }
+
+  if (method === 'unsubscribe') {
+    const { subId } = params as { subId: string };
+    orchestrator.unsubscribe(subId);
+    activeSubs.delete(subId);
+    ws.send(JSON.stringify(ok(id, { ok: true })));
+    return;
+  }
+
+  if (method === 'getConversation') {
+    const { conversationId } = params as { conversationId: number };
+    const snap = orchestrator.getConversationSnapshot(conversationId);
+    ws.send(JSON.stringify(ok(id, snap)));
+    return;
+  }
+
+  if (method === 'sendTrace') {
+    const { conversationId, agentId, tracePayload, currentTurn } = params as {
+      conversationId: number;
+      agentId: string;
+      tracePayload: TracePayload;
+      currentTurn?: number;
+    };
+    try {
+      orchestrator.sendTrace(conversationId, agentId, tracePayload, currentTurn);
+      ws.send(JSON.stringify(ok(id, { ok: true })));
+    } catch (e) {
+      const err = e as Error;
+      ws.send(JSON.stringify(errResp(id, -32000, err.message)));
+    }
+    return;
+  }
+
+  if (method === 'sendMessage') {
+    const { conversationId, agentId, messagePayload, finality, currentTurn } = params as {
+      conversationId: number;
+      agentId: string;
+      messagePayload: MessagePayload;
+      finality: Finality;
+      currentTurn?: number;
+    };
+    try {
+      orchestrator.sendMessage(conversationId, agentId, messagePayload, finality, currentTurn);
+      ws.send(JSON.stringify(ok(id, { ok: true })));
+    } catch (e) {
+      const err = e as Error;
+      ws.send(JSON.stringify(errResp(id, -32000, err.message)));
+    }
+    return;
+  }
+
+  ws.send(JSON.stringify(errResp(id, -32601, 'Method not found')));
+}
+
+export { websocket };
