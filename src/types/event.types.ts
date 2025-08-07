@@ -39,12 +39,12 @@ export type TracePayload =
   | { type: 'user_response'; queryId: string; response: string };
 
 export interface SystemPayload {
-  kind: 'idle_timeout' | 'note' | 'next_candidate_agents' | 'policy_hint';
+  kind: 'idle_timeout' | 'note' | 'turn_claimed' | 'claim_expired' | 'meta_created' | 'meta_updated';
   data?: unknown;
+  metadata?: unknown;  // For meta_created/meta_updated events
 }
 
 export interface AppendEventInput<T = unknown> {
-  tenantId?: string;
   conversation: number;
   turn?: number; // optional for message starting a new turn
   type: EventType;

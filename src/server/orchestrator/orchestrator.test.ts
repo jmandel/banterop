@@ -12,7 +12,7 @@ describe('OrchestratorService', () => {
   beforeEach(() => {
     storage = new Storage(':memory:');
     bus = new SubscriptionBus();
-    orch = new OrchestratorService(storage, bus, undefined, { emitNextCandidates: true });
+    orch = new OrchestratorService(storage, bus, undefined, {});
     // seed conversation
     orch.createConversation({});
   });
@@ -24,7 +24,7 @@ describe('OrchestratorService', () => {
 
   it('appends events, fans out, and emits next-candidate system event on turn finality', () => {
     const recv: UnifiedEvent[] = [];
-    orch.subscribe(1, (e) => recv.push(e));
+    orch.subscribe(1, (e: UnifiedEvent) => recv.push(e));
 
     // Start a user turn and finalize
     orch.appendEvent({
@@ -60,12 +60,15 @@ describe('OrchestratorService', () => {
     expect(() => orch.sendTrace(1, 'user', { type: 'thought', content: 'too late' })).toThrow(/No open turn/);
   });
 
-  it('spawnInternalWorker is invoked by policy (smoke test)', async () => {
-    const recv: UnifiedEvent[] = [];
-    orch.subscribe(1, (e) => recv.push(e));
+  it('emits guidance events when configured', () => {
+    const orch2 = new OrchestratorService(storage, bus, undefined, {});
+    orch2.createConversation({});
+    
+    const recv: Array<UnifiedEvent | any> = [];
+    orch2.subscribe(1, (e: any) => recv.push(e), true); // includeGuidance = true
 
-    // User finalizes a turn -> policy schedules internal worker -> worker appends trace + final message
-    orch.appendEvent({
+    // User finalizes a turn -> should emit guidance
+    orch2.appendEvent({
       conversation: 1,
       type: 'message',
       payload: { text: 'Please answer' } as MessagePayload,
@@ -73,11 +76,8 @@ describe('OrchestratorService', () => {
       agentId: 'user',
     });
 
-    // Wait for worker to complete
-    await orch.waitForWorkers(1);
-    
-    // Check that worker added messages
-    const hasWorkerMsg = recv.some((e) => e.type === 'message' && e.agentId !== 'user');
-    expect(hasWorkerMsg).toBe(true);
+    // Check that guidance was emitted
+    const hasGuidance = recv.some((e) => e.type === 'guidance');
+    expect(hasGuidance).toBe(true);
   });
 });

@@ -2,8 +2,9 @@ import { Hono } from 'hono';
 import { createBunWebSocket } from 'hono/bun';
 import type { WSContext } from 'hono/ws';
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
-import type { MessagePayload, TracePayload, Finality } from '$src/types/event.types';
+import type { MessagePayload, TracePayload, Finality, UnifiedEvent } from '$src/types/event.types';
 import type { JsonRpcRequest, JsonRpcResponse } from '$src/types/api.types';
+import type { GuidanceEvent } from '$src/types/orchestrator.types';
 
 const { upgradeWebSocket, websocket } = createBunWebSocket();
 
@@ -20,10 +21,10 @@ export function createWebSocketServer(orchestrator: OrchestratorService) {
         connectionSubs.set(ws, new Set());
         ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'welcome', params: { ok: true } }));
       },
-      onMessage(evt, ws) {
+      async onMessage(evt, ws) {
         try {
           const req = JSON.parse(evt.data.toString()) as JsonRpcRequest;
-          handleRpc(orchestrator, ws, req, connectionSubs.get(ws) || new Set());
+          await handleRpc(orchestrator, ws, req, connectionSubs.get(ws) || new Set());
         } catch (err) {
           ws.send(JSON.stringify(errResp(null, -32700, 'Parse error')));
         }
@@ -52,7 +53,7 @@ function errResp(id: string | number | null | undefined, code: number, message: 
   return { id: id ?? null, error: { code, message, data }, jsonrpc: '2.0' };
 }
 
-function handleRpc(
+async function handleRpc(
   orchestrator: OrchestratorService,
   ws: { send: (data: string) => void },
   req: JsonRpcRequest,
@@ -61,10 +62,16 @@ function handleRpc(
   const { id = null, method, params = {} } = req;
 
   if (method === 'subscribe') {
-    const { conversationId } = params as { conversationId: number };
-    const subId = orchestrator.subscribe(conversationId, (e) => {
-      ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: e }));
-    });
+    const { conversationId, includeGuidance = false } = params as { conversationId: number; includeGuidance?: boolean };
+    const subId = orchestrator.subscribe(
+      conversationId, 
+      (e: UnifiedEvent | GuidanceEvent) => {
+        // For guidance events, send with method 'guidance'
+        const method = 'type' in e && e.type === 'guidance' ? 'guidance' : 'event';
+        ws.send(JSON.stringify({ jsonrpc: '2.0', method, params: e }));
+      },
+      includeGuidance
+    );
     activeSubs.add(subId);
     ws.send(JSON.stringify(ok(id, { subId })));
     return;
@@ -113,6 +120,22 @@ function handleRpc(
     try {
       orchestrator.sendMessage(conversationId, agentId, messagePayload, finality, currentTurn);
       ws.send(JSON.stringify(ok(id, { ok: true })));
+    } catch (e) {
+      const err = e as Error;
+      ws.send(JSON.stringify(errResp(id, -32000, err.message)));
+    }
+    return;
+  }
+
+  if (method === 'claimTurn') {
+    const { conversationId, agentId, guidanceSeq } = params as {
+      conversationId: number;
+      agentId: string;
+      guidanceSeq: number;
+    };
+    try {
+      const result = await orchestrator.claimTurn(conversationId, agentId, guidanceSeq);
+      ws.send(JSON.stringify(ok(id, result)));
     } catch (e) {
       const err = e as Error;
       ws.send(JSON.stringify(errResp(id, -32000, err.message)));

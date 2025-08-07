@@ -1,6 +1,6 @@
 import { Storage } from './storage';
 import { SubscriptionBus } from './subscriptions';
-import type { ConversationSnapshot, OrchestratorConfig, SchedulePolicy } from '$src/types/orchestrator.types';
+import type { ConversationSnapshot, OrchestratorConfig, SchedulePolicy, GuidanceEvent, EventListener } from '$src/types/orchestrator.types';
 import type {
   AppendEventInput,
   AppendEventResult,
@@ -11,7 +11,7 @@ import type {
   SystemPayload,
   AttachmentRow,
 } from '$src/types/event.types';
-import type { ConversationRow, CreateConversationParams, ListConversationsParams } from '$src/db/conversation.store';
+import type { ConversationRow, ConversationWithMeta, CreateConversationParams, ListConversationsParams } from '$src/db/conversation.store';
 import { SimpleAlternationPolicy } from './policy';
 
 export class OrchestratorService {
@@ -21,25 +21,28 @@ export class OrchestratorService {
   private cfg: OrchestratorConfig;
   private isShuttingDown = false;
 
-  // In-memory guard for "in-flight" internal work per conversation to avoid duplicate workers.
-  private inflightInternal = new Map<number, Promise<void>>();
+  private watchdogInterval: Timer | undefined = undefined;
 
   constructor(storage: Storage, bus?: SubscriptionBus, policy?: SchedulePolicy, cfg?: OrchestratorConfig) {
     this.storage = storage;
     this.bus = bus ?? new SubscriptionBus();
     this.policy = policy ?? new SimpleAlternationPolicy();
-    this.cfg = cfg ?? { idleTurnMs: 120_000, emitNextCandidates: true };
+    this.cfg = cfg ?? { idleTurnMs: 120_000 };
+    
+    // Start watchdog for expired claims
+    this.startClaimWatchdog();
   }
 
   // Graceful shutdown
   async shutdown(): Promise<void> {
     this.isShuttingDown = true;
     
-    // Wait for all in-flight workers to complete
-    const workers = Array.from(this.inflightInternal.values());
-    if (workers.length > 0) {
-      await Promise.allSettled(workers);
+    // Stop watchdog
+    if (this.watchdogInterval) {
+      clearInterval(this.watchdogInterval);
+      this.watchdogInterval = undefined;
     }
+    
     
     // Clear subscriptions
     this.bus = new SubscriptionBus();
@@ -97,16 +100,33 @@ export class OrchestratorService {
   getConversationSnapshot(conversation: number): ConversationSnapshot {
     const events = this.storage.events.getEvents(conversation);
     const status = this.storage.events.getConversationStatus(conversation);
-    return { conversation, status, events };
+    const convoWithMeta = this.storage.conversations.getWithMetadata(conversation);
+    const metadata = convoWithMeta?.metadata || { agents: [] };
+    return { conversation, status, metadata, events };
   }
 
   // Expose storage methods for conversations and attachments
   createConversation(params: CreateConversationParams): number {
-    return this.storage.conversations.create(params);
+    const conversationId = this.storage.conversations.create(params);
+    
+    // Emit meta_created system event
+    const convoWithMeta = this.storage.conversations.getWithMetadata(conversationId);
+    if (convoWithMeta) {
+      this.appendSystemEvent(conversationId, {
+        kind: 'meta_created',
+        metadata: convoWithMeta.metadata,
+      });
+    }
+    
+    return conversationId;
   }
 
   getConversation(id: number): ConversationRow | null {
     return this.storage.conversations.get(id);
+  }
+  
+  getConversationWithMetadata(id: number): ConversationWithMeta | null {
+    return this.storage.conversations.getWithMetadata(id);
   }
 
   listConversations(params: ListConversationsParams): ConversationRow[] {
@@ -121,35 +141,96 @@ export class OrchestratorService {
     return this.storage.attachments.listByConversation(conversationId);
   }
 
-  subscribe(conversation: number, listener: (e: UnifiedEvent) => void): string {
-    return this.bus.subscribe({ conversation }, listener);
+  subscribe(conversation: number, listener: ((e: UnifiedEvent | GuidanceEvent) => void) | ((e: UnifiedEvent) => void), includeGuidance = false): string {
+    return this.bus.subscribe({ conversation }, listener as EventListener, includeGuidance);
   }
 
   unsubscribe(subId: string) {
     this.bus.unsubscribe(subId);
   }
 
+  // Turn claim (Phase 2: actual implementation with SQLite)
+  async claimTurn(conversationId: number, agentId: string, guidanceSeq: number): Promise<{ ok: boolean; reason?: string }> {
+    // Check if conversation exists and is active
+    const conv = this.storage.conversations.get(conversationId);
+    if (!conv) {
+      return { ok: false, reason: 'conversation not found' };
+    }
+    if (conv.status === 'completed') {
+      return { ok: false, reason: 'conversation completed' };
+    }
+
+    // Calculate expiry using configured idle time
+    const expiresAt = new Date(Date.now() + (this.cfg.idleTurnMs ?? 120_000)).toISOString();
+    
+    // Try to claim
+    const claimed = this.storage.turnClaims.claim({
+      conversation: conversationId,
+      guidanceSeq,
+      agentId,
+      expiresAt,
+    });
+    
+    if (claimed) {
+      // Write system event to log the claim
+      try {
+        this.appendSystemEvent(conversationId, {
+          kind: 'turn_claimed',
+          data: { 
+            agentId, 
+            guidanceSeq, 
+            expiresAt 
+          },
+        });
+      } catch (err) {
+        // System events are advisory, continue even if append fails
+        console.error('Failed to append turn_claimed event:', err);
+      }
+      return { ok: true };
+    } else {
+      // Already claimed, check by whom
+      const existing = this.storage.turnClaims.getClaim(conversationId, guidanceSeq);
+      if (existing && existing.agentId === agentId) {
+        // Same agent reclaiming, allow it (idempotent)
+        return { ok: true };
+      }
+      return { ok: false, reason: 'already claimed' };
+    }
+  }
+
   // Internals
 
   private onEventAppended(e: UnifiedEvent) {
+    // Clean up claims when a turn is completed by the claiming agent
+    if (e.type === 'message' && e.finality === 'turn') {
+      this.cleanupClaims(e.conversation);
+    }
+    
     // Only react to message finality changes
     if (e.type === 'message' && (e.finality === 'turn' || e.finality === 'conversation')) {
-      // Optionally emit advisory next-candidate system event
-      if (this.cfg.emitNextCandidates) {
-        const decision = this.policy.decide({
-          snapshot: this.getConversationSnapshot(e.conversation),
-          lastEvent: e,
-        });
+      // Get policy decision
+      const decision = this.policy.decide({
+        snapshot: this.getConversationSnapshot(e.conversation),
+        lastEvent: e,
+      });
 
-        if (decision.kind === 'external') {
-          this.appendSystemEvent(e.conversation, {
-            kind: 'next_candidate_agents',
-            data: { candidates: decision.candidates, note: decision.note },
-          });
-        }
-
-        if (decision.kind === 'internal' && !this.isShuttingDown) {
-          this.spawnInternalWorker(e.conversation, decision.agentId);
+      // Emit guidance events based on policy decision
+      if (!this.isShuttingDown) {
+        if (decision.kind === 'internal' || decision.kind === 'external') {
+          const nextAgentId = decision.kind === 'internal' 
+            ? decision.agentId 
+            : decision.candidates[0]; // For external, use first candidate as hint
+          
+          if (nextAgentId) {
+            const guidanceEvent: GuidanceEvent = {
+              type: 'guidance',
+              conversation: e.conversation,
+              seq: e.seq + 0.1, // Fractional seq for ordering
+              nextAgentId,
+              deadlineMs: 30000,
+            };
+            this.bus.publishGuidance(guidanceEvent);
+          }
         }
       }
     }
@@ -226,37 +307,54 @@ export class OrchestratorService {
     return currentTurn;
   }
 
-  private spawnInternalWorker(conversation: number, agentId: string) {
-    if (this.inflightInternal.has(conversation) || this.isShuttingDown) return;
-    
-    const workerPromise = (async () => {
+
+  // Watchdog for expired turn claims
+  private startClaimWatchdog() {
+    // Run every 5 seconds
+    this.watchdogInterval = setInterval(() => {
+      if (this.isShuttingDown) return;
+      
       try {
-        // Check if shutting down before starting work
-        if (this.isShuttingDown) return;
+        // Get expired claims before deleting them
+        const expired = this.storage.turnClaims.getExpired();
         
-        // Lazy import to avoid cycles
-        const { WorkerRunner } = await import('./worker-runner');
-        const runner = new WorkerRunner(this);
-        await runner.runOneTurn(conversation, agentId);
-      } catch (err) {
-        if (!this.isShuttingDown) {
-          console.error('Internal worker failed', { conversation, agentId, err });
-          // Optionally append a system note
-          this.appendSystemEvent(conversation, { kind: 'note', data: { error: String(err) } });
+        // Delete expired claims
+        const deletedCount = this.storage.turnClaims.deleteExpired();
+        
+        if (deletedCount > 0) {
+          // Emit system events for expired claims
+          for (const claim of expired) {
+            try {
+              this.appendSystemEvent(claim.conversation, {
+                kind: 'claim_expired',
+                data: {
+                  agentId: claim.agentId,
+                  guidanceSeq: claim.guidanceSeq,
+                  expiredAt: claim.expiresAt,
+                },
+              });
+            } catch (err) {
+              // System events are advisory, continue on error
+              console.error('Failed to append claim_expired event:', err);
+            }
+          }
         }
-      } finally {
-        this.inflightInternal.delete(conversation);
+      } catch (err) {
+        console.error('Claim watchdog error:', err);
       }
-    })();
-    
-    this.inflightInternal.set(conversation, workerPromise);
+    }, 5000);
   }
   
-  // Test helper to wait for workers
-  async waitForWorkers(conversation: number): Promise<void> {
-    const workerPromise = this.inflightInternal.get(conversation);
-    if (workerPromise) {
-      await workerPromise;
+  // Clean up claims when a turn is successfully completed
+  private cleanupClaims(conversation: number) {
+    try {
+      const activeClaims = this.storage.turnClaims.getActiveClaimsForConversation(conversation);
+      for (const claim of activeClaims) {
+        this.storage.turnClaims.deleteClaim(conversation, claim.guidanceSeq);
+      }
+    } catch (err) {
+      // Non-critical cleanup, log and continue
+      console.error('Failed to cleanup claims:', err);
     }
   }
 }

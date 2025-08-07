@@ -9,7 +9,7 @@ import type {
 } from '$src/types/event.types';
 import { AttachmentStore, type AttachmentInput } from './attachment.store';
 import { ConversationStore } from './conversation.store';
-import { IdempotencyStore, type IdempotencyKey, type IdempotencyRecord } from './idempotency.store';
+import { IdempotencyStore } from './idempotency.store';
 
 export class EventStore {
   private attachments: AttachmentStore;
@@ -61,15 +61,11 @@ export class EventStore {
         undefined;
 
       if (clientReqId) {
-        const params: IdempotencyKey = {
+        const existingSeq = this.idempotency.find({
           conversation: input.conversation,
           agentId: input.agentId,
           clientRequestId: clientReqId,
-        };
-        if (input.tenantId !== undefined) {
-          params.tenantId = input.tenantId;
-        }
-        const existingSeq = this.idempotency.find(params);
+        });
         if (existingSeq) {
           // Return the existing seq by looking it up
           const existing = this.db
@@ -145,16 +141,12 @@ export class EventStore {
 
       // Idempotency record
       if (clientReqId) {
-        const params: IdempotencyRecord = {
+        this.idempotency.record({
           conversation: input.conversation,
           agentId: input.agentId,
           clientRequestId: clientReqId,
           seq: row.seq,
-        };
-        if (input.tenantId !== undefined) {
-          params.tenantId = input.tenantId;
-        }
-        this.idempotency.record(params);
+        });
       }
 
       this.db.exec('COMMIT;');

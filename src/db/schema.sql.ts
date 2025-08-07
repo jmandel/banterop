@@ -4,16 +4,20 @@ PRAGMA foreign_keys = ON;
 -- Conversations registry (metadata + denormalized status for fast listing)
 CREATE TABLE IF NOT EXISTS conversations (
   conversation    INTEGER PRIMARY KEY,         -- autoincrement id for conversation
-  tenant_id       TEXT,
   title           TEXT,
   description     TEXT,
+  scenario_id     TEXT,
+  meta_json       TEXT NOT NULL DEFAULT '{}',  -- JSON string holding: {agents,config,custom}
   status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed')),
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_conversations_tenant_status
-  ON conversations (tenant_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conversations_status
+  ON conversations (status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_conversations_scenario
+  ON conversations (scenario_id);
 
 -- Unified event log (append-only)
 CREATE TABLE IF NOT EXISTS conversation_events (
@@ -61,14 +65,27 @@ CREATE INDEX IF NOT EXISTS idx_attachments_doc
 
 -- Idempotency keys for safe retries
 CREATE TABLE IF NOT EXISTS idempotency_keys (
-  tenant_id         TEXT,
   conversation      INTEGER NOT NULL,
   agent_id          TEXT NOT NULL,
   client_request_id TEXT NOT NULL,
   seq               INTEGER NOT NULL,            -- seq of the event written
   created_at        TEXT NOT NULL DEFAULT (datetime('now')),
-  PRIMARY KEY (tenant_id, conversation, agent_id, client_request_id)
+  PRIMARY KEY (conversation, agent_id, client_request_id)
 );
+
+-- Turn claims for coordination (Phase 2)
+CREATE TABLE IF NOT EXISTS turn_claims (
+  conversation      INTEGER NOT NULL,
+  guidance_seq      REAL NOT NULL,      -- Fractional seq from guidance event
+  agent_id          TEXT NOT NULL,
+  claimed_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at        TEXT NOT NULL,
+  PRIMARY KEY (conversation, guidance_seq),
+  FOREIGN KEY(conversation) REFERENCES conversations(conversation)
+);
+
+CREATE INDEX IF NOT EXISTS idx_turn_claims_expires
+  ON turn_claims (expires_at);
 
 -- Triggers to keep conversations.updated_at fresh
 CREATE TRIGGER IF NOT EXISTS trg_conversations_touch AFTER UPDATE ON conversations

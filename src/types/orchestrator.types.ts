@@ -1,8 +1,10 @@
 import type { UnifiedEvent } from './event.types';
+import type { ConversationMeta } from './conversation.meta';
 
 export interface ConversationSnapshot {
   conversation: number;
   status: 'active' | 'completed';
+  metadata: ConversationMeta;
   events: UnifiedEvent[];
 }
 
@@ -16,7 +18,6 @@ export type EventListener = (e: UnifiedEvent) => void;
 
 export interface OrchestratorConfig {
   idleTurnMs?: number; // optional watchdog for open turns
-  emitNextCandidates?: boolean;
 }
 
 export interface SchedulePolicyInput {
@@ -31,4 +32,13 @@ export type ScheduleDecision =
 
 export interface SchedulePolicy {
   decide(input: SchedulePolicyInput): ScheduleDecision;
+}
+
+// Guidance event type (transient, not persisted)
+export interface GuidanceEvent {
+  type: 'guidance';
+  conversation: number;
+  seq: number; // Monotone cursor (can be fractional)
+  nextAgentId: string;
+  deadlineMs?: number;
 }

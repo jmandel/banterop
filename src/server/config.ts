@@ -10,7 +10,6 @@ const ConfigSchema = z.object({
   
   // Orchestrator
   idleTurnMs: z.number().int().positive().default(120_000),
-  emitNextCandidates: z.boolean().default(true),
   
   // LLM Providers
   googleApiKey: z.string().optional(),
@@ -40,7 +39,6 @@ export class ConfigManager {
       
       // Orchestrator
       idleTurnMs: process.env.IDLE_TURN_MS ? Number(process.env.IDLE_TURN_MS) : undefined,
-      emitNextCandidates: process.env.EMIT_NEXT_CANDIDATES === 'false' ? false : undefined,
       
       // LLM Providers
       googleApiKey: process.env.GOOGLE_API_KEY,
@@ -87,7 +85,6 @@ export class ConfigManager {
   get orchestratorConfig() {
     return {
       idleTurnMs: this.config.idleTurnMs,
-      emitNextCandidates: this.config.emitNextCandidates,
     };
   }
   
@@ -109,7 +106,6 @@ export class ConfigManager {
       dbPath: ':memory:',
       nodeEnv: 'test',
       logLevel: 'error',
-      emitNextCandidates: false, // Disable workers in tests
     });
   }
 }

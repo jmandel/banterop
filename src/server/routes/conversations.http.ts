@@ -5,14 +5,14 @@ export function createConversationRoutes(orchestrator: OrchestratorService) {
   const app = new Hono();
 
   app.get('/api/conversations', (c) => {
-    const tenantId = c.req.query('tenantId');
     const status = c.req.query('status') as 'active' | 'completed' | undefined;
+    const scenarioId = c.req.query('scenarioId');
     const limit = Number(c.req.query('limit')) || 50;
     const offset = Number(c.req.query('offset')) || 0;
     
     const params: Parameters<typeof orchestrator.listConversations>[0] = { limit, offset };
-    if (tenantId !== undefined) params.tenantId = tenantId;
     if (status !== undefined) params.status = status;
+    if (scenarioId !== undefined) params.scenarioId = scenarioId;
     
     const conversations = orchestrator.listConversations(params);
     return c.json(conversations);
@@ -28,10 +28,17 @@ export function createConversationRoutes(orchestrator: OrchestratorService) {
   app.get('/api/conversations/:id', (c) => {
     const id = Number(c.req.param('id'));
     const includeEvents = c.req.query('includeEvents') === 'true';
+    const includeMeta = c.req.query('includeMeta') === 'true';
     
     if (includeEvents) {
       const snap = orchestrator.getConversationSnapshot(id);
       return c.json(snap);
+    } else if (includeMeta) {
+      const conversation = orchestrator.getConversationWithMetadata(id);
+      if (!conversation) {
+        return c.json({ error: 'Conversation not found' }, 404);
+      }
+      return c.json(conversation);
     } else {
       const conversation = orchestrator.getConversation(id);
       if (!conversation) {

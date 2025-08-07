@@ -2,8 +2,8 @@ import type { Finality, MessagePayload, TracePayload, UnifiedEvent } from './eve
 
 // REST API types
 export interface ListConversationsRequest {
-  tenantId?: string;
   status?: 'active' | 'completed';
+  scenarioId?: string;
   limit?: number;
   offset?: number;
 }
@@ -22,7 +22,6 @@ export interface AuthenticateRequest {
 export interface AuthenticateResponse {
   authenticated: boolean;
   agentId?: string;
-  tenantId?: string;
 }
 
 export interface SubscribeRequest {
@@ -72,6 +71,18 @@ export interface TailEventsRequest {
   conversationId: number;
   sinceEvent?: number;
   sinceTs?: string;
+}
+
+// Turn claim API types
+export interface ClaimTurnRequest {
+  conversationId: number;
+  agentId: string;
+  guidanceSeq: number;
+}
+
+export interface ClaimTurnResponse {
+  ok: boolean;
+  reason?: string; // e.g., "already claimed", "expired guidance"
 }
 
 // JSON-RPC protocol

@@ -4,6 +4,7 @@ import { EventStore } from '$src/db/event.store';
 import { ConversationStore } from '$src/db/conversation.store';
 import { AttachmentStore } from '$src/db/attachment.store';
 import { IdempotencyStore } from '$src/db/idempotency.store';
+import { TurnClaimStore } from '$src/db/turn-claim.store';
 import type { Database } from 'bun:sqlite';
 
 export class Storage {
@@ -12,6 +13,7 @@ export class Storage {
   conversations!: ConversationStore;
   attachments!: AttachmentStore;
   idempotency!: IdempotencyStore;
+  turnClaims!: TurnClaimStore;
 
   constructor(dbPath: string = ':memory:') {
     this.db = new Sqlite(dbPath);
@@ -21,6 +23,7 @@ export class Storage {
     this.conversations = new ConversationStore(raw);
     this.attachments = new AttachmentStore(raw);
     this.idempotency = new IdempotencyStore(raw);
+    this.turnClaims = new TurnClaimStore(raw);
   }
 
   static fromDatabase(db: Database): Storage {
@@ -29,6 +32,7 @@ export class Storage {
     storage.conversations = new ConversationStore(db);
     storage.attachments = new AttachmentStore(db);
     storage.idempotency = new IdempotencyStore(db);
+    storage.turnClaims = new TurnClaimStore(db);
     // No db to close in this case
     return storage;
   }

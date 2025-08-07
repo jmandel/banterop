@@ -15,11 +15,10 @@ describe('IdempotencyStore', () => {
   afterEach(() => sqlite.close());
 
   it('records and finds clientRequestId entries', () => {
-    const key = { tenantId: 't1', conversation: 1, agentId: 'a1', clientRequestId: 'rid-1', seq: 123 };
+    const key = { conversation: 1, agentId: 'a1', clientRequestId: 'rid-1', seq: 123 };
     store.record(key);
 
     const found = store.find({
-      tenantId: 't1',
       conversation: 1,
       agentId: 'a1',
       clientRequestId: 'rid-1',

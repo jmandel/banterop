@@ -4,7 +4,7 @@ import type { MessagePayload } from '$src/types/event.types';
 
 describe('App integration', () => {
   it('uses :memory: database for tests', async () => {
-    const app = new App({ dbPath: ':memory:', emitNextCandidates: false });
+    const app = new App({ dbPath: ':memory:' });
     
     // Create a conversation
     const conversationId = app.orchestrator.createConversation({
@@ -41,7 +41,7 @@ describe('App integration', () => {
   });
   
   it('shares storage across routes', async () => {
-    const app = new App({ dbPath: ':memory:', emitNextCandidates: false });
+    const app = new App({ dbPath: ':memory:' });
     
     // Create conversation through orchestrator
     const id1 = app.orchestrator.createConversation({ title: 'Conv 1' });

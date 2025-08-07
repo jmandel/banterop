@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { App } from './app';
-import { createWebSocketServer } from './ws/jsonrpc.server';
+import { createWebSocketServer, websocket } from './ws/jsonrpc.server';
 import { createConversationRoutes } from './routes/conversations.http';
 
 // Create singleton app instance
@@ -26,4 +26,5 @@ process.on('SIGTERM', async () => {
 export default {
   port: Number(process.env.PORT ?? 3000),
   fetch: server.fetch,
+  websocket,
 };

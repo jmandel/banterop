@@ -15,14 +15,14 @@ describe('ConversationStore', () => {
   afterEach(() => sqlite.close());
 
   it('creates, reads, lists, and completes conversations', () => {
-    const id = store.create({ tenantId: 't1', title: 'Test', description: 'Desc' });
+    const id = store.create({ title: 'Test', description: 'Desc', agents: [] });
     expect(id).toBeGreaterThan(0);
 
     const row = store.get(id)!;
     expect(row.title).toBe('Test');
     expect(row.status).toBe('active');
 
-    const list = store.list({ tenantId: 't1', status: 'active' });
+    const list = store.list({ status: 'active' });
     expect(list.some((c) => c.conversation === id)).toBe(true);
 
     store.complete(id);

@@ -12,7 +12,6 @@ describe('MCPBridge', () => {
   beforeEach(() => {
     storage = new Storage(':memory:');
     orchestrator = new OrchestratorService(storage, undefined, undefined, { 
-      emitNextCandidates: true,
       idleTurnMs: 120_000 
     });
     bridge = new MCPBridge(orchestrator);
