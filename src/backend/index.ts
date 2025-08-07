@@ -8,8 +8,7 @@ import { seedDatabase } from './db/seed.js';
 import { createScenarioRoutes } from './api/scenarios.js';
 import { createLLMRoutes } from './api/llm.js';
 import { createBridgeRoutes } from './api/bridge.js';
-import { createLLMProvider } from '$llm/factory.js';
-import { LLMProviderConfig, LLMProvider } from 'src/types/llm.types.js';
+import { providerManager } from './llm/provider-manager.js';
 import {
   CreateConversationRequest,
   StartTurnRequest,
@@ -29,16 +28,9 @@ type Variables = {
 
 // --- 1. Initialization ---
 
-// Define the single source of truth for LLM configuration from environment variables.
-const llmConfig: LLMProviderConfig = {
-  provider: (process.env.LLM_PROVIDER as any) || 'google',
-  apiKey: process.env.GEMINI_API_KEY, // The server's key
-  model: process.env.LLM_MODEL || 'gemini-2.5-flash-lite',
-};
-
-// Create the single, shared LLM provider instance for the entire app.
-const defaultLlmProvider: LLMProvider = createLLMProvider(llmConfig);
-console.log(`[Backend] Default LLM Provider initialized: ${llmConfig.provider}`);
+// Get the default LLM provider from the centralized provider manager
+const defaultLlmProvider = providerManager.getDefaultProvider();
+console.log('[Backend] Using default LLM provider for orchestrator');
 
 // Inject the default LLM provider into the Orchestrator.
 const orchestrator = new ConversationOrchestrator(

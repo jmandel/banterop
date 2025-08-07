@@ -775,7 +775,7 @@ export class ConversationOrchestrator {
     this.globalEventListeners.forEach(callback => callback(event));
     
     // Log for debugging
-    console.log(`Event emitted for ${conversationId}:`, event.type, event.data);
+    console.log(`Event emitted for ${conversationId}:`, event.type, event.data?.agentId);
   }
 
   private notifyAgent(conversationId: string, event: ConversationEvent): void {

@@ -200,7 +200,7 @@ export class ScenarioDrivenAgent extends BaseAgent {
           let result: ParsedResponse;
           try {
             result = await this.extractToolCallsFromLLMResponse(prompt);
-            console.log(`LLM response received for agent ${this.agentId}:`, result);
+            console.log(`LLM response received for agent ${this.agentId}:`, result.message);
           } catch (llmError) {
             console.error("LLM request failed:", llmError);
             await this.addThought(`LLM request failed: ${llmError.message}. I'll try to recover gracefully.`);
@@ -384,6 +384,8 @@ ATTACHMENT GUIDANCE:
   Example: attachments_to_include: ["doc_policy_123", "doc_report_456"]
 - Never claim "see attached" without including actual attachments.
 - Never re-attach a document within the same conversation! Once is plenty.
+
+Never suggest submitting documents through email, portals, or fax; always suggest sharing documents as attachments in the converation thread.
 
 </AVAILABLE_TOOLS>`;
 

@@ -117,10 +117,22 @@ export class HonoServerResponse extends EventEmitter {
   private chunks: Buffer[] = [];
   private ended: boolean = false;
   public headersSent: boolean = false;
+  private requestId: string;
+  private createdAt: number;
   
   constructor(c: Context) {
     super();
     this.c = c;
+    this.requestId = `hono_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    this.createdAt = Date.now();
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] [HonoServerResponse] Created - requestId=${this.requestId}`);
+    
+    // Listen for client disconnect
+    this.on('close', () => {
+      const elapsed = Date.now() - this.createdAt;
+      console.log(`[${new Date().toISOString()}] [HonoServerResponse] Client closed connection - requestId=${this.requestId}, elapsed=${elapsed}ms, ended=${this.ended}`);
+    });
   }
   
   writeHead(statusCode: number, headers?: Record<string, string>): this {
@@ -172,6 +184,9 @@ export class HonoServerResponse extends EventEmitter {
   }
   
   write(chunk: any, encoding?: any, callback?: any): boolean {
+    const elapsed = Date.now() - this.createdAt;
+    console.log(`[${new Date().toISOString()}] [HonoServerResponse] write called - requestId=${this.requestId}, elapsed=${elapsed}ms, chunkSize=${chunk?.length || 0}`);
+    
     if (this.ended) {
       throw new Error('Cannot write after end');
     }
@@ -224,7 +239,12 @@ export class HonoServerResponse extends EventEmitter {
   }
   
   end(chunk?: any, encoding?: any, callback?: any): this {
+    const elapsed = Date.now() - this.createdAt;
+    console.log(`[${new Date().toISOString()}] [HonoServerResponse] end called - requestId=${this.requestId}, elapsed=${elapsed}ms, hasChunk=${chunk !== undefined}`);
+    
     if (this.ended) {
+      console.log(`[${new Date().toISOString()}] [HonoServerResponse] Already ended - requestId=${this.requestId}`);
+      console.trace();
       return this;
     }
     
@@ -301,206 +321,4 @@ export class HonoServerResponse extends EventEmitter {
     this.statusCode = code;
     return this;
   }
-}
-
-/**
- * SSE ServerResponse adapter for streaming responses
- */
-export class HonoSSEServerResponse extends EventEmitter {
-  private c: Context;
-  private statusCode: number = 200;
-  private headers: Record<string, string> = {};
-  private streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
-  private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
-  private ended: boolean = false;
-  public headersSent: boolean = false;
-  
-  constructor(c: Context) {
-    super();
-    this.c = c;
-    
-    // Listen for client disconnect
-    if (this.c.req.raw.signal) {
-      this.c.req.raw.signal.addEventListener('abort', () => {
-        this.handleClose();
-      });
-    }
-  }
-  
-  writeHead(statusCode: number, headers?: Record<string, string>): this {
-    this.statusCode = statusCode;
-    if (headers) {
-      Object.assign(this.headers, headers);
-    }
-    return this;
-  }
-  
-  setHeader(name: string, value: string): this {
-    this.headers[name.toLowerCase()] = value;
-    return this;
-  }
-  
-  getHeader(name: string): string | undefined {
-    return this.headers[name.toLowerCase()];
-  }
-  
-  flushHeaders(): void {
-    if (this.headersSent || this.ended) {
-      return;
-    }
-    
-    this.headersSent = true;
-    
-    // Set SSE headers
-    const sseHeaders = {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      ...this.headers
-    };
-    
-    // If we already have a writer (set externally for Hono stream), just set headers
-    if (this.writer) {
-      // Headers are already set by the parent stream context
-      return;
-    }
-    
-    // Otherwise, start streaming with Hono (legacy path, shouldn't be used)
-    this.c.header('Content-Type', 'text/event-stream');
-    this.c.header('Cache-Control', 'no-cache');
-    this.c.header('Connection', 'keep-alive');
-    
-    Object.entries(sseHeaders).forEach(([key, value]) => {
-      this.c.header(key, value);
-    });
-    
-    // Create a streaming response
-    const stream = this.c.stream(async (stream) => {
-      this.writer = stream.writer;
-      
-      // Keep the stream open until explicitly ended
-      await new Promise<void>((resolve) => {
-        this.once('_internal_end', resolve);
-      });
-    });
-  }
-  
-  write(chunk: any, encoding?: any, callback?: any): boolean {
-    if (this.ended) {
-      throw new Error('Cannot write after end');
-    }
-    
-    const cb = typeof encoding === 'function' ? encoding : callback;
-    
-    // Ensure headers are sent
-    if (!this.headersSent) {
-      this.flushHeaders();
-    }
-    
-    // Convert chunk to Uint8Array
-    let data: Uint8Array;
-    if (chunk instanceof Uint8Array) {
-      data = chunk;
-    } else if (Buffer.isBuffer(chunk)) {
-      data = new Uint8Array(chunk);
-    } else if (typeof chunk === 'string') {
-      const encoder = new TextEncoder();
-      data = encoder.encode(chunk);
-    } else {
-      const encoder = new TextEncoder();
-      data = encoder.encode(String(chunk));
-    }
-    
-    // Write to stream if writer is available
-    if (this.writer) {
-      this.writer.write(data).then(() => {
-        if (cb) cb();
-      }).catch((err) => {
-        if (cb) cb(err);
-      });
-    } else {
-      // Queue the write until stream is ready
-      process.nextTick(() => {
-        if (this.writer) {
-          this.writer.write(data).then(() => {
-            if (cb) cb();
-          }).catch((err) => {
-            if (cb) cb(err);
-          });
-        } else if (cb) {
-          cb(new Error('Stream not ready'));
-        }
-      });
-    }
-    
-    return true;
-  }
-  
-  end(chunk?: any, encoding?: any, callback?: any): this {
-    if (this.ended) {
-      return this;
-    }
-    
-    // Handle various parameter combinations
-    let cb = callback;
-    if (typeof chunk === 'function') {
-      cb = chunk;
-      chunk = undefined;
-    } else if (typeof encoding === 'function') {
-      cb = encoding;
-      encoding = undefined;
-    }
-    
-    if (chunk !== undefined) {
-      this.write(chunk, encoding);
-    }
-    
-    this.ended = true;
-    
-    // Close the stream
-    if (this.writer) {
-      this.writer.close().then(() => {
-        this.emit('_internal_end');
-        this.handleClose();
-        if (cb) cb();
-      }).catch((err) => {
-        this.emit('_internal_end');
-        this.handleClose();
-        if (cb) cb(err);
-      });
-    } else {
-      process.nextTick(() => {
-        this.emit('_internal_end');
-        this.handleClose();
-        if (cb) cb();
-      });
-    }
-    
-    return this;
-  }
-  
-  private handleClose(): void {
-    if (!this.ended) {
-      this.ended = true;
-      this.emit('_internal_end');
-    }
-    this.emit('close');
-  }
-  
-  status(code: number): this {
-    this.statusCode = code;
-    return this;
-  }
-}
-
-/**
- * Helper function to determine if request should use SSE
- */
-export function shouldUseSSE(c: Context): boolean {
-  // GET requests with Accept: text/event-stream should use SSE
-  if (c.req.method === 'GET') {
-    const accept = c.req.header('Accept');
-    return accept?.includes('text/event-stream') === true;
-  }
-  return false;
 }

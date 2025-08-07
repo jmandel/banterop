@@ -45,13 +45,12 @@ export class OpenRouterLLMProvider extends LLMProvider {
     return OpenRouterLLMProvider.metadata.description;
   }
   
-  async generateResponse(request: LLMRequest): Promise<LLMResponse> {
+  protected async generateResponseImpl(request: LLMRequest): Promise<LLMResponse> {
     if (!this.client) {
       throw new Error('OpenRouter client not initialized - API key required');
     }
     
     try {
-      console.log("Send llm query to open router", request)
       const completion = await this.client.chat.completions.create({
         model: request.model || this.config.model || OpenRouterLLMProvider.metadata.defaultModel,
         messages: request.messages.map(msg => ({

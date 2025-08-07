@@ -41,7 +41,7 @@ export function createBridgeRoutes(orchestrator: ConversationOrchestrator) {
       const res = new HonoServerResponse(c);
       const req = new HonoIncomingMessage(c, requestBody);
       
-      // Set up promise to wait for the response to be written
+      // // Set up promise to wait for the response to be written
       const responsePromise = new Promise<Response>((resolve, reject) => {
         res.once('close', () => {
           console.log('[Bridge] Response close event received');
@@ -61,7 +61,7 @@ export function createBridgeRoutes(orchestrator: ConversationOrchestrator) {
       });
       
       // Wait for the response to be ready
-      return await responsePromise;
+      await responsePromise;
     } catch (error) {
       console.error('MCP bridge error:', error);
       return c.json({

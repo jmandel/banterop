@@ -141,6 +141,12 @@ export class McpBridgeServer {
         inputSchema: sendMessageSchema
       },
       async (params) => {
+      const startTime = Date.now();
+      const timestamp = new Date().toISOString();
+      const requestId = `mcp_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      
+      console.log(`[${timestamp}] [MCP send_message] START - requestId=${requestId}, conversationId=${params.conversationId}, message_length=${params.message?.length}`);
+      
       try {
         const conversationId = params.conversationId;
         
@@ -164,12 +170,17 @@ export class McpBridgeServer {
           content: att.content
         }));
         
+        console.log(`[${new Date().toISOString()}] [MCP send_message] Awaiting bridge promise - requestId=${requestId}, timeout=180000ms (default)`);
+        
         // Use BridgeAgent to bridge the external client's turn
         const reply = await agent.bridgeExternalClientTurn(
           params.message, 
           attachments
           // Use BridgeAgent's default timeout
         );
+        
+        const elapsed = Date.now() - startTime;
+        console.log(`[${new Date().toISOString()}] [MCP send_message] SUCCESS - requestId=${requestId}, elapsed=${elapsed}ms`);
         
         return {
           content: [{ 
@@ -178,15 +189,20 @@ export class McpBridgeServer {
           }]
         };
       } catch (error) {
+        const elapsed = Date.now() - startTime;
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.log(`[${new Date().toISOString()}] [MCP send_message] ERROR - requestId=${requestId}, elapsed=${elapsed}ms, error="${errorMessage}"`);
+        
         if (error instanceof Error && error.message.includes('Timeout')) {
+          console.log(`[${new Date().toISOString()}] [MCP send_message] Returning timeout response - requestId=${requestId}`);
           return {
             content: [{ 
               type: 'text', 
-              text: JSON.stringify({ timeout: true }) 
+              text: JSON.stringify({ stillWorking: true, followUp: "Please call wait_for_reply until we have a response ready for you." }) 
             }]
           };
         }
-        throw new Error(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        throw new Error(`Failed to send message: ${errorMessage}`);
       }
     });
 
@@ -229,7 +245,7 @@ export class McpBridgeServer {
           return {
             content: [{ 
               type: 'text', 
-              text: JSON.stringify({ timeout: true }) 
+              text: JSON.stringify({ stillWorking: true, followUp: "Please continue to call wait_for_reply until we have a response ready for you." }) 
             }]
           };
         }
@@ -259,10 +275,8 @@ export class McpBridgeServer {
       enableJsonResponse: true // Prefer JSON responses over SSE
     });
     
-    // Clean up transport when response closes
-    res.on('close', () => {
-      transport.close();
-    });
+    // Note: The response 'close' event is already handled by the bridge.ts route
+    // We don't need to add another listener here
     
     try {
       // Connect the MCP server to the transport

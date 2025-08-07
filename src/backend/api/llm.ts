@@ -2,25 +2,11 @@ import { Hono } from 'hono';
 import { ScenarioBuilderLLM, getAvailableProviders } from '$llm/index.js';
 import { LLMRequest, ApiResponse, LLMProvider } from '$lib/types.js';
 import type { ConversationDatabase } from '$backend/db/database.js';
-import { createLLMProvider } from '$llm/factory.js';
+import { providerManager } from '../llm/provider-manager.js';
 
 // The function now accepts the single, shared LLM provider instance.
 export function createLLMRoutes(db: ConversationDatabase, llmProvider: LLMProvider): Hono {
   const router = new Hono();
-  
-  // Create provider instances for dynamic routing
-  const providers: Record<string, LLMProvider | null> = {
-    google: null,
-    openrouter: null
-  };
-  
-  // Initialize providers based on available API keys
-  if (process.env.GEMINI_API_KEY) {
-    providers.google = createLLMProvider({ provider: 'google', apiKey: process.env.GEMINI_API_KEY });
-  }
-  if (process.env.OPENROUTER_API_KEY) {
-    providers.openrouter = createLLMProvider({ provider: 'openrouter', apiKey: process.env.OPENROUTER_API_KEY });
-  }
 
 // Helper to create API responses
 function createResponse<T = any>(success: boolean, data?: T, error?: string): ApiResponse<T> {
@@ -41,27 +27,17 @@ router.post('/generate', async (c) => {
       return c.json(createResponse(false, undefined, 'Messages array is required'), 400);
     }
 
-    // Determine which provider to use based on model name
+    // Use provider manager to find the right provider for the model
     let selectedProvider: LLMProvider | null = null;
     
-    console.log('Available providers:', Object.keys(providers).map(p => providers[p].getSupportedModels()));
-    // Check if model matches any provider's supported models
-    if (providers.google && providers.google.getSupportedModels().includes(model || '')) {
-      selectedProvider = providers.google;
-    } else if (providers.openrouter && providers.openrouter.getSupportedModels().includes(model || '')) {
-      selectedProvider = providers.openrouter;
-    } else {
-      // Default to the injected provider for backward compatibility
-      selectedProvider = llmProvider;
-      
-      // If model was specified but not found in any provider, return error
-      if (model && !selectedProvider.getSupportedModels().includes(model)) {
+    if (model) {
+      selectedProvider = providerManager.getProviderForModel(model);
+      if (!selectedProvider) {
         return c.json(createResponse(false, undefined, `Model '${model}' not found in any configured provider`), 400);
       }
-    }
-    
-    if (!selectedProvider) {
-      return c.json(createResponse(false, undefined, 'No LLM provider configured'), 503);
+    } else {
+      // No model specified, use the default provider
+      selectedProvider = llmProvider;
     }
 
     const response = await selectedProvider.generateResponse({
@@ -150,11 +126,9 @@ router.get('/config', async (c) => {
   try {
     const availableProviders = getAvailableProviders();
     
-    // Filter to only show providers that are actually configured
+    // Get the actual configured providers from provider manager
     const configuredProviders = availableProviders.filter(p => {
-      if (p.name === 'google' && providers.google) return true;
-      if (p.name === 'openrouter' && providers.openrouter) return true;
-      return false;
+      return providerManager.providers.has(p.name);
     });
     
     return c.json(createResponse(true, {
