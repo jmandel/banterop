@@ -1,4 +1,4 @@
-import type { Agent, AgentContext, TurnOutcome } from '$src/agents/agent.types';
+import type { Agent, AgentContext } from '$src/agents/agent.types';
 import { logLine } from '$src/lib/utils/logger';
 
 export class EchoAgent implements Agent {
@@ -7,7 +7,7 @@ export class EchoAgent implements Agent {
     private finalText = 'Done'
   ) {}
 
-  async handleTurn(ctx: AgentContext): Promise<TurnOutcome> {
+  async handleTurn(ctx: AgentContext): Promise<void> {
     const t0 = Date.now();
     logLine(ctx.agentId, 'turn start', `echo agent`);
     
@@ -26,7 +26,5 @@ export class EchoAgent implements Agent {
       finality: 'turn' 
     });
     logLine(ctx.agentId, 'posted final', `seq=${r2.seq}`, `${Date.now() - t0}ms`);
-    
-    return 'posted';
   }
 }

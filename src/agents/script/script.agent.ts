@@ -1,11 +1,11 @@
-import type { Agent, AgentContext, TurnOutcome } from '$src/agents/agent.types';
+import type { Agent, AgentContext } from '$src/agents/agent.types';
 import type { AgentScript, ScriptAction } from './script.types';
 import type { TracePayload } from '$src/types/event.types';
 
 export class ScriptAgent implements Agent {
   constructor(private script: AgentScript) {}
 
-  async handleTurn(ctx: AgentContext): Promise<TurnOutcome> {
+  async handleTurn(ctx: AgentContext): Promise<void> {
     for (const step of this.script.steps) {
       switch (step.kind) {
         case 'sleep':
@@ -36,9 +36,6 @@ export class ScriptAgent implements Agent {
             text: step.text, 
             finality: step.finality ?? 'turn' 
           });
-          if ((step.finality ?? 'turn') !== 'none') {
-            return (step.finality === 'conversation') ? 'complete' : 'posted';
-          }
           break;
           
         case 'assert':
@@ -46,10 +43,10 @@ export class ScriptAgent implements Agent {
           break;
           
         case 'yield':
-          return 'yield';
+          // Yield is no longer meaningful with guidance-based coordination
+          break;
       }
     }
-    return 'no_action';
   }
 }
 

@@ -1,9 +1,7 @@
 import type { TracePayload } from '$src/types/event.types';
 
-export type TurnOutcome = 'posted' | 'yield' | 'no_action' | 'complete';
-
 export interface Agent {
-  handleTurn(ctx: AgentContext): Promise<TurnOutcome>;
+  handleTurn(ctx: AgentContext): Promise<void>;
 }
 
 export interface AgentContext {

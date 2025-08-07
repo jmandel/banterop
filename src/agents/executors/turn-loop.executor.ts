@@ -68,8 +68,8 @@ export class TurnLoopExecutor {
             
             // Run agent for one turn
             try {
-              const outcome = await this.agent.handleTurn(ctx);
-              logLine(agentId, colors.bright('TURN COMPLETE'), `outcome=${outcome}`);
+              await this.agent.handleTurn(ctx);
+              logLine(agentId, colors.bright('TURN COMPLETE'));
             } catch (err) {
               logLine(agentId, colors.red('TURN ERROR'), String(err));
             }

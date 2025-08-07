@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { TurnLoopExecutor } from '$src/agents/executors/turn-loop.executor';
-import type { Agent, TurnOutcome } from '$src/agents/agent.types';
+import type { Agent } from '$src/agents/agent.types';
 import { App } from '$src/server/app';
 import { createWebSocketServer, websocket } from '$src/server/ws/jsonrpc.server';
 import { createConversationRoutes } from '$src/server/routes/conversations.http';
@@ -51,7 +51,7 @@ async function main() {
   let turnCount = 0;
   
   const assistant: Agent = {
-    async handleTurn(ctx): Promise<TurnOutcome> {
+    async handleTurn(ctx): Promise<void> {
       turnCount++;
       console.log(`[ASSISTANT] Turn ${turnCount}`);
       
@@ -75,7 +75,7 @@ async function main() {
           });
         }, 200);
         
-        return 'posted';
+        return;
       } else {
         await ctx.client.postMessage({ 
           conversationId: ctx.conversationId, 
@@ -83,7 +83,7 @@ async function main() {
           text: 'Assistant: Goodbye!', 
           finality: 'conversation' 
         });
-        return 'complete';
+        return;
       }
     }
   };

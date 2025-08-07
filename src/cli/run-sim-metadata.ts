@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { TurnLoopExecutor } from '$src/agents/executors/turn-loop.executor';
-import type { Agent, TurnOutcome } from '$src/agents/agent.types';
+import type { Agent } from '$src/agents/agent.types';
 import { App } from '$src/server/app';
 import { createWebSocketServer, websocket } from '$src/server/ws/jsonrpc.server';
 import { createConversationRoutes } from '$src/server/routes/conversations.http';
@@ -93,7 +93,7 @@ async function main() {
   // Simple insurer assistant agent
   let turnCount = 0;
   const insurerAgent: Agent = {
-    async handleTurn(ctx): Promise<TurnOutcome> {
+    async handleTurn(ctx): Promise<void> {
       turnCount++;
       console.log(`[INSURER] Turn ${turnCount}`);
       
@@ -104,7 +104,7 @@ async function main() {
           text: 'Hello! I see you need prior authorization for a knee MRI. Can you provide your member ID?', 
           finality: 'turn' 
         });
-        return 'posted';
+        return;
       } else if (turnCount === 2) {
         await ctx.client.postMessage({ 
           conversationId: ctx.conversationId, 
@@ -112,9 +112,8 @@ async function main() {
           text: 'Thank you. Your prior authorization has been approved. Reference #PA-2025-1234.', 
           finality: 'conversation' 
         });
-        return 'complete';
+        return;
       }
-      return 'posted';
     }
   };
   

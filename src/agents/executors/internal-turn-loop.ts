@@ -1,8 +1,9 @@
 import type { Agent, AgentContext, Logger } from '$src/agents/agent.types';
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
 import type { GuidanceEvent } from '$src/types/orchestrator.types';
-import type { UnifiedEvent, MessagePayload } from '$src/types/event.types';
+import type { UnifiedEvent } from '$src/types/event.types';
 import { InProcessEventStream, type StreamEvent } from '$src/agents/clients/event-stream';
+import { InProcessClient } from '$src/agents/clients/inprocess.client';
 import { logLine, colors } from '$src/lib/utils/logger';
 
 export interface InternalLoopOptions {
@@ -58,14 +59,14 @@ export class InternalTurnLoop {
               conversationId,
               agentId,
               deadlineMs: Date.now() + (guidance.deadlineMs || 30000),
-              client: new InProcessClient(this.orchestrator, conversationId, agentId),
+              client: new InProcessClient(this.orchestrator),
               logger,
             };
             
             // Run agent for one turn
             try {
-              const outcome = await this.agent.handleTurn(ctx);
-              logLine(agentId, colors.bright('TURN COMPLETE'), `outcome=${outcome}`);
+              await this.agent.handleTurn(ctx);
+              logLine(agentId, colors.bright('TURN COMPLETE'));
             } catch (err) {
               logLine(agentId, colors.red('TURN ERROR'), String(err));
             }
@@ -121,72 +122,5 @@ export class InternalTurnLoop {
       warn: (msg: string) => logLine(agentId, colors.yellow('warn'), msg),
       error: (msg: string) => logLine(agentId, colors.red('error'), msg),
     };
-  }
-}
-
-/**
- * Minimal in-process client for internal agents
- * No more getUpdatesOrGuidance or waitForChange!
- */
-class InProcessClient {
-  constructor(
-    private orchestrator: OrchestratorService,
-    _conversationId: number,
-    _agentId: string
-  ) {}
-  
-  async postMessage(params: {
-    conversationId: number;
-    agentId: string;
-    text: string;
-    finality: 'none' | 'turn' | 'conversation';
-    attachments?: any[];
-  }): Promise<{ seq: number; turn: number; event: number }> {
-    const payload: MessagePayload = { text: params.text };
-    if (params.attachments) payload.attachments = params.attachments;
-    
-    const result = this.orchestrator.appendEvent({
-      conversation: params.conversationId,
-      type: 'message',
-      payload,
-      finality: params.finality,
-      agentId: params.agentId,
-    });
-    
-    return {
-      seq: result.seq,
-      turn: result.turn,
-      event: result.event,
-    };
-  }
-  
-  async postTrace(params: {
-    conversationId: number;
-    agentId: string;
-    payload: any;
-    turn?: number;
-  }): Promise<{ seq: number; turn: number; event: number }> {
-    const result = this.orchestrator.appendEvent({
-      conversation: params.conversationId,
-      type: 'trace',
-      payload: params.payload,
-      finality: 'none',
-      agentId: params.agentId,
-      ...(params.turn !== undefined ? { turn: params.turn } : {}),
-    });
-    
-    return {
-      seq: result.seq,
-      turn: result.turn,
-      event: result.event,
-    };
-  }
-  
-  async getSnapshot(conversationId: number): Promise<any> {
-    return this.orchestrator.getConversationSnapshot(conversationId);
-  }
-  
-  now(): Date {
-    return new Date();
   }
 }

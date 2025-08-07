@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { TurnLoopExecutor } from '$src/agents/executors/turn-loop.executor';
-import type { Agent, TurnOutcome } from '$src/agents/agent.types';
+import type { Agent } from '$src/agents/agent.types';
 import { App } from '$src/server/app';
 import { createWebSocketServer, websocket } from '$src/server/ws/jsonrpc.server';
 import { createConversationRoutes } from '$src/server/routes/conversations.http';
@@ -51,7 +51,7 @@ async function main() {
   let agentATurnCount = 0;
   
   const agentA: Agent = {
-    async handleTurn(ctx): Promise<TurnOutcome> {
+    async handleTurn(ctx): Promise<void> {
       agentATurnCount++;
       console.log(`[AGENT-A] Turn ${agentATurnCount}`);
       
@@ -62,7 +62,7 @@ async function main() {
           text: `Agent A message ${agentATurnCount}`, 
           finality: 'turn' 
         });
-        return 'posted';
+        return;
       } else {
         await ctx.client.postMessage({ 
           conversationId: ctx.conversationId, 
@@ -70,7 +70,7 @@ async function main() {
           text: 'Agent A: Ending conversation now', 
           finality: 'conversation' 
         });
-        return 'complete';
+        return;
       }
     }
   };
@@ -78,7 +78,7 @@ async function main() {
   // Agent B responds each time
   let agentBTurnCount = 0;
   const agentB: Agent = {
-    async handleTurn(ctx): Promise<TurnOutcome> {
+    async handleTurn(ctx): Promise<void> {
       agentBTurnCount++;
       console.log(`[AGENT-B] Turn ${agentBTurnCount}`);
       
@@ -88,7 +88,7 @@ async function main() {
         text: `Agent B message ${agentBTurnCount}`, 
         finality: 'turn' 
       });
-      return 'posted';
+      return;
     }
   };
   
