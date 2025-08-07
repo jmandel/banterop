@@ -19,6 +19,18 @@ CREATE INDEX IF NOT EXISTS idx_conversations_status
 CREATE INDEX IF NOT EXISTS idx_conversations_scenario
   ON conversations (scenario_id);
 
+-- Scenarios table to store templates
+CREATE TABLE IF NOT EXISTS scenarios (
+  id            TEXT PRIMARY KEY,      -- The unique scenarioId, e.g., "prior-auth.v2"
+  name          TEXT NOT NULL,         -- A human-friendly name, e.g., "Prior Auth for Infliximab"
+  config        TEXT NOT NULL,         -- The full ScenarioConfiguration as a JSON string
+  history       TEXT NOT NULL DEFAULT '[]', -- Optional: chat history for a scenario builder UI
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  modified_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_scenarios_name ON scenarios (name);
+
 -- Unified event log (append-only)
 CREATE TABLE IF NOT EXISTS conversation_events (
   conversation  INTEGER NOT NULL,

@@ -20,6 +20,20 @@ export function createConversationRoutes(orchestrator: OrchestratorService) {
 
   app.post('/api/conversations', async (c) => {
     const body = await c.req.json();
+    
+    // If scenarioId is provided, validate it exists and merge with scenario defaults
+    if (body.scenarioId) {
+      const scenario = orchestrator.storage.scenarios.findScenarioById(body.scenarioId);
+      if (!scenario) {
+        return c.json({ error: `Scenario '${body.scenarioId}' not found` }, 404);
+      }
+      
+      // Use scenario title as default if not provided
+      if (!body.title && scenario.config.metadata?.title) {
+        body.title = scenario.config.metadata.title;
+      }
+    }
+    
     const id = orchestrator.createConversation(body);
     const conversation = orchestrator.getConversation(id);
     return c.json(conversation, 201);

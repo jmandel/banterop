@@ -1,10 +1,19 @@
 import type { UnifiedEvent } from './event.types';
 import type { ConversationMeta } from './conversation.meta';
+import type { ScenarioConfiguration } from './scenario-configuration.types';
 
 export interface ConversationSnapshot {
   conversation: number;
   status: 'active' | 'completed';
   metadata: ConversationMeta;
+  events: UnifiedEvent[];
+}
+
+export interface HydratedConversationSnapshot {
+  conversation: number;
+  status: 'active' | 'completed';
+  scenario: ScenarioConfiguration | null;
+  runtimeMeta: ConversationMeta;
   events: UnifiedEvent[];
 }
 

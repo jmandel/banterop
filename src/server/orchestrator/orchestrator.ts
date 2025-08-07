@@ -1,6 +1,7 @@
 import { Storage } from './storage';
 import { SubscriptionBus } from './subscriptions';
-import type { ConversationSnapshot, OrchestratorConfig, SchedulePolicy, GuidanceEvent, EventListener } from '$src/types/orchestrator.types';
+import type { ConversationSnapshot, HydratedConversationSnapshot, OrchestratorConfig, SchedulePolicy, GuidanceEvent, EventListener } from '$src/types/orchestrator.types';
+import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
 import type {
   AppendEventInput,
   AppendEventResult,
@@ -15,7 +16,7 @@ import type { ConversationRow, ConversationWithMeta, CreateConversationParams, L
 import { SimpleAlternationPolicy } from './policy';
 
 export class OrchestratorService {
-  private storage: Storage;
+  public readonly storage: Storage;
   private bus: SubscriptionBus;
   private policy: SchedulePolicy;
   private cfg: OrchestratorConfig;
@@ -103,6 +104,26 @@ export class OrchestratorService {
     const convoWithMeta = this.storage.conversations.getWithMetadata(conversation);
     const metadata = convoWithMeta?.metadata || { agents: [] };
     return { conversation, status, metadata, events };
+  }
+
+  getHydratedConversationSnapshot(conversationId: number): HydratedConversationSnapshot | null {
+    const convo = this.storage.conversations.getWithMetadata(conversationId);
+    if (!convo) return null;
+
+    const events = this.storage.events.getEvents(conversationId);
+    let scenario: ScenarioConfiguration | null = null;
+    if (convo.scenarioId) {
+      const scenarioItem = this.storage.scenarios.findScenarioById(convo.scenarioId);
+      scenario = scenarioItem?.config || null;
+    }
+
+    return {
+      conversation: convo.conversation,
+      status: convo.status as 'active' | 'completed',
+      scenario,
+      runtimeMeta: convo.metadata,
+      events,
+    };
   }
 
   // Expose storage methods for conversations and attachments
