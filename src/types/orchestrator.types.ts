@@ -7,6 +7,7 @@ export interface ConversationSnapshot {
   status: 'active' | 'completed';
   metadata: ConversationMeta;
   events: UnifiedEvent[];
+  lastClosedSeq: number;
 }
 
 export interface HydratedConversationSnapshot {
@@ -15,6 +16,7 @@ export interface HydratedConversationSnapshot {
   scenario: ScenarioConfiguration | null;
   runtimeMeta: ConversationMeta;
   events: UnifiedEvent[];
+  lastClosedSeq: number;
 }
 
 export interface SubscribeFilter {

@@ -60,17 +60,8 @@ export abstract class BaseAgent<TSnap = any> {
         }
         
         logLine(agentId, 'guidance', `Received guidance seq=${g.seq}`);
-        
-        // Attempt to claim the turn
-        const claim = await this.transport.claimTurn(conversationId, agentId, g.seq);
-        if (!claim.ok) {
-          logLine(agentId, 'claim-failed', claim.reason || 'Unknown reason');
-          return;
-        }
-        
-        logLine(agentId, 'claim-success', `Claimed turn at seq=${g.seq}`);
 
-        // Create turn context
+        // Create turn context (no claiming needed with CAS preconditions)
         const ctx: TurnContext<TSnap> = {
           conversationId,
           agentId,

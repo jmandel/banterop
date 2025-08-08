@@ -82,24 +82,4 @@ describe("DB timestamp precision", () => {
     sqlite.close();
   });
 
-  it("records millisecond precision in turn_claims claimed_at", () => {
-    const sqlite = new Sqlite(":memory:");
-    sqlite.migrate();
-
-    // Setup: create conversation
-    sqlite.raw.prepare(`INSERT INTO conversations (status) VALUES ('active')`).run();
-
-    // Insert turn claim
-    const expiresAt = new Date(Date.now() + 60000).toISOString();
-    const stmt = sqlite.raw.prepare(`
-      INSERT INTO turn_claims (conversation, guidance_seq, agent_id, expires_at)
-      VALUES (1, 1.1, 'test-agent', ?)
-      RETURNING claimed_at
-    `);
-    const result = stmt.get(expiresAt) as { claimed_at: string };
-
-    expect(result.claimed_at).toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
-
-    sqlite.close();
-  });
 });

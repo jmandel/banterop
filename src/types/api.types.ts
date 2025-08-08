@@ -33,7 +33,8 @@ export interface SendTraceRequest {
   conversationId: number;
   agentId: string;
   tracePayload: TracePayload;
-  turn?: number;
+  turn?: number; // omit to open a new turn
+  precondition?: { lastClosedSeq: number }; // NEW (only required when opening a new turn)
 }
 
 export interface SendTraceResponse {
@@ -47,7 +48,8 @@ export interface SendMessageRequest {
   agentId: string;
   messagePayload: MessagePayload; // clientRequestId must be inside this payload for idempotency
   finality: Finality;
-  turn?: number;
+  turn?: number; // omit to open a new turn
+  precondition?: { lastClosedSeq: number }; // NEW (only required when opening a new turn)
 }
 
 export interface SendMessageResponse {
@@ -60,19 +62,6 @@ export interface GetConversationResponse {
   conversation: number;
   status: 'active' | 'completed';
   events: UnifiedEvent[];
-}
-
-
-// Turn claim API types
-export interface ClaimTurnRequest {
-  conversationId: number;
-  agentId: string;
-  guidanceSeq: number;
-}
-
-export interface ClaimTurnResponse {
-  ok: boolean;
-  reason?: string; // e.g., "already claimed", "expired guidance"
 }
 
 // JSON-RPC protocol

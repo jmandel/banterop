@@ -207,21 +207,6 @@ async function handleRpc(
     return;
   }
 
-  if (method === 'claimTurn') {
-    const { conversationId, agentId, guidanceSeq } = params as {
-      conversationId: number;
-      agentId: string;
-      guidanceSeq: number;
-    };
-    try {
-      const result = await orchestrator.claimTurn(conversationId, agentId, guidanceSeq);
-      ws.send(JSON.stringify(ok(id, result)));
-    } catch (e) {
-      const { code, message } = mapError(e);
-      ws.send(JSON.stringify(errResp(id, code, message)));
-    }
-    return;
-  }
 
   if (method === 'runConversationToCompletion') {
     const { conversationId } = params as { conversationId: number };

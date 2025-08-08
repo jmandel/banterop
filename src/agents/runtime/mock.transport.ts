@@ -9,7 +9,8 @@ export class MockTransport implements IAgentTransport {
       conversation: _conversationId,
       status: 'active' as const,
       metadata: { agents: [] },
-      events: []
+      events: [],
+      lastClosedSeq: 0
     };
   });
 
@@ -21,6 +22,7 @@ export class MockTransport implements IAgentTransport {
     attachments?: NonNullable<MessagePayload['attachments']>;
     clientRequestId?: string;
     turn?: number;
+    precondition?: { lastClosedSeq: number };
   }): Promise<{ seq: number; turn: number; event: number }> => {
     return { seq: 1, turn: 1, event: 1 };
   });
@@ -31,12 +33,9 @@ export class MockTransport implements IAgentTransport {
     payload: TracePayload;
     turn?: number;
     clientRequestId?: string;
+    precondition?: { lastClosedSeq: number };
   }): Promise<{ seq: number; turn: number; event: number }> => {
     return { seq: 2, turn: 1, event: 2 };
-  });
-
-  claimTurn = mock(async (_conversationId: number, _agentId: string, _guidanceSeq: number): Promise<{ ok: boolean; reason?: string }> => {
-    return { ok: true };
   });
 
   now = mock((): number => Date.now());

@@ -32,14 +32,14 @@ export interface MessagePayload {
 }
 
 export type TracePayload =
-  | { type: 'thought'; content: string }
-  | { type: 'tool_call'; name: string; args: unknown; toolCallId: string }
-  | { type: 'tool_result'; toolCallId: string; result?: unknown; error?: string }
+  | { type: 'thought'; content: string; clientRequestId?: string }
+  | { type: 'tool_call'; name: string; args: unknown; toolCallId: string; clientRequestId?: string }
+  | { type: 'tool_result'; toolCallId: string; result?: unknown; error?: string; clientRequestId?: string }
   | { type: 'user_query'; question: string; context?: unknown; clientRequestId?: string }
-  | { type: 'user_response'; queryId: string; response: string };
+  | { type: 'user_response'; queryId: string; response: string; clientRequestId?: string };
 
 export interface SystemPayload {
-  kind: 'idle_timeout' | 'note' | 'turn_claimed' | 'claim_expired' | 'meta_created' | 'meta_updated';
+  kind: 'idle_timeout' | 'note' | 'meta_created' | 'meta_updated' | 'turn_started' | 'turn_phase_changed';
   data?: unknown;
   metadata?: unknown;  // For meta_created/meta_updated events
 }

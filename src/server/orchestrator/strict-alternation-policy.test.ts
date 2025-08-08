@@ -13,6 +13,7 @@ describe('StrictAlternationPolicy', () => {
       agents,
     },
     events: [],
+    lastClosedSeq: 0,
   });
   
   const createMessageEvent = (agentId: string, finality: 'none' | 'turn' | 'conversation'): UnifiedEvent => ({

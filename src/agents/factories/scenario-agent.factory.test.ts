@@ -64,12 +64,12 @@ describe('scenario-agent.factory', () => {
             { id: 'agent-2', kind: 'external' as const },
           ],
         },
+        lastClosedSeq: 0
       } as HydratedConversationSnapshot)),
       createConversation: mock(() => 1),
       appendEvent: mock(() => ({ seq: 1, turn: 1, event: 1, conversation: 1, ts: new Date().toISOString() })),
       subscribe: mock(() => 'sub-id'),
       unsubscribe: mock(() => {}),
-      claimTurn: mock(() => Promise.resolve({ ok: false, reason: 'test' })),
     };
 
     mockProviderManager = {
@@ -122,6 +122,7 @@ describe('scenario-agent.factory', () => {
             { id: 'agent-2', kind: 'external' as const },
           ],
         },
+        lastClosedSeq: 0
       } as HydratedConversationSnapshot));
 
       const handle = await startScenarioAgents(
