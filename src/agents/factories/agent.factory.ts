@@ -40,7 +40,8 @@ export async function startAgents(options: StartAgentsOptions): Promise<AgentHan
   const snapshot = await transport.getSnapshot(conversationId, { includeScenario: true });
   const hydrated = snapshot as any; // Type assertion for hydrated snapshot
   const scenario = hydrated?.scenario ?? null;
-  const runtimeAgents: AgentMeta[] = hydrated?.runtimeMeta?.agents || [];
+  // Try both runtimeMeta (hydrated) and metadata (regular snapshot)
+  const runtimeAgents: AgentMeta[] = hydrated?.runtimeMeta?.agents || hydrated?.metadata?.agents || [];
 
   // Filter to requested agents
   const candidates = agentIds?.length
@@ -48,14 +49,17 @@ export async function startAgents(options: StartAgentsOptions): Promise<AgentHan
     : runtimeAgents;
 
   console.log(`[startAgents] Starting ${candidates.length} agents for conversation ${conversationId}`);
+  console.log(`[startAgents] Runtime agents:`, runtimeAgents.map(a => ({ id: a.id, kind: a.kind, class: a.agentClass })));
+  console.log(`[startAgents] Candidates:`, candidates.map(a => ({ id: a.id, kind: a.kind, class: a.agentClass })));
 
   for (const agentMeta of candidates) {
-    // Skip external agents if we're filtering by kind
-    // (In the unified model, "internal" vs "external" is determined by transport, not metadata)
+    // Skip external agents only when using InProcessTransport (server-side)
+    // WsTransport (client-side) should run agents regardless of kind marking
     if (agentMeta.kind === 'external' && transport instanceof InProcessTransport) {
       console.log(`[startAgents] Skipping ${agentMeta.id} - marked as external but using InProcessTransport`);
       continue;
     }
+    // For WsTransport, we run whatever agents were requested
 
     const agentId = agentMeta.id;
     console.log(`[startAgents] Creating agent ${agentId} with class ${agentMeta.agentClass || 'default'}`);

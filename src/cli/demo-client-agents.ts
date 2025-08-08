@@ -2,32 +2,21 @@
 // Demo 2: Client-Side Agent Execution
 //
 // This demo shows running agents locally on the client side:
-// 1. Connect to the server over WebSocket
+// 1. Connect to existing server on port 3000
 // 2. Create a conversation (agents marked as external)
 // 3. Use WsTransport to run agents locally on the client
 // 4. Agents communicate with server via WebSocket JSON-RPC
 // 5. Client manages the agent lifecycle and execution
 
-import { Bun } from 'bun';
-import { App } from '$src/server/app';
-import { createWebSocketServer } from '$src/server/ws/jsonrpc.server';
 import { startAgents } from '$src/agents/factories/agent.factory';
 import { WsTransport } from '$src/agents/runtime/ws.transport';
 import { ProviderManager } from '$src/llm/provider-manager';
 
-// Start the server with in-memory DB
-const app = new App({ dbPath: ':memory:', nodeEnv: 'test' });
-const wsServer = createWebSocketServer(app.orchestrator, app.providerManager);
-const server = Bun.serve({
-  port: 3457,
-  fetch: wsServer.fetch,
-  websocket: wsServer.websocket,
-});
+// Connect to existing server
+const WS_URL = process.env.WS_URL || 'ws://localhost:3000/api/ws';
+console.log(`🔌 Connecting to server at ${WS_URL}...`);
 
-console.log(`🚀 Server running on ws://localhost:${server.port}/api/ws`);
-
-// Connect as a client to create the conversation
-const ws = new WebSocket(`ws://localhost:${server.port}/api/ws`);
+const ws = new WebSocket(WS_URL);
 let reqId = 1;
 
 function sendRequest(method: string, params: any): Promise<any> {
@@ -53,6 +42,9 @@ ws.onopen = async () => {
   console.log('✅ Connected to server');
   
   try {
+    // Track lastClosedSeq for the conversation
+    let lastClosedSeq = 0;
+    
     // Step 1: Create a conversation with external agents
     console.log('\n📝 Creating conversation with external agents...');
     const { conversationId } = await sendRequest('createConversation', {
@@ -96,6 +88,11 @@ ws.onopen = async () => {
         const e = data.params;
         if (e.type === 'message') {
           console.log(`📨 [Server view - ${e.agentId}]: ${e.payload.text}`);
+          // Track lastClosedSeq for our own messages
+          if (e.finality !== 'none' && e.seq) {
+            console.log(`  📌 Updating lastClosedSeq to ${e.seq}`);
+            lastClosedSeq = e.seq;
+          }
         }
       }
     });
@@ -103,11 +100,10 @@ ws.onopen = async () => {
     // Step 3: Start client-side agents using WsTransport
     console.log('\n🤖 Starting local agents with WsTransport...');
     const clientProvider = new ProviderManager({ defaultLlmProvider: 'mock' });
-    const wsUrl = `ws://localhost:${server.port}/api/ws`;
     
     const agentHandle = await startAgents({
       conversationId,
-      transport: new WsTransport(wsUrl),
+      transport: new WsTransport(WS_URL),
       providerManager: clientProvider,
       agentIds: ['local-assistant', 'local-echo'] // Only our local agents
     });
@@ -120,19 +116,22 @@ ws.onopen = async () => {
       conversationId,
       agentId: 'user',
       messagePayload: { text: 'Hello local agents! How are you running?' },
-      finality: 'turn'
+      finality: 'turn',
+      precondition: { lastClosedSeq }
     });
     
     // Wait for local agents to respond
+    console.log('\n⏳ Waiting for local agents to respond...');
     await new Promise(resolve => setTimeout(resolve, 3000));
     
     // Send another message
-    console.log('\n💬 Sending follow-up message...');
+    console.log(`\n💬 Sending follow-up message... (lastClosedSeq=${lastClosedSeq})`);
     await sendRequest('sendMessage', {
       conversationId,
       agentId: 'user',
       messagePayload: { text: 'Great to hear you are running locally!' },
-      finality: 'turn'
+      finality: 'turn',
+      precondition: { lastClosedSeq }
     });
     
     await new Promise(resolve => setTimeout(resolve, 2000));
@@ -142,12 +141,13 @@ ws.onopen = async () => {
     await agentHandle.stop();
     
     // End the conversation
-    console.log('\n🏁 Ending conversation...');
+    console.log(`\n🏁 Ending conversation... (lastClosedSeq=${lastClosedSeq})`);
     await sendRequest('sendMessage', {
       conversationId,
       agentId: 'user',
       messagePayload: { text: 'Demo complete - agents ran on the client!' },
-      finality: 'conversation'
+      finality: 'conversation',
+      precondition: { lastClosedSeq }
     });
     
     console.log('\n✅ Demo complete! Agents ran entirely on the client using WsTransport.');
@@ -155,15 +155,11 @@ ws.onopen = async () => {
     // Cleanup
     await sendRequest('unsubscribe', { subId });
     ws.close();
-    server.stop();
-    await app.shutdown();
     process.exit(0);
     
   } catch (error) {
     console.error('❌ Error:', error);
     ws.close();
-    server.stop();
-    await app.shutdown();
     process.exit(1);
   }
 };
