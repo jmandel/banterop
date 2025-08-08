@@ -1,7 +1,8 @@
-import type { IAgentTransport } from './runtime.interfaces';
+import type { IAgentTransport, IAgentEvents } from './runtime.interfaces';
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
 import type { MessagePayload, TracePayload } from '$src/types/event.types';
 import type { ConversationSnapshot, HydratedConversationSnapshot } from '$src/types/orchestrator.types';
+import { InProcessEvents } from './inprocess.events';
 
 export class InProcessTransport implements IAgentTransport {
   constructor(private orchestrator: OrchestratorService) {}
@@ -67,5 +68,9 @@ export class InProcessTransport implements IAgentTransport {
 
   now(): number {
     return Date.now();
+  }
+
+  createEventStream(conversationId: number, includeGuidance: boolean): IAgentEvents {
+    return new InProcessEvents(this.orchestrator, conversationId, includeGuidance);
   }
 }

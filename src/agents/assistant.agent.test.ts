@@ -270,11 +270,12 @@ describe('AssistantAgent', () => {
     // Add a longer wait to ensure the async turn completes
     await new Promise(resolve => setTimeout(resolve, 200));
     
-    expect(mockTransport.postMessage).toHaveBeenCalledWith({
+    // Allow additional fields (e.g., precondition) while asserting required shape
+    expect(mockTransport.postMessage).toHaveBeenCalledWith(expect.objectContaining({
       conversationId: 1,
       agentId: 'assistant',
       text: expect.stringContaining('Mock response'),
       finality: 'turn'
-    });
+    }));
   });
 });

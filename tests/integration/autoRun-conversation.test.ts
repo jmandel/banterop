@@ -76,12 +76,14 @@ describe("AutoRun conversation feature", () => {
 
     // === 3. Create conversation with scenario ===
     const { conversationId } = await wsRpcCall<{ conversationId: number }>(wsUrl, "createConversation", {
-      title: "Test AutoRun Flag",
-      scenarioId: "test-scenario-1",
-      agents: [
-        { id: "alpha", kind: "internal", agentClass: "ScenarioDrivenAgent" },
-        { id: "beta", kind: "internal", agentClass: "ScenarioDrivenAgent" }
-      ]
+      meta: {
+        title: "Test AutoRun Flag",
+        scenarioId: "test-scenario-1",
+        agents: [
+          { id: "alpha", kind: "internal", agentClass: "ScenarioDrivenAgent" },
+          { id: "beta", kind: "internal", agentClass: "ScenarioDrivenAgent" }
+        ]
+      }
     });
 
     // === 4. Trigger auto-run ===
@@ -123,12 +125,14 @@ describe("AutoRun conversation feature", () => {
 
     // === 3. Create conversation ===
     const { conversationId } = await wsRpcCall<{ conversationId: number }>(wsUrl, "createConversation", {
-      title: "Test Resume",
-      scenarioId: "test-scenario-2",
-      agents: [
-        { id: "alpha", kind: "internal", agentClass: "ScenarioDrivenAgent" },
-        { id: "beta", kind: "internal", agentClass: "ScenarioDrivenAgent" }
-      ]
+      meta: {
+        title: "Test Resume",
+        scenarioId: "test-scenario-2",
+        agents: [
+          { id: "alpha", kind: "internal", agentClass: "ScenarioDrivenAgent" },
+          { id: "beta", kind: "internal", agentClass: "ScenarioDrivenAgent" }
+        ]
+      }
     });
 
     // Mark for autoRun
@@ -170,12 +174,14 @@ describe("AutoRun conversation feature", () => {
 
     // === 3. Create conversation ===
     const { conversationId } = await wsRpcCall<{ conversationId: number }>(wsUrl, "createConversation", {
-      title: "Old AutoRun",
-      scenarioId: "test-scenario-3",
-      agents: [
-        { id: "alpha", kind: "internal", agentClass: "ScenarioDrivenAgent" },
-        { id: "beta", kind: "internal", agentClass: "ScenarioDrivenAgent" }
-      ]
+      meta: {
+        title: "Old AutoRun",
+        scenarioId: "test-scenario-3",
+        agents: [
+          { id: "alpha", kind: "internal", agentClass: "ScenarioDrivenAgent" },
+          { id: "beta", kind: "internal", agentClass: "ScenarioDrivenAgent" }
+        ]
+      }
     });
 
     // Trigger autoRun

@@ -3,7 +3,8 @@ import { OrchestratorService } from './orchestrator/orchestrator';
 import { ConfigManager, type Config } from './config';
 import { ProviderManager } from '$src/llm/provider-manager';
 import type { SchedulePolicy } from '$src/types/orchestrator.types';
-import { startScenarioAgents } from '$src/agents/factories/scenario-agent.factory';
+import { startAgents } from '$src/agents/factories/agent.factory';
+import { InProcessTransport } from '$src/agents/runtime/inprocess.transport';
 
 export interface AppOptions extends Partial<Config> {
   policy?: SchedulePolicy;
@@ -52,10 +53,12 @@ export class App {
         }
         console.log(`[AutoRun Resume] Resuming conversation ${convo.conversation}`);
         
-        // Only start if there's a scenario or internal agents defined
+        // Only start if there are internal agents defined
         const hasInternalAgents = meta.agents?.some((a: any) => a.kind === 'internal');
-        if (meta.scenarioId || hasInternalAgents) {
-          startScenarioAgents(this.orchestrator, convo.conversation, {
+        if (hasInternalAgents) {
+          startAgents({
+            conversationId: convo.conversation,
+            transport: new InProcessTransport(this.orchestrator),
             providerManager: this.providerManager
           }).catch(err => {
             console.error(`[AutoRun Resume] Failed to start convo ${convo.conversation}`, err);

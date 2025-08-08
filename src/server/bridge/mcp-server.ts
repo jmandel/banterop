@@ -20,7 +20,8 @@ import {
   getStartingAgentId,
   type ConvConversationMeta,
 } from '$src/server/bridge/conv-config.types';
-import { startInternalAgentsFromMeta } from '$src/agents/factories/internal-agent.factory';
+import { startAgents } from '$src/agents/factories/agent.factory';
+import { InProcessTransport } from '$src/agents/runtime/inprocess.transport';
 
 export interface McpBridgeDeps {
   orchestrator: OrchestratorService;
@@ -159,8 +160,12 @@ export class McpBridgeServer {
       },
     });
 
-    // Start internal agent loops
-    await startInternalAgentsFromMeta(orchestrator, conversationId, meta, { providerManager });
+    // Start agents using unified factory
+    await startAgents({
+      conversationId,
+      transport: new InProcessTransport(orchestrator),
+      providerManager
+    });
 
     return conversationId;
   }
