@@ -33,7 +33,7 @@
 import type { LLMProvider, LLMMessage } from '$src/types/llm.types';
 import type {
   ScenarioConfiguration,
-  AgentConfiguration,
+  ScenarioConfigAgentDetails,
 } from '$src/types/scenario-configuration.types';
 
 // Input definitions for Oracle execution
@@ -257,12 +257,12 @@ EXAMPLE:
     ].join('\n');
   }
 
-  private getAgentDef(s: ScenarioConfiguration, agentId: string): AgentConfiguration | undefined {
+  private getAgentDef(s: ScenarioConfiguration, agentId: string): ScenarioConfigAgentDetails | undefined {
     return (s.agents || []).find((a) => a.agentId === agentId);
   }
 
   // Extracts the knowledgeBase from AgentConfiguration
-  private extractKnowledgeFromAgentDef(agent?: AgentConfiguration): unknown {
+  private extractKnowledgeFromAgentDef(agent?: ScenarioConfigAgentDetails): unknown {
     if (!agent) return null;
     // AgentConfiguration has knowledgeBase directly
     return agent.knowledgeBase || null;

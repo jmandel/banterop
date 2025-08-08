@@ -1,5 +1,5 @@
 import type { ScheduleDecision, SchedulePolicy, SchedulePolicyInput } from '$src/types/orchestrator.types';
-import type { AgentConfiguration } from '$src/types/scenario-configuration.types';
+import type { ScenarioConfigAgentDetails } from '$src/types/scenario-configuration.types';
 import type { AgentMeta } from '$src/types/conversation.meta';
 
 export class ScenarioPolicy implements SchedulePolicy {
@@ -32,7 +32,7 @@ export class ScenarioPolicy implements SchedulePolicy {
         const agentKindMap = new Map(metadataAgents.map((a: AgentMeta) => [a.id, a.kind]));
         
         // Get scenario agents for participant list
-        const scenarioAgents = (hydrated.scenario.agents || []) as AgentConfiguration[];
+        const scenarioAgents = (hydrated.scenario.agents || []) as ScenarioConfigAgentDetails[];
         
         // Get participants from scenario
         const participants = new Set(scenarioAgents.map(a => a.agentId));

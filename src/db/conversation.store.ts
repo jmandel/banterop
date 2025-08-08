@@ -28,6 +28,18 @@ export interface ListConversationsParams {
 export class ConversationStore {
   constructor(private db: Database) {}
 
+  updateMeta(conversationId: number, metadata: ConversationMeta): void {
+    this.db.prepare(`
+      UPDATE conversations
+      SET meta_json = ?
+      WHERE conversation = ?
+    `).run(JSON.stringify({
+      agents: metadata.agents,
+      ...(metadata.config !== undefined ? { config: metadata.config } : {}),
+      ...(metadata.custom !== undefined ? { custom: metadata.custom } : {}),
+    }), conversationId);
+  }
+
   create(params: CreateConversationParams): number {
     const metadata: ConversationMeta = {
       ...(params.title !== undefined ? { title: params.title } : {}),
