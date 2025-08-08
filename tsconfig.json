@@ -5,6 +5,7 @@
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "noEmit": true,
+    "jsx": "react",
     "strict": true,
     "skipLibCheck": true,
     "allowSyntheticDefaultImports": true,

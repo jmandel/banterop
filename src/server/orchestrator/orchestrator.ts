@@ -13,7 +13,7 @@ import type {
   AttachmentRow,
 } from '$src/types/event.types';
 import type { ConversationRow, ConversationWithMeta, CreateConversationParams, ListConversationsParams } from '$src/db/conversation.store';
-import { SimpleAlternationPolicy } from './policy';
+import { StrictAlternationPolicy } from './strict-alternation-policy';
 
 export class OrchestratorService {
   public readonly storage: Storage;
@@ -27,7 +27,7 @@ export class OrchestratorService {
   constructor(storage: Storage, bus?: SubscriptionBus, policy?: SchedulePolicy, cfg?: OrchestratorConfig) {
     this.storage = storage;
     this.bus = bus ?? new SubscriptionBus();
-    this.policy = policy ?? new SimpleAlternationPolicy();
+    this.policy = policy ?? new StrictAlternationPolicy();
     this.cfg = cfg ?? { idleTurnMs: 120_000 };
     
     // Start watchdog for expired claims
@@ -429,5 +429,58 @@ export class OrchestratorService {
       // Non-critical cleanup, log and continue
       console.error('Failed to cleanup claims:', err);
     }
+  }
+
+  // Wait for this agent's turn - used by internal executors
+  async waitForTurn(conversationId: number, agentId: string): Promise<{ deadlineMs: number } | null> {
+    return new Promise((resolve) => {
+      // Subscribe with guidance to get scheduling decisions
+      const subId = this.subscribe(
+        conversationId,
+        (event: any) => {
+          // Check for conversation completion
+          if ('type' in event && event.type === 'message') {
+            const msg = event as UnifiedEvent;
+            if (msg.finality === 'conversation') {
+              this.unsubscribe(subId);
+              resolve(null);
+              return;
+            }
+          }
+
+          // Check if we got a guidance event for this agent
+          if ('type' in event && event.type === 'guidance') {
+            const guidance = event as GuidanceEvent;
+            if (guidance.nextAgentId === agentId) {
+              this.unsubscribe(subId);
+              const deadlineMs = guidance.deadlineMs || (Date.now() + 30000);
+              resolve({ deadlineMs });
+              return;
+            }
+          }
+        },
+        true // includeGuidance
+      );
+
+      // Also check current state immediately
+      const snapshot = this.getConversationSnapshot(conversationId);
+      if (snapshot.status === 'completed') {
+        this.unsubscribe(subId);
+        resolve(null);
+        return;
+      }
+
+      // Check if there's already a decision for this agent based on last event
+      const lastEvent = snapshot.events[snapshot.events.length - 1];
+      if (lastEvent) {
+        const decision = this.policy.decide({ snapshot, lastEvent });
+        if (decision.kind === 'internal' && decision.agentId === agentId) {
+          this.unsubscribe(subId);
+          const deadlineMs = Date.now() + 30000;
+          resolve({ deadlineMs });
+          return;
+        }
+      }
+    });
   }
 }

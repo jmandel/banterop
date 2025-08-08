@@ -51,26 +51,26 @@ async function main() {
     const agentClass = (agent.agentClass || "EchoAgent").toLowerCase();
     
     if (agentClass === "echoagent") {
-      agentImpl = new EchoAgent({ 
-        name: agent.id,
-        processingMessage: `${agent.id} is thinking...`,
-        finalMessage: `Hello from ${agent.id}!`
-      });
+      agentImpl = new EchoAgent(
+        `${agent.id} is thinking...`,
+        `Hello from ${agent.id}!`
+      );
     } else if (agentClass === "assistantagent") {
       const provider = app.providerManager.getProvider();
       agentImpl = new AssistantAgent(provider);
     } else {
       // Default to echo agent
-      agentImpl = new EchoAgent({ name: agent.id });
+      agentImpl = new EchoAgent();
     }
     
     // Create and start the executor
     const loop = new TurnLoopExecutorInternal(
-      agentImpl,
       app.orchestrator,
       {
         conversationId,
         agentId: agent.id,
+        meta: agent,
+        buildAgent: () => agentImpl,  // For backward compatibility
       }
     );
     

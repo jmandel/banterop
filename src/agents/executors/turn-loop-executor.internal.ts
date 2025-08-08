@@ -2,26 +2,30 @@ import type { Agent, AgentContext, Logger } from '$src/agents/agent.types';
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
 import type { GuidanceEvent } from '$src/types/orchestrator.types';
 import type { UnifiedEvent } from '$src/types/event.types';
+import type { AgentMeta } from '$src/types/conversation.meta';
 import { InProcessEventStream, type StreamEvent } from '$src/agents/clients/event-stream';
 import { InProcessClient } from '$src/agents/clients/inprocess.client';
 import { logLine, colors } from '$src/lib/utils/logger';
 
+export type BuildAgentFn = (meta: AgentMeta) => Agent;
+
 export interface InternalLoopOptions {
   conversationId: number;
   agentId: string;
+  meta: AgentMeta;
+  buildAgent: BuildAgentFn;
   logger?: Logger;
 }
 
 /**
  * Internal executor using the same guidance/claim pattern as external
- * Replaces the complex worker-runner.ts and policy callbacks
+ * Now supports per-turn agent instantiation via buildAgent function
  */
 export class TurnLoopExecutorInternal {
   private stream: InProcessEventStream | undefined;
   private stopped = false;
   
   constructor(
-    private agent: Agent,
     private orchestrator: OrchestratorService,
     private options: InternalLoopOptions
   ) {}
@@ -54,6 +58,9 @@ export class TurnLoopExecutorInternal {
           if (claimed.ok) {
             logLine(agentId, colors.green('CLAIMED'), `guidanceSeq=${guidance.seq}`);
             
+            // Build a brand new agent instance for this turn
+            const agent = this.options.buildAgent(this.options.meta);
+            
             // Create agent context with in-process client
             const ctx: AgentContext = {
               conversationId,
@@ -65,7 +72,7 @@ export class TurnLoopExecutorInternal {
             
             // Run agent for one turn
             try {
-              await this.agent.handleTurn(ctx);
+              await agent.handleTurn(ctx);
               logLine(agentId, colors.bright('TURN COMPLETE'));
             } catch (err) {
               logLine(agentId, colors.red('TURN ERROR'), String(err));
