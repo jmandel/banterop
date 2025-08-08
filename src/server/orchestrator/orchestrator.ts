@@ -22,7 +22,7 @@ export class OrchestratorService {
   private cfg: OrchestratorConfig;
   private isShuttingDown = false;
 
-  private watchdogInterval: Timer | undefined = undefined;
+  private watchdogInterval: ReturnType<typeof setInterval> | undefined = undefined;
 
   constructor(storage: Storage, bus?: SubscriptionBus, policy?: SchedulePolicy, cfg?: OrchestratorConfig) {
     this.storage = storage;
@@ -56,12 +56,14 @@ export class OrchestratorService {
     }
     
     const res = this.storage.events.appendEvent(input);
-    const last = this.getLastEvent(res.conversation)!;
-    // Fanout
-    this.bus.publish(last);
+    // Fanout the exact event we wrote (robust to ordering)
+    const persisted = this.storage.events.getEventBySeq(res.seq);
+    if (persisted) {
+      this.bus.publish(persisted);
+    }
     // Post-write orchestration
     if (!this.isShuttingDown) {
-      this.onEventAppended(last);
+      if (persisted) this.onEventAppended(persisted);
     }
     return res;
   }
@@ -69,11 +71,13 @@ export class OrchestratorService {
   // Convenience helpers for common patterns
 
   sendTrace(conversation: number, agentId: string, payload: TracePayload, turn?: number): void {
-    // Determine turn: use provided or the last open turn authored by this agent, else error
-    const targetTurn = turn ?? this.findOpenTurn(conversation);
+    // Determine turn: use provided or try to find an open turn
+    // If no open turn exists, traces can now start a new turn
+    const targetTurn = turn ?? this.tryFindOpenTurn(conversation);
+    // Pass undefined turn to appendEvent to allow trace-started turn
     this.appendEvent({
       conversation,
-      turn: targetTurn,
+      ...(targetTurn !== undefined ? { turn: targetTurn } : {}),
       type: 'trace',
       payload,
       finality: 'none',
@@ -260,41 +264,18 @@ export class OrchestratorService {
   private appendSystemEvent(conversation: number, systemPayload: SystemPayload) {
     if (this.isShuttingDown) return;
     
-    // System events cannot finalize anything
-    // System events should create a new turn if the previous one is finalized
     try {
-      const snapshot = this.getConversationSnapshot(conversation);
-      let turn: number | undefined;
-      
-      // Check if we need a new turn (if last message finalized)
-      if (snapshot.events.length > 0) {
-        const lastEvent = snapshot.events[snapshot.events.length - 1]!;
-        if (lastEvent.type === 'message' && lastEvent.finality !== 'none') {
-          // Previous turn is closed, don't provide turn to start a new one
-          turn = undefined;
-        } else {
-          // Use current turn
-          turn = lastEvent.turn;
-        }
-      }
-      
-      // For system events that can't start a turn, we need to start with a message
-      if (!turn) {
-        // System events can't start turns, so skip if no open turn
-        return;
-      }
-      
-      this.storage.events.appendEvent({
+      // With EventStore routing, no turn is required; system events will go to turn 0
+      const res = this.storage.events.appendEvent({
         conversation,
-        turn,
         type: 'system',
         payload: systemPayload,
         finality: 'none',
         agentId: 'system-orchestrator',
       });
-      // Publish the last event for this conversation (the system event we just appended)
-      const last = this.getLastEvent(conversation);
-      if (last) this.bus.publish(last);
+      // Publish exactly what we wrote
+      const persisted = this.storage.events.getEventBySeq(res.seq);
+      if (persisted) this.bus.publish(persisted);
     } catch (err) {
       // System events are advisory, so we can silently skip on errors
       if (!this.isShuttingDown) {
@@ -303,18 +284,12 @@ export class OrchestratorService {
     }
   }
 
-  private getLastEvent(conversation: number): UnifiedEvent | undefined {
-    const snapshot = this.getConversationSnapshot(conversation);
-    return snapshot.events[snapshot.events.length - 1];
-  }
-
-  private findOpenTurn(conversation: number): number {
-    // An "open turn" is defined as a turn that has no message with finality != 'none' yet.
-    // We can compute by scanning from end.
+  private tryFindOpenTurn(conversation: number): number | undefined {
+    // Non-throwing helper to find an open turn, or return undefined if none exists
     const events = this.storage.events.getEvents(conversation);
-    if (events.length === 0) throw new Error('No turns exist');
+    if (events.length === 0) return undefined;
     const lastEvent = events[events.length - 1];
-    if (!lastEvent) throw new Error('No events exist');
+    if (!lastEvent) return undefined;
     const currentTurn = lastEvent.turn;
     // Check if the last message finalized the turn; if yes, no open turn
     for (let i = events.length - 1; i >= 0; i--) {
@@ -322,7 +297,7 @@ export class OrchestratorService {
       if (!e) continue;
       if (e.turn !== currentTurn) break;
       if (e.type === 'message' && e.finality !== 'none') {
-        throw new Error('No open turn for traces; provide turn explicitly');
+        return undefined; // Turn is closed
       }
     }
     return currentTurn;

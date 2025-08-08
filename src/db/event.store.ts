@@ -40,15 +40,21 @@ export class EventStore {
 
       // Turn allocation
       let turn = input.turn;
-      if (!turn) {
-        if (input.type !== 'message') {
-          throw new Error('Only message events can start a new turn');
+      if (turn === undefined) {
+        if (input.type === 'system') {
+          // System events use an out-of-band lane: turn 0
+          turn = 0;
+        } else if (input.type === 'message' || input.type === 'trace') {
+          turn = allocNextTurn(this.db, input.conversation);
+        } else {
+          throw new Error('Only message or trace events may start a new turn');
         }
-        turn = allocNextTurn(this.db, input.conversation);
       } else {
-        // Validate no turn-finalized message exists already
-        const closed = this.isTurnClosed(input.conversation, turn);
-        if (closed) throw new Error('Turn already finalized');
+        // If turn is explicitly provided, reject writes to closed turns for normal turns (> 0)
+        if (turn !== 0) {
+          const closed = this.isTurnClosed(input.conversation, turn);
+          if (closed) throw new Error('Turn already finalized');
+        }
       }
 
       // Event allocation
@@ -161,6 +167,40 @@ export class EventStore {
       this.db.exec('ROLLBACK;');
       throw e;
     }
+  }
+
+  getEventBySeq(seq: number): UnifiedEvent | null {
+    const row = this.db
+      .prepare(
+        `SELECT conversation, turn, event, type, payload, finality, ts, agent_id as agentId, seq
+         FROM conversation_events
+         WHERE seq = ?`
+      )
+      .get(seq) as
+        | {
+            conversation: number;
+            turn: number;
+            event: number;
+            type: string;
+            payload: string;
+            finality: string;
+            ts: string;
+            agentId: string;
+            seq: number;
+          }
+        | undefined;
+    if (!row) return null;
+    return {
+      conversation: row.conversation,
+      turn: row.turn,
+      event: row.event,
+      type: row.type as UnifiedEvent['type'],
+      payload: JSON.parse(row.payload),
+      finality: row.finality as Finality,
+      ts: row.ts,
+      agentId: row.agentId,
+      seq: row.seq,
+    };
   }
 
   getEvents(conversation: number): UnifiedEvent[] {

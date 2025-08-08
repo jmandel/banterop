@@ -100,11 +100,8 @@ export class InternalTurnLoop {
     if (!('type' in event)) return false;
     if (event.type !== 'guidance') return false;
     const guidance = event as GuidanceEvent;
-    // Match if guidance is explicitly for us
-    if (guidance.nextAgentId === this.options.agentId) return true;
-    // Also match if guidance is for 'assistant' and we're agent-a (first responder)
-    if (guidance.nextAgentId === 'assistant' && this.options.agentId === 'agent-a') return true;
-    return false;
+    // Match only if guidance is explicitly for us
+    return guidance.nextAgentId === this.options.agentId;
   }
   
   private isConversationEnd(event: StreamEvent): boolean {

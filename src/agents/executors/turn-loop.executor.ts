@@ -103,11 +103,8 @@ export class TurnLoopExecutor {
     if (!('type' in event)) return false;
     if (event.type !== 'guidance') return false;
     const guidance = event as GuidanceEvent;
-    // Match if guidance is explicitly for us
-    if (guidance.nextAgentId === this.options.agentId) return true;
-    // Also match 'assistant' guidance if we're not 'user' (any agent can claim assistant role)
-    if (guidance.nextAgentId === 'assistant' && this.options.agentId !== 'user') return true;
-    return false;
+    // Match only if guidance is explicitly for us
+    return guidance.nextAgentId === this.options.agentId;
   }
   
   private isConversationEnd(event: StreamEvent): boolean {

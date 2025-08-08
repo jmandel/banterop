@@ -29,8 +29,9 @@ describe('App integration', () => {
     
     // Verify we can read it back
     const snapshot = app.orchestrator.getConversationSnapshot(conversationId);
-    expect(snapshot.events.length).toBe(1);
-    expect((snapshot.events[0]!.payload as MessagePayload).text).toBe('Hello');
+    const messages = snapshot.events.filter(e => e.type === 'message');
+    expect(messages.length).toBe(1);
+    expect((messages[0]!.payload as MessagePayload).text).toBe('Hello');
     
     // List conversations
     const conversations = app.orchestrator.listConversations({});
@@ -72,10 +73,12 @@ describe('App integration', () => {
     const snap1 = app.orchestrator.getConversationSnapshot(id1);
     const snap2 = app.orchestrator.getConversationSnapshot(id2);
     
-    expect(snap1.events.length).toBe(1);
-    expect(snap2.events.length).toBe(1);
-    expect((snap1.events[0]!.payload as MessagePayload).text).toBe('Message 1');
-    expect((snap2.events[0]!.payload as MessagePayload).text).toBe('Message 2');
+    const msgs1 = snap1.events.filter(e => e.type === 'message');
+    const msgs2 = snap2.events.filter(e => e.type === 'message');
+    expect(msgs1.length).toBe(1);
+    expect(msgs2.length).toBe(1);
+    expect((msgs1[0]!.payload as MessagePayload).text).toBe('Message 1');
+    expect((msgs2[0]!.payload as MessagePayload).text).toBe('Message 2');
     
     await app.shutdown();
   });

@@ -4,6 +4,7 @@ import { App } from '$src/server/app';
 import { createWebSocketServer, websocket } from '$src/server/ws/jsonrpc.server';
 import { Hono } from 'hono';
 import type { Agent, AgentContext } from '$src/agents/agent.types';
+import { CompetitionPolicy } from '$src/server/orchestrator/competition-policy';
 
 describe('Turn-based Coordination E2E', () => {
   let app: App;
@@ -27,6 +28,16 @@ describe('Turn-based Coordination E2E', () => {
     
     conversationId = app.orchestrator.createConversation({
       title: 'Test Turn Coordination',
+      agents: [
+        { id: 'user', kind: 'external' },
+        { id: 'agent-a', kind: 'internal' },
+        { id: 'agent-b', kind: 'internal' },
+        { id: 'agent-c', kind: 'internal' },
+        { id: 'competitor-0', kind: 'internal' },
+        { id: 'competitor-1', kind: 'internal' },
+        { id: 'competitor-2', kind: 'internal' },
+        { id: 'slow-agent', kind: 'internal' },
+      ],
     });
   });
 
@@ -130,6 +141,33 @@ describe('Turn-based Coordination E2E', () => {
   });
 
   test('turn claims prevent duplicate work', async () => {
+    // Create app with competition policy for this test
+    const competitionApp = new App({ 
+      dbPath: ':memory:',
+      policy: new CompetitionPolicy(),
+    });
+    
+    const honoServer = new Hono();
+    honoServer.route('/', createWebSocketServer(competitionApp.orchestrator));
+    
+    const competitionServer = Bun.serve({
+      port: 0,
+      fetch: honoServer.fetch,
+      websocket,
+    });
+    
+    const competitionWsUrl = `ws://localhost:${competitionServer.port}/api/ws`;
+    
+    const competitionConvId = competitionApp.orchestrator.createConversation({
+      title: 'Competition Test',
+      agents: [
+        { id: 'user', kind: 'external' },
+        { id: 'competitor-0', kind: 'internal' },
+        { id: 'competitor-1', kind: 'internal' },
+        { id: 'competitor-2', kind: 'internal' },
+      ],
+    });
+    
     let successfulTurns = 0;
     
     // Create agent that tracks claim attempts
@@ -159,9 +197,9 @@ describe('Turn-based Coordination E2E', () => {
     
     for (let i = 0; i < 3; i++) {
       const exec = new TurnLoopExecutor(competingAgent, {
-        conversationId,
+        conversationId: competitionConvId,
         agentId: `competitor-${i}`,
-        wsUrl,
+        wsUrl: competitionWsUrl,
       });
       executors.push(exec);
       promises.push(exec.start());
@@ -171,8 +209,8 @@ describe('Turn-based Coordination E2E', () => {
     await new Promise(resolve => setTimeout(resolve, 100));
 
     // Trigger guidance
-    app.orchestrator.appendEvent({
-      conversation: conversationId,
+    competitionApp.orchestrator.appendEvent({
+      conversation: competitionConvId,
       type: 'message',
       payload: { text: 'Go!' },
       finality: 'turn',
@@ -189,7 +227,11 @@ describe('Turn-based Coordination E2E', () => {
     expect(successfulTurns).toBe(1);
     
     // Check conversation events to verify only one agent responded
-    const snapshot = app.orchestrator.getConversationSnapshot(conversationId);
+    const snapshot = competitionApp.orchestrator.getConversationSnapshot(competitionConvId);
+    
+    // Clean up
+    competitionServer.stop();
+    await competitionApp.shutdown();
     const agentMessages = snapshot.events.filter(
       e => e.type === 'message' && e.agentId.startsWith('competitor')
     );
@@ -292,6 +334,12 @@ describe('Guidance Event Distribution', () => {
   test('guidance targets specific agents', async () => {
     const conversationId = app.orchestrator.createConversation({
       title: 'Guidance targeting test',
+      agents: [
+        { id: 'user', kind: 'external' },
+        { id: 'agent-a', kind: 'internal' },
+        { id: 'agent-b', kind: 'internal' },
+        { id: 'agent-c', kind: 'internal' },
+      ],
     });
 
     const receivedGuidance: { [key: string]: any[] } = {

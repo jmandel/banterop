@@ -46,7 +46,7 @@ describe('OrchestratorService', () => {
     }
   });
 
-  it('sendTrace requires open turn; sendMessage can start a new turn', () => {
+  it('sendTrace can start a new turn when none exists', () => {
     // Starting a new turn via message
     orch.sendMessage(1, 'user', { text: 'Part 1' }, 'none'); // turn 1
 
@@ -56,20 +56,57 @@ describe('OrchestratorService', () => {
     // Finalize the turn
     orch.sendMessage(1, 'user', { text: 'Part 2' }, 'turn', 1);
 
-    // Now sendTrace without specifying turn should fail (no open turn)
-    expect(() => orch.sendTrace(1, 'user', { type: 'thought', content: 'too late' })).toThrow(/No open turn/);
+    // Now sendTrace can start a new turn (turn 2)
+    orch.sendTrace(1, 'assistant', { type: 'thought', content: 'starting new turn' });
+    
+    // Verify the trace started a new turn
+    const snapshot = orch.getConversationSnapshot(1);
+    const lastEvent = snapshot.events[snapshot.events.length - 1];
+    expect(lastEvent?.type).toBe('trace');
+    expect(lastEvent?.turn).toBe(2);
+  });
+
+  it('logs meta_created system event in turn 0', () => {
+    const recv: UnifiedEvent[] = [];
+    const conversationId = orch.createConversation({
+      title: 'Test Conversation',
+      agents: [
+        { id: 'user', kind: 'external' },
+        { id: 'bot', kind: 'internal' },
+      ],
+    });
+    
+    orch.subscribe(conversationId, (e: UnifiedEvent) => recv.push(e));
+    
+    // Meta_created should have been logged
+    const snapshot = orch.getConversationSnapshot(conversationId);
+    const systemEvents = snapshot.events.filter(e => e.type === 'system');
+    expect(systemEvents.length).toBeGreaterThan(0);
+    
+    const metaCreated = systemEvents.find(e => 
+      e.type === 'system' && (e.payload as any).kind === 'meta_created'
+    );
+    expect(metaCreated).toBeDefined();
+    expect(metaCreated?.turn).toBe(0);
+    expect(metaCreated?.event).toBe(1);
   });
 
   it('emits guidance events when configured', () => {
     const orch2 = new OrchestratorService(storage, bus, undefined, {});
-    orch2.createConversation({});
+    const convId = orch2.createConversation({
+      agents: [
+        { id: 'user', kind: 'external' },
+        { id: 'assistant', kind: 'internal' },
+      ],
+    });
+    
     
     const recv: Array<UnifiedEvent | any> = [];
-    orch2.subscribe(1, (e: any) => recv.push(e), true); // includeGuidance = true
+    orch2.subscribe(convId, (e: any) => recv.push(e), true); // includeGuidance = true
 
     // User finalizes a turn -> should emit guidance
     orch2.appendEvent({
-      conversation: 1,
+      conversation: convId,
       type: 'message',
       payload: { text: 'Please answer' } as MessagePayload,
       finality: 'turn',
@@ -77,7 +114,12 @@ describe('OrchestratorService', () => {
     });
 
     // Check that guidance was emitted
-    const hasGuidance = recv.some((e) => e.type === 'guidance');
-    expect(hasGuidance).toBe(true);
+    const guidanceEvents = recv.filter((e) => e.type === 'guidance');
+    expect(guidanceEvents.length).toBeGreaterThan(0);
+    
+    // Verify the guidance is for the assistant
+    if (guidanceEvents.length > 0) {
+      expect(guidanceEvents[0].nextAgentId).toBe('assistant');
+    }
   });
 });

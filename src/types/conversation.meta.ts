@@ -1,10 +1,11 @@
 export interface AgentMeta {
-  id: string;                              // slug, immutable
-  kind: 'internal' | 'external';
+  id: string;                              // slug, immutable (matches agentId from scenario)
+  kind: 'internal' | 'external';           // explicitly specify if internal or external
+  agentClass?: string;                     // e.g., "AssistantAgent", "EchoAgent", "ScriptAgent"
   role?: string;
   displayName?: string;
   avatarUrl?: string;
-  config?: Record<string, unknown>;
+  config?: Record<string, unknown>;        // agent-specific configuration (e.g., LLM provider settings)
 }
 
 export interface ConversationMeta {
@@ -12,6 +13,7 @@ export interface ConversationMeta {
   description?: string;
   scenarioId?: string;
   agents: AgentMeta[];
+  startingAgentId?: string;                // which agent should start the conversation
   config?: Record<string, unknown>;
   custom?: Record<string, unknown>;        // namespaced ext
 }
@@ -22,6 +24,7 @@ export interface CreateConversationRequest {
   description?: string;
   scenarioId?: string;
   agents?: AgentMeta[];
+  startingAgentId?: string;                // which agent should start the conversation
   config?: Record<string, unknown>;
   custom?: Record<string, unknown>;
 }

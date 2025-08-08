@@ -6,7 +6,11 @@ export class InProcessClient implements IAgentClient {
   constructor(private orch: OrchestratorService) {}
 
   async getSnapshot(conversationId: number) {
-    return this.orch.getConversationSnapshot(conversationId);
+    const hydrated = this.orch.getHydratedConversationSnapshot(conversationId);
+    if (!hydrated) {
+      throw new Error(`Conversation ${conversationId} not found`);
+    }
+    return hydrated;
   }
 
 

@@ -1,10 +1,25 @@
 import type { ScheduleDecision, SchedulePolicy, SchedulePolicyInput } from '$src/types/orchestrator.types';
-import type { AgentDefinition } from '$src/types/scenario-configuration.types';
+import type { AgentConfiguration } from '$src/types/scenario-configuration.types';
 import type { AgentMeta } from '$src/types/conversation.meta';
 
 export class ScenarioPolicy implements SchedulePolicy {
   decide({ snapshot, lastEvent }: SchedulePolicyInput): ScheduleDecision {
-    if (!lastEvent) return { kind: 'none' };
+    // If no events yet, check if we have a configured starting agent
+    if (!lastEvent) {
+      const startingAgentId = snapshot.metadata?.startingAgentId;
+      if (startingAgentId) {
+        const metadataAgents = snapshot.metadata?.agents || [];
+        const starter = metadataAgents.find((a: AgentMeta) => a.id === startingAgentId);
+        if (starter) {
+          if (starter.kind === 'internal') {
+            return { kind: 'internal', agentId: startingAgentId };
+          } else {
+            return { kind: 'external', candidates: [startingAgentId], note: `Waiting for ${startingAgentId} to start` };
+          }
+        }
+      }
+      return { kind: 'none' };
+    }
 
     // Only react to a message that finalized a turn
     if (lastEvent.type === 'message' && lastEvent.finality === 'turn') {
@@ -12,9 +27,12 @@ export class ScenarioPolicy implements SchedulePolicy {
       const hydrated = snapshot as any;
       
       if (hydrated.scenario) {
-        // Use scenario agents to determine participants and their kinds
-        const scenarioAgents = (hydrated.scenario.agents || []) as AgentDefinition[];
-        const agentKindMap = new Map(scenarioAgents.map(a => [a.agentId, a.role === 'assistant' ? 'internal' : 'external']));
+        // Use runtime metadata to determine agent kinds - MUST be explicitly configured
+        const metadataAgents = snapshot.metadata?.agents || [];
+        const agentKindMap = new Map(metadataAgents.map((a: AgentMeta) => [a.id, a.kind]));
+        
+        // Get scenario agents for participant list
+        const scenarioAgents = (hydrated.scenario.agents || []) as AgentConfiguration[];
         
         // Get participants from scenario
         const participants = new Set(scenarioAgents.map(a => a.agentId));
@@ -37,36 +55,22 @@ export class ScenarioPolicy implements SchedulePolicy {
           return { kind: 'external', candidates: [nextAgent], note: `Waiting for ${nextAgent}` };
         }
       } else {
-        // Fall back to simple alternation based on metadata
+        // Without scenario, check metadata
         const metadataAgents = snapshot.metadata?.agents || [];
-        let participants: Set<string>;
-        let agentKindMap: Map<string, 'internal' | 'external'>;
         
-        if (metadataAgents.length > 0) {
-          const agents = metadataAgents as AgentMeta[];
-          participants = new Set(agents.map(a => a.id));
-          agentKindMap = new Map(agents.map(a => [a.id, a.kind]));
-        } else {
-          // Discover from conversation history
-          participants = new Set<string>();
-          agentKindMap = new Map();
-          
-          for (const event of snapshot.events) {
-            if (event.type === 'message' && event.agentId !== 'system-orchestrator') {
-              participants.add(event.agentId);
-              const kind = event.agentId.startsWith('agent-') || event.agentId === 'assistant' ? 'internal' : 'external';
-              agentKindMap.set(event.agentId, kind);
-            }
-          }
+        if (metadataAgents.length === 0) {
+          // No agent metadata configured
+          return { kind: 'none' };
         }
+        
+        const agents = metadataAgents as AgentMeta[];
+        const participants = new Set(agents.map(a => a.id));
+        const agentKindMap = new Map(agents.map(a => [a.id, a.kind]));
         
         const otherParticipants = Array.from(participants).filter(id => id !== lastEvent.agentId);
         
         if (otherParticipants.length === 0) {
-          if (lastEvent.agentId === 'user') {
-            return { kind: 'internal', agentId: 'assistant' };
-          }
-          return { kind: 'external', candidates: ['user'], note: 'Waiting for other participant' };
+          return { kind: 'none' };
         }
         
         const nextAgent = String(otherParticipants[0]!);

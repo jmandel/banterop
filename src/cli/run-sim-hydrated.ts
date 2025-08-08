@@ -6,49 +6,57 @@ import { createScenarioRoutes } from '$src/server/routes/scenarios.http';
 import { createWebSocketServer, websocket } from '$src/server/ws/jsonrpc.server';
 import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
 
-// Create a simple test scenario
+// Create a simple test scenario using v2 structure
 const testScenario: ScenarioConfiguration = {
   metadata: {
     id: 'test-scenario-v1',
     title: 'Test Scenario',
     description: 'A simple test scenario for validation',
-    category: 'testing',
     tags: ['test', 'demo'],
-    difficulty: 'basic',
-    estimatedDuration: 5,
-    version: '1.0.0',
+  },
+  scenario: {
+    background: 'This is a test scenario to validate the system',
+    challenges: ['Testing the conversation flow', 'Validating scenario hydration'],
+    interactionNotes: { testRun: true },
   },
   agents: [
     {
       agentId: 'user',
-      role: 'user',
-      name: 'Test User',
-      description: 'The user requesting assistance',
-      capabilities: ['ask_questions', 'provide_information'],
+      principal: {
+        type: 'individual',
+        name: 'Test User',
+        description: 'The user requesting assistance',
+      },
+      situation: 'You need help with a test request',
+      systemPrompt: 'You are a user asking for help',
       goals: ['Get help with their request'],
-      constraints: [],
+      tools: [],
+      knowledgeBase: {},
+      messageToUseWhenInitiatingConversation: 'Hello, I need help with a test',
     },
     {
       agentId: 'assistant',
-      role: 'assistant',
-      name: 'Test Assistant',
-      description: 'The AI assistant helping the user',
-      capabilities: ['answer_questions', 'provide_guidance'],
-      goals: ['Help the user effectively'],
-      constraints: ['Be helpful and concise'],
+      principal: {
+        type: 'individual',
+        name: 'Test Assistant', 
+        description: 'The AI assistant helping the user',
+      },
+      situation: 'You are helping a user with their request',
       systemPrompt: 'You are a helpful assistant.',
+      goals: ['Help the user effectively'],
+      tools: [
+        {
+          toolName: 'get_test_info',
+          description: 'Retrieves test information',
+          inputSchema: { type: 'object', properties: {} },
+          synthesisGuidance: 'Return basic test information from the knowledge base',
+        }
+      ],
+      knowledgeBase: {
+        testData: 'This is test data from the knowledge base',
+      },
     },
   ],
-  rules: {
-    turnLimit: 10,
-    messageLimit: 20,
-    allowedMessageTypes: ['message', 'trace'],
-    successCriteria: ['User question answered'],
-    failureCriteria: ['Conversation timeout'],
-  },
-  knowledge: {
-    facts: ['This is a test scenario', 'The system supports scenarios'],
-  },
 };
 
 async function main() {
@@ -85,14 +93,30 @@ async function main() {
   console.log(`✅ Scenario template '${testScenario.metadata.id}' created.`);
 
   // STEP 2: Create a conversation INSTANCE, providing RUNTIME-specific config
+  // This is where we explicitly configure which agents are internal/external and their implementation
   const createConvoRes = await fetch(`http://localhost:${port}/api/conversations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       scenarioId: testScenario.metadata.id,
       title: "Test Conversation (Runtime Override)",
+      startingAgentId: 'assistant',  // Configure which agent starts the conversation
       agents: [
-        { id: 'assistant', config: { model: 'gpt-4o-mini', temperature: 0.7 } },
+        { 
+          id: 'user',           // matches agentId from scenario
+          kind: 'external',     // explicitly external (human/client-driven)
+          agentClass: 'HumanAgent',  // or could be a bot client
+        },
+        { 
+          id: 'assistant',      // matches agentId from scenario  
+          kind: 'internal',     // explicitly internal (orchestrator-driven)
+          agentClass: 'AssistantAgent',  // which agent implementation to use
+          config: {             // configuration for the AssistantAgent
+            llmProvider: 'mock',
+            model: 'gpt-4o-mini', 
+            temperature: 0.7 
+          } 
+        },
       ],
       custom: {
         testRun: true,

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { Sqlite } from './sqlite';
 import { EventStore } from './event.store';
-import type { MessagePayload } from '$src/types/event.types';
+import type { MessagePayload, TracePayload } from '$src/types/event.types';
 
 describe('EventStore append invariants and retrieval', () => {
   let sqlite: Sqlite;
@@ -165,5 +165,113 @@ describe('EventStore append invariants and retrieval', () => {
     });
     expect(dup.seq).toBe(first.seq);
     expect(dup.event).toBe(first.event);
+  });
+
+  it('system events use turn 0 without requiring an open turn', () => {
+    // System event can be appended without any existing turn
+    const sys1 = events.appendEvent({
+      conversation: 1,
+      type: 'system',
+      payload: { kind: 'meta_created', data: { title: 'New conversation' } },
+      finality: 'none',
+      agentId: 'system-orchestrator',
+    });
+    expect(sys1.turn).toBe(0);
+    expect(sys1.event).toBe(1);
+
+    // Another system event also goes to turn 0
+    const sys2 = events.appendEvent({
+      conversation: 1,
+      type: 'system',
+      payload: { kind: 'note', data: { message: 'System note' } },
+      finality: 'none',
+      agentId: 'system-orchestrator',
+    });
+    expect(sys2.turn).toBe(0);
+    expect(sys2.event).toBe(2);
+
+    // Meanwhile, a message starts turn 1
+    const msg = events.appendEvent({
+      conversation: 1,
+      type: 'message',
+      payload: { text: 'Hello' } as MessagePayload,
+      finality: 'none',
+      agentId: 'user',
+    });
+    expect(msg.turn).toBe(1);
+    expect(msg.event).toBe(1);
+
+    // More system events still go to turn 0
+    const sys3 = events.appendEvent({
+      conversation: 1,
+      type: 'system',
+      payload: { kind: 'turn_claimed', data: { agentId: 'assistant' } },
+      finality: 'none',
+      agentId: 'system-orchestrator',
+    });
+    expect(sys3.turn).toBe(0);
+    expect(sys3.event).toBe(3);
+
+    // Verify retrieval
+    const all = events.getEvents(1);
+    const systemEvents = all.filter(e => e.type === 'system');
+    expect(systemEvents.length).toBe(3);
+    expect(systemEvents.every(e => e.turn === 0)).toBe(true);
+  });
+
+  it('trace can start a new turn when no turn exists', () => {
+    // First trace starts turn 1
+    const trace1 = events.appendEvent({
+      conversation: 1,
+      type: 'trace',
+      payload: { type: 'thought', content: 'starting work' } as TracePayload,
+      finality: 'none',
+      agentId: 'assistant',
+    });
+    expect(trace1.turn).toBe(1);
+    expect(trace1.event).toBe(1);
+
+    // Subsequent traces need to specify turn or they start a new turn
+    const trace2 = events.appendEvent({
+      conversation: 1,
+      turn: 1,  // Explicitly provide the turn to stay in same turn
+      type: 'trace',
+      payload: { type: 'tool_call', name: 'search', args: {}, toolCallId: 'call_1' } as TracePayload,
+      finality: 'none',
+      agentId: 'assistant',
+    });
+    expect(trace2.turn).toBe(1);
+    expect(trace2.event).toBe(2);
+
+    // Message finalizes the turn
+    const msg = events.appendEvent({
+      conversation: 1,
+      turn: 1,  // Stay in same turn
+      type: 'message',
+      payload: { text: 'Here is the result' } as MessagePayload,
+      finality: 'turn',
+      agentId: 'assistant',
+    });
+    expect(msg.turn).toBe(1);
+    expect(msg.event).toBe(3);
+
+    // Next trace without turn starts turn 2 (since turn 1 is finalized)
+    const trace3 = events.appendEvent({
+      conversation: 1,
+      type: 'trace',
+      payload: { type: 'thought', content: 'processing next request' } as TracePayload,
+      finality: 'none',
+      agentId: 'user',
+    });
+    expect(trace3.turn).toBe(2);
+    expect(trace3.event).toBe(1);
+
+    // Verify all events
+    const all = events.getEvents(1);
+    expect(all).toHaveLength(4);
+    expect(all[0]?.type).toBe('trace');
+    expect(all[0]?.turn).toBe(1);
+    expect(all[3]?.type).toBe('trace');
+    expect(all[3]?.turn).toBe(2);
   });
 });
