@@ -48,7 +48,7 @@ export interface BacklogResult {
  * const rpc = {
  *   call: <T,>(method: string, params?: any) => {
  *     // Implement a tiny one-shot JSON-RPC call using a transient WebSocket
- *     // or reuse an existing ClaimClient as in turn-loop.executor.ts
+ *     // or reuse an existing ClaimClient as in turn-loop-executor.external.ts
  *   }
  * };
  * 

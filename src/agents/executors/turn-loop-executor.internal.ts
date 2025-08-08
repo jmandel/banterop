@@ -16,7 +16,7 @@ export interface InternalLoopOptions {
  * Internal executor using the same guidance/claim pattern as external
  * Replaces the complex worker-runner.ts and policy callbacks
  */
-export class InternalTurnLoop {
+export class TurnLoopExecutorInternal {
   private stream: InProcessEventStream | undefined;
   private stopped = false;
   

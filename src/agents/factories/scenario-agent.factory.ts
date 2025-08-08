@@ -3,7 +3,7 @@ import type { ProviderManager } from '$src/llm/provider-manager';
 import type { Logger } from '$src/agents/agent.types';
 import type { AgentMeta } from '$src/types/conversation.meta';
 import { ScenarioDrivenAgent } from '$src/agents/scenario/scenario-driven.agent';
-import { InternalTurnLoop } from '$src/agents/executors/internal-turn-loop';
+import { TurnLoopExecutorInternal } from '$src/agents/executors/turn-loop-executor.internal';
 
 export interface StartScenarioAgentsOptions {
   providerManager: ProviderManager;      // Provider manager for LLM access
@@ -14,7 +14,7 @@ export interface StartScenarioAgentsOptions {
 }
 
 export interface ScenarioAgentHandle {
-  loops: InternalTurnLoop[];
+  loops: TurnLoopExecutorInternal[];
   stop: () => Promise<void>;
 }
 
@@ -58,7 +58,7 @@ export async function startScenarioAgents(
     };
   }
 
-  const loops: InternalTurnLoop[] = [];
+  const loops: TurnLoopExecutorInternal[] = [];
 
   for (const agentId of idsToRun) {
     // Verify strict match with scenario
@@ -81,7 +81,7 @@ export async function startScenarioAgents(
     });
 
     // Create the internal turn loop executor
-    const loop = new InternalTurnLoop(agentImpl, orchestrator, {
+    const loop = new TurnLoopExecutorInternal(agentImpl, orchestrator, {
       conversationId,
       agentId,
       ...(logger !== undefined ? { logger } : {}),
