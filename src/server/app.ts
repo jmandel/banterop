@@ -46,7 +46,7 @@ export class App {
       if (autoRun) {
         if (convo.updatedAt < cutoffIso) {
           console.warn(`[AutoRun Resume] Skipping ${convo.conversation} — last updated too old (${convo.updatedAt})`);
-          meta.custom.autoRun = false;
+          meta.custom = { ...(meta.custom || {}), autoRun: false };
           this.storage.conversations.updateMeta(convo.conversation, meta);
           continue;
         }

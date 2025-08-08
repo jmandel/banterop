@@ -35,7 +35,7 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`📋 Starting internal agents for conversation ${conversationId}: "${convo.title}"`);
+  console.log(`📋 Starting internal agents for conversation ${conversationId}: "${convo.metadata.title || 'Untitled'}"`);
   
   const agents: BaseAgent[] = [];
   
