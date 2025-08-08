@@ -1,6 +1,6 @@
 import type { Agent, AgentContext, Logger } from '$src/agents/agent.types';
 import type { GuidanceEvent } from '$src/types/orchestrator.types';
-import type { UnifiedEvent, TracePayload } from '$src/types/event.types';
+import type { UnifiedEvent } from '$src/types/event.types';
 import { WsEventStream, type StreamEvent } from '$src/agents/clients/event-stream';
 import { logLine, colors } from '$src/lib/utils/logger';
 

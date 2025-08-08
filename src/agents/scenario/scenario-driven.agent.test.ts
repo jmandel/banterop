@@ -125,7 +125,7 @@ describe('ScenarioDrivenAgent', () => {
           turn: 2,
           event: 2,
         })),
-        now: () => new Date(),
+        now: () => Date.now(),
       },
       logger: {
         debug: mock(() => {}),
