@@ -9,8 +9,8 @@ CREATE TABLE IF NOT EXISTS conversations (
   scenario_id     TEXT,
   meta_json       TEXT NOT NULL DEFAULT '{}',  -- JSON string holding: {agents,config,custom}
   status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed')),
-  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_conversations_status
@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS scenarios (
   name          TEXT NOT NULL,         -- A human-friendly name, e.g., "Prior Auth for Infliximab"
   config        TEXT NOT NULL,         -- The full ScenarioConfiguration as a JSON string
   history       TEXT NOT NULL DEFAULT '[]', -- Optional: chat history for a scenario builder UI
-  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   modified_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS conversation_events (
   type          TEXT NOT NULL CHECK (type IN ('message','trace','system')),
   payload       TEXT NOT NULL,                 -- JSON string
   finality      TEXT NOT NULL CHECK (finality IN ('none','turn','conversation')),
-  ts            TEXT NOT NULL DEFAULT (datetime('now')),
+  ts            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   agent_id      TEXT NOT NULL,
   seq           INTEGER PRIMARY KEY AUTOINCREMENT, -- global total order
   FOREIGN KEY(conversation) REFERENCES conversations(conversation)
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS attachments (
   content            TEXT NOT NULL,
   summary            TEXT,
   created_by_agent_id TEXT NOT NULL,
-  created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   FOREIGN KEY(conversation, turn, event)
     REFERENCES conversation_events(conversation, turn, event)
 );
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
   agent_id          TEXT NOT NULL,
   client_request_id TEXT NOT NULL,
   seq               INTEGER NOT NULL,            -- seq of the event written
-  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   PRIMARY KEY (conversation, agent_id, client_request_id)
 );
 
@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS turn_claims (
   conversation      INTEGER NOT NULL,
   guidance_seq      REAL NOT NULL,      -- Fractional seq from guidance event
   agent_id          TEXT NOT NULL,
-  claimed_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  claimed_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   expires_at        TEXT NOT NULL,
   PRIMARY KEY (conversation, guidance_seq),
   FOREIGN KEY(conversation) REFERENCES conversations(conversation)
@@ -102,6 +102,6 @@ CREATE INDEX IF NOT EXISTS idx_turn_claims_expires
 -- Triggers to keep conversations.updated_at fresh
 CREATE TRIGGER IF NOT EXISTS trg_conversations_touch AFTER UPDATE ON conversations
 BEGIN
-  UPDATE conversations SET updated_at = datetime('now') WHERE conversation = NEW.conversation;
+  UPDATE conversations SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE conversation = NEW.conversation;
 END;
 `;

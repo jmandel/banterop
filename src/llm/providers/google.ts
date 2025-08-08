@@ -11,7 +11,7 @@ export class GoogleLLMProvider extends LLMProvider {
     }
   }
   
-  getMetadata(): LLMProviderMetadata {
+  static getMetadata(): LLMProviderMetadata {
     return {
       name: 'google',
       description: 'Google Gemini models via @google/genai',

@@ -98,11 +98,11 @@ export class EventStore {
         payloadToStore = tempPayload;
       }
 
-      // Insert event row
+      // Insert event row (ts will use the default from schema with millisecond precision)
       const insert = this.db.prepare(
         `INSERT INTO conversation_events
-         (conversation, turn, event, type, payload, finality, ts, agent_id)
-         VALUES (?,?,?,?,?,?,datetime('now'),?)`
+         (conversation, turn, event, type, payload, finality, agent_id)
+         VALUES (?,?,?,?,?,?,?)`
       );
       insert.run(
         input.conversation,
@@ -259,6 +259,41 @@ export class EventStore {
         seq: number;
       }>;
     return rows.map((r) => ({
+      conversation: r.conversation,
+      turn: r.turn,
+      event: r.event,
+      type: r.type as UnifiedEvent['type'],
+      payload: JSON.parse(r.payload),
+      finality: r.finality as Finality,
+      ts: r.ts,
+      agentId: r.agentId,
+      seq: r.seq,
+    }));
+  }
+
+  getEventsPage(conversation: number, afterSeq?: number, limit: number = 200): UnifiedEvent[] {
+    const rows = this.db
+      .prepare(
+        `SELECT conversation, turn, event, type, payload, finality, ts, agent_id as agentId, seq
+         FROM conversation_events
+         WHERE conversation = ?
+         ${afterSeq ? 'AND seq > ?' : ''}
+         ORDER BY seq ASC
+         LIMIT ?`
+      )
+      .all(...(afterSeq !== undefined ? [conversation, afterSeq, limit] : [conversation, limit])) as Array<{
+        conversation: number;
+        turn: number;
+        event: number;
+        type: string;
+        payload: string;
+        finality: string;
+        ts: string;
+        agentId: string;
+        seq: number;
+      }>;
+
+    return rows.map(r => ({
       conversation: r.conversation,
       turn: r.turn,
       event: r.event,

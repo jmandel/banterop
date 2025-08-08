@@ -132,6 +132,24 @@ export class OrchestratorService {
 
   // Expose storage methods for conversations and attachments
   createConversation(params: CreateConversationParams): number {
+    if (params.scenarioId) {
+      const scenarioItem = this.storage.scenarios.findScenarioById(params.scenarioId);
+      if (scenarioItem) {
+        const scenarioIds = new Set(scenarioItem.config.agents.map(a => a.agentId));
+        const runtimeIds = new Set((params.agents || []).map(a => a.id));
+        if (
+          scenarioIds.size !== runtimeIds.size ||
+          [...scenarioIds].some(id => !runtimeIds.has(id))
+        ) {
+          throw new Error(
+            `Config error: runtime agents must match scenario agents exactly.\n` +
+            `Scenario agents: ${[...scenarioIds].join(', ')}\n` +
+            `Runtime agents: ${[...runtimeIds].join(', ')}`
+          );
+        }
+      }
+    }
+
     const conversationId = this.storage.conversations.create(params);
     
     // Emit meta_created system event
@@ -192,6 +210,10 @@ export class OrchestratorService {
     return this.storage.events.getEventsSince(conversation, sinceSeq);
   }
 
+  getEventsPage(conversationId: number, afterSeq?: number, limit?: number): UnifiedEvent[] {
+    return this.storage.events.getEventsPage(conversationId, afterSeq, limit);
+  }
+
   unsubscribe(subId: string) {
     this.bus.unsubscribe(subId);
   }
@@ -248,6 +270,11 @@ export class OrchestratorService {
   // Internals
 
   private onEventAppended(e: UnifiedEvent) {
+    // NOTE: System assumes at most one guidance is active at a time per conversation.
+    // cleanupClaims() will delete ALL active claims when a turn is completed.
+    // If you ever need multiple concurrent guidance items, refactor cleanupClaims to
+    // delete claims by guidanceSeq and carry guidanceSeq through the lifecycle.
+    
     // Clean up claims when a turn is completed by the claiming agent
     if (e.type === 'message' && e.finality === 'turn') {
       this.cleanupClaims(e.conversation);
@@ -366,7 +393,14 @@ export class OrchestratorService {
   // Clean up claims when a turn is successfully completed
   private cleanupClaims(conversation: number) {
     try {
+      // Assumption: only one guidance is active at a time.
       const activeClaims = this.storage.turnClaims.getActiveClaimsForConversation(conversation);
+      if (activeClaims.length > 1) {
+        console.warn(
+          `cleanupClaims: multiple active claims detected for conversation ${conversation}. ` +
+          `System currently assumes one-at-a-time guidance; all claims will be deleted.`
+        );
+      }
       for (const claim of activeClaims) {
         this.storage.turnClaims.deleteClaim(conversation, claim.guidanceSeq);
       }

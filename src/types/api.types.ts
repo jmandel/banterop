@@ -99,3 +99,52 @@ export interface JsonRpcNotification {
   params: unknown;
   jsonrpc: '2.0';
 }
+
+// New WebSocket RPC API types
+export interface CreateConversationRpcResult {
+  conversationId: number;
+}
+
+export interface ListConversationsRpcParams {
+  status?: 'active' | 'completed';
+  scenarioId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ListConversationsRpcResult {
+  conversations: import('$src/db/conversation.store').ConversationRow[];
+}
+
+export interface GetEventsPageParams {
+  conversationId: number;
+  afterSeq?: number;
+  limit?: number;
+}
+
+export interface GetEventsPageResult {
+  events: UnifiedEvent[];
+  nextAfterSeq?: number;
+}
+
+// Scenario RPC types
+export interface CreateScenarioRpcParams {
+  id: string;
+  name: string;
+  config: import('$src/types/scenario-configuration.types').ScenarioConfiguration;
+  history?: any[];
+}
+
+export interface GetScenarioRpcParams {
+  scenarioId: string;
+}
+
+export interface UpdateScenarioRpcParams {
+  id: string;
+  name?: string;
+  config?: import('$src/types/scenario-configuration.types').ScenarioConfiguration;
+}
+
+export interface DeleteScenarioRpcParams {
+  id: string;
+}

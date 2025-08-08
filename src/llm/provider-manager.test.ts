@@ -135,4 +135,52 @@ describe('ProviderManager', () => {
     
     expect(provider.getMetadata().name).toBe('google');
   });
+
+  it('auto-detects provider from model name', () => {
+    const manager = new ProviderManager(mockConfig);
+    
+    // Test Google model
+    const googleProvider = manager.getProvider({ model: 'gemini-2.5-flash' });
+    expect(googleProvider.getMetadata().name).toBe('google');
+    
+    // Test OpenRouter model with prefix
+    const openrouterProvider = manager.getProvider({ model: 'openai/gpt-3.5-turbo' });
+    expect(openrouterProvider.getMetadata().name).toBe('openrouter');
+    
+    // Test common model name without prefix
+    const gptProvider = manager.getProvider({ model: 'gpt-3.5-turbo' });
+    expect(gptProvider.getMetadata().name).toBe('openrouter');
+    
+    // Test mock model
+    const mockProvider = manager.getProvider({ model: 'mock-model' });
+    expect(mockProvider.getMetadata().name).toBe('mock');
+  });
+
+  it('throws error for unknown model without provider', () => {
+    const manager = new ProviderManager(mockConfig);
+    
+    expect(() => {
+      manager.getProvider({ model: 'unknown-model-xyz' });
+    }).toThrow(/Unknown model 'unknown-model-xyz'/);
+  });
+
+  it('uses explicit provider even with model name', () => {
+    const manager = new ProviderManager(mockConfig);
+    
+    // Model that normally maps to OpenRouter, but we explicitly request Google
+    const provider = manager.getProvider({ 
+      model: 'gpt-3.5-turbo',
+      provider: 'google' 
+    });
+    
+    expect(provider.getMetadata().name).toBe('google');
+  });
+
+  it('searches provider models dynamically', () => {
+    const manager = new ProviderManager(mockConfig);
+    
+    // Model that's in the provider's metadata but not in registry
+    const provider = manager.getProvider({ model: 'gemini-2.5-pro' });
+    expect(provider.getMetadata().name).toBe('google');
+  });
 });

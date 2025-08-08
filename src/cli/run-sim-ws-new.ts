@@ -3,8 +3,24 @@ import { TurnLoopExecutor } from '$src/agents/executors/turn-loop.executor';
 import type { Agent } from '$src/agents/agent.types';
 import { App } from '$src/server/app';
 import { createWebSocketServer, websocket } from '$src/server/ws/jsonrpc.server';
-import { createConversationRoutes } from '$src/server/routes/conversations.http';
 import { Hono } from 'hono';
+
+// Helper for one-shot WebSocket RPC calls
+async function rpcCall<T>(wsUrl: string, method: string, params?: any): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(wsUrl);
+    const id = crypto.randomUUID();
+    ws.onopen = () => ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+    ws.onmessage = (evt) => {
+      const msg = JSON.parse(String(evt.data));
+      if (msg.id !== id) return;
+      ws.close();
+      if (msg.error) reject(new Error(msg.error.message));
+      else resolve(msg.result as T);
+    };
+    ws.onerror = reject;
+  });
+}
 
 async function main() {
   // Create app with guidance enabled
@@ -13,7 +29,6 @@ async function main() {
   });
   
   const honoServer = new Hono();
-  honoServer.route('/', createConversationRoutes(appInstance.orchestrator));
   honoServer.route('/', createWebSocketServer(appInstance.orchestrator));
   honoServer.get('/health', (c) => c.json({ ok: true }));
   
@@ -26,25 +41,13 @@ async function main() {
   
   const port = server.port;
   const wsUrl = `ws://localhost:${port}/api/ws`;
-  const httpBase = `http://localhost:${port}`;
   
   console.log(`Server started on port ${port}`);
   console.log(`WebSocket URL: ${wsUrl}`);
   console.log(`Creating conversation...`);
   
-  // Create conversation via HTTP
-  const resp = await fetch(`${httpBase}/api/conversations`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ title: 'WS Sim (New)' }),
-  });
-  
-  if (!resp.ok) {
-    throw new Error(`Failed to create conversation: ${resp.status}`);
-  }
-  
-  const convo = await resp.json();
-  const conversationId = convo.conversation as number;
+  // Create conversation via WebSocket RPC
+  const { conversationId } = await rpcCall<{ conversationId: number }>(wsUrl, 'createConversation', { title: 'WS Sim (New)' });
   console.log(`Conversation ${conversationId} created\n`);
 
   // Agent A will speak 3 times then end the conversation
@@ -118,20 +121,18 @@ async function main() {
   
   // Have both agents introduce themselves first so policy knows about them
   console.log('Agents introducing themselves...');
-  appInstance.orchestrator.appendEvent({
-    conversation: conversationId,
-    type: 'message',
-    payload: { text: 'Agent A ready' },
-    finality: 'none',  // Don't finalize turn
+  await rpcCall(wsUrl, 'sendMessage', {
+    conversationId,
     agentId: 'agent-a',
+    messagePayload: { text: 'Agent A ready' },
+    finality: 'none',  // Don't finalize turn
   });
   
-  appInstance.orchestrator.appendEvent({
-    conversation: conversationId,
-    type: 'message',
-    payload: { text: 'Agent B ready' },
-    finality: 'turn',  // Now finalize to trigger guidance
+  await rpcCall(wsUrl, 'sendMessage', {
+    conversationId,
     agentId: 'agent-b',
+    messagePayload: { text: 'Agent B ready' },
+    finality: 'turn',  // Now finalize to trigger guidance
   });
   
   try {

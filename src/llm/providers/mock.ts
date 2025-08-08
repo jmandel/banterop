@@ -5,7 +5,7 @@ export class MockLLMProvider extends LLMProvider {
     super(config);
   }
   
-  getMetadata(): LLMProviderMetadata {
+  static getMetadata(): LLMProviderMetadata {
     return {
       name: 'mock',
       description: 'Mock LLM Provider for testing',

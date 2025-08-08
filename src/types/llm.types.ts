@@ -49,6 +49,16 @@ export interface LLMProviderMetadata {
 
 export abstract class LLMProvider {
   constructor(protected config: LLMProviderConfig) {}
-  abstract getMetadata(): LLMProviderMetadata;
+  
+  // Static method to get metadata without instantiation
+  static getMetadata(): LLMProviderMetadata {
+    throw new Error('getMetadata must be implemented by subclass');
+  }
+  
+  // Instance method for backwards compatibility (delegates to static)
+  getMetadata(): LLMProviderMetadata {
+    return (this.constructor as typeof LLMProvider).getMetadata();
+  }
+  
   abstract complete(request: LLMRequest): Promise<LLMResponse>;
 }
