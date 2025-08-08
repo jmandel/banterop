@@ -77,7 +77,7 @@ async function runDemo() {
     const agentHandle = await startAgents({
       conversationId,
       transport: new InProcessTransport(app.orchestrator),
-      providerManager: app.providerManager
+      providerManager: app.llmProviderManager
     });
     console.log(`✅ Started ${agentHandle.agents.length} backend agents`);
     

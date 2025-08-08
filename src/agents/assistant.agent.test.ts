@@ -3,7 +3,7 @@ import { AssistantAgent } from './assistant.agent';
 import { MockLLMProvider } from '$src/llm/providers/mock';
 import { MockTransport } from '$src/agents/runtime/mock.transport';
 import { MockEvents } from '$src/agents/runtime/mock.events';
-import type { GuidanceEvent, HydratedConversationSnapshot } from '$src/types/orchestrator.types';
+import type { GuidanceEvent, ConversationSnapshot } from '$src/types/orchestrator.types';
 import type { UnifiedEvent } from '$src/types/event.types';
 
 describe('AssistantAgent', () => {
@@ -75,7 +75,7 @@ describe('AssistantAgent', () => {
     mockProvider = new MockLLMProvider({ provider: 'mock' });
     mockTransport = new MockTransport();
     mockEvents = new MockEvents();
-    agent = new AssistantAgent(mockTransport, mockEvents, mockProvider);
+    agent = new AssistantAgent(mockTransport, mockProvider);
     
     // Setup default mock responses
     mockTransport.getSnapshot.mockResolvedValue({
@@ -88,7 +88,7 @@ describe('AssistantAgent', () => {
       scenario: null,
       runtimeMeta: { agents: [] },
       lastClosedSeq: 0
-    } as HydratedConversationSnapshot);
+    }) 
   });
 
   it('creates agent with LLM provider', () => {
@@ -145,7 +145,7 @@ describe('AssistantAgent', () => {
       scenario: null,
       runtimeMeta: { agents: [] },
       lastClosedSeq: 0
-    } as HydratedConversationSnapshot);
+    });
     
     const originalComplete = mockProvider.complete.bind(mockProvider);
     let capturedMessages: any[] = [];
@@ -185,7 +185,7 @@ describe('AssistantAgent', () => {
       scenario: null,
       runtimeMeta: { agents: [] },
       lastClosedSeq: 0
-    } as HydratedConversationSnapshot);
+    });
     
     const originalComplete = mockProvider.complete.bind(mockProvider);
     let capturedMessages: any[] = [];
@@ -214,7 +214,7 @@ describe('AssistantAgent', () => {
       scenario: null,
       runtimeMeta: { agents: [] },
       lastClosedSeq: 0
-    } as HydratedConversationSnapshot);
+    });
     
     await triggerTurn(1, 'assistant');
     
@@ -238,7 +238,7 @@ describe('AssistantAgent', () => {
       scenario: null,
       runtimeMeta: { agents: [] },
       lastClosedSeq: 0
-    } as HydratedConversationSnapshot);
+    });
     
     const originalComplete = mockProvider.complete.bind(mockProvider);
     let capturedMessages: any[] = [];

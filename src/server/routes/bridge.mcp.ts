@@ -6,12 +6,12 @@
 
 import { Hono } from 'hono';
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
-import type { ProviderManager } from '$src/llm/provider-manager';
+import type { LLMProviderManager } from '$src/llm/provider-manager';
 import { McpBridgeServer } from '$src/server/bridge/mcp-server';
 import { HonoIncomingMessage, HonoServerResponse } from '$src/server/bridge/hono-node-adapters';
 import { parseConversationMetaFromConfig64 } from '$src/server/bridge/conv-config.types';
 
-export function createBridgeRoutes(orchestrator: OrchestratorService, providerManager: ProviderManager, replyTimeoutMs?: number) {
+export function createBridgeRoutes(orchestrator: OrchestratorService, providerManager: LLMProviderManager, replyTimeoutMs?: number) {
   const app = new Hono();
 
   app.all('/:config64/mcp', async (c) => {

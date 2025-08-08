@@ -1,6 +1,6 @@
 import type { IAgentTransport, IAgentEvents } from './runtime.interfaces';
 import type { MessagePayload, TracePayload } from '$src/types/event.types';
-import type { ConversationSnapshot, HydratedConversationSnapshot } from '$src/types/orchestrator.types';
+import type { ConversationSnapshot } from '$src/types/orchestrator.types';
 import { WsEvents } from './ws.events';
 
 /**
@@ -62,13 +62,20 @@ export class WsTransport implements IAgentTransport {
     });
   }
   
-  async getSnapshot(conversationId: number, opts?: { includeScenario?: boolean }): Promise<ConversationSnapshot | HydratedConversationSnapshot> {
-    // Use getConversation method which returns a snapshot
+  async getSnapshot(conversationId: number, opts?: { includeScenario?: boolean }): Promise<ConversationSnapshot> {
+    // Use getConversation method which returns a snapshot with scenario if requested
     const snapshot = await this.call<any>('getConversation', { 
       conversationId,
-      includeScenario: opts?.includeScenario 
+      includeScenario: opts?.includeScenario ?? true
     });
     return snapshot;
+  }
+  
+  async abortTurn(conversationId: number, agentId: string): Promise<{ turn: number }> {
+    return await this.call<{ turn: number }>('abortTurn', {
+      conversationId,
+      agentId
+    });
   }
   
   async postMessage(params: {
@@ -79,7 +86,6 @@ export class WsTransport implements IAgentTransport {
     attachments?: NonNullable<MessagePayload['attachments']>;
     clientRequestId?: string;
     turn?: number;
-    precondition?: { lastClosedSeq: number };
   }): Promise<{ seq: number; turn: number; event: number }> {
     const result = await this.call<any>('sendMessage', {
       conversationId: params.conversationId,
@@ -91,7 +97,6 @@ export class WsTransport implements IAgentTransport {
       },
       finality: params.finality,
       ...(params.turn !== undefined ? { turn: params.turn } : {}),
-      ...(params.precondition !== undefined ? { precondition: params.precondition } : {}),
     });
     
     // Handle both response formats
@@ -113,7 +118,6 @@ export class WsTransport implements IAgentTransport {
     payload: TracePayload;
     turn?: number;
     clientRequestId?: string;
-    precondition?: { lastClosedSeq: number };
   }): Promise<{ seq: number; turn: number; event: number }> {
     const tracePayload = {
       ...params.payload,
@@ -125,7 +129,6 @@ export class WsTransport implements IAgentTransport {
       agentId: params.agentId,
       tracePayload,
       ...(params.turn !== undefined ? { turn: params.turn } : {}),
-      ...(params.precondition !== undefined ? { precondition: params.precondition } : {}),
     });
     
     // Handle both response formats

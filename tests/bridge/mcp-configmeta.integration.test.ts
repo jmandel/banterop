@@ -17,7 +17,7 @@ describe('MCP Bridge with ConversationMeta config (Phase 2)', () => {
   beforeAll(() => {
     app = new App({ dbPath: ':memory:' });
     const hono = new Hono();
-    hono.route('/bridge', createBridgeRoutes(app.orchestrator, app.providerManager, 200)); // short timeout
+    hono.route('/bridge', createBridgeRoutes(app.orchestrator, app.llmProviderManager, 200)); // short timeout
     server = Bun.serve({ port: 0, fetch: hono.fetch, websocket });
     baseUrl = `http://localhost:${server.port}`;
   });

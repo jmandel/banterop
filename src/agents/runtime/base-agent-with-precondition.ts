@@ -1,5 +1,5 @@
 import type { IAgentTransport, IAgentEvents } from './runtime.interfaces';
-import type { ConversationSnapshot, HydratedConversationSnapshot, GuidanceEvent } from '$src/types/orchestrator.types';
+import type { ConversationSnapshot, GuidanceEvent } from '$src/types/orchestrator.types';
 import type { StreamEvent } from '$src/agents/clients/event-stream';
 import type { UnifiedEvent } from '$src/types/event.types';
 import { logLine } from '$src/lib/utils/logger';
@@ -19,7 +19,7 @@ export interface TurnContext<TSnap = ConversationSnapshot> {
 /**
  * Enhanced BaseAgent that automatically handles preconditions for CAS
  */
-export abstract class BaseAgentWithPrecondition<TSnap extends ConversationSnapshot | HydratedConversationSnapshot = ConversationSnapshot> {
+export abstract class BaseAgentWithPrecondition<TSnap extends ConversationSnapshot = ConversationSnapshot> {
   protected liveSnapshot: TSnap | undefined;
   protected latestSeq: number = 0;
   protected unsubscribe: (() => void) | undefined;
@@ -77,7 +77,7 @@ export abstract class BaseAgentWithPrecondition<TSnap extends ConversationSnapsh
           transport: this.createPreconditionAwareTransport(conversationId, agentId),
           getLatestSnapshot: () => this.clone(this.liveSnapshot!),
           lastClosedSeq: this.liveSnapshot!.lastClosedSeq,
-          currentTurn: this.currentTurn
+          ...(this.currentTurn !== undefined ? { currentTurn: this.currentTurn } : {})
         };
 
         // Execute the turn
@@ -95,7 +95,7 @@ export abstract class BaseAgentWithPrecondition<TSnap extends ConversationSnapsh
   /**
    * Wrap the transport to automatically add preconditions
    */
-  private createPreconditionAwareTransport(conversationId: number, agentId: string): IAgentTransport {
+  private createPreconditionAwareTransport(_conversationId: number, agentId: string): IAgentTransport {
     const self = this;
     const originalTransport = this.transport;
     

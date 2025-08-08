@@ -13,11 +13,11 @@ import { App } from '$src/server/app';
 import { createWebSocketServer } from '$src/server/ws/jsonrpc.server';
 import { startAgents } from '$src/agents/factories/agent.factory';
 import { WsTransport } from '$src/agents/runtime/ws.transport';
-import { ProviderManager } from '$src/llm/provider-manager';
+import { LLMProviderManager } from '$src/llm/provider-manager';
 
 // Start the server
 const app = new App({ dbPath: ':memory:', nodeEnv: 'test' });
-const wsServer = createWebSocketServer(app.orchestrator, app.providerManager);
+const wsServer = createWebSocketServer(app.orchestrator, app.llmProviderManager);
 const server = Bun.serve({
   port: 3459,
   fetch: wsServer.fetch,
@@ -53,7 +53,7 @@ function sendRequest(method: string, params: any): Promise<any> {
 async function runConversationToCompletionClientSide(
   conversationId: number,
   wsUrl: string,
-  providerManager: ProviderManager
+  providerManager: LLMProviderManager
 ) {
   console.log('\n🎮 Client taking control of conversation orchestration...');
   
@@ -143,7 +143,11 @@ ws.onopen = async () => {
     });
     
     // Step 3: Run conversation to completion FROM THE CLIENT
-    const clientProvider = new ProviderManager({ defaultLlmProvider: 'mock' });
+    const clientProvider = new LLMProviderManager({ 
+      defaultLlmProvider: 'mock',
+      googleApiKey: process.env.GOOGLE_API_KEY,
+      openRouterApiKey: process.env.OPENROUTER_API_KEY
+    });
     const wsUrl = `ws://localhost:${server.port}/api/ws`;
     
     const agentHandle = await runConversationToCompletionClientSide(

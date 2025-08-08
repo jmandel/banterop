@@ -1,19 +1,18 @@
 import { BaseAgent, type TurnContext } from '$src/agents/runtime/base-agent';
-import type { IAgentTransport, IAgentEvents } from '$src/agents/runtime/runtime.interfaces';
+import type { IAgentTransport } from '$src/agents/runtime/runtime.interfaces';
 import type { LLMProvider, LLMMessage } from '$src/types/llm.types';
-import type { HydratedConversationSnapshot } from '$src/types/orchestrator.types';
+import type { ConversationSnapshot } from '$src/types/orchestrator.types';
 import { logLine } from '$src/lib/utils/logger';
 
-export class AssistantAgent extends BaseAgent<HydratedConversationSnapshot> {
+export class AssistantAgent extends BaseAgent<ConversationSnapshot> {
   constructor(
     transport: IAgentTransport,
-    events: IAgentEvents,
     private llmProvider: LLMProvider
   ) {
-    super(transport, events);
+    super(transport);
   }
 
-  protected async takeTurn(ctx: TurnContext<HydratedConversationSnapshot>): Promise<void> {
+  protected async takeTurn(ctx: TurnContext<ConversationSnapshot>): Promise<void> {
     logLine(ctx.agentId, 'info', `AssistantAgent turn started. Using provider: ${this.llmProvider.getMetadata().name}`);
 
     // Use the snapshot from context (stable view at turn start)
@@ -38,13 +37,11 @@ export class AssistantAgent extends BaseAgent<HydratedConversationSnapshot> {
     const response = await this.llmProvider.complete({ messages });
 
     // Post the response back to the conversation
-    // Include precondition to start new turn
     await ctx.transport.postMessage({
       conversationId: ctx.conversationId,
       agentId: ctx.agentId,
       text: response.content,
-      finality: 'turn',
-      precondition: { lastClosedSeq: ctx.snapshot.lastClosedSeq }
+      finality: 'turn'
     });
 
     logLine(ctx.agentId, 'info', 'AssistantAgent turn completed.');

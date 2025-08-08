@@ -8,3 +8,11 @@ export interface AgentScript {
   name: string;
   steps: ScriptAction[];
 }
+
+// Turn-based script for demos - each turn gets its own set of actions
+export interface TurnBasedScript {
+  name: string;
+  defaultDelay?: number;  // Default delay between actions in ms
+  turns: ScriptAction[][];  // Array of turns, each containing an array of actions
+  maxTurns?: number;  // Max turns before ending conversation
+}

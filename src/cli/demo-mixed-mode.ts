@@ -10,7 +10,7 @@
 
 import { startAgents } from '$src/agents/factories/agent.factory';
 import { WsTransport } from '$src/agents/runtime/ws.transport';
-import { ProviderManager } from '$src/llm/provider-manager';
+import { LLMProviderManager } from '$src/llm/provider-manager';
 import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
 
 // Connect to existing server
@@ -167,7 +167,11 @@ ws.onopen = async () => {
     
     // Step 5: Start client-side agents
     console.log('\n📱 Starting client-side agents...');
-    const clientProvider = new ProviderManager({ defaultLlmProvider: 'mock' });
+    const clientProvider = new LLMProviderManager({ 
+      defaultLlmProvider: 'mock',
+      googleApiKey: process.env.GOOGLE_API_KEY,
+      openRouterApiKey: process.env.OPENROUTER_API_KEY
+    });
     
     const clientAgents = await startAgents({
       conversationId,

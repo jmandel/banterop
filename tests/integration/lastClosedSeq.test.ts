@@ -49,9 +49,7 @@ describe('lastClosedSeq per-conversation isolation', () => {
       conv2, 
       'user', 
       { text: 'First message in conv2' }, 
-      'turn',
-      undefined, // no turn specified (opening new turn)
-      { lastClosedSeq: 0 } // Should be 0 for first turn in this conversation
+      'turn'
     );
     
     expect(result2.turn).toBe(1);
@@ -123,7 +121,7 @@ describe('lastClosedSeq per-conversation isolation', () => {
     expect(conv2Snapshot.lastClosedSeq).toBe(results[2].seq);
   });
 
-  test('precondition should fail with wrong lastClosedSeq', async () => {
+  test('turns should increment correctly without preconditions', async () => {
     const orchestrator = app.orchestrator;
     
     const conv = orchestrator.createConversation({
@@ -133,32 +131,27 @@ describe('lastClosedSeq per-conversation isolation', () => {
       }
     });
     
-    // First message succeeds with precondition 0
+    // First message creates turn 1
     const msg1 = orchestrator.sendMessage(conv, 'agent', { text: 'First' }, 'turn');
+    expect(msg1.turn).toBe(1);
     
-    // Try to start new turn with wrong precondition (using 0 again instead of msg1.seq)
-    expect(() => {
-      orchestrator.sendMessage(
-        conv,
-        'agent',
-        { text: 'Second' },
-        'turn',
-        undefined, // new turn
-        { lastClosedSeq: 0 } // Wrong! Should be msg1.seq
-      );
-    }).toThrow(/Precondition failed/);
-    
-    // Correct precondition should work
+    // Second message creates turn 2 (since first had finality='turn')
     const msg2 = orchestrator.sendMessage(
       conv,
       'agent',
       { text: 'Second' },
-      'turn',
-      undefined,
-      { lastClosedSeq: msg1.seq }
+      'turn'
     );
-    
     expect(msg2.turn).toBe(2);
+    
+    // Third message creates turn 3
+    const msg3 = orchestrator.sendMessage(
+      conv,
+      'agent',
+      { text: 'Third' },
+      'turn'
+    );
+    expect(msg3.turn).toBe(3);
   });
 
   afterEach(async () => {

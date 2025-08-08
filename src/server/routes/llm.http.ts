@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import type { ProviderManager } from '$src/llm/provider-manager';
+import type { LLMProviderManager } from '$src/llm/provider-manager';
 import type { LLMRequest, LLMResponse, SupportedProvider } from '$src/types/llm.types';
 
 const LLMMessageSchema = z.object({
@@ -24,7 +24,7 @@ const LLMCompleteSchema = z.object({
   provider: z.enum(['google', 'openrouter', 'mock']).optional(),
 });
 
-export function createLLMRoutes(pm: ProviderManager) {
+export function createLLMRoutes(pm: LLMProviderManager) {
   const app = new Hono();
 
   // GET providers metadata

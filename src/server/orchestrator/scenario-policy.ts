@@ -23,16 +23,14 @@ export class ScenarioPolicy implements SchedulePolicy {
 
     // Only react to a message that finalized a turn
     if (lastEvent.type === 'message' && lastEvent.finality === 'turn') {
-      // Check if this is a hydrated snapshot
-      const hydrated = snapshot as any;
       
-      if (hydrated.scenario) {
+      if (snapshot.scenario) {
         // Use runtime metadata to determine agent kinds - MUST be explicitly configured
         const metadataAgents = snapshot.metadata?.agents || [];
         const agentKindMap = new Map(metadataAgents.map((a: AgentMeta) => [a.id, a.kind]));
         
         // Get scenario agents for participant list
-        const scenarioAgents = (hydrated.scenario.agents || []) as ScenarioConfigAgentDetails[];
+        const scenarioAgents = (snapshot.scenario.agents || []) as ScenarioConfigAgentDetails[];
         
         // Get participants from scenario
         const participants = new Set(scenarioAgents.map(a => a.agentId));

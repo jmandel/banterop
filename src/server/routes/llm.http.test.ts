@@ -10,7 +10,7 @@ describe('LLM HTTP routes', () => {
 
   beforeEach(() => {
     app = new App({ dbPath: ':memory:', defaultLlmProvider: 'mock' as any });
-    const hono = new Hono().route('/api', createLLMRoutes(app.providerManager));
+    const hono = new Hono().route('/api', createLLMRoutes(app.llmProviderManager));
     server = Bun.serve({ port: 0, fetch: hono.fetch });
     base = `http://localhost:${server.port}`;
   });
@@ -106,7 +106,7 @@ describe('LLM HTTP routes', () => {
   it('returns 502 for provider errors', async () => {
     // Attempt to use a provider that requires API key without having one configured
     const appNoKey = new App({ dbPath: ':memory:', defaultLlmProvider: 'google' as any });
-    const honoNoKey = new Hono().route('/api', createLLMRoutes(appNoKey.providerManager));
+    const honoNoKey = new Hono().route('/api', createLLMRoutes(appNoKey.llmProviderManager));
     const serverNoKey = Bun.serve({ port: 0, fetch: honoNoKey.fetch });
     
     try {

@@ -3,12 +3,12 @@
 // Backward compatibility wrapper - redirects to unified factory
 
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
-import type { ProviderManager } from '$src/llm/provider-manager';
+import type { LLMProviderManager } from '$src/llm/provider-manager';
 import { startAgents, type AgentHandle } from './agent.factory';
 import { InProcessTransport } from '$src/agents/runtime/inprocess.transport';
 
 export interface StartInternalAgentsOptions {
-  providerManager: ProviderManager;
+  providerManager: LLMProviderManager;
   logger?: any; // unused, for backward compat
   agentIds?: string[];
 }

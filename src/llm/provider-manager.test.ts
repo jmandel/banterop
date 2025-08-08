@@ -1,42 +1,36 @@
 import { describe, it, expect } from 'bun:test';
-import { ProviderManager } from './provider-manager';
-import type { Config } from '$src/server/config';
+import { LLMProviderManager, type LLMConfig } from './provider-manager';
 
 describe('ProviderManager', () => {
-  const mockConfig: Config = {
-    dbPath: ':memory:',
-    port: 3000,
-    idleTurnMs: 120000,
+  const mockConfig: LLMConfig = {
     googleApiKey: 'test-google-key',
     openRouterApiKey: 'test-openrouter-key',
     defaultLlmProvider: 'mock',
-    logLevel: 'info',
-    nodeEnv: 'test',
   };
 
   it('creates mock provider by default', () => {
-    const manager = new ProviderManager(mockConfig);
+    const manager = new LLMProviderManager(mockConfig);
     const provider = manager.getProvider();
     
     expect(provider.getMetadata().name).toBe('mock');
   });
 
   it('creates google provider when specified', () => {
-    const manager = new ProviderManager(mockConfig);
+    const manager = new LLMProviderManager(mockConfig);
     const provider = manager.getProvider({ provider: 'google' });
     
     expect(provider.getMetadata().name).toBe('google');
   });
 
   it('creates openrouter provider when specified', () => {
-    const manager = new ProviderManager(mockConfig);
+    const manager = new LLMProviderManager(mockConfig);
     const provider = manager.getProvider({ provider: 'openrouter' });
     
     expect(provider.getMetadata().name).toBe('openrouter');
   });
 
   it('throws error for unsupported provider', () => {
-    const manager = new ProviderManager(mockConfig);
+    const manager = new LLMProviderManager(mockConfig);
     
     expect(() => {
       manager.getProvider({ provider: 'unsupported' as any });
@@ -44,7 +38,7 @@ describe('ProviderManager', () => {
   });
 
   it('uses API key from config', () => {
-    const manager = new ProviderManager(mockConfig);
+    const manager = new LLMProviderManager(mockConfig);
     const provider = manager.getProvider({ provider: 'google' });
     
     // Provider should be created successfully with config API key
@@ -52,7 +46,7 @@ describe('ProviderManager', () => {
   });
 
   it('uses override API key when provided', () => {
-    const manager = new ProviderManager(mockConfig);
+    const manager = new LLMProviderManager(mockConfig);
     const provider = manager.getProvider({ 
       provider: 'google',
       apiKey: 'override-key'
@@ -63,13 +57,13 @@ describe('ProviderManager', () => {
   });
 
   it('throws error when API key missing for non-mock provider', () => {
-    const configNoKeys: Config = {
+    const configNoKeys: LLMConfig = {
       ...mockConfig,
       googleApiKey: undefined,
       openRouterApiKey: undefined,
     };
     
-    const manager = new ProviderManager(configNoKeys);
+    const manager = new LLMProviderManager(configNoKeys);
     
     expect(() => {
       manager.getProvider({ provider: 'google' });
@@ -81,13 +75,13 @@ describe('ProviderManager', () => {
   });
 
   it('allows mock provider without API key', () => {
-    const configNoKeys: Config = {
+    const configNoKeys: LLMConfig = {
       ...mockConfig,
       googleApiKey: undefined,
       openRouterApiKey: undefined,
     };
     
-    const manager = new ProviderManager(configNoKeys);
+    const manager = new LLMProviderManager(configNoKeys);
     const provider = manager.getProvider({ provider: 'mock' });
     
     expect(provider).toBeDefined();
@@ -95,7 +89,7 @@ describe('ProviderManager', () => {
   });
 
   it('passes model configuration to provider', () => {
-    const manager = new ProviderManager(mockConfig);
+    const manager = new LLMProviderManager(mockConfig);
     const provider = manager.getProvider({ 
       provider: 'google',
       model: 'gemini-2.5-pro'
@@ -106,7 +100,7 @@ describe('ProviderManager', () => {
   });
 
   it('returns metadata for all available providers', () => {
-    const manager = new ProviderManager(mockConfig);
+    const manager = new LLMProviderManager(mockConfig);
     const providers = manager.getAvailableProviders();
     
     expect(providers).toHaveLength(3);
@@ -125,19 +119,19 @@ describe('ProviderManager', () => {
   });
 
   it('respects default provider from config', () => {
-    const configWithGoogle: Config = {
+    const configWithGoogle: LLMConfig = {
       ...mockConfig,
       defaultLlmProvider: 'google',
     };
     
-    const manager = new ProviderManager(configWithGoogle);
+    const manager = new LLMProviderManager(configWithGoogle);
     const provider = manager.getProvider();
     
     expect(provider.getMetadata().name).toBe('google');
   });
 
   it('auto-detects provider from model name', () => {
-    const manager = new ProviderManager(mockConfig);
+    const manager = new LLMProviderManager(mockConfig);
     
     // Test Google model
     const googleProvider = manager.getProvider({ model: 'gemini-2.5-flash' });
@@ -157,7 +151,7 @@ describe('ProviderManager', () => {
   });
 
   it('throws error for unknown model without provider', () => {
-    const manager = new ProviderManager(mockConfig);
+    const manager = new LLMProviderManager(mockConfig);
     
     expect(() => {
       manager.getProvider({ model: 'unknown-model-xyz' });
@@ -165,7 +159,7 @@ describe('ProviderManager', () => {
   });
 
   it('uses explicit provider even with model name', () => {
-    const manager = new ProviderManager(mockConfig);
+    const manager = new LLMProviderManager(mockConfig);
     
     // Model that normally maps to OpenRouter, but we explicitly request Google
     const provider = manager.getProvider({ 
@@ -177,7 +171,7 @@ describe('ProviderManager', () => {
   });
 
   it('searches provider models dynamically', () => {
-    const manager = new ProviderManager(mockConfig);
+    const manager = new LLMProviderManager(mockConfig);
     
     // Model that's in the provider's metadata but not in registry
     const provider = manager.getProvider({ model: 'gemini-2.5-pro' });

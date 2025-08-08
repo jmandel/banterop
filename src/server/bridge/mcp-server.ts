@@ -12,7 +12,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
-import type { ProviderManager } from '$src/llm/provider-manager';
+import type { LLMProviderManager } from '$src/llm/provider-manager';
 import type { UnifiedEvent } from '$src/types/event.types';
 import type { AgentMeta } from '$src/types/conversation.meta';
 import {
@@ -25,7 +25,7 @@ import { InProcessTransport } from '$src/agents/runtime/inprocess.transport';
 
 export interface McpBridgeDeps {
   orchestrator: OrchestratorService;
-  providerManager: ProviderManager;
+  providerManager: LLMProviderManager;
   replyTimeoutMs?: number;
 }
 

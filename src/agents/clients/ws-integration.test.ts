@@ -364,14 +364,13 @@ describe('WsEventStream Integration Tests', () => {
     // Get the lastClosedSeq for precondition
     const snapshot = app.orchestrator.getConversationSnapshot(conversationId);
     
-    // Post another event with precondition
+    // Post another event
     app.orchestrator.appendEvent({
       conversation: conversationId,
       type: 'message',
       payload: { text: 'After reconnect' },
       finality: 'turn',
-      agentId: 'test-agent',
-      precondition: { lastClosedSeq: snapshot.lastClosedSeq }
+      agentId: 'test-agent'
     });
 
     // Wait for consumption
