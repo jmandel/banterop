@@ -7,10 +7,12 @@ import type { JsonRpcRequest, JsonRpcResponse, SendMessageRequest, SendTraceRequ
 import type { GuidanceEvent } from '$src/types/orchestrator.types';
 import type { CreateConversationRequest } from '$src/types/conversation.meta';
 import type { ListConversationsParams } from '$src/db/conversation.store';
+import { startScenarioAgents } from '$src/agents/factories/scenario-agent.factory';
+import type { ProviderManager } from '$src/llm/provider-manager';
 
 const { upgradeWebSocket, websocket } = createBunWebSocket();
 
-export function createWebSocketServer(orchestrator: OrchestratorService) {
+export function createWebSocketServer(orchestrator: OrchestratorService, providerManager?: ProviderManager) {
   const app = new Hono();
 
   // Store subscription IDs per connection
@@ -26,7 +28,7 @@ export function createWebSocketServer(orchestrator: OrchestratorService) {
       async onMessage(evt, ws) {
         try {
           const req = JSON.parse(evt.data.toString()) as JsonRpcRequest;
-          await handleRpc(orchestrator, ws, req, connectionSubs.get(ws) || new Set());
+          await handleRpc(orchestrator, ws, req, connectionSubs.get(ws) || new Set(), providerManager);
         } catch (err) {
           ws.send(JSON.stringify(errResp(null, -32700, 'Parse error')));
         }
@@ -68,7 +70,8 @@ async function handleRpc(
   orchestrator: OrchestratorService,
   ws: { send: (data: string) => void },
   req: JsonRpcRequest,
-  activeSubs: Set<string>
+  activeSubs: Set<string>,
+  providerManager?: ProviderManager
 ) {
   const { id = null, method, params = {} } = req;
 
@@ -213,6 +216,47 @@ async function handleRpc(
     try {
       const result = await orchestrator.claimTurn(conversationId, agentId, guidanceSeq);
       ws.send(JSON.stringify(ok(id, result)));
+    } catch (e) {
+      const { code, message } = mapError(e);
+      ws.send(JSON.stringify(errResp(id, code, message)));
+    }
+    return;
+  }
+
+  if (method === 'runConversationToCompletion') {
+    const { conversationId } = params as { conversationId: number };
+    try {
+      const convo = orchestrator.getConversationWithMetadata(conversationId);
+      if (!convo) {
+        ws.send(JSON.stringify(errResp(id, 404, 'Conversation not found')));
+        return;
+      }
+      if (convo.status !== 'active') {
+        ws.send(JSON.stringify(errResp(id, 400, 'Conversation not active')));
+        return;
+      }
+      
+      // Mark autoRun = true in metadata
+      convo.metadata.custom = { ...(convo.metadata.custom || {}), autoRun: true };
+      orchestrator.storage.conversations.updateMeta(conversationId, convo.metadata);
+      
+      // Start internal loops now if providerManager is available
+      // Only start if there's a scenario or internal agents defined
+      if (providerManager) {
+        const hasInternalAgents = convo.metadata.agents?.some(a => a.kind === 'internal');
+        if (convo.scenarioId || hasInternalAgents) {
+          try {
+            await startScenarioAgents(orchestrator, conversationId, {
+              providerManager
+            });
+          } catch (err) {
+            // Log but don't fail - agents might start on resume
+            console.warn(`[AutoRun] Could not start agents immediately: ${err}`);
+          }
+        }
+      }
+      
+      ws.send(JSON.stringify(ok(id, { started: true })));
     } catch (e) {
       const { code, message } = mapError(e);
       ws.send(JSON.stringify(errResp(id, code, message)));

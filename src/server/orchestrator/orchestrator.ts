@@ -61,6 +61,20 @@ export class OrchestratorService {
     if (persisted) {
       this.bus.publish(persisted);
     }
+    
+    // If conversation finality set, mark conversation status and clear autoRun flag
+    if (input.type === 'message' && input.finality === 'conversation') {
+      this.storage.conversations.complete(input.conversation);
+      
+      // Clear autoRun flag if set
+      const convo = this.storage.conversations.getWithMetadata(input.conversation);
+      if (convo?.metadata?.custom?.autoRun) {
+        convo.metadata.custom.autoRun = false;
+        this.storage.conversations.updateMeta(convo.conversation, convo.metadata);
+        console.log(`[AutoRun] Conversation ${convo.conversation} completed; autoRun flag cleared.`);
+      }
+    }
+    
     // Post-write orchestration
     if (!this.isShuttingDown) {
       if (persisted) this.onEventAppended(persisted);

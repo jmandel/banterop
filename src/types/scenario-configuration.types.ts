@@ -73,14 +73,14 @@ export interface ScenarioConfiguration {
   };
 
   /** An array of the agents participating in the conversation. */
-  agents: AgentConfiguration[];
+  agents: ScenarioConfigAgentDetails[];
 }
 
 /**
  * Defines an agent's complete configuration, separating the conversational persona
  * from the underlying knowledge base used by its tools.
  */
-export interface AgentConfiguration {
+export interface ScenarioConfigAgentDetails {
   agentId: string; // Simple string ID
   principal: {
     type: 'individual' | 'organization';

@@ -12,7 +12,7 @@ async function main() {
     const agents = [
       {
         id: argv["agent-id"],
-        kind: "internal",
+        kind: "external" as const,  // Mark as external since we're connecting via WebSocket
         agentClass: argv["agent-class"] || "EchoAgent",
         config: argv["agent-config"] ? JSON.parse(argv["agent-config"]) : {},
       }

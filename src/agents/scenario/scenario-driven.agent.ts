@@ -1,5 +1,5 @@
 import type { Agent, AgentContext } from '$src/agents/agent.types';
-import type { AgentConfiguration, ScenarioConfiguration } from '$src/types/scenario-configuration.types';
+import type { ScenarioConfigAgentDetails, ScenarioConfiguration } from '$src/types/scenario-configuration.types';
 import type { LLMMessage, LLMProvider } from '$src/types/llm.types';
 import type { UnifiedEvent, TracePayload } from '$src/types/event.types';
 import type { HydratedConversationSnapshot } from '$src/types/orchestrator.types';
@@ -159,7 +159,7 @@ export class ScenarioDrivenAgent implements Agent {
 
   private buildMessages(
     myAgentId: string,
-    myAgent: AgentConfiguration,
+    myAgent: ScenarioConfigAgentDetails,
     scenario: ScenarioConfiguration,
     events: UnifiedEvent[]
   ): LLMMessage[] {

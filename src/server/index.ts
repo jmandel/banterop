@@ -27,7 +27,7 @@ server.route('/api', createLLMRoutes(appInstance.providerManager));
 server.route('/api/bridge', createBridgeRoutes(appInstance.orchestrator, appInstance.providerManager));
 
 // WS: JSON-RPC under /api/ws (already configured in createWebSocketServer)
-server.route('/', createWebSocketServer(appInstance.orchestrator));
+server.route('/', createWebSocketServer(appInstance.orchestrator, appInstance.providerManager));
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {

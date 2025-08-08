@@ -9,18 +9,25 @@ import { ScenarioStore } from '$src/db/scenario.store';
 import type { Database } from 'bun:sqlite';
 
 export class Storage {
-  private db?: Sqlite;
+  private _db?: Sqlite;
   events!: EventStore;
   conversations!: ConversationStore;
   attachments!: AttachmentStore;
   idempotency!: IdempotencyStore;
   turnClaims!: TurnClaimStore;
   scenarios!: ScenarioStore;
+  
+  get db(): Database {
+    if (!this._db) {
+      throw new Error('Database not initialized');
+    }
+    return this._db.raw;
+  }
 
   constructor(dbPath: string = ':memory:') {
-    this.db = new Sqlite(dbPath);
-    this.db.migrate();
-    const raw = this.db.raw;
+    this._db = new Sqlite(dbPath);
+    this._db.migrate();
+    const raw = this._db.raw;
     this.events = new EventStore(raw);
     this.conversations = new ConversationStore(raw);
     this.attachments = new AttachmentStore(raw);
@@ -42,8 +49,8 @@ export class Storage {
   }
 
   close() {
-    if (this.db) {
-      this.db.close();
+    if (this._db) {
+      this._db.close();
     }
   }
 }
