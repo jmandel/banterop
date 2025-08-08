@@ -15,7 +15,7 @@ export interface TurnLoopOptions {
  * Simplified external executor using guidance events and turn claims
  * Replaces 600+ LOC external.executor.ts with < 100 LOC
  */
-export class TurnLoopExecutor {
+export class TurnLoopExecutorExternal {
   private stream: WsEventStream | undefined;
   private stopped = false;
   

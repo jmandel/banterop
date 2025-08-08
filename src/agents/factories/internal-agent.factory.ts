@@ -10,7 +10,7 @@ import type { OrchestratorService } from '$src/server/orchestrator/orchestrator'
 import type { ProviderManager } from '$src/llm/provider-manager';
 import type { Logger } from '$src/agents/agent.types';
 import type { ConvConversationMeta } from '$src/server/bridge/conv-config.types';
-import { InternalTurnLoop } from '$src/agents/executors/internal-turn-loop';
+import { TurnLoopExecutorInternal } from '$src/agents/executors/turn-loop-executor.internal';
 import { AssistantAgent } from '$src/agents/assistant.agent';
 import { EchoAgent } from '$src/agents/echo.agent';
 import { ScenarioDrivenAgent } from '$src/agents/scenario/scenario-driven.agent';
@@ -30,8 +30,8 @@ export async function startInternalAgentsFromMeta(
   conversationId: number,
   meta: ConvConversationMeta,
   opts: StartInternalAgentsOptions
-): Promise<{ loops: InternalTurnLoop[]; stop: () => Promise<void> }> {
-  const loops: InternalTurnLoop[] = [];
+): Promise<{ loops: TurnLoopExecutorInternal[]; stop: () => Promise<void> }> {
+  const loops: TurnLoopExecutorInternal[] = [];
   const logger = opts.logger;
 
   // Hydrated snapshot -> scenario for ScenarioDrivenAgent fallback
@@ -86,7 +86,7 @@ export async function startInternalAgentsFromMeta(
       }
     }
 
-    const loop = new InternalTurnLoop(impl, orchestrator, { 
+    const loop = new TurnLoopExecutorInternal(impl, orchestrator, { 
       conversationId, 
       agentId, 
       ...(logger !== undefined ? { logger } : {})

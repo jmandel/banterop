@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { TurnLoopExecutor } from './turn-loop.executor';
+import { TurnLoopExecutorExternal } from './turn-loop-executor.external';
 import { App } from '$src/server/app';
 import { createWebSocketServer, websocket } from '$src/server/ws/jsonrpc.server';
 import { Hono } from 'hono';
@@ -63,7 +63,7 @@ describe('Turn-based Coordination E2E', () => {
     };
 
     // Create executor (agent-a will match 'assistant' guidance)
-    const execA = new TurnLoopExecutor(agentA, {
+    const execA = new TurnLoopExecutorExternal(agentA, {
       conversationId,
       agentId: 'agent-a',
       wsUrl,
@@ -111,7 +111,7 @@ describe('Turn-based Coordination E2E', () => {
     };
 
     // Start external executor (using agent-a to match 'assistant' guidance)
-    const externalExec = new TurnLoopExecutor(externalAgent, {
+    const externalExec = new TurnLoopExecutorExternal(externalAgent, {
       conversationId,
       agentId: 'agent-a',
       wsUrl,
@@ -196,7 +196,7 @@ describe('Turn-based Coordination E2E', () => {
     const promises = [];
     
     for (let i = 0; i < 3; i++) {
-      const exec = new TurnLoopExecutor(competingAgent, {
+      const exec = new TurnLoopExecutorExternal(competingAgent, {
         conversationId: competitionConvId,
         agentId: `competitor-${i}`,
         wsUrl: competitionWsUrl,
@@ -268,7 +268,7 @@ describe('Turn-based Coordination E2E', () => {
     // Note: Can't override readonly orchestrator, using default timeout
 
     // Create executor
-    const exec = new TurnLoopExecutor(slowAgent, {
+    const exec = new TurnLoopExecutorExternal(slowAgent, {
       conversationId,
       agentId: 'slow-agent',
       wsUrl,
@@ -375,7 +375,7 @@ describe('Guidance Event Distribution', () => {
         },
       };
 
-      const exec = new TurnLoopExecutor(agent, {
+      const exec = new TurnLoopExecutorExternal(agent, {
         conversationId,
         agentId,
         wsUrl,

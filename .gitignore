@@ -12,7 +12,7 @@ bun.lock*
 
 # --- Databases & generated data ---
 *.sqlite*
-*.db
+*.db.*
 output*/
 progress/
 
