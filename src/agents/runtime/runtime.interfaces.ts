@@ -13,6 +13,7 @@ export interface IAgentTransport {
     attachments?: NonNullable<MessagePayload['attachments']>;
     clientRequestId?: string;
     turn?: number;
+    precondition?: { lastClosedSeq: number };
   }): Promise<{ seq: number; turn: number; event: number }>;
   
   postTrace(params: {
@@ -21,9 +22,8 @@ export interface IAgentTransport {
     payload: TracePayload;
     turn?: number;
     clientRequestId?: string;
+    precondition?: { lastClosedSeq: number };
   }): Promise<{ seq: number; turn: number; event: number }>;
-  
-  claimTurn(conversationId: number, agentId: string, guidanceSeq: number): Promise<{ ok: boolean; reason?: string }>;
   
   now(): number;
 }

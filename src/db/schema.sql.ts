@@ -85,19 +85,6 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
   PRIMARY KEY (conversation, agent_id, client_request_id)
 );
 
--- Turn claims for coordination (Phase 2)
-CREATE TABLE IF NOT EXISTS turn_claims (
-  conversation      INTEGER NOT NULL,
-  guidance_seq      REAL NOT NULL,      -- Fractional seq from guidance event
-  agent_id          TEXT NOT NULL,
-  claimed_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  expires_at        TEXT NOT NULL,
-  PRIMARY KEY (conversation, guidance_seq),
-  FOREIGN KEY(conversation) REFERENCES conversations(conversation)
-);
-
-CREATE INDEX IF NOT EXISTS idx_turn_claims_expires
-  ON turn_claims (expires_at);
 
 -- Triggers to keep conversations.updated_at fresh
 CREATE TRIGGER IF NOT EXISTS trg_conversations_touch AFTER UPDATE ON conversations

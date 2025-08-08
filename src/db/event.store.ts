@@ -313,6 +313,67 @@ export class EventStore {
     return (row?.status as 'active' | 'completed') || 'active';
   }
 
+  // Get conversation head metadata for CAS preconditions
+  getHead(conversation: number): { lastTurn: number; lastClosedSeq: number; hasOpenTurn: boolean } {
+    // Get the last event in the conversation
+    const lastEvent = this.db
+      .prepare(`
+        SELECT turn, seq, type, finality 
+        FROM conversation_events 
+        WHERE conversation = ? 
+        ORDER BY seq DESC 
+        LIMIT 1
+      `)
+      .get(conversation) as { turn: number; seq: number; type: string; finality: string } | undefined;
+    
+    if (!lastEvent) {
+      return { lastTurn: 0, lastClosedSeq: 0, hasOpenTurn: false };
+    }
+    
+    // Get the last message with finality !== 'none'
+    const lastClosedMessage = this.db
+      .prepare(`
+        SELECT seq 
+        FROM conversation_events 
+        WHERE conversation = ? AND type = 'message' AND finality != 'none'
+        ORDER BY seq DESC 
+        LIMIT 1
+      `)
+      .get(conversation) as { seq: number } | undefined;
+    
+    const lastClosedSeq = lastClosedMessage?.seq || 0;
+    
+    // Check if the current turn is open (no closing message on this turn)
+    const hasOpenTurn = lastEvent.turn > 0 && !this.isTurnClosed(conversation, lastEvent.turn);
+    
+    return {
+      lastTurn: lastEvent.turn,
+      lastClosedSeq,
+      hasOpenTurn
+    };
+  }
+
+  // Check if a turn is closed
+  isTurnClosed(conversation: number, turn: number): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT finality
+         FROM conversation_events
+         WHERE conversation = ? AND turn = ? AND type = 'message'
+         ORDER BY event DESC
+         LIMIT 1`
+      )
+      .get(conversation, turn) as { finality: string } | undefined;
+    return row?.finality === 'turn' || row?.finality === 'conversation';
+  }
+
+  // Mark a turn as closed (update lastClosedSeq)
+  markTurnClosed(_conversation: number, _turn: number, _seq: number): void {
+    // This is handled automatically when a message with finality is inserted
+    // The getHead method will find it dynamically
+    // No additional work needed here
+  }
+
   // Helpers
 
   private ensureConversationExists(conversation: number) {
@@ -342,18 +403,6 @@ export class EventStore {
     return (row?.finality as Finality) || 'none';
   }
 
-  private isTurnClosed(conversation: number, turn: number): boolean {
-    const row = this.db
-      .prepare(
-        `SELECT finality
-         FROM conversation_events
-         WHERE conversation = ? AND turn = ? AND type = 'message'
-         ORDER BY event DESC
-         LIMIT 1`
-      )
-      .get(conversation, turn) as { finality: string } | undefined;
-    return row?.finality === 'turn' || row?.finality === 'conversation';
-  }
 
   private processMessageAttachments(
     conversation: number,

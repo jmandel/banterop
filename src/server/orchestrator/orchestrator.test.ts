@@ -56,8 +56,11 @@ describe('OrchestratorService', () => {
     // Finalize the turn
     orch.sendMessage(1, 'user', { text: 'Part 2' }, 'turn', 1);
 
-    // Now sendTrace can start a new turn (turn 2)
-    orch.sendTrace(1, 'assistant', { type: 'thought', content: 'starting new turn' });
+    // Get the lastClosedSeq for the precondition
+    const snapshot1 = orch.getConversationSnapshot(1);
+    
+    // Now sendTrace can start a new turn (turn 2) with proper precondition
+    orch.sendTrace(1, 'assistant', { type: 'thought', content: 'starting new turn' }, undefined, { lastClosedSeq: snapshot1.lastClosedSeq });
     
     // Verify the trace started a new turn
     const snapshot = orch.getConversationSnapshot(1);

@@ -25,6 +25,7 @@ export class InProcessTransport implements IAgentTransport {
     attachments?: NonNullable<MessagePayload['attachments']>;
     clientRequestId?: string;
     turn?: number;
+    precondition?: { lastClosedSeq: number };
   }): Promise<{ seq: number; turn: number; event: number }> {
     const payload: MessagePayload = {
       text: params.text,
@@ -37,7 +38,8 @@ export class InProcessTransport implements IAgentTransport {
       params.agentId,
       payload,
       params.finality,
-      params.turn
+      params.turn,
+      params.precondition
     );
   }
 
@@ -47,6 +49,7 @@ export class InProcessTransport implements IAgentTransport {
     payload: TracePayload;
     turn?: number;
     clientRequestId?: string;
+    precondition?: { lastClosedSeq: number };
   }): Promise<{ seq: number; turn: number; event: number }> {
     const payload = {
       ...params.payload,
@@ -57,12 +60,9 @@ export class InProcessTransport implements IAgentTransport {
       params.conversationId,
       params.agentId,
       payload,
-      params.turn
+      params.turn,
+      params.precondition
     );
-  }
-
-  async claimTurn(conversationId: number, agentId: string, guidanceSeq: number): Promise<{ ok: boolean; reason?: string }> {
-    return this.orchestrator.claimTurn(conversationId, agentId, guidanceSeq);
   }
 
   now(): number {

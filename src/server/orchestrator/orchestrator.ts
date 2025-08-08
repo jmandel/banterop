@@ -19,40 +19,72 @@ export class OrchestratorService {
   public readonly storage: Storage;
   private bus: SubscriptionBus;
   private policy: SchedulePolicy;
-  private cfg: OrchestratorConfig;
   private isShuttingDown = false;
 
-  private watchdogInterval: ReturnType<typeof setInterval> | undefined = undefined;
-
-  constructor(storage: Storage, bus?: SubscriptionBus, policy?: SchedulePolicy, cfg?: OrchestratorConfig) {
+  constructor(storage: Storage, bus?: SubscriptionBus, policy?: SchedulePolicy, _cfg?: OrchestratorConfig) {
     this.storage = storage;
     this.bus = bus ?? new SubscriptionBus();
     this.policy = policy ?? new StrictAlternationPolicy();
-    this.cfg = cfg ?? { idleTurnMs: 120_000 };
-    
-    // Start watchdog for expired claims
-    this.startClaimWatchdog();
   }
 
   // Graceful shutdown
   async shutdown(): Promise<void> {
     this.isShuttingDown = true;
     
-    // Stop watchdog
-    if (this.watchdogInterval) {
-      clearInterval(this.watchdogInterval);
-      this.watchdogInterval = undefined;
-    }
-    
-    
     // Clear subscriptions
     this.bus = new SubscriptionBus();
   }
 
-  // Writes with fanout and post-write orchestration hooks
-  appendEvent<T = unknown>(input: AppendEventInput<T>): AppendEventResult {
+  // Writes with fanout and post-write orchestration hooks (with CAS support)
+  appendEvent<T = unknown>(input: AppendEventInput<T> & { precondition?: { lastClosedSeq: number } }): AppendEventResult {
     if (this.isShuttingDown) {
       throw new Error('Orchestrator is shutting down');
+    }
+    
+    // Get conversation head for CAS checking
+    const head = this.storage.events.getHead(input.conversation);
+    
+    const openingNewTurn = input.turn == null; // caller didn't specify a turn
+    if (openingNewTurn) {
+      // Check precondition for opening a new turn
+      // Initial turn can omit precondition (treated as 0)
+      const requiredSeq = head.lastClosedSeq;
+      const providedSeq = input.precondition?.lastClosedSeq ?? 0;
+      
+      // For the very first turn (no events yet), allow missing precondition
+      const isFirstTurn = head.lastTurn === 0;
+      if (!isFirstTurn && providedSeq !== requiredSeq) {
+        throw new Error(`Precondition failed: expected lastClosedSeq=${requiredSeq}, got ${providedSeq}`);
+      }
+      
+      // Allocate new turn number
+      const newTurn = head.lastTurn + 1;
+      input.turn = newTurn;
+      
+      // If first event is a trace, emit a system turn_started event
+      if (input.type === 'trace') {
+        // First append the turn_started system event
+        this.storage.events.appendEvent({
+          conversation: input.conversation,
+          turn: newTurn,
+          type: 'system',
+          payload: { 
+            kind: 'turn_started', 
+            data: { 
+              turn: newTurn, 
+              phase: 'work', 
+              opener: input.agentId 
+            } 
+          },
+          finality: 'none',
+          agentId: 'system-orchestrator'
+        });
+      }
+    } else {
+      // Appending to an existing turn: check if it's closed
+      if (this.storage.events.isTurnClosed(input.conversation, input.turn!)) {
+        throw new Error(`Cannot append to closed turn ${input.turn}`);
+      }
     }
     
     const res = this.storage.events.appendEvent(input);
@@ -84,7 +116,7 @@ export class OrchestratorService {
 
   // Convenience helpers for common patterns
 
-  sendTrace(conversation: number, agentId: string, payload: TracePayload, turn?: number): AppendEventResult {
+  sendTrace(conversation: number, agentId: string, payload: TracePayload, turn?: number, precondition?: { lastClosedSeq: number }): AppendEventResult {
     // Determine turn: use provided or try to find an open turn
     // If no open turn exists, traces can now start a new turn
     const targetTurn = turn ?? this.tryFindOpenTurn(conversation);
@@ -96,12 +128,13 @@ export class OrchestratorService {
       payload,
       finality: 'none',
       agentId,
+      ...(precondition !== undefined ? { precondition } : {}),
     });
   }
 
-  sendMessage(conversation: number, agentId: string, payload: MessagePayload, finality: Finality, turn?: number): AppendEventResult {
+  sendMessage(conversation: number, agentId: string, payload: MessagePayload, finality: Finality, turn?: number, precondition?: { lastClosedSeq: number }): AppendEventResult {
     // If turn is omitted, this starts a new turn (allowed for message)
-    const input: AppendEventInput<MessagePayload> = {
+    const input: AppendEventInput<MessagePayload> & { precondition?: { lastClosedSeq: number } } = {
       conversation,
       type: 'message',
       payload,
@@ -110,6 +143,9 @@ export class OrchestratorService {
     };
     if (turn !== undefined) {
       input.turn = turn;
+    }
+    if (precondition !== undefined) {
+      input.precondition = precondition;
     }
     return this.appendEvent(input);
   }
@@ -121,7 +157,8 @@ export class OrchestratorService {
     const status = this.storage.events.getConversationStatus(conversation);
     const convoWithMeta = this.storage.conversations.getWithMetadata(conversation);
     const metadata = convoWithMeta?.metadata || { agents: [] };
-    return { conversation, status, metadata, events };
+    const head = this.storage.events.getHead(conversation);
+    return { conversation, status, metadata, events, lastClosedSeq: head.lastClosedSeq };
   }
 
   getHydratedConversationSnapshot(conversationId: number): HydratedConversationSnapshot | null {
@@ -134,6 +171,8 @@ export class OrchestratorService {
       const scenarioItem = this.storage.scenarios.findScenarioById(convo.scenarioId);
       scenario = scenarioItem?.config || null;
     }
+    
+    const head = this.storage.events.getHead(conversationId);
 
     return {
       conversation: convo.conversation,
@@ -141,6 +180,7 @@ export class OrchestratorService {
       scenario,
       runtimeMeta: convo.metadata,
       events,
+      lastClosedSeq: head.lastClosedSeq,
     };
   }
 
@@ -232,68 +272,9 @@ export class OrchestratorService {
     this.bus.unsubscribe(subId);
   }
 
-  // Turn claim (Phase 2: actual implementation with SQLite)
-  async claimTurn(conversationId: number, agentId: string, guidanceSeq: number): Promise<{ ok: boolean; reason?: string }> {
-    // Check if conversation exists and is active
-    const conv = this.storage.conversations.get(conversationId);
-    if (!conv) {
-      return { ok: false, reason: 'conversation not found' };
-    }
-    if (conv.status === 'completed') {
-      return { ok: false, reason: 'conversation completed' };
-    }
-
-    // Calculate expiry using configured idle time
-    const expiresAt = new Date(Date.now() + (this.cfg.idleTurnMs ?? 120_000)).toISOString();
-    
-    // Try to claim
-    const claimed = this.storage.turnClaims.claim({
-      conversation: conversationId,
-      guidanceSeq,
-      agentId,
-      expiresAt,
-    });
-    
-    if (claimed) {
-      // Write system event to log the claim
-      try {
-        this.appendSystemEvent(conversationId, {
-          kind: 'turn_claimed',
-          data: { 
-            agentId, 
-            guidanceSeq, 
-            expiresAt 
-          },
-        });
-      } catch (err) {
-        // System events are advisory, continue even if append fails
-        console.error('Failed to append turn_claimed event:', err);
-      }
-      return { ok: true };
-    } else {
-      // Already claimed, check by whom
-      const existing = this.storage.turnClaims.getClaim(conversationId, guidanceSeq);
-      if (existing && existing.agentId === agentId) {
-        // Same agent reclaiming, allow it (idempotent)
-        return { ok: true };
-      }
-      return { ok: false, reason: 'already claimed' };
-    }
-  }
-
   // Internals
 
   private onEventAppended(e: UnifiedEvent) {
-    // NOTE: System assumes at most one guidance is active at a time per conversation.
-    // cleanupClaims() will delete ALL active claims when a turn is completed.
-    // If you ever need multiple concurrent guidance items, refactor cleanupClaims to
-    // delete claims by guidanceSeq and carry guidanceSeq through the lifecycle.
-    
-    // Clean up claims when a turn is completed by the claiming agent
-    if (e.type === 'message' && e.finality === 'turn') {
-      this.cleanupClaims(e.conversation);
-    }
-    
     // Only react to message finality changes
     if (e.type === 'message' && (e.finality === 'turn' || e.finality === 'conversation')) {
       // Get policy decision
@@ -326,7 +307,7 @@ export class OrchestratorService {
 
   /// NOTE: All system events are stored in turn 0 as an out-of-band "meta lane"
   /// regardless of the current open turn. This allows orchestration/meta signals
-  /// (e.g., claim_expired, meta_created) to exist in parallel to regular turn 1..N
+  /// (e.g., meta_created) to exist in parallel to regular turn 1..N
   /// streams and be replayed independently.
   private appendSystemEvent(conversation: number, systemPayload: SystemPayload) {
     if (this.isShuttingDown) return;
@@ -368,67 +349,6 @@ export class OrchestratorService {
       }
     }
     return currentTurn;
-  }
-
-
-  // Watchdog for expired turn claims
-  private startClaimWatchdog() {
-    // Run every 5 seconds
-    this.watchdogInterval = setInterval(() => {
-      if (this.isShuttingDown) return;
-      
-      try {
-        // Get expired claims before deleting them
-        const expired = this.storage.turnClaims.getExpired();
-        
-        // Delete expired claims
-        const deletedCount = this.storage.turnClaims.deleteExpired();
-        
-        if (deletedCount > 0) {
-          // Emit system events for expired claims
-          for (const claim of expired) {
-            try {
-              this.appendSystemEvent(claim.conversation, {
-                kind: 'claim_expired',
-                data: {
-                  agentId: claim.agentId,
-                  guidanceSeq: claim.guidanceSeq,
-                  expiredAt: claim.expiresAt,
-                },
-              });
-            } catch (err) {
-              // System events are advisory, continue on error
-              console.error('Failed to append claim_expired event:', err);
-            }
-          }
-        }
-      } catch (err) {
-        console.error('Claim watchdog error:', err);
-      }
-    }, 5000);
-  }
-  
-  /// NOTE: In Connectathon mode, we delete ALL active claims for the conversation
-  /// when any turn completes. This is intentional and matches the 1-guidance-at-a-time
-  /// policy for the event.
-  // Clean up claims when a turn is successfully completed
-  private cleanupClaims(conversation: number) {
-    try {
-      // Assumption: only one guidance is active at a time.
-      const activeClaims = this.storage.turnClaims.getActiveClaimsForConversation(conversation);
-      if (activeClaims.length > 1) {
-        console.warn(
-          `cleanupClaims: multiple active claims detected for conversation ${conversation}. ` +
-          `System currently assumes one-at-a-time guidance; all claims will be deleted.`
-        );
-      }
-      for (const claim of activeClaims) {
-        this.storage.turnClaims.deleteClaim(conversation, claim.guidanceSeq);
-      }
-    } catch (err) {
-      // Non-critical cleanup, log and continue
-      console.error('Failed to cleanup claims:', err);
-    }
   }
 
   // Wait for this agent's turn - used by internal executors

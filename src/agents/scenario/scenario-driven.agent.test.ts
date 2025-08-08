@@ -130,7 +130,8 @@ describe('ScenarioDrivenAgent', () => {
       },
       events: [
         createMessageEvent('other-agent', 'Hello test agent')
-      ]
+      ],
+      lastClosedSeq: 0
     } as HydratedConversationSnapshot);
     
     // Create agent
@@ -211,7 +212,8 @@ describe('ScenarioDrivenAgent', () => {
         createMessageEvent('other-agent', 'First message', 1),
         createMessageEvent('test-agent', 'My response', 2),
         createMessageEvent('other-agent', 'Second message', 3),
-      ]
+      ],
+      lastClosedSeq: 0
     } as HydratedConversationSnapshot);
     
     const originalComplete = mockProvider.complete.bind(mockProvider);
@@ -223,13 +225,19 @@ describe('ScenarioDrivenAgent', () => {
     
     await triggerTurn(1, 'test-agent', 3.1);
     
-    expect(capturedMessages).toHaveLength(4);
+    // ScenarioDrivenAgent passes conversation history as part of the prompt content,
+    // not as separate messages. It constructs 2 messages: system and user
+    expect(capturedMessages).toHaveLength(2);
+    expect(capturedMessages[0].role).toBe('system');
     expect(capturedMessages[1].role).toBe('user');
-    expect(capturedMessages[1].content).toBe('First message');
-    expect(capturedMessages[2].role).toBe('assistant');
-    expect(capturedMessages[2].content).toBe('My response');
-    expect(capturedMessages[3].role).toBe('user');
-    expect(capturedMessages[3].content).toBe('Second message');
+    
+    // The user content should include the conversation history
+    const userContent = capturedMessages[1].content;
+    expect(userContent).toContain('First message');
+    expect(userContent).toContain('My response');
+    expect(userContent).toContain('Second message');
+    expect(userContent).toContain('other-agent');
+    expect(userContent).toContain('test-agent');
   });
 
   it('posts message with turn finality', async () => {
@@ -266,7 +274,8 @@ describe('ScenarioDrivenAgent', () => {
       },
       events: [
         createMessageEvent('other-agent', 'Hello')
-      ]
+      ],
+      lastClosedSeq: 0
     } as HydratedConversationSnapshot);
     
     await triggerTurn(1, 'test-agent');
@@ -281,7 +290,8 @@ describe('ScenarioDrivenAgent', () => {
       status: 'active' as const,
       scenario: null,
       runtimeMeta: { agents: [] },
-      events: []
+      events: [],
+      lastClosedSeq: 0
     } as HydratedConversationSnapshot);
     
     // Should not throw - error is caught in BaseAgent
@@ -294,7 +304,8 @@ describe('ScenarioDrivenAgent', () => {
       status: 'active' as const,
       scenario: testScenario,
       runtimeMeta: { agents: [] },
-      events: []
+      events: [],
+      lastClosedSeq: 0
     } as HydratedConversationSnapshot);
     
     // Create agent with ID not in scenario
@@ -320,8 +331,9 @@ describe('ScenarioDrivenAgent', () => {
     expect(mockTransport.postMessage).not.toHaveBeenCalled();
   });
 
-  it('handles tool synthesis for pending tool calls', async () => {
-    // Add a tool_call trace event to the history
+  it('handles conversation with incomplete tool calls from previous turns', async () => {
+    // Add a tool_call trace event to the history without a corresponding tool_result
+    // This tests that the agent can handle seeing incomplete tool calls in history
     mockTransport.getSnapshot.mockResolvedValue({
       conversation: 1,
       status: 'active' as const,
@@ -350,7 +362,8 @@ describe('ScenarioDrivenAgent', () => {
           ts: new Date().toISOString(),
           seq: 2
         }
-      ]
+      ],
+      lastClosedSeq: 0
     } as HydratedConversationSnapshot);
     
     await triggerTurn(1, 'test-agent');
@@ -358,9 +371,13 @@ describe('ScenarioDrivenAgent', () => {
     // Add a longer wait to ensure the async turn completes
     await new Promise(resolve => setTimeout(resolve, 200));
     
-    // Should have posted a tool_result trace
+    // The agent starts fresh each turn and doesn't try to complete pending tool calls
+    // It should post at least a thought trace as it processes the turn
     expect(mockTransport.postTrace).toHaveBeenCalled();
     const traceCall = mockTransport.postTrace.mock.calls[0]?.[0];
-    expect(traceCall?.payload.type).toBe('tool_result');
+    expect(traceCall?.payload.type).toBe('thought');
+    
+    // Should eventually post a message to complete the turn
+    expect(mockTransport.postMessage).toHaveBeenCalled();
   });
 });

@@ -86,7 +86,8 @@ describe('AssistantAgent', () => {
         createMessageEvent('user', 'Hello assistant')
       ],
       scenario: null,
-      runtimeMeta: { agents: [] }
+      runtimeMeta: { agents: [] },
+      lastClosedSeq: 0
     } as HydratedConversationSnapshot);
   });
 
@@ -142,7 +143,8 @@ describe('AssistantAgent', () => {
         createMessageEvent('user', 'User message 2', 3)
       ],
       scenario: null,
-      runtimeMeta: { agents: [] }
+      runtimeMeta: { agents: [] },
+      lastClosedSeq: 0
     } as HydratedConversationSnapshot);
     
     const originalComplete = mockProvider.complete.bind(mockProvider);
@@ -181,7 +183,8 @@ describe('AssistantAgent', () => {
         createSystemEvent()
       ],
       scenario: null,
-      runtimeMeta: { agents: [] }
+      runtimeMeta: { agents: [] },
+      lastClosedSeq: 0
     } as HydratedConversationSnapshot);
     
     const originalComplete = mockProvider.complete.bind(mockProvider);
@@ -209,7 +212,8 @@ describe('AssistantAgent', () => {
       metadata: { agents: [] },
       events: [],
       scenario: null,
-      runtimeMeta: { agents: [] }
+      runtimeMeta: { agents: [] },
+      lastClosedSeq: 0
     } as HydratedConversationSnapshot);
     
     await triggerTurn(1, 'assistant');
@@ -232,7 +236,8 @@ describe('AssistantAgent', () => {
         createMessageEvent('assistant', 'Another of my responses', 4)
       ],
       scenario: null,
-      runtimeMeta: { agents: [] }
+      runtimeMeta: { agents: [] },
+      lastClosedSeq: 0
     } as HydratedConversationSnapshot);
     
     const originalComplete = mockProvider.complete.bind(mockProvider);

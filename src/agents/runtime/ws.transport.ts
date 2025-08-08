@@ -78,6 +78,7 @@ export class WsTransport implements IAgentTransport {
     attachments?: NonNullable<MessagePayload['attachments']>;
     clientRequestId?: string;
     turn?: number;
+    precondition?: { lastClosedSeq: number };
   }): Promise<{ seq: number; turn: number; event: number }> {
     const result = await this.call<any>('sendMessage', {
       conversationId: params.conversationId,
@@ -89,6 +90,7 @@ export class WsTransport implements IAgentTransport {
       },
       finality: params.finality,
       ...(params.turn !== undefined ? { turn: params.turn } : {}),
+      ...(params.precondition !== undefined ? { precondition: params.precondition } : {}),
     });
     
     // Handle both response formats
@@ -110,6 +112,7 @@ export class WsTransport implements IAgentTransport {
     payload: TracePayload;
     turn?: number;
     clientRequestId?: string;
+    precondition?: { lastClosedSeq: number };
   }): Promise<{ seq: number; turn: number; event: number }> {
     const tracePayload = {
       ...params.payload,
@@ -121,6 +124,7 @@ export class WsTransport implements IAgentTransport {
       agentId: params.agentId,
       tracePayload,
       ...(params.turn !== undefined ? { turn: params.turn } : {}),
+      ...(params.precondition !== undefined ? { precondition: params.precondition } : {}),
     });
     
     // Handle both response formats
@@ -133,10 +137,6 @@ export class WsTransport implements IAgentTransport {
       turn: result.turn || 0, 
       event: result.event || 0 
     };
-  }
-  
-  async claimTurn(conversationId: number, agentId: string, guidanceSeq: number): Promise<{ ok: boolean; reason?: string }> {
-    return this.call('claimTurn', { conversationId, agentId, guidanceSeq });
   }
   
   now(): number {
