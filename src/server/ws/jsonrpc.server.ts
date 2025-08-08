@@ -7,7 +7,8 @@ import type { JsonRpcRequest, JsonRpcResponse, SendMessageRequest, SendTraceRequ
 import type { GuidanceEvent } from '$src/types/orchestrator.types';
 import type { CreateConversationRequest } from '$src/types/conversation.meta';
 import type { ListConversationsParams } from '$src/db/conversation.store';
-import { startScenarioAgents } from '$src/agents/factories/scenario-agent.factory';
+import { startAgents } from '$src/agents/factories/agent.factory';
+import { InProcessTransport } from '$src/agents/runtime/inprocess.transport';
 import type { ProviderManager } from '$src/llm/provider-manager';
 
 const { upgradeWebSocket, websocket } = createBunWebSocket();
@@ -184,9 +185,9 @@ async function handleRpc(
   }
 
   if (method === 'sendTrace') {
-    const { conversationId, agentId, tracePayload, turn } = params as SendTraceRequest;
+    const { conversationId, agentId, tracePayload, turn, precondition } = params as SendTraceRequest;
     try {
-      const res = orchestrator.sendTrace(conversationId, agentId, tracePayload, turn);
+      const res = orchestrator.sendTrace(conversationId, agentId, tracePayload, turn, precondition);
       ws.send(JSON.stringify(ok(id, res)));
     } catch (e) {
       const { code, message } = mapError(e);
@@ -196,9 +197,9 @@ async function handleRpc(
   }
 
   if (method === 'sendMessage') {
-    const { conversationId, agentId, messagePayload, finality, turn } = params as SendMessageRequest;
+    const { conversationId, agentId, messagePayload, finality, turn, precondition } = params as SendMessageRequest;
     try {
-      const res = orchestrator.sendMessage(conversationId, agentId, messagePayload, finality, turn);
+      const res = orchestrator.sendMessage(conversationId, agentId, messagePayload, finality, turn, precondition);
       ws.send(JSON.stringify(ok(id, res)));
     } catch (e) {
       const { code, message } = mapError(e);
@@ -226,19 +227,27 @@ async function handleRpc(
       orchestrator.storage.conversations.updateMeta(conversationId, convo.metadata);
       
       // Start internal loops now if providerManager is available
-      // Only start if there's a scenario or internal agents defined
+      // Only start if there are internal agents defined
       if (providerManager) {
         const hasInternalAgents = convo.metadata.agents?.some((a: any) => a.kind === 'internal');
-        if (convo.metadata.scenarioId || hasInternalAgents) {
+        console.log(`[AutoRun] hasInternalAgents: ${hasInternalAgents}, scenarioId: ${convo.metadata.scenarioId}`);
+        if (hasInternalAgents) {
           try {
-            await startScenarioAgents(orchestrator, conversationId, {
+            // Use the unified factory for all internal agents
+            console.log(`[AutoRun] Starting agents for conversation ${conversationId}`);
+            await startAgents({
+              conversationId,
+              transport: new InProcessTransport(orchestrator),
               providerManager
             });
+            console.log(`[AutoRun] Agents started successfully for conversation ${conversationId}`);
           } catch (err) {
             // Log but don't fail - agents might start on resume
             console.warn(`[AutoRun] Could not start agents immediately: ${err}`);
           }
         }
+      } else {
+        console.log(`[AutoRun] No providerManager available`);
       }
       
       ws.send(JSON.stringify(ok(id, { started: true })));

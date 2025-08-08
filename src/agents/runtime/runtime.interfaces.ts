@@ -26,6 +26,9 @@ export interface IAgentTransport {
   }): Promise<{ seq: number; turn: number; event: number }>;
   
   now(): number;
+  
+  // NEW: Transport owns event stream creation
+  createEventStream(conversationId: number, includeGuidance: boolean): IAgentEvents;
 }
 
 export interface IAgentEvents {

@@ -38,11 +38,13 @@ export class AssistantAgent extends BaseAgent<HydratedConversationSnapshot> {
     const response = await this.llmProvider.complete({ messages });
 
     // Post the response back to the conversation
+    // Include precondition to start new turn
     await ctx.transport.postMessage({
       conversationId: ctx.conversationId,
       agentId: ctx.agentId,
       text: response.content,
       finality: 'turn',
+      precondition: { lastClosedSeq: ctx.snapshot.lastClosedSeq }
     });
 
     logLine(ctx.agentId, 'info', 'AssistantAgent turn completed.');

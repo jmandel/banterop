@@ -1,4 +1,4 @@
-import type { IAgentTransport } from './runtime.interfaces';
+import type { IAgentTransport, IAgentEvents } from './runtime.interfaces';
 import type { MessagePayload, TracePayload } from '$src/types/event.types';
 import type { ConversationSnapshot, HydratedConversationSnapshot } from '$src/types/orchestrator.types';
 import { mock } from 'bun:test';
@@ -39,4 +39,10 @@ export class MockTransport implements IAgentTransport {
   });
 
   now = mock((): number => Date.now());
+
+  createEventStream = mock((_conversationId: number, _includeGuidance: boolean): IAgentEvents => {
+    return {
+      subscribe: () => () => {} // Returns unsubscribe function
+    };
+  });
 }

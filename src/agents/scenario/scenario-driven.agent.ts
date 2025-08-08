@@ -1002,7 +1002,8 @@ ${thoughts.join('\n')}
       agentId: ctx.agentId,
       text,
       finality: concludeConversation ? 'conversation' : 'turn',
-      ...(attachments && attachments.length > 0 ? { attachments } : {})
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
+      precondition: { lastClosedSeq: ctx.snapshot.lastClosedSeq }
     });
     
     logLine(ctx.agentId, 'info', `ScenarioDrivenAgent(${ctx.agentId}) completed turn`);

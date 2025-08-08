@@ -1,6 +1,7 @@
-import type { IAgentTransport } from './runtime.interfaces';
+import type { IAgentTransport, IAgentEvents } from './runtime.interfaces';
 import type { MessagePayload, TracePayload } from '$src/types/event.types';
 import type { ConversationSnapshot, HydratedConversationSnapshot } from '$src/types/orchestrator.types';
+import { WsEvents } from './ws.events';
 
 /**
  * WebSocket RPC client for agent transport operations
@@ -141,6 +142,10 @@ export class WsTransport implements IAgentTransport {
   
   now(): number {
     return Date.now();
+  }
+  
+  createEventStream(conversationId: number, includeGuidance: boolean): IAgentEvents {
+    return new WsEvents(this.wsUrl, { conversationId, includeGuidance });
   }
   
   close() {
