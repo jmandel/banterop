@@ -40,7 +40,9 @@ async function main() {
   });
   
   const port = server.port;
-  const wsUrl = `ws://localhost:${port}/api/ws`;
+  // const wsUrl = `ws://localhost:${port}/api/ws`;
+  const wsUrl = "ws://localhost:3000/api/ws";
+
   
   console.log(`Server started on port ${port}`);
   console.log(`WebSocket URL: ${wsUrl}`);

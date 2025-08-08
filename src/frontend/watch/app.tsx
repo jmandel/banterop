@@ -12,7 +12,42 @@ import { UnifiedEvent } from "$src/types/event.types";
 import { WsEventStream } from "$src/agents/clients/event-stream";
 
 dayjs.extend(relativeTime);
-const API_BASE = "/api";
+
+// Pull server URL from HTML-injected config if it exists, else default
+declare const __API_BASE__: string | undefined;
+const API_BASE: string =
+  (typeof window !== "undefined" &&
+    (window as any).__APP_CONFIG__?.API_BASE) ||
+  (typeof __API_BASE__ !== "undefined" ? __API_BASE__ : "http://localhost:3000/api");
+
+// Minimal one-shot WS JSON-RPC helper
+async function wsRpcCall<T>(method: string, params?: any): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const wsUrl = API_BASE.startsWith("http")
+      ? API_BASE.replace(/^http/, "ws") + "/ws"
+      : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${API_BASE}/ws`;
+
+    const ws = new WebSocket(wsUrl);
+    const id = crypto.randomUUID();
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+    };
+
+    ws.onmessage = (evt) => {
+      const msg = JSON.parse(evt.data as string);
+      if (msg.id !== id) return;
+      ws.close();
+      if (msg.error) {
+        reject(new Error(msg.error.message));
+      } else {
+        resolve(msg.result as T);
+      }
+    };
+
+    ws.onerror = (err) => reject(err);
+  });
+}
 
 // Color palette
 const AGENT_COLORS = [
@@ -42,7 +77,6 @@ interface TurnView {
   systems: UnifiedEvent[];
 }
 
-// Conversation list w/ filters + tags
 function ConversationList() {
   const [hours, setHours] = useState(6);
   const [scenarioFilter, setScenarioFilter] = useState("");
@@ -50,31 +84,61 @@ function ConversationList() {
   const [conversations, setConversations] = useState<any[]>([]);
   const [scenarioMap, setScenarioMap] = useState<Record<string, any>>({});
 
-  useEffect(() => {
-    (async () => {
-      const since = dayjs().subtract(hours, "hour").toISOString();
-      const convoRes = await fetch(
-        `${API_BASE}/conversations?since=${encodeURIComponent(since)}`
-      );
-      const convoData = await convoRes.json();
-      setConversations(convoData);
+  // helper to load list
+  const loadList = async () => {
+    const sinceIso = dayjs().subtract(hours, "hour").toISOString();
+    const result = await wsRpcCall<{ conversations: any[] }>(
+      "listConversations", {}
+    );
+    const recent = result.conversations.filter((c) =>
+      dayjs(c.updatedAt).isAfter(sinceIso)
+    );
+    setConversations(recent);
 
-      const scenarioIds = Array.from(
-        new Set(convoData.map((c: any) => c.scenarioId).filter(Boolean))
-      );
-      if (scenarioIds.length) {
-        const scenarioMapLocal: Record<string, any> = {};
-        for (const id of scenarioIds) {
-          try {
-            const sres = await fetch(`${API_BASE}/scenarios/${id}`);
-            if (sres.ok) {
-              scenarioMapLocal[id] = await sres.json();
-            }
-          } catch {}
-        }
-        setScenarioMap(scenarioMapLocal);
+    const scenarioIds = Array.from(
+      new Set(recent.map((c: any) => c.scenarioId).filter(Boolean))
+    );
+    if (scenarioIds.length) {
+      const scenarioMapLocal: Record<string, any> = {};
+      for (const id of scenarioIds) {
+        scenarioMapLocal[id] = { name: id, config: {} };
       }
-    })();
+      setScenarioMap(scenarioMapLocal);
+    }
+  };
+
+  useEffect(() => {
+    loadList().catch(console.error);
+  }, [hours]);
+
+  // subscribeAll to new convos
+  useEffect(() => {
+    const wsUrl = API_BASE.startsWith("http")
+      ? API_BASE.replace(/^http/, "ws") + "/ws"
+      : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${API_BASE}/ws`;
+    const ws = new WebSocket(wsUrl);
+    const id = crypto.randomUUID();
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method: "subscribeAll",
+        params: { includeGuidance: false }
+      }));
+    };
+
+    ws.onmessage = (evt) => {
+      const msg = JSON.parse(evt.data as string);
+      if (msg.method === "event" && msg.params?.type === "system") {
+        if (msg.params?.payload?.kind === "meta_created") {
+          loadList().catch(console.error);
+        }
+      }
+    };
+
+    ws.onerror = (err) => console.error("subscribeAll error", err);
+    return () => ws.close();
   }, [hours]);
 
   const availableTags = useMemo(() => {
@@ -97,7 +161,9 @@ function ConversationList() {
 
   return (
     <div className="p-4 space-y-4">
+      {/* filters */}
       <div className="flex flex-wrap gap-4 items-end">
+        {/* hours */}
         <label className="flex flex-col text-sm">
           Hours back
           <input
@@ -107,6 +173,7 @@ function ConversationList() {
             onChange={(e) => setHours(Number(e.target.value))}
           />
         </label>
+        {/* scenario */}
         <label className="flex flex-col text-sm">
           Scenario
           <select
@@ -122,6 +189,7 @@ function ConversationList() {
             ))}
           </select>
         </label>
+        {/* tag */}
         <label className="flex flex-col text-sm">
           Tag
           <select
@@ -139,6 +207,7 @@ function ConversationList() {
         </label>
       </div>
 
+      {/* table */}
       <table className="w-full text-xs border">
         <thead className="bg-gray-100">
           <tr>
@@ -155,10 +224,7 @@ function ConversationList() {
             const tags =
               scenarioMap[c.scenarioId]?.config?.metadata?.tags || [];
             return (
-              <tr
-                key={c.conversation}
-                className="border-t hover:bg-gray-50 cursor-pointer"
-              >
+              <tr key={c.conversation} className="border-t hover:bg-gray-50">
                 <td className="p-1">{c.conversation}</td>
                 <td className="p-1">
                   <Link
@@ -194,22 +260,29 @@ function ConversationView() {
 
   const fetchHistory = async () => {
     if (!id) return;
-    const res = await fetch(`${API_BASE}/conversations/${id}?includeEvents=true`);
-    const data = await res.json();
-    setMeta(data);
-    if (data.events) {
-      const unique = data.events.filter((e: UnifiedEvent) => {
-        if (seenSeqRef.current.has(e.seq)) return false;
-        seenSeqRef.current.add(e.seq);
-        return true;
+    try {
+      const data = await wsRpcCall<any>("getConversation", {
+        conversationId: Number(id),
       });
-      setEvents((prev) => [...prev, ...unique].sort((a, b) => a.seq - b.seq));
+      setMeta(data);
+      if (data.events) {
+        const unique = data.events.filter((e: UnifiedEvent) => {
+          if (seenSeqRef.current.has(e.seq)) return false;
+          seenSeqRef.current.add(e.seq);
+          return true;
+        });
+        setEvents((prev) => [...prev, ...unique].sort((a, b) => a.seq - b.seq));
+      }
+    } catch (err) {
+      console.error("Error loading conversation:", err);
     }
   };
 
   const connectWS = () => {
     if (!id) return;
-    const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws`;
+    const wsUrl = API_BASE.startsWith("http")
+      ? API_BASE.replace(/^http/, "ws") + "/ws"
+      : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${API_BASE}/ws`;
     const s = new WsEventStream(wsUrl, {
       conversationId: Number(id),
       includeGuidance: true,
@@ -332,7 +405,7 @@ function ConversationView() {
   );
 }
 
-export default function App() {
+function App() {
   return (
     <Router>
       <div className="font-sans text-gray-900 bg-gray-50 min-h-screen">
@@ -344,3 +417,8 @@ export default function App() {
     </Router>
   );
 }
+
+// Mount the app
+import ReactDOM from "react-dom/client";
+const root = ReactDOM.createRoot(document.getElementById("root")!);
+root.render(<App />);

@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "bun --watch src/server/index.ts",
+    "dev:backend": "bun --watch src/server/index.ts",
+    "dev:frontend": "bun --port 3001 src/frontend/watch/index.html",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "typecheck": "tsc --noEmit",
@@ -15,10 +17,16 @@
     "@modelcontextprotocol/sdk": "^1.17.2",
     "hono": "^4.8.9",
     "openai": "^5.12.1",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.20.0",
+    "dayjs": "^1.11.10"
   },
   "devDependencies": {
     "@types/bun": "^1.2.19",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
     "bun-types": "^1.2.19",
     "typescript": "^5.8.3"
   }
