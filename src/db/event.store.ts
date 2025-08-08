@@ -236,6 +236,41 @@ export class EventStore {
     }));
   }
 
+  getEventsSince(conversation: number, sinceSeq?: number): UnifiedEvent[] {
+    const rows = this.db
+      .prepare(
+        `SELECT conversation, turn, event, type, payload, finality, ts, agent_id as agentId, seq
+         FROM conversation_events
+         WHERE conversation = ?
+         ${sinceSeq ? 'AND seq > ?' : ''}
+         ORDER BY seq ASC`
+      )
+      .all(
+        ...(sinceSeq !== undefined ? [conversation, sinceSeq] : [conversation])
+      ) as Array<{
+        conversation: number;
+        turn: number;
+        event: number;
+        type: string;
+        payload: string;
+        finality: string;
+        ts: string;
+        agentId: string;
+        seq: number;
+      }>;
+    return rows.map((r) => ({
+      conversation: r.conversation,
+      turn: r.turn,
+      event: r.event,
+      type: r.type as UnifiedEvent['type'],
+      payload: JSON.parse(r.payload),
+      finality: r.finality as Finality,
+      ts: r.ts,
+      agentId: r.agentId,
+      seq: r.seq,
+    }));
+  }
+
   getConversationStatus(conversation: number): 'active' | 'completed' {
     const row = this.db
       .prepare(`SELECT status FROM conversations WHERE conversation = ?`)

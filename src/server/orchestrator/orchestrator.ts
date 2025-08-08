@@ -170,6 +170,28 @@ export class OrchestratorService {
     return this.bus.subscribe({ conversation }, listener as EventListener, includeGuidance);
   }
 
+  // New: filtered subscribe (types/agents)
+  subscribeWithFilter(
+    filter: { conversation: number; types?: Array<'message'|'trace'|'system'>; agents?: string[] },
+    listener: ((e: UnifiedEvent | GuidanceEvent) => void),
+    includeGuidance = false
+  ): string {
+    return this.bus.subscribe(
+      filter,
+      listener as EventListener,
+      includeGuidance
+    );
+  }
+
+  // Optional: subscribe to all conversations (wildcard)
+  subscribeAll(listener: ((e: UnifiedEvent | GuidanceEvent) => void), includeGuidance = false): string {
+    return this.bus.subscribe({ conversation: -1 }, listener as EventListener, includeGuidance);
+  }
+
+  getEventsSince(conversation: number, sinceSeq?: number): UnifiedEvent[] {
+    return this.storage.events.getEventsSince(conversation, sinceSeq);
+  }
+
   unsubscribe(subId: string) {
     this.bus.unsubscribe(subId);
   }

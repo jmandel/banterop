@@ -65,4 +65,32 @@ describe('SubscriptionBus', () => {
 
     bus.unsubscribe(subId);
   });
+
+  it('supports wildcard subscription across all conversations (-1)', () => {
+    const bus = new SubscriptionBus();
+    const received: UnifiedEvent[] = [];
+
+    const subId = bus.subscribe({ conversation: -1 }, (e) => {
+      received.push(e);
+    });
+
+    const now = new Date().toISOString();
+    const e1: UnifiedEvent = {
+      conversation: 1, turn: 0, event: 1, type: 'system',
+      payload: { kind: 'meta_created' }, finality: 'none', ts: now, agentId: 'system', seq: 1,
+    };
+    const e2: UnifiedEvent = {
+      conversation: 2, turn: 1, event: 1, type: 'message',
+      payload: { text: 'hey' }, finality: 'turn', ts: now, agentId: 'a1', seq: 2,
+    };
+
+    bus.publish(e1);
+    bus.publish(e2);
+
+    expect(received.length).toBe(2);
+    expect(received[0]?.conversation).toBe(1);
+    expect(received[1]?.conversation).toBe(2);
+
+    bus.unsubscribe(subId);
+  });
 });

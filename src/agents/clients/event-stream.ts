@@ -8,6 +8,8 @@ export interface EventStreamOptions {
   includeGuidance?: boolean;
   reconnectDelayMs?: number;
   heartbeatIntervalMs?: number;
+  filters?: { types?: Array<'message'|'trace'|'system'>; agents?: string[] };
+  sinceSeq?: number;
 }
 
 /**
@@ -47,6 +49,8 @@ export class WsEventStream {
           params: {
             conversationId: this.options.conversationId,
             includeGuidance: this.options.includeGuidance ?? false,
+            ...(this.options.filters ? { filters: this.options.filters } : {}),
+            ...(typeof this.options.sinceSeq === 'number' ? { sinceSeq: this.options.sinceSeq } : {}),
           },
           jsonrpc: '2.0',
         };

@@ -62,18 +62,37 @@ async function handleRpc(
   const { id = null, method, params = {} } = req;
 
   if (method === 'subscribe') {
-    const { conversationId, includeGuidance = false } = params as { conversationId: number; includeGuidance?: boolean };
-    const subId = orchestrator.subscribe(
-      conversationId, 
-      (e: UnifiedEvent | GuidanceEvent) => {
-        // For guidance events, send with method 'guidance'
-        const method = 'type' in e && e.type === 'guidance' ? 'guidance' : 'event';
-        ws.send(JSON.stringify({ jsonrpc: '2.0', method, params: e }));
-      },
-      includeGuidance
-    );
+    const {
+      conversationId,
+      includeGuidance = false,
+      filters,
+      sinceSeq,
+    } = params as {
+      conversationId: number;
+      includeGuidance?: boolean;
+      filters?: { types?: Array<'message'|'trace'|'system'>; agents?: string[] };
+      sinceSeq?: number;
+    };
+    const listener = (e: UnifiedEvent | GuidanceEvent) => {
+      const methodName = 'type' in e && e.type === 'guidance' ? 'guidance' : 'event';
+      ws.send(JSON.stringify({ jsonrpc: '2.0', method: methodName, params: e }));
+    };
+    const subId = (filters?.types || filters?.agents)
+      ? orchestrator.subscribeWithFilter(
+          { conversation: conversationId, ...(filters?.types ? { types: filters.types } : {}), ...(filters?.agents ? { agents: filters.agents } : {}) },
+          listener,
+          includeGuidance
+        )
+      : orchestrator.subscribe(conversationId, listener, includeGuidance);
     activeSubs.add(subId);
     ws.send(JSON.stringify(ok(id, { subId })));
+
+    if (typeof sinceSeq === 'number') {
+      const backlog = orchestrator.getEventsSince(conversationId, sinceSeq);
+      for (const ev of backlog) {
+        ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: ev }));
+      }
+    }
     return;
   }
 
@@ -140,6 +159,17 @@ async function handleRpc(
       const err = e as Error;
       ws.send(JSON.stringify(errResp(id, -32000, err.message)));
     }
+    return;
+  }
+
+  if (method === 'subscribeAll') {
+    const { includeGuidance = false } = params as { includeGuidance?: boolean };
+    const subId = orchestrator.subscribeAll((e: UnifiedEvent | GuidanceEvent) => {
+      const methodName = 'type' in e && e.type === 'guidance' ? 'guidance' : 'event';
+      ws.send(JSON.stringify({ jsonrpc: '2.0', method: methodName, params: e }));
+    }, includeGuidance);
+    activeSubs.add(subId);
+    ws.send(JSON.stringify(ok(id, { subId })));
     return;
   }
 

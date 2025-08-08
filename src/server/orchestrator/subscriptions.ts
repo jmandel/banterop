@@ -23,7 +23,9 @@ export class SubscriptionBus {
 
   publish(e: UnifiedEvent) {
     for (const s of this.subs.values()) {
-      if (s.filter.conversation !== e.conversation) continue;
+      // Wildcard support: conversation === -1 means "all conversations"
+      const convOk = s.filter.conversation === -1 || s.filter.conversation === e.conversation;
+      if (!convOk) continue;
       if (s.filter.types && !s.filter.types.includes(e.type)) continue;
       if (s.filter.agents && !s.filter.agents.includes(e.agentId)) continue;
       try {
@@ -38,7 +40,9 @@ export class SubscriptionBus {
   // Publish guidance event (transient, not persisted)
   publishGuidance(g: GuidanceEvent) {
     for (const s of this.subs.values()) {
-      if (s.filter.conversation !== g.conversation) continue;
+      // Wildcard support for guidance too
+      const convOk = s.filter.conversation === -1 || s.filter.conversation === g.conversation;
+      if (!convOk) continue;
       if (!s.includeGuidance) continue; // Only send to subscribers that opted in
       try {
         (s.listener as (e: UnifiedEvent | GuidanceEvent) => void)(g);

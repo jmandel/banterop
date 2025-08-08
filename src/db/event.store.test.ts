@@ -274,4 +274,24 @@ describe('EventStore append invariants and retrieval', () => {
     expect(all[3]?.type).toBe('trace');
     expect(all[3]?.turn).toBe(2);
   });
+
+  it('getEventsSince returns events with seq greater than given', () => {
+    const e1 = events.appendEvent({
+      conversation: 1,
+      type: 'message',
+      payload: { text: 'one' } as MessagePayload,
+      finality: 'none',
+      agentId: 'a1',
+    });
+    const e2 = events.appendEvent({
+      conversation: 1,
+      type: 'message',
+      payload: { text: 'two' } as MessagePayload,
+      finality: 'turn',
+      agentId: 'a2',
+    });
+    const since = events.getEventsSince(1, e1.seq);
+    expect(since.length).toBe(1);
+    expect((since[0]!.payload as any).text).toBe('two');
+  });
 });

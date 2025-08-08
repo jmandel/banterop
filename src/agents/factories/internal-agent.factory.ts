@@ -95,7 +95,8 @@ export async function startInternalAgentsFromMeta(
 
 function pickProvider(pm: ProviderManager, cfg?: Record<string, unknown>): LLMProvider {
   // Read a minimal set of keys commonly used to choose provider/model/apiKey
-  const provider = (cfg?.provider as SupportedProvider | undefined);
+  // Support both 'llmProvider' and 'provider' for backward compatibility
+  const provider = ((cfg?.llmProvider ?? cfg?.provider) as SupportedProvider | undefined);
   const model = (cfg?.model as string | undefined);
   const apiKey = (cfg?.apiKey as string | undefined);
 

@@ -240,6 +240,72 @@ describe('WsEventStream Integration Tests', () => {
     stream2.close();
   });
 
+  test('subscribe with filters and sinceSeq backlog', async () => {
+    // Post some seed events by different agents
+    app.orchestrator.appendEvent({
+      conversation: conversationId,
+      type: 'message',
+      payload: { text: 'from A1' },
+      finality: 'none',
+      agentId: 'agent-A',
+    });
+    const lastA1 = app.orchestrator.getConversationSnapshot(conversationId).events.slice(-1)[0]!.seq;
+
+    app.orchestrator.appendEvent({
+      conversation: conversationId,
+      type: 'message',
+      payload: { text: 'from B1' },
+      finality: 'none',
+      agentId: 'agent-B',
+    });
+
+    // Subscribe to only agent-B messages and replay from before B1 (so we get B1)
+    const stream = new WsEventStream(wsUrl, {
+      conversationId,
+      filters: { types: ['message'], agents: ['agent-B'] },
+      sinceSeq: lastA1, // > lastA1 means include B1
+    });
+
+    const received: any[] = [];
+    const consuming = (async () => {
+      for await (const ev of stream) {
+        received.push(ev);
+        if (received.length >= 2) break; // expect 1 backlog (B1) and 1 live
+      }
+    })();
+
+    // Allow connection to establish and backlog to arrive
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Now post live events for A and B; only B should be delivered due to filters
+    app.orchestrator.appendEvent({
+      conversation: conversationId,
+      type: 'message',
+      payload: { text: 'from A2' },
+      finality: 'none',
+      agentId: 'agent-A',
+    });
+    app.orchestrator.appendEvent({
+      conversation: conversationId,
+      type: 'message',
+      payload: { text: 'from B2' },
+      finality: 'turn',
+      agentId: 'agent-B',
+    });
+
+    await Promise.race([consuming, new Promise((r) => setTimeout(r, 1000))]);
+
+    // Verify we got the backlog (B1) and live (B2), only message type, only agent-B
+    const msgs = received.filter((e) => e.type === 'message');
+    expect(msgs.length).toBe(2);
+    expect(msgs[0]?.agentId).toBe('agent-B');
+    expect((msgs[0]?.payload as any).text).toBe('from B1');
+    expect(msgs[1]?.agentId).toBe('agent-B');
+    expect((msgs[1]?.payload as any).text).toBe('from B2');
+
+    stream.close();
+  });
+
   test('reconnects after connection loss', async () => {
     const stream = new WsEventStream(wsUrl, {
       conversationId,
