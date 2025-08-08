@@ -14,7 +14,7 @@ describe('OrchestratorService', () => {
     bus = new SubscriptionBus();
     orch = new OrchestratorService(storage, bus, undefined, {});
     // seed conversation
-    orch.createConversation({});
+    orch.createConversation({ meta: { agents: [] } });
   });
 
   afterEach(async () => {
@@ -72,11 +72,13 @@ describe('OrchestratorService', () => {
   it('logs meta_created system event in turn 0', () => {
     const recv: UnifiedEvent[] = [];
     const conversationId = orch.createConversation({
-      title: 'Test Conversation',
-      agents: [
-        { id: 'user', kind: 'external' },
-        { id: 'bot', kind: 'internal' },
-      ],
+      meta: {
+        title: 'Test Conversation',
+        agents: [
+          { id: 'user', kind: 'external' },
+          { id: 'bot', kind: 'internal' },
+        ],
+      },
     });
     
     orch.subscribe(conversationId, (e: UnifiedEvent) => recv.push(e));
@@ -97,10 +99,12 @@ describe('OrchestratorService', () => {
   it('emits guidance events when configured', () => {
     const orch2 = new OrchestratorService(storage, bus, undefined, {});
     const convId = orch2.createConversation({
-      agents: [
-        { id: 'user', kind: 'external' },
-        { id: 'assistant', kind: 'internal' },
-      ],
+      meta: {
+        agents: [
+          { id: 'user', kind: 'external' },
+          { id: 'assistant', kind: 'internal' },
+        ],
+      },
     });
     
     

@@ -102,7 +102,7 @@ export interface ListConversationsRpcParams {
 }
 
 export interface ListConversationsRpcResult {
-  conversations: import('$src/db/conversation.store').ConversationRow[];
+  conversations: import('$src/db/conversation.store').Conversation[];
 }
 
 export interface GetEventsPageParams {

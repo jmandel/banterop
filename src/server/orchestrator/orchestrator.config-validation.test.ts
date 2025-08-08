@@ -55,19 +55,23 @@ describe("OrchestratorService config validation", () => {
   it("throws if runtime agent IDs don't match scenario agents 1:1", () => {
     expect(() =>
       orch.createConversation({
-        scenarioId: "demo-scn",
-        agents: [{ id: "agent-1", kind: "internal" }], // missing agent-2
+        meta: {
+          scenarioId: "demo-scn",
+          agents: [{ id: "agent-1", kind: "internal" }], // missing agent-2
+        },
       })
     ).toThrow(/runtime agents must match scenario agents exactly/);
   });
 
   it("allows exact match of runtime and scenario agents", () => {
     const id = orch.createConversation({
-      scenarioId: "demo-scn",
-      agents: [
-        { id: "agent-1", kind: "internal" },
-        { id: "agent-2", kind: "external" },
-      ],
+      meta: {
+        scenarioId: "demo-scn",
+        agents: [
+          { id: "agent-1", kind: "internal" },
+          { id: "agent-2", kind: "external" },
+        ],
+      },
     });
     expect(id).toBeGreaterThan(0);
   });
@@ -75,12 +79,14 @@ describe("OrchestratorService config validation", () => {
   it("throws when runtime has extra agents not in scenario", () => {
     expect(() =>
       orch.createConversation({
-        scenarioId: "demo-scn",
-        agents: [
-          { id: "agent-1", kind: "internal" },
-          { id: "agent-2", kind: "external" },
-          { id: "agent-3", kind: "external" }, // extra agent
-        ],
+        meta: {
+          scenarioId: "demo-scn",
+          agents: [
+            { id: "agent-1", kind: "internal" },
+            { id: "agent-2", kind: "external" },
+            { id: "agent-3", kind: "external" }, // extra agent
+          ],
+        },
       })
     ).toThrow(/runtime agents must match scenario agents exactly/);
   });
@@ -88,20 +94,24 @@ describe("OrchestratorService config validation", () => {
   it("throws with runtime agents in different order but still mismatched", () => {
     expect(() =>
       orch.createConversation({
-        scenarioId: "demo-scn",
-        agents: [
-          { id: "agent-2", kind: "internal" },
-          { id: "agent-3", kind: "external" }, // wrong agent
-        ],
+        meta: {
+          scenarioId: "demo-scn",
+          agents: [
+            { id: "agent-2", kind: "internal" },
+            { id: "agent-3", kind: "external" }, // wrong agent
+          ],
+        },
       })
     ).toThrow(/runtime agents must match scenario agents exactly/);
   });
 
   it("allows creation without scenario", () => {
     const id = orch.createConversation({
-      agents: [
-        { id: "any-agent", kind: "internal" },
-      ],
+      meta: {
+        agents: [
+          { id: "any-agent", kind: "internal" },
+        ],
+      },
     });
     expect(id).toBeGreaterThan(0);
   });

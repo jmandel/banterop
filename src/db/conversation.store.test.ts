@@ -15,11 +15,11 @@ describe('ConversationStore', () => {
   afterEach(() => sqlite.close());
 
   it('creates, reads, lists, and completes conversations', () => {
-    const id = store.create({ title: 'Test', description: 'Desc', agents: [] });
+    const id = store.create({ meta: { title: 'Test', description: 'Desc', agents: [] } });
     expect(id).toBeGreaterThan(0);
 
     const row = store.get(id)!;
-    expect(row.title).toBe('Test');
+    expect(row.metadata.title).toBe('Test');
     expect(row.status).toBe('active');
 
     const list = store.list({ status: 'active' });

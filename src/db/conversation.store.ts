@@ -1,19 +1,22 @@
 import type { Database } from 'bun:sqlite';
 import type { ConversationMeta, CreateConversationRequest } from '$src/types/conversation.meta';
 
-export interface ConversationRow {
+// This is the main Conversation type - always includes parsed metadata
+export interface Conversation {
   conversation: number;
-  title?: string;
-  description?: string;
-  scenarioId?: string;
-  metaJson: string;  // JSON string of {agents, config, custom}
   status: 'active' | 'completed';
+  metadata: ConversationMeta;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface ConversationWithMeta extends ConversationRow {
-  metadata: ConversationMeta;
+// Internal type for raw DB rows
+interface ConversationRow {
+  conversation: number;
+  status: 'active' | 'completed';
+  metaJson: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type CreateConversationParams = CreateConversationRequest;
@@ -29,100 +32,103 @@ export class ConversationStore {
   constructor(private db: Database) {}
 
   updateMeta(conversationId: number, metadata: ConversationMeta): void {
+    // Ensure metaVersion is set
+    const metaWithVersion = {
+      ...metadata,
+      metaVersion: metadata.metaVersion || 1
+    };
+    
     this.db.prepare(`
       UPDATE conversations
-      SET meta_json = ?
+      SET meta_json = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
       WHERE conversation = ?
-    `).run(JSON.stringify({
-      agents: metadata.agents,
-      ...(metadata.config !== undefined ? { config: metadata.config } : {}),
-      ...(metadata.custom !== undefined ? { custom: metadata.custom } : {}),
-    }), conversationId);
+    `).run(JSON.stringify(metaWithVersion), conversationId);
   }
 
   create(params: CreateConversationParams): number {
+    // Ensure metaVersion is set
     const metadata: ConversationMeta = {
-      ...(params.title !== undefined ? { title: params.title } : {}),
-      ...(params.description !== undefined ? { description: params.description } : {}),
-      ...(params.scenarioId !== undefined ? { scenarioId: params.scenarioId } : {}),
-      agents: params.agents || [],
-      ...(params.config !== undefined ? { config: params.config } : {}),
-      ...(params.custom !== undefined ? { custom: params.custom } : {}),
+      ...params.meta,
+      metaVersion: params.meta.metaVersion || 1
     };
     
     const stmt = this.db.prepare(
-      `INSERT INTO conversations (title, description, scenario_id, meta_json, status)
-       VALUES (?, ?, ?, ?, 'active')`
+      `INSERT INTO conversations (meta_json, status)
+       VALUES (?, 'active')`
     );
-    const info = stmt.run(
-      params.title ?? null,
-      params.description ?? null,
-      params.scenarioId ?? null,
-      JSON.stringify({ agents: metadata.agents, config: metadata.config, custom: metadata.custom })
-    );
+    const info = stmt.run(JSON.stringify(metadata));
     return Number(info.lastInsertRowid);
   }
 
   complete(conversation: number) {
     this.db
-      .prepare(`UPDATE conversations SET status='completed' WHERE conversation = ?`)
+      .prepare(`UPDATE conversations SET status='completed', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE conversation = ?`)
       .run(conversation);
   }
 
-  get(conversation: number): ConversationRow | null {
+  get(conversation: number): Conversation | null {
     const row = this.db
       .prepare(
-        `SELECT conversation, title, description, scenario_id as scenarioId,
-                meta_json as metaJson, status,
+        `SELECT conversation, status,
+                meta_json as metaJson,
                 created_at as createdAt, updated_at as updatedAt
          FROM conversations WHERE conversation = ?`
       )
       .get(conversation) as ConversationRow | undefined;
-    return row || null;
-  }
-  
-  getWithMetadata(conversation: number): ConversationWithMeta | null {
-    const row = this.get(conversation);
+    
     if (!row) return null;
     
-    const metaData = row.metaJson ? JSON.parse(row.metaJson) : {};
-    const metadata: ConversationMeta = {
-      ...(row.title !== undefined && row.title !== null ? { title: row.title } : {}),
-      ...(row.description !== undefined && row.description !== null ? { description: row.description } : {}),
-      ...(row.scenarioId !== undefined && row.scenarioId !== null ? { scenarioId: row.scenarioId } : {}),
-      agents: metaData.agents || [],
-      ...(metaData.config !== undefined ? { config: metaData.config } : {}),
-      ...(metaData.custom !== undefined ? { custom: metaData.custom } : {}),
+    return {
+      conversation: row.conversation,
+      status: row.status,
+      metadata: JSON.parse(row.metaJson),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
     };
-    
-    return { ...row, metadata };
+  }
+  
+  // Alias for backward compatibility if needed
+  getWithMetadata(conversation: number): Conversation | null {
+    return this.get(conversation);
   }
 
-  list(params: ListConversationsParams) {
+  list(params: ListConversationsParams = {}): Conversation[] {
     const { status, scenarioId, limit = 50, offset = 0 } = params;
     const wh: string[] = [];
     const args: (string | number)[] = [];
+    
     if (status) {
       wh.push('status = ?');
       args.push(status);
     }
     if (scenarioId) {
-      wh.push('scenario_id = ?');
+      // Use JSON extract for scenarioId filtering
+      wh.push("json_extract(meta_json, '$.scenarioId') = ?");
       args.push(scenarioId);
     }
+    
     const where = wh.length ? `WHERE ${wh.join(' AND ')}` : '';
     args.push(limit, offset);
+    
     const rows = this.db
       .prepare(
-        `SELECT conversation, title, description, scenario_id as scenarioId,
-                meta_json as metaJson, status,
+        `SELECT conversation, status,
+                meta_json as metaJson,
                 created_at as createdAt, updated_at as updatedAt
          FROM conversations
          ${where}
-         ORDER BY created_at DESC
+         ORDER BY updated_at DESC
          LIMIT ? OFFSET ?`
       )
       .all(...args) as ConversationRow[];
-    return rows;
+    
+    // Always return with parsed metadata
+    return rows.map(row => ({
+      conversation: row.conversation,
+      status: row.status,
+      metadata: JSON.parse(row.metaJson),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    }));
   }
 }

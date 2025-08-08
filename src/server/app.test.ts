@@ -8,8 +8,11 @@ describe('App integration', () => {
     
     // Create a conversation
     const conversationId = app.orchestrator.createConversation({
-      title: 'Test conversation',
-      description: 'Testing in-memory db'
+      meta: {
+        title: 'Test conversation',
+        description: 'Testing in-memory db',
+        agents: []
+      }
     });
     
     expect(conversationId).toBe(1);
@@ -36,7 +39,7 @@ describe('App integration', () => {
     // List conversations
     const conversations = app.orchestrator.listConversations({});
     expect(conversations.length).toBe(1);
-    expect(conversations[0]!.title).toBe('Test conversation');
+    expect(conversations[0]!.metadata.title).toBe('Test conversation');
     
     await app.shutdown();
   });
@@ -45,8 +48,8 @@ describe('App integration', () => {
     const app = new App({ dbPath: ':memory:' });
     
     // Create conversation through orchestrator
-    const id1 = app.orchestrator.createConversation({ title: 'Conv 1' });
-    const id2 = app.orchestrator.createConversation({ title: 'Conv 2' });
+    const id1 = app.orchestrator.createConversation({ meta: { title: 'Conv 1', agents: [] } });
+    const id2 = app.orchestrator.createConversation({ meta: { title: 'Conv 2', agents: [] } });
     
     // Both should be visible
     const list = app.orchestrator.listConversations({});

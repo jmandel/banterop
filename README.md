@@ -68,7 +68,7 @@ This stack makes it practical and testable:
 - **Scenario**: Playbook for a simulated world with roles & goals.
 - **Tool Synthesis**: Oracle‑driven plausible action results.
 - **Immutable Event Log**: Replayable record of all events.
-- **Turn Claiming**: Ensures only one active agent at a time.
+- **Guidance Scheduling**: Orchestrator emits guidance(nextAgentId); CAS preconditions ensure safe turn opens.
 - **Attachment Handling**: Store/reuse large or structured artifacts.
 - **Pluggable Scheduling**: Choose who speaks next.
 - **CLI Demos**: Watch or run simulations locally.
@@ -114,8 +114,8 @@ Simulates tool/API calls:
 
 Keeps order:
 - Emits `guidance` naming next agent.
-- Requires `claimTurn` before acting.
-- Expiry triggers next candidate.
+- Agents open new turns by posting a `message` or `trace`; when opening, clients should respect a CAS precondition (`lastClosedSeq`) to avoid races.
+- Policies choose the next agent; guidance may be emitted after a turn-ending message.
 
 ---
 
@@ -134,9 +134,9 @@ Store large or structured content once, reference via `docId`.
 
 ---
 
-### 7. Turn Claiming
+### 7. Guidance & CAS Preconditions
 
-Ensures one actor per turn, prevents collisions.
+The orchestrator coordinates turns by emitting `guidance` events that name the suggested next agent. When opening a new turn (omitting an explicit `turn`), clients should include a compare‑and‑set precondition (the last closed `seq`) to avoid races. Internal agents handle this automatically; external agents can adopt the same pattern.
 
 ---
 
@@ -155,6 +155,8 @@ Ensures one actor per turn, prevents collisions.
 
 Before acting:
 - Merge scenario data, live roster, and full event log into a single snapshot for your agent.
+
+- System events live on a meta lane at turn `0` and do not block/close conversational turns `1..N`.
 
 ---
 
@@ -188,11 +190,10 @@ sequenceDiagram
     participant AgentA
     participant AgentB
 
-    Orchestrator->>AgentA: guidance(turn N)
-    AgentA->>Orchestrator: claimTurn(seq)
-    AgentA->>Orchestrator: message/trace events
-    Orchestrator->>EventLog: store events (finality: turn)
-    Orchestrator->>AgentB: guidance(turn N+1)
+    Orchestrator->>AgentA: guidance(nextAgentId)
+    AgentA->>Orchestrator: message/trace (may open new turn)
+    Orchestrator->>EventLog: append (message may set finality)
+    Orchestrator->>AgentB: guidance(nextAgentId)
 ```
 
 ---
@@ -239,6 +240,7 @@ src/
   llm/            # LLM providers (mock & real)
   lib/            # Utilities
   server/         # Hono server, orchestrator, RPC
+  frontend/       # Watch UI for local iteration
   types/          # Shared types
 tests/            # Unit and integration tests
 ```
@@ -249,12 +251,53 @@ tests/            # Unit and integration tests
 
 ```bash
 bun install
-bun run dev
+bun run dev              # API + WS (PORT or 3000)
 ```
 
-Example local sim with built‑in agents:
+Optional:
+- `bun run dev:frontend` — serves watch UI at http://localhost:3001 (reads WS from 3000)
+- `bun test` / `bun run test:watch` — run tests
+- `bun run typecheck` — strict TypeScript checks
+- `bun run clean` — remove local SQLite artifacts (`data.db*`)
+
+Environment (.env; keys optional unless using non‑mock providers):
+- `DB_PATH`, `PORT`, `IDLE_TURN_MS`
+- `GOOGLE_API_KEY`, `OPENROUTER_API_KEY`
+- Default LLM provider is `mock` (no key required)
+
+Data lives in `data.db` (gitignored).
+
+### CLI Demos (working examples)
+
+- Create/join a simple conversation as an external agent (Echo by default):
+  ```bash
+  bun run src/cli/ws-convo.ts --agent-id you --create --initial-message "Hello"
+  ```
+- Start two internal echo agents and watch events:
+  ```bash
+  bun run src/cli/ws-internal-agents.ts --agent-id agent-alpha --title "Internal Agents Test"
+  ```
+- Join an existing conversation:
+  ```bash
+  bun run src/cli/ws-join-agent.ts --conversation-id 1 --agent-id you --agent-class EchoAgent
+  ```
+- Run a scenario by ID (register one via HTTP or RPC first):
+  ```bash
+  bun run src/cli/ws-scenario.ts --scenario-id my-scenario --agent-id agent-1
+  ```
+- Auto‑run demo with resume:
+  ```bash
+  bun run src/cli/ws-run-auto-convo.ts --agent1-id alpha --agent2-id beta
+  ```
+
+All WS CLIs default to `ws://localhost:3000/api/ws`; override with `--url`.
+
+### Watch UI
+
+Lightweight watch/debug UI at `src/frontend/watch/`:
+
 ```bash
-bun run src/cli/run-sim-inproc.ts
+bun run dev:frontend   # serves http://localhost:3001
 ```
 
 ---
@@ -262,3 +305,71 @@ bun run src/cli/run-sim-inproc.ts
 You can now:
 - **Plug in your own agent** (MCP or A2A) as participant or observer.
 - **Run ours** and watch believable, contextual conversations unfold.
+
+---
+
+## 🔌 HTTP API (summary)
+
+- `GET /api/health`
+- Scenarios (CRUD):
+  - `GET /api/scenarios`
+  - `GET /api/scenarios/:id`
+  - `POST /api/scenarios`
+  - `PUT /api/scenarios/:id`
+  - `DELETE /api/scenarios/:id`
+- Attachments:
+  - `GET /api/attachments/:id` — metadata
+  - `GET /api/attachments/:id/content` — raw content with `Content-Type`
+- LLM helper:
+  - `GET /api/llm/providers` — available providers
+  - `POST /api/llm/complete` — synchronous completion (validates body)
+
+## 🔗 WebSocket JSON‑RPC
+
+Endpoint: `ws://<host>:<port>/api/ws`
+
+Methods (subset):
+- Health: `ping`
+- Conversations: `createConversation`, `listConversations`, `getConversation`, `getHydratedConversation`, `getEventsPage`
+- Events: `sendMessage`, `sendTrace`
+- Subscriptions: `subscribe` (supports `filters.types`/`filters.agents` and `sinceSeq` backlog), `unsubscribe`, `subscribeAll`
+- Scenarios: `listScenarios`, `getScenario`, `createScenario`, `updateScenario`, `deleteScenario`
+- Orchestration helper: `runConversationToCompletion`
+
+Notifications:
+- `event` — unified event
+- `guidance` — transient scheduling hints
+
+CAS: When opening a new turn, internal clients include a CAS precondition (`lastClosedSeq`). External clients can follow the same pattern using `getConversation` and `getEventsPage` to derive state.
+
+## 🗂️ Data Model Notes
+
+- Events use a global `seq` (monotone) and `ts` with millisecond precision.
+- Only `message` events may set `finality` to `turn` or `conversation`; `trace`/`system` must use `none`.
+- System events are stored on turn `0` and do not affect turn openness.
+- Message attachments are persisted in an `attachments` table; payloads are rewritten to references `{ id, docId?, name, contentType, summary? }`.
+
+## 🧭 Scheduling Policy
+
+- Default policy: strict alternation over `metadata.agents`; emits guidance for the next agent when a turn‑ending message arrives.
+- Scenario‑aware policies are available; scheduling is pluggable.
+
+## 🔁 Auto‑Run Resume
+
+- Conversations marked with `metadata.custom.autoRun = true` will resume internal agent loops on server restart if recently updated; stale runs are skipped and the flag is cleared.
+
+## 🔐 Security & Data
+
+- Don’t commit `.env` or SQLite databases (`data.db*`).
+- Prefer synthetic data; avoid real PHI/PII.
+- Use `bun run clean` to reset local state quickly.
+
+## ✅ Testing & Guarantees
+
+- Tests validate millisecond timestamp precision and idempotency keys `(conversation, agentId, clientRequestId)`.
+- Appending to a closed turn throws; only `message` can close a turn or conversation.
+
+## 🧩 MCP Bridge (optional)
+
+- Bridge endpoint: `/api/bridge/:config64/mcp` where `config64` is base64url‑encoded ConversationMeta.
+- Diagnostic: `/api/bridge/:config64/mcp/diag` echoes parsed meta.
