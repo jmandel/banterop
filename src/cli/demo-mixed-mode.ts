@@ -8,27 +8,17 @@
 // 4. Both types of agents interact seamlessly through the orchestrator
 // 5. Demonstrates true transport-agnostic design
 
-import { Bun } from 'bun';
-import { App } from '$src/server/app';
-import { createWebSocketServer } from '$src/server/ws/jsonrpc.server';
 import { startAgents } from '$src/agents/factories/agent.factory';
 import { WsTransport } from '$src/agents/runtime/ws.transport';
 import { ProviderManager } from '$src/llm/provider-manager';
 import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
 
-// Start the server
-const app = new App({ dbPath: ':memory:', nodeEnv: 'test' });
-const wsServer = createWebSocketServer(app.orchestrator, app.providerManager);
-const server = Bun.serve({
-  port: 3458,
-  fetch: wsServer.fetch,
-  websocket: wsServer.websocket,
-});
-
-console.log(`🚀 Server running on ws://localhost:${server.port}/api/ws`);
+// Connect to existing server
+const WS_URL = process.env.WS_URL || 'ws://localhost:3000/api/ws';
+console.log(`🔌 Connecting to server at ${WS_URL}...`);
 
 // Create WebSocket client
-const ws = new WebSocket(`ws://localhost:${server.port}/api/ws`);
+const ws = new WebSocket(WS_URL);
 let reqId = 1;
 
 function sendRequest(method: string, params: any): Promise<any> {
@@ -54,11 +44,13 @@ ws.onopen = async () => {
   console.log('✅ Connected to server\n');
   
   try {
+    // Track lastClosedSeq for the conversation
+    let lastClosedSeq = 0;
     // Step 1: Create a medical scenario for demonstration
     console.log('📋 Creating medical authorization scenario...');
     const medicalScenario: ScenarioConfiguration = {
       metadata: {
-        id: 'medical-auth-demo',
+        id: 'medical-auth-demo-v2',
         name: 'Medical Authorization Demo',
         description: 'Provider requests authorization from insurer',
         version: '1.0.0'
@@ -81,6 +73,12 @@ ws.onopen = async () => {
           principal: 'Patient Representative',
           goal: 'Ensure appropriate care is authorized',
           systemPrompt: 'You represent the patient in the authorization process.'
+        },
+        {
+          agentId: 'coordinator',
+          principal: 'Care Coordinator',
+          goal: 'Facilitate the authorization process',
+          systemPrompt: 'You are coordinating the authorization request process.'
         }
       ],
       knowledge: {
@@ -105,7 +103,7 @@ ws.onopen = async () => {
       meta: {
         title: 'Mixed Mode Medical Authorization',
         description: 'Provider (server) and Insurer (client) negotiate, Patient observes',
-        scenarioId: 'medical-auth-demo',
+        scenarioId: 'medical-auth-demo-v2',
         agents: [
           {
             id: 'provider',
@@ -151,6 +149,10 @@ ws.onopen = async () => {
         if (e.type === 'message') {
           const location = e.agentId === 'insurer' ? '📱 CLIENT' : '☁️ SERVER';
           console.log(`[${location}] ${e.agentId}: ${e.payload.text}`);
+          // Update lastClosedSeq when we see a message that closes a turn
+          if (e.finality !== 'none' && e.seq) {
+            lastClosedSeq = e.seq;
+          }
         }
       } else if (data.method === 'guidance') {
         console.log(`🎯 Next turn: ${data.params.nextAgentId}`);
@@ -166,11 +168,10 @@ ws.onopen = async () => {
     // Step 5: Start client-side agents
     console.log('\n📱 Starting client-side agents...');
     const clientProvider = new ProviderManager({ defaultLlmProvider: 'mock' });
-    const wsUrl = `ws://localhost:${server.port}/api/ws`;
     
     const clientAgents = await startAgents({
       conversationId,
-      transport: new WsTransport(wsUrl),
+      transport: new WsTransport(WS_URL),
       providerManager: clientProvider,
       agentIds: ['insurer'] // Only the insurer runs on client
     });
@@ -196,7 +197,8 @@ ws.onopen = async () => {
           summary: 'Patient medical record'
         }]
       },
-      finality: 'turn'
+      finality: 'turn',
+      precondition: { lastClosedSeq }
     });
     
     // Let the conversation flow
@@ -209,7 +211,8 @@ ws.onopen = async () => {
       conversationId,
       agentId: 'coordinator',
       messagePayload: { text: 'Insurer, what is your determination on this authorization request?' },
-      finality: 'turn'
+      finality: 'turn',
+      precondition: { lastClosedSeq }
     });
     
     await new Promise(resolve => setTimeout(resolve, 3000));
@@ -221,7 +224,8 @@ ws.onopen = async () => {
       conversationId,
       agentId: 'coordinator',
       messagePayload: { text: 'Thank you all. The authorization process is now complete.' },
-      finality: 'conversation'
+      finality: 'conversation',
+      precondition: { lastClosedSeq }
     });
     
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -240,8 +244,6 @@ ws.onopen = async () => {
     await clientAgents.stop();
     await sendRequest('unsubscribe', { subId });
     ws.close();
-    server.stop();
-    await app.shutdown();
     
     console.log('✅ Demo complete!');
     process.exit(0);
@@ -249,8 +251,6 @@ ws.onopen = async () => {
   } catch (error) {
     console.error('❌ Error:', error);
     ws.close();
-    server.stop();
-    await app.shutdown();
     process.exit(1);
   }
 };
