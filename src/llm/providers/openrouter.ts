@@ -20,7 +20,7 @@ export class OpenRouterLLMProvider extends LLMProvider {
     });
   }
   
-  getMetadata(): LLMProviderMetadata {
+  static getMetadata(): LLMProviderMetadata {
     return {
       name: 'openrouter',
       description: 'OpenRouter AI Gateway',

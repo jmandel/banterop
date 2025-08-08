@@ -96,6 +96,14 @@ export class ToolSynthesisService {
   }
 
   async execute(input: ToolExecutionInput): Promise<ToolExecutionOutput> {
+    /**
+     * WARNING (Connectathon mode):
+     * This service does NOT validate the shape of tool `output` against
+     * the tool's `inputSchema` or any other constraints.
+     * It is assumed that upstream orchestration & LLM prompts
+     * produce correct data.
+     * Production deployments should integrate strict schema validation here.
+     */
     if (!input?.tool?.toolName || !input.tool.synthesisGuidance) {
       throw new Error('ToolSynthesisService: tool.toolName and tool.synthesisGuidance are required');
     }

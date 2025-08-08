@@ -192,7 +192,7 @@ class ClaimClient {
     clientRequestId?: string;
     turn?: number; // unified
   }): Promise<{ seq: number; turn: number; event: number }> {
-    const result = await this.call<{ conversation: number; turn: number; event: number; seq: number }>(
+    const result = await this.call<{ conversation: number; turn: number; event: number; seq: number; ts: string }>(
       'sendMessage',
       {
         conversationId: params.conversationId,
@@ -206,7 +206,7 @@ class ClaimClient {
         turn: params.turn, // unified
       }
     );
-    return { seq: result.seq || 0, turn: result.turn || 0, event: result.event || 0 };
+    return { seq: result.seq, turn: result.turn, event: result.event };
   }
   
   async getSnapshot(conversationId: number): Promise<any> {
@@ -220,7 +220,7 @@ class ClaimClient {
     turn?: number;
     clientRequestId?: string;
   }): Promise<{ seq: number; turn: number; event: number }> {
-    const result = await this.call<{ conversation: number; turn: number; event: number; seq: number }>(
+    const result = await this.call<{ conversation: number; turn: number; event: number; seq: number; ts: string }>(
       'sendTrace',
       {
         conversationId: params.conversationId,
@@ -229,7 +229,7 @@ class ClaimClient {
         turn: params.turn, // unified
       }
     );
-    return { seq: result.seq || 0, turn: result.turn || 0, event: result.event || 0 };
+    return { seq: result.seq, turn: result.turn, event: result.event };
   }
   
   now() {

@@ -136,20 +136,17 @@ describe('scenario-agent.factory', () => {
       await handle.stop(); // Should not throw
     });
 
-    it('skips agents not in scenario', async () => {
-      const handle = await startScenarioAgents(
-        mockOrchestrator as OrchestratorService,
-        1,
-        {
-          providerManager: mockProviderManager as ProviderManager,
-          agentIds: ['agent-1', 'unknown-agent'],
-        }
-      );
-
-      expect(handle.loops).toHaveLength(1); // Only agent-1 exists
-      
-      // Clean up
-      await handle.stop();
+    it('throws error for agents not in scenario', async () => {
+      await expect(
+        startScenarioAgents(
+          mockOrchestrator as OrchestratorService,
+          1,
+          {
+            providerManager: mockProviderManager as ProviderManager,
+            agentIds: ['agent-1', 'unknown-agent'],
+          }
+        )
+      ).rejects.toThrow('Config error: runtime agent "unknown-agent" not found in scenario "test-scenario"');
     });
 
     it('throws when conversation not hydrated', async () => {

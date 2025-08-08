@@ -1,10 +1,25 @@
 #!/usr/bin/env bun
 import { App } from '$src/server/app';
 import { Hono } from 'hono';
-import { createConversationRoutes } from '$src/server/routes/conversations.http';
-import { createScenarioRoutes } from '$src/server/routes/scenarios.http';
 import { createWebSocketServer, websocket } from '$src/server/ws/jsonrpc.server';
 import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
+
+// Helper for one-shot WebSocket RPC calls
+async function rpcCall<T>(wsUrl: string, method: string, params?: any): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(wsUrl);
+    const id = crypto.randomUUID();
+    ws.onopen = () => ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+    ws.onmessage = (evt) => {
+      const msg = JSON.parse(String(evt.data));
+      if (msg.id !== id) return;
+      ws.close();
+      if (msg.error) reject(new Error(msg.error.message));
+      else resolve(msg.result as T);
+    };
+    ws.onerror = reject;
+  });
+}
 
 // Create a simple test scenario using v2 structure
 const testScenario: ScenarioConfiguration = {
@@ -62,8 +77,6 @@ const testScenario: ScenarioConfiguration = {
 async function main() {
   const appInstance = new App({ dbPath: ':memory:' });
   const server = new Hono()
-    .route('/', createConversationRoutes(appInstance.orchestrator))
-    .route('/api/scenarios', createScenarioRoutes(appInstance.orchestrator.storage.scenarios))
     .route('/', createWebSocketServer(appInstance.orchestrator));
   
   const bunServer = Bun.serve({ 
@@ -73,31 +86,21 @@ async function main() {
   });
   
   const port = bunServer.port;
+  const wsUrl = `ws://localhost:${port}/api/ws`;
   console.log(`Server running on port ${port}`);
 
-  // STEP 1: Create the scenario template via the new API
-  const createScenarioRes = await fetch(`http://localhost:${port}/api/scenarios`, {
-    method: 'POST',
-    body: JSON.stringify({ 
-      name: 'Test Scenario Template', 
-      config: testScenario 
-    }),
-    headers: { 'Content-Type': 'application/json' },
+  // STEP 1: Create the scenario template via WebSocket RPC
+  await rpcCall(wsUrl, 'createScenario', {
+    id: testScenario.metadata.id,
+    name: 'Test Scenario Template',
+    config: testScenario,
   });
-  
-  if (!createScenarioRes.ok) {
-    const error = await createScenarioRes.text();
-    throw new Error(`Failed to create scenario: ${error}`);
-  }
   
   console.log(`✅ Scenario template '${testScenario.metadata.id}' created.`);
 
   // STEP 2: Create a conversation INSTANCE, providing RUNTIME-specific config
   // This is where we explicitly configure which agents are internal/external and their implementation
-  const createConvoRes = await fetch(`http://localhost:${port}/api/conversations`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const conversationReq = {
       scenarioId: testScenario.metadata.id,
       title: "Test Conversation (Runtime Override)",
       startingAgentId: 'assistant',  // Configure which agent starts the conversation
@@ -122,29 +125,22 @@ async function main() {
         testRun: true,
         environment: 'development',
       },
-    }),
-  });
+    };
   
-  if (!createConvoRes.ok) {
-    const error = await createConvoRes.text();
-    throw new Error(`Failed to create conversation: ${error}`);
-  }
-  
-  const convo = await createConvoRes.json();
-  const conversationId = convo.conversation;
+  const { conversationId } = await rpcCall<{ conversationId: number }>(wsUrl, 'createConversation', conversationReq);
   console.log(`✅ Conversation ${conversationId} instantiated from scenario.`);
 
-  // STEP 3: Demonstrate hydration by fetching the merged view
-  const hydrated = appInstance.orchestrator.getHydratedConversationSnapshot(conversationId);
+  // STEP 3: Demonstrate hydration by fetching the merged view via WS RPC
+  const hydrated = await rpcCall<any>(wsUrl, 'getHydratedConversation', { conversationId });
   if (!hydrated) throw new Error("Hydration failed");
 
   console.log("\n--- Hydration Validation ---");
   console.log("Scenario ID:", hydrated.scenario?.metadata.id);
   console.log("Scenario Title:", hydrated.scenario?.metadata.title);
   console.log("Runtime Title:", hydrated.runtimeMeta.title);
-  console.log("Scenario Agents:", hydrated.scenario?.agents.map(a => a.agentId).join(', '));
+  console.log("Scenario Agents:", hydrated.scenario?.agents.map((a: any) => a.agentId).join(', '));
   
-  const assistantScenarioDef = hydrated.scenario?.agents.find(a => a.agentId === 'assistant');
+  const assistantScenarioDef = hydrated.scenario?.agents.find((a: any) => a.agentId === 'assistant');
   const assistantRuntimeConfig = hydrated.runtimeMeta.agents?.find((a: any) => a.id === 'assistant');
   
   console.log("\nAssistant Configuration:");
@@ -158,32 +154,32 @@ async function main() {
   console.log("\nCustom Runtime Data:", hydrated.runtimeMeta.custom);
   console.log("--------------------------\n");
 
-  // STEP 4: Test listing scenarios
-  const listRes = await fetch(`http://localhost:${port}/api/scenarios`);
-  const scenarios = await listRes.json();
+  // STEP 4: Test listing scenarios via WS RPC
+  const { scenarios } = await rpcCall<{ scenarios: any[] }>(wsUrl, 'listScenarios');
   console.log(`✅ Listed ${scenarios.length} scenario(s)`);
   
-  // STEP 5: Test getting a specific scenario
-  const getRes = await fetch(`http://localhost:${port}/api/scenarios/${testScenario.metadata.id}`);
-  const retrievedScenario = await getRes.json();
+  // STEP 5: Test getting a specific scenario via WS RPC
+  const retrievedScenario = await rpcCall<any>(wsUrl, 'getScenario', { 
+    scenarioId: testScenario.metadata.id 
+  });
   console.log(`✅ Retrieved scenario '${retrievedScenario.name}'`);
 
-  // STEP 6: Test conversation with scenario filter
-  const filteredRes = await fetch(`http://localhost:${port}/api/conversations?scenarioId=${testScenario.metadata.id}`);
-  const filteredConvos = await filteredRes.json();
-  console.log(`✅ Found ${filteredConvos.length} conversation(s) using scenario '${testScenario.metadata.id}'`);
+  // STEP 6: Test conversation listing with scenario filter via WS RPC
+  const { conversations } = await rpcCall<{ conversations: any[] }>(wsUrl, 'listConversations', {
+    scenarioId: testScenario.metadata.id
+  });
+  console.log(`✅ Found ${conversations.length} conversation(s) using scenario '${testScenario.metadata.id}'`);
 
-  // STEP 7: Add an event to the conversation to test the full flow
-  appInstance.orchestrator.appendEvent({
-    conversation: conversationId,
-    type: 'message',
-    payload: { text: 'Hello from the test!' },
-    finality: 'turn',
+  // STEP 7: Add a message to the conversation via WS RPC
+  await rpcCall(wsUrl, 'sendMessage', {
+    conversationId,
     agentId: 'user',
+    messagePayload: { text: 'Hello from the test!' },
+    finality: 'turn',
   });
   
-  const finalSnapshot = appInstance.orchestrator.getHydratedConversationSnapshot(conversationId);
-  console.log(`✅ Added event, conversation now has ${finalSnapshot?.events.length} event(s)`);
+  const finalSnapshot = await rpcCall<any>(wsUrl, 'getHydratedConversation', { conversationId });
+  console.log(`✅ Added event, conversation now has ${finalSnapshot.events.length} event(s)`);
 
   bunServer.stop(true);
   await appInstance.shutdown();

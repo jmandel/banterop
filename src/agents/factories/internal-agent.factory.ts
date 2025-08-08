@@ -44,6 +44,16 @@ export async function startInternalAgentsFromMeta(
     const agentId = agent.id;
     const agentClass = (agent.agentClass || 'ScenarioDrivenAgent').toLowerCase();
 
+    // Validate: agentId must exist in scenario for Connectathon strictness
+    if (scenario) {
+      const inScenario = scenario.agents.some(sa => sa.agentId === agentId);
+      if (!inScenario) {
+        throw new Error(
+          `Config error: runtime agent "${agentId}" not found in scenario "${scenario.metadata.id}"`
+        );
+      }
+    }
+
     // Provider selection per agent (config override) or global default
     const provider = pickProvider(opts.providerManager, agent.config);
 

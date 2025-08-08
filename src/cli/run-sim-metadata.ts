@@ -3,9 +3,25 @@ import { TurnLoopExecutor } from '$src/agents/executors/turn-loop.executor';
 import type { Agent } from '$src/agents/agent.types';
 import { App } from '$src/server/app';
 import { createWebSocketServer, websocket } from '$src/server/ws/jsonrpc.server';
-import { createConversationRoutes } from '$src/server/routes/conversations.http';
 import { Hono } from 'hono';
 import type { CreateConversationRequest } from '$src/types/conversation.meta';
+
+// Helper for one-shot WebSocket RPC calls
+async function rpcCall<T>(wsUrl: string, method: string, params?: any): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(wsUrl);
+    const id = crypto.randomUUID();
+    ws.onopen = () => ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+    ws.onmessage = (evt) => {
+      const msg = JSON.parse(String(evt.data));
+      if (msg.id !== id) return;
+      ws.close();
+      if (msg.error) reject(new Error(msg.error.message));
+      else resolve(msg.result as T);
+    };
+    ws.onerror = reject;
+  });
+}
 
 async function main() {
   // Create app with guidance enabled
@@ -14,7 +30,6 @@ async function main() {
   });
   
   const honoServer = new Hono();
-  honoServer.route('/', createConversationRoutes(appInstance.orchestrator));
   honoServer.route('/', createWebSocketServer(appInstance.orchestrator));
   
   const server = Bun.serve({
@@ -25,7 +40,6 @@ async function main() {
   
   const port = server.port;
   const wsUrl = `ws://localhost:${port}/api/ws`;
-  const httpBase = `http://localhost:${port}`;
   
   console.log(`Server started on port ${port}`);
   console.log('Creating conversation with rich metadata...\n');
@@ -68,23 +82,11 @@ async function main() {
     },
   };
   
-  const resp = await fetch(`${httpBase}/api/conversations`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(createReq),
-  });
-  
-  if (!resp.ok) {
-    throw new Error(`Failed to create conversation: ${resp.status}`);
-  }
-  
-  const convo = await resp.json();
-  const conversationId = convo.conversation as number;
+  const { conversationId } = await rpcCall<{ conversationId: number }>(wsUrl, 'createConversation', createReq);
   console.log(`Created conversation ${conversationId}\n`);
   
-  // Get conversation with metadata
-  const metaResp = await fetch(`${httpBase}/api/conversations/${conversationId}?includeMeta=true`);
-  const convoWithMeta = await metaResp.json();
+  // Get conversation with metadata via WebSocket RPC
+  const convoWithMeta = await rpcCall<any>(wsUrl, 'getConversation', { conversationId });
   
   console.log('Conversation metadata:');
   console.log(JSON.stringify(convoWithMeta.metadata, null, 2));
@@ -132,36 +134,34 @@ async function main() {
   // Give executor time to connect
   await new Promise(resolve => setTimeout(resolve, 500));
   
-  // Patient sends initial message
+  // Patient sends initial message via WS RPC
   console.log('[PATIENT] Sending initial request');
-  appInstance.orchestrator.appendEvent({
-    conversation: conversationId,
-    type: 'message',
-    payload: { text: 'I need prior authorization for my knee MRI scheduled next week.' },
-    finality: 'turn',
+  await rpcCall(wsUrl, 'sendMessage', {
+    conversationId,
     agentId: 'patient',
+    messagePayload: { text: 'I need prior authorization for my knee MRI scheduled next week.' },
+    finality: 'turn',
   });
   
   // Wait a bit, then patient responds
   await new Promise(resolve => setTimeout(resolve, 1000));
   
   console.log('[PATIENT] Providing member ID');
-  appInstance.orchestrator.appendEvent({
-    conversation: conversationId,
-    type: 'message',
-    payload: { text: 'My member ID is ACM-123456789' },
-    finality: 'turn',
+  await rpcCall(wsUrl, 'sendMessage', {
+    conversationId,
     agentId: 'patient',
+    messagePayload: { text: 'My member ID is ACM-123456789' },
+    finality: 'turn',
   });
   
   // Wait for completion
   await new Promise(resolve => setTimeout(resolve, 1000));
   
-  // Get final snapshot
-  const finalSnap = appInstance.orchestrator.getConversationSnapshot(conversationId);
+  // Get final snapshot via WS RPC
+  const finalSnap = await rpcCall<any>(wsUrl, 'getConversation', { conversationId });
   
   console.log('\n=== Final Conversation ===');
-  console.log('Metadata agents:', finalSnap.metadata.agents.map(a => `${a.id} (${a.kind})`).join(', '));
+  console.log('Metadata agents:', finalSnap.metadata.agents.map((a: any) => `${a.id} (${a.kind})`).join(', '));
   console.log('\nMessages:');
   for (const event of finalSnap.events) {
     if (event.type === 'message') {

@@ -3,6 +3,7 @@ import { LLMProvider, type LLMProviderConfig, type SupportedProvider, type LLMPr
 import { GoogleLLMProvider } from './providers/google';
 import { OpenRouterLLMProvider } from './providers/openrouter';
 import { MockLLMProvider } from './providers/mock';
+import { findProviderForModel } from './model-registry';
 
 const PROVIDER_MAP = {
   google: GoogleLLMProvider,
@@ -11,30 +12,100 @@ const PROVIDER_MAP = {
 } as const;
 
 export class ProviderManager {
+  private providerInstances: Map<SupportedProvider, LLMProvider> = new Map();
+  
   constructor(private appConfig: Config) {}
 
   /**
    * Creates an LLM provider instance based on the requested configuration.
-   * If a provider is not specified, it uses the default from the app config.
+   * Can auto-detect provider from model name, or use explicit provider.
+   * 
+   * @param config - Configuration with optional model, provider, or apiKey
+   * @returns LLMProvider instance configured for the request
    */
   getProvider(config?: Partial<LLMProviderConfig>): LLMProvider {
-    const providerName = config?.provider ?? this.appConfig.defaultLlmProvider;
+    let providerName: SupportedProvider;
     const model = config?.model;
 
+    // If a model is specified, try to auto-detect the provider
+    if (model && !config?.provider) {
+      const detectedProvider = this.findProviderForModel(model);
+      if (detectedProvider) {
+        providerName = detectedProvider;
+      } else {
+        throw new Error(`Unknown model '${model}'. Please specify a provider or use a known model name.`);
+      }
+    } else {
+      // Use explicit provider or fall back to default
+      providerName = config?.provider ?? this.appConfig.defaultLlmProvider;
+    }
+
+    // Check if we have a cached instance for this provider
+    const cacheKey = `${providerName}-${config?.apiKey || 'default'}`;
+    let provider = this.providerInstances.get(cacheKey as SupportedProvider);
+    
+    if (!provider) {
+      provider = this.createProviderInstance(providerName, config);
+      this.providerInstances.set(cacheKey as SupportedProvider, provider);
+    }
+
+    // If a specific model was requested, create a new instance with that model configured
+    if (model) {
+      const ProviderClass = PROVIDER_MAP[providerName];
+      const apiKey = this.getApiKeyForProvider(providerName, config?.apiKey);
+      return new ProviderClass({ 
+        provider: providerName, 
+        ...(apiKey !== undefined ? { apiKey } : {}),
+        model
+      });
+    }
+
+    return provider;
+  }
+
+  /**
+   * Searches all available providers to find which one supports the given model.
+   * Checks each provider's model list dynamically.
+   */
+  private findProviderForModel(modelName: string): SupportedProvider | null {
+    // First check the static registry
+    const registryProvider = findProviderForModel(modelName);
+    if (registryProvider) {
+      return registryProvider;
+    }
+
+    // Then dynamically check each provider's supported models using static metadata
+    for (const [providerName, ProviderClass] of Object.entries(PROVIDER_MAP)) {
+      try {
+        const metadata = ProviderClass.getMetadata();
+        
+        // Check if this provider supports the model
+        if (metadata.models.includes(modelName)) {
+          return providerName as SupportedProvider;
+        }
+        
+        // Also check if model matches when prepended with provider name
+        // e.g., "gpt-4" might match "openai/gpt-4" in OpenRouter
+        const withPrefix = `${metadata.name}/${modelName}`;
+        if (metadata.models.some(m => m === withPrefix || m.endsWith(`/${modelName}`))) {
+          return providerName as SupportedProvider;
+        }
+      } catch {
+        // Provider metadata access failed, skip it
+        continue;
+      }
+    }
+
+    return null;
+  }
+
+  private createProviderInstance(providerName: SupportedProvider, config?: Partial<LLMProviderConfig>): LLMProvider {
     const ProviderClass = PROVIDER_MAP[providerName];
     if (!ProviderClass) {
       throw new Error(`Unsupported LLM provider: ${providerName}`);
     }
 
-    // Pass the correct API key from the app's central config
-    let apiKey: string | undefined;
-    if (providerName === 'google') {
-      apiKey = config?.apiKey ?? this.appConfig.googleApiKey;
-    } else if (providerName === 'openrouter') {
-      apiKey = config?.apiKey ?? this.appConfig.openRouterApiKey;
-    } else if (providerName === 'mock') {
-      apiKey = 'mock-key'; // Mock provider doesn't need a real key
-    }
+    const apiKey = this.getApiKeyForProvider(providerName, config?.apiKey);
 
     if (!apiKey && providerName !== 'mock') {
       throw new Error(`API key for provider '${providerName}' not found in configuration or environment variables.`);
@@ -43,20 +114,30 @@ export class ProviderManager {
     return new ProviderClass({ 
       provider: providerName, 
       ...(apiKey !== undefined ? { apiKey } : {}),
-      ...(model !== undefined ? { model } : {})
+      ...(config?.model !== undefined ? { model: config.model } : {})
     });
+  }
+
+  private getApiKeyForProvider(providerName: SupportedProvider, overrideKey?: string): string | undefined {
+    if (overrideKey) return overrideKey;
+    
+    if (providerName === 'google') {
+      return this.appConfig.googleApiKey;
+    } else if (providerName === 'openrouter') {
+      return this.appConfig.openRouterApiKey;
+    } else if (providerName === 'mock') {
+      return 'mock-key'; // Mock provider doesn't need a real key
+    }
+    
+    return undefined;
   }
 
   /**
    * Returns metadata for all configured providers.
    */
   getAvailableProviders(): LLMProviderMetadata[] {
-    return Object.entries(PROVIDER_MAP).map(([name, ProviderClass]) => {
-      const tempInstance = new ProviderClass({ 
-        provider: name as SupportedProvider, 
-        apiKey: 'temp' 
-      });
-      return tempInstance.getMetadata();
+    return Object.entries(PROVIDER_MAP).map(([_, ProviderClass]) => {
+      return ProviderClass.getMetadata();
     });
   }
 }

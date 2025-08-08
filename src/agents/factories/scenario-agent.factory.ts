@@ -61,11 +61,12 @@ export async function startScenarioAgents(
   const loops: InternalTurnLoop[] = [];
 
   for (const agentId of idsToRun) {
-    // Verify this agent exists in the scenario
+    // Verify strict match with scenario
     const scenarioAgent = scenario.agents.find(a => a.agentId === agentId);
     if (!scenarioAgent) {
-      console.warn(`Agent ${agentId} not found in scenario, skipping`);
-      continue;
+      throw new Error(
+        `Config error: runtime agent "${agentId}" not found in scenario "${scenario.metadata.id}"`
+      );
     }
 
     // Create the scenario-driven agent implementation
