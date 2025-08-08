@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Language Track v3 - Watch</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module">
+    import React from 'https://esm.sh/react@18';
+    import ReactDOM from 'https://esm.sh/react-dom@18/client';
+    import { HashRouter, Routes, Route, Link, useParams } from 'https://esm.sh/react-router-dom@6';
+    import dayjs from 'https://esm.sh/dayjs@1';
+    import relativeTime from 'https://esm.sh/dayjs@1/plugin/relativeTime';
+    
+    // Import the app component
+    const module = await import('./app.tsx');
+    const App = module.default;
+    
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(React.createElement(App));
+  </script>
+</body>
+</html>

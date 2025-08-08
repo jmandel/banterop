@@ -1,132 +1,231 @@
 # 💬 Conversational Interop Reference Stack
 
-A transparent, extensible simulation and orchestration environment for **conversation‑driven interoperability**.
+A transparent, extensible simulation and orchestration environment for **conversation‑driven interoperability** between systems, teams, and tools in complex domains.
 
-This is the official **reference backend** for the HL7 FHIR Connectathon **Language‑First Interoperability (LFI)** Track — a proving ground for AI‑mediated, scenario‑based interactions between agents in healthcare and beyond.
+---
+
+## 💡 What This Stack Lets You Do
+
+This reference stack is designed so **any developer** can plug in their own conversational agent and have it interact naturally with simulated agents in **nearly any scenario you can design**.
+
+We provide:
+
+- **Configurable scenarios**: define the “world” — roles, goals, private records, and actions (“tools”) for each agent.
+- **Tool synthesis** (“the Oracle”): produces believable results from those tools without real backend APIs.
+- **Transparent orchestration**: your agent just sees messages, turns, and tool responses like it would with a real counterparty.
+
+Your agent **never needs to know it’s in a simulation** — conversations look real from its perspective.
+
+You can connect in multiple ways:
+
+- **External MCP client** — Your agent connects *to* the orchestrator.
+- **External MCP server** — The orchestrator connects to *your* agent.
+- **External A2A clients & servers** — For emerging agent‑to‑agent protocol standards.
+- **Or none at all** — run built‑in **improv agents** and simply watch them talk.
 
 ---
 
 ## 🌍 Background & Motivation
 
-### The Shift to Conversational Interoperability
+In many cross‑organization workflows, information exchange fails not for lack of transport, but because:
 
-Healthcare and other complex industries are moving from **rigid, predefined APIs** toward **fluid, context‑aware, natural‑language exchanges** between participants. This is driven by:
+- **Integrations are brittle** — workflows break when business rules or local assumptions change.
+- **Key context is missing** — data is structurally valid but incomplete for the receiver's purpose.
+- **Humans fill the gaps** — requiring calls, emails, or faxes to clarify.
 
-- **LLM‑powered reasoning** — Agents can negotiate, clarify, and coordinate without every branch pre‑coded
-- **Dynamic business logic** — Many rules and edge cases cannot be fully captured in static request/response contracts
-- **Reduced integration friction** — Use conversation itself as the interoperability layer, reducing brittle point‑to‑point mappings
+**Examples where conversation helps**:
+- **Prior authorization** — Not just “yes/no”, but clarifying criteria, providing supporting documents.
+- **Specialty appointment booking** — Not just finding a date, but confirming eligibility for a slot.
+- **Clinical trial enrollment** — Determining eligibility through back‑and‑forth Q&A.
+- **Disease registry reporting** — Negotiating missing or ambiguous case details.
 
-**Language‑First Interoperability (LFI)** imagines organizations, systems, and humans communicating via **agents** that “just talk” — asking clarifying questions, exchanging structured + unstructured information, and jointly solving problems.
+### Conversation-Driven Exchange
+
+Here, autonomous or semi‑autonomous **agents** act for each party.  
+The conversation — natural language plus optional structured data attachments — works like an **email chain** the parties stay “in” until they work things out.
+
+This stack makes it practical and testable:
+
+- **Glass‑box runs** where you see every message, thought, simulated action.
+- **Scenario‑based control** over context, roles, and rules.
+- **Turn‑based orchestration** ensuring order and replayability.
 
 ---
 
-## 🎯 Goals of This Reference Stack
+## 🎯 Goals
 
-1. **Glass‑box reference environment**: Run full simulated conversations with internal (or external) agents, seeing every decision, trace, tool call, and message in real time.
-2. **Robust orchestration layer**: Coordinate multi‑agent exchanges with turn‑taking, scheduling policies, and message routing.
-3. **Interop‑friendly**: Plug in agents using **standard protocols** like MCP (Model Context Protocol) now, A2A (Agent‑to‑Agent) async later — without custom glue.
-4. **Executable spec**: Type‑safe, database‑backed, thoroughly tested code illustrating best practices for conversational orchestration.
-5. **Scenario‑driven simulations**: Pre‑define realistic situations, goals, and tools; run repeatable tests.
+1. **Glass‑box simulation** — See every decision, message, and tool call in context.
+2. **Orderly orchestration** — Deterministic turn control and fair scheduling.
+3. **Scenario‑driven testing** — Rich setups to test nuanced flows.
+4. **Interop readiness** — MCP today, A2A tomorrow.
+5. **Rapid prototyping** — Define an agent’s persona, private KB, and tools in minutes.
 
 ---
 
 ## 🛠 Key Features
 
-- **Scenario Builder & Runtime** — `ScenarioConfiguration` defines personas, private knowledge bases, tools, and world background.
-- **Fully‑logged Event Stream** — Append‑only storage of all events: messages, traces, system signals, attachments.
-- **Hydration API** — Merge static scenario + runtime metadata for agent initialization.
-- **Internal & External Agents**:
-  - Built‑in internal implementations: `ScenarioDrivenAgent`, `AssistantAgent`, `EchoAgent`, scripted agents
-  - Remote agents connect via WebSocket JSON‑RPC
-- **Turn Claiming & Guidance** — Orchestrator signals whose turn it is and enforces claim/expiry to prevent racing.
-- **Attachment Management** — Store and reference rich content (replace inline content with database refs).
-- **Transparent Scheduling** — Swappable policies: simple alternation, scenario‑aware, competition mode for load tests.
-- **Developer CLIs** — One‑shot scripts in `src/cli` for demos, simulations, and agent integration examples.
+- **Conversation**: Container for the whole exchange (like a shared email chain).
+- **Scenario**: Playbook for a simulated world with roles & goals.
+- **Tool Synthesis**: Oracle‑driven plausible action results.
+- **Immutable Event Log**: Replayable record of all events.
+- **Turn Claiming**: Ensures only one active agent at a time.
+- **Attachment Handling**: Store/reuse large or structured artifacts.
+- **Pluggable Scheduling**: Choose who speaks next.
+- **CLI Demos**: Watch or run simulations locally.
 
 ---
 
-## ⚙️ Architecture Overview
+## 🔍 Core Concepts
 
+### 1. Conversations — *The session container*
+
+**Concept:**  
+A Conversation is the bounded “room” agents stay in until the job is done — like an email thread for coordination.
+
+**Behavior:**
+- **Roster** — IDs, type (internal/external), config.
+- **Lifecycle** — Starts at turn 0, ends on explicit finality.
+- **Scenario link** — Often tied to a scenario for simulation.
+
+---
+
+### 2. Scenarios — *Realistic improv setup*
+
+**Concept:**  
+Define structured starting conditions:
+- Shared **background** and **challenges**.
+- Distinct **roles** with identity, situation, goals, private KB, tools, and persona.
+- Optional starter line.
+
+Repeatable, comparable runs in the same “world”.
+
+---
+
+### 3. Tool Synthesis (“Oracle”)
+
+Simulates tool/API calls:
+- Input: Tool + params.
+- Context: Scenario, KBs, history.
+- Output: `{ reasoning, output }` plausible in-world.
+
+---
+
+### 4. Orchestrator
+
+Keeps order:
+- Emits `guidance` naming next agent.
+- Requires `claimTurn` before acting.
+- Expiry triggers next candidate.
+
+---
+
+### 5. Event Log
+
+Immutable ledger:
+- Types: Message / Trace / System.
+- Addressing: turn, event, global `seq`.
+- Finality: none / turn / conversation.
+
+---
+
+### 6. Attachments
+
+Store large or structured content once, reference via `docId`.
+
+---
+
+### 7. Turn Claiming
+
+Ensures one actor per turn, prevents collisions.
+
+---
+
+## 📡 Clients & Data Patterns
+
+**Connect as:**
+- Participant (contribute turns)
+- Observer (view only)
+
+**Patterns:**
+1. Snapshot + Follow — Fetch then live subscribe.
+2. Continuous — Always-subscribe live.
+3. Resilient — Resume after `seq` gap.
+
+### Hydration
+
+Before acting:
+- Merge scenario data, live roster, and full event log into a single snapshot for your agent.
+
+---
+
+## 📊 Diagrams
+
+### Concept Map
+```mermaid
+flowchart TB
+    Scenario[Scenario\n- background, roles, KBs, tools]
+    Conversation[Conversation Instance\n- roster, event log, config]
+    ToolCall[Tool Call]
+    Oracle[Oracle Synthesis\n(fictional but plausible outputs)]
+    EventLog[Event Log]
+    Hydration[Hydrated Snapshot\n(scenario + live state + events)]
+    Agent[Agent / Client App\n(internal or external MCP/A2A)]
+
+    Scenario --> Conversation
+    Conversation --> ToolCall
+    ToolCall --> Oracle --> EventLog
+    Conversation --> EventLog
+    EventLog --> Hydration --> Agent
+    Conversation --> Hydration
 ```
-┌──────────────────┐
-│  Scenario Layer   │
-│  (Definitions)    │
-└─────────┬─────────┘
-          │ references
-┌─────────▼─────────┐
-│  Orchestration    │
-│  (OrchestratorSvc)│
-└───┬───────────┬───┘
-    │events     │guidance
-┌───▼───┐   ┌───▼─────┐
-│Events │   │Subscript│
-│Store  │   │Bus      │
-└───────┘   └───────┬─┘
-                    │
-         ┌──────────▼───────────┐
-         │ Agent Layer          │
-         │ internal / external  │
-         └──────────┬───────────┘
-                    │ WebSocket JSON‑RPC / MCP / A2A (future)
-             ┌──────▼──────┐
-             │ External    │
-             │ Agent       │
-             └─────────────┘
+
+---
+
+### Turn Lifecycle
+```mermaid
+sequenceDiagram
+    participant Orchestrator
+    participant AgentA
+    participant AgentB
+
+    Orchestrator->>AgentA: guidance(turn N)
+    AgentA->>Orchestrator: claimTurn(seq)
+    AgentA->>Orchestrator: message/trace events
+    Orchestrator->>EventLog: store events (finality: turn)
+    Orchestrator->>AgentB: guidance(turn N+1)
 ```
 
 ---
 
-### **1. Scenario Layer**
-- Stored as JSON in `ScenarioStore` (`scenarios` table).
-- Defines:
-  - Agents: ID, persona, goals, tools
-  - Each agent’s **private knowledgeBase** (for tool execution)
-  - Shared `background` and `challenges`
+### Architecture Overview
+```mermaid
+flowchart LR
+    subgraph ScenarioLayer[Scenario Layer]
+        BG[Background & Challenges]
+        Roles[Roles & Personas]
+        KBs[Knowledge Bases]
+        Tools[Tools & Guidance]
+    end
 
-### **2. Orchestration Layer**
-- `OrchestratorService`:
-  - Appends events via `EventStore`
-  - Publishes to subscribers
-  - Runs **scheduling policies** to pick the next agent
-  - Emits **guidance events** (ephemeral signals: “Agent X should act next”)
-  - Manages **turn claims** to avoid duplicate acting
+    subgraph Runtime[Conversation Runtime]
+        Orchestrator
+        EventStore[(Event Store)]
+        Guidance[Guidance Emitter]
+    end
 
-### **3. Persistence Layer**
-- `schema.sql.ts` defines normalized tables:
-  - `conversations`, `conversation_events`, `attachments`, `scenarios`, `turn_claims`, `idempotency_keys`
-- All events stored chronologically with **finality** (`none`, `turn`, `conversation`).
+    ScenarioLayer --> Orchestrator
+    Orchestrator --> EventStore
+    Orchestrator --> Guidance
 
-### **4. Agent Layer**
-- **Internal agents** implement `Agent.handleTurn(ctx)`:
-  - `ScenarioDrivenAgent` — Synthesizes persona/system prompt from scenario + history
-  - `AssistantAgent` — Minimalistic user/assistant prompt
-  - `EchoAgent` — For testing message flow
-- **Execution Loops**:
-  - `InternalTurnLoop`: uses in‑process `OrchestratorService`
-  - `TurnLoopExecutor`: connects over WS JSON‑RPC
+    subgraph Clients[Agents & External Clients]
+        InternalAgents[Built-in Improv Agents]
+        ExternalAgents[External MCP / A2A Agents]
+    end
 
-### **5. Integration / Bridge Layer**
-- **WS JSON‑RPC (`/api/ws`)**:
-  - Subscribe to events/guidance
-  - Send messages/traces
-  - Claim turns
-- **REST API**:
-  - Manage scenarios
-  - Fetch/download attachments
-- **MCP Bridge**:
-  - Wraps a conversation with `begin_chat_thread`, `send_message_to_chat_thread`, `wait_for_reply`
-- **Future A2A**:
-  - Event‑driven pub/sub between peer orchestrators & agents
-
----
-
-## 🔌 Protocol Support
-
-- **MCP (Model Context Protocol)**  
-  For Connectathon participant agents wanting a synchronous tool‑call UX.
-  
-- **A2A (Agent‑to‑Agent)** *(Planned)*  
-  Asynchronous, bidirectional agent messaging for richer workflows.
+    Guidance --> Clients
+    Clients --> Orchestrator
+    EventStore --> Clients
+```
 
 ---
 
@@ -134,70 +233,32 @@ Healthcare and other complex industries are moving from **rigid, predefined APIs
 
 ```
 src/
-  agents/         # Implementations, executors, factories
-  cli/            # Demo scripts
-  db/             # SQLite schema, store classes
-  llm/            # Provider integrations (Google, OpenRouter, Mock)
-  lib/            # Utility modules
-  server/         # Hono server, orchestrator, routes
-  types/          # Shared type definitions
-tests/            # Unit & integration tests
+  agents/         # Agent logic
+  cli/            # CLI demos
+  db/             # SQLite schema & accessors
+  llm/            # LLM providers (mock & real)
+  lib/            # Utilities
+  server/         # Hono server, orchestrator, RPC
+  types/          # Shared types
+tests/            # Unit and integration tests
 ```
 
 ---
 
 ## 🚀 Running Locally
 
-1. **Install dependencies**  
-   ```bash
-   bun install
-   ```
+```bash
+bun install
+bun run dev
+```
 
-2. **Run in dev mode**  
-   ```bash
-   bun run dev
-   ```
-
-3. **Try a CLI demo**  
-   ```bash
-   bun run src/cli/run-sim-inproc.ts
-   ```
-
----
-
-## 📡 Example: External Agent via WebSocket JSON‑RPC
-
-```ts
-const ws = new WebSocket('ws://localhost:3000/api/ws');
-
-ws.onopen = () => {
-  ws.send(JSON.stringify({
-    id: 'sub',
-    method: 'subscribe',
-    params: { conversationId: 1, includeGuidance: true }
-  }));
-};
-
-ws.onmessage = (evt) => {
-  const msg = JSON.parse(evt.data);
-  if (msg.method === 'guidance') {
-    // claimTurn then sendMessage
-  }
-};
+Example local sim with built‑in agents:
+```bash
+bun run src/cli/run-sim-inproc.ts
 ```
 
 ---
 
-## 🔮 Next Steps (Roadmap)
-
-1. **Frontend Conversation Inspector** — real‑time multi‑pane (conversation + per‑agent traces).
-2. **Scenario Builder UI** — create/edit scenarios collaboratively.
-3. **A2A Bridge** — robust async interoperability beyond strict alternation.
-4. **Tool Synthesis Oracle** — complete `ToolSynthesisService` for omniscient scenario‑based tool exec.
-5. **Automatic Conversation Resurrection** — bring back active conversations post‑restart.
-6. **Human‑in‑Loop Hooks** — let agents pause for principal input.
-7. **Scenario Evaluation Metrics** — auto‑classify success/failure turns.
-
----
-
-**HL7 FHIR Connectathon LFI Track** participants can deploy this stack locally or extend it to prototype **their own agents** interacting over **standard interop protocols** — with full transparency into orchestration, decisioning, and conversation flow.
+You can now:
+- **Plug in your own agent** (MCP or A2A) as participant or observer.
+- **Run ours** and watch believable, contextual conversations unfold.

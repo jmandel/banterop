@@ -12,13 +12,15 @@ const PROVIDER_MAP = {
 } as const;
 
 export class ProviderManager {
-  private providerInstances: Map<SupportedProvider, LLMProvider> = new Map();
-  
   constructor(private appConfig: Config) {}
 
   /**
    * Creates an LLM provider instance based on the requested configuration.
    * Can auto-detect provider from model name, or use explicit provider.
+   * 
+   * NOTE: In this Connectathon build, we do NOT cache providers.
+   * They are cheap to construct and model changes trigger new instances.
+   * This keeps behaviour simple and deterministic.
    * 
    * @param config - Configuration with optional model, provider, or apiKey
    * @returns LLMProvider instance configured for the request
@@ -40,27 +42,8 @@ export class ProviderManager {
       providerName = config?.provider ?? this.appConfig.defaultLlmProvider;
     }
 
-    // Check if we have a cached instance for this provider
-    const cacheKey = `${providerName}-${config?.apiKey || 'default'}`;
-    let provider = this.providerInstances.get(cacheKey as SupportedProvider);
-    
-    if (!provider) {
-      provider = this.createProviderInstance(providerName, config);
-      this.providerInstances.set(cacheKey as SupportedProvider, provider);
-    }
-
-    // If a specific model was requested, create a new instance with that model configured
-    if (model) {
-      const ProviderClass = PROVIDER_MAP[providerName];
-      const apiKey = this.getApiKeyForProvider(providerName, config?.apiKey);
-      return new ProviderClass({ 
-        provider: providerName, 
-        ...(apiKey !== undefined ? { apiKey } : {}),
-        model
-      });
-    }
-
-    return provider;
+    // Create a new provider instance each time (no caching in Connectathon mode)
+    return this.createProviderInstance(providerName, config);
   }
 
   /**

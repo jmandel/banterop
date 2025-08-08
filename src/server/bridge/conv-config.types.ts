@@ -38,11 +38,13 @@ export type ConvConversationMeta = z.infer<typeof ConversationMetaSchema>;
 
 /**
  * Decode base64url (RFC 4648) JSON string to object.
+ * NOTE: atob is available in both browser and Bun environments.
  */
 export function decodeBase64Url<T = unknown>(b64url: string): T {
   const normalized = b64url.replace(/-/g, '+').replace(/_/g, '/');
   const pad = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
-  const json = Buffer.from(normalized + pad, 'base64').toString('utf8');
+  const base64 = normalized + pad;
+  const json = atob(base64);
   return JSON.parse(json) as T;
 }
 
