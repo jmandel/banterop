@@ -16,29 +16,31 @@ describe('Conversation Metadata', () => {
 
   it('stores and retrieves full metadata', () => {
     const params: CreateConversationRequest = {
-      title: 'Test Conversation',
-      description: 'Test description',
-      scenarioId: 'test-scenario',
-      agents: [
-        {
-          id: 'user-1',
-          kind: 'external',
-          role: 'user',
-          displayName: 'Test User',
+      meta: {
+        title: 'Test Conversation',
+        description: 'Test description',
+        scenarioId: 'test-scenario',
+        agents: [
+          {
+            id: 'user-1',
+            kind: 'external',
+            role: 'user',
+            displayName: 'Test User',
+          },
+          {
+            id: 'assistant-1',
+            kind: 'internal',
+            role: 'assistant',
+            config: { model: 'gpt-4' },
+          },
+        ],
+        config: {
+          idleTurnMs: 60000,
         },
-        {
-          id: 'assistant-1',
-          kind: 'internal',
-          role: 'assistant',
-          config: { model: 'gpt-4' },
+        custom: {
+          organizationId: 'test-org',
+          tags: ['test', 'metadata'],
         },
-      ],
-      config: {
-        idleTurnMs: 60000,
-      },
-      custom: {
-        organizationId: 'test-org',
-        tags: ['test', 'metadata'],
       },
     };
 
@@ -65,7 +67,9 @@ describe('Conversation Metadata', () => {
 
   it('handles minimal metadata', () => {
     const params: CreateConversationRequest = {
-      agents: [],
+      meta: {
+        agents: [],
+      },
     };
 
     const id = store.create(params);
@@ -81,13 +85,13 @@ describe('Conversation Metadata', () => {
 
   it('indexes scenario_id for queries', () => {
     // Create multiple conversations with different scenarios
-    store.create({ scenarioId: 'scenario-a', agents: [] });
-    store.create({ scenarioId: 'scenario-b', agents: [] });
-    store.create({ scenarioId: 'scenario-a', agents: [] });
+    store.create({ meta: { scenarioId: 'scenario-a', agents: [] } });
+    store.create({ meta: { scenarioId: 'scenario-b', agents: [] } });
+    store.create({ meta: { scenarioId: 'scenario-a', agents: [] } });
 
     // Query by scenario (would need to add this method to store)
     const rows = db.prepare(
-      `SELECT COUNT(*) as count FROM conversations WHERE scenario_id = ?`
+      `SELECT COUNT(*) as count FROM conversations WHERE json_extract(meta_json, '$.scenarioId') = ?`
     ).get('scenario-a') as { count: number };
 
     expect(rows.count).toBe(2);
@@ -95,22 +99,24 @@ describe('Conversation Metadata', () => {
 
   it('stores complex agent config', () => {
     const params: CreateConversationRequest = {
-      agents: [
-        {
-          id: 'complex-agent',
-          kind: 'internal',
-          config: {
-            model: 'gpt-4',
-            temperature: 0.7,
-            tools: ['search', 'calculator'],
-            nested: {
-              deeply: {
-                nested: 'value',
+      meta: {
+        agents: [
+          {
+            id: 'complex-agent',
+            kind: 'internal',
+            config: {
+              model: 'gpt-4',
+              temperature: 0.7,
+              tools: ['search', 'calculator'],
+              nested: {
+                deeply: {
+                  nested: 'value',
+                },
               },
             },
           },
-        },
-      ],
+        ],
+      },
     };
 
     const id = store.create(params);

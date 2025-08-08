@@ -31,11 +31,13 @@ describe('WsEventStream Integration Tests', () => {
     
     // Create a test conversation with configured agents
     conversationId = app.orchestrator.createConversation({
-      title: 'Test Conversation',
-      agents: [
-        { id: 'user', kind: 'external' },
-        { id: 'test-agent', kind: 'internal' },
-      ],
+      meta: {
+        title: 'Test Conversation',
+        agents: [
+          { id: 'user', kind: 'external' },
+          { id: 'test-agent', kind: 'internal' },
+        ],
+      },
     });
   });
 

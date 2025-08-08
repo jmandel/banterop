@@ -182,12 +182,14 @@ describe('scenario-agent.factory', () => {
 
       expect(conversationId).toBe(1);
       expect(mockOrchestrator.createConversation).toHaveBeenCalledWith({
-        scenarioId: 'test-scenario',
-        title: 'Test Conversation',
-        agents: [
-          { id: 'agent-1', kind: 'internal' },
-          { id: 'agent-2', kind: 'external' },
-        ],
+        meta: {
+          scenarioId: 'test-scenario',
+          title: 'Test Conversation',
+          agents: [
+            { id: 'agent-1', kind: 'internal' },
+            { id: 'agent-2', kind: 'external' },
+          ],
+        },
       });
       expect(handle.agents).toHaveLength(1); // Only internal agent started
       
@@ -211,7 +213,9 @@ describe('scenario-agent.factory', () => {
 
       expect(mockOrchestrator.createConversation).toHaveBeenCalledWith(
         expect.objectContaining({
-          startingAgentId: 'agent-1',
+          meta: expect.objectContaining({
+            startingAgentId: 'agent-1',
+          }),
         })
       );
     });
@@ -233,7 +237,9 @@ describe('scenario-agent.factory', () => {
 
       expect(mockOrchestrator.createConversation).toHaveBeenCalledWith(
         expect.objectContaining({
-          custom: { testData: 'value' },
+          meta: expect.objectContaining({
+            custom: { testData: 'value' },
+          }),
         })
       );
     });

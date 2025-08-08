@@ -126,11 +126,13 @@ export async function createScenarioConversation(
 ): Promise<{ conversationId: number; handle: ScenarioAgentHandle }> {
   // Create the conversation
   const conversationId = orchestrator.createConversation({
-    scenarioId: options.scenarioId,
-    ...(options.title !== undefined ? { title: options.title } : {}),
-    agents: options.agents,
-    ...(options.startingAgentId !== undefined ? { startingAgentId: options.startingAgentId } : {}),
-    ...(options.custom !== undefined ? { custom: options.custom } : {}),
+    meta: {
+      scenarioId: options.scenarioId,
+      ...(options.title !== undefined ? { title: options.title } : {}),
+      agents: options.agents,
+      ...(options.startingAgentId !== undefined ? { startingAgentId: options.startingAgentId } : {}),
+      ...(options.custom !== undefined ? { custom: options.custom } : {}),
+    },
   });
   
   // Start internal agents

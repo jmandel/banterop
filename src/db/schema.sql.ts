@@ -1,23 +1,21 @@
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
 
--- Conversations registry (metadata + denormalized status for fast listing)
+-- Conversations registry (all metadata in meta_json)
 CREATE TABLE IF NOT EXISTS conversations (
   conversation    INTEGER PRIMARY KEY,         -- autoincrement id for conversation
-  title           TEXT,
-  description     TEXT,
-  scenario_id     TEXT,
-  meta_json       TEXT NOT NULL DEFAULT '{}',  -- JSON string holding: {agents,config,custom}
   status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed')),
+  meta_json       TEXT NOT NULL DEFAULT '{}',  -- JSON string holding all conversation metadata
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_conversations_status
-  ON conversations (status, created_at DESC);
+  ON conversations (status, updated_at DESC);
 
+-- JSON expression index for scenario filtering
 CREATE INDEX IF NOT EXISTS idx_conversations_scenario
-  ON conversations (scenario_id);
+  ON conversations (json_extract(meta_json, '$.scenarioId'));
 
 -- Scenarios table to store templates
 CREATE TABLE IF NOT EXISTS scenarios (

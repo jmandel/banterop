@@ -41,7 +41,7 @@ export class App {
     const activeConvos = this.storage.conversations.list({ status: 'active' });
 
     for (const convo of activeConvos) {
-      const meta = JSON.parse(convo.metaJson || '{}');
+      const meta = convo.metadata;
       const autoRun = meta.custom?.autoRun;
       if (autoRun) {
         if (convo.updatedAt < cutoffIso) {
@@ -54,7 +54,7 @@ export class App {
         
         // Only start if there's a scenario or internal agents defined
         const hasInternalAgents = meta.agents?.some((a: any) => a.kind === 'internal');
-        if (convo.scenarioId || hasInternalAgents) {
+        if (meta.scenarioId || hasInternalAgents) {
           startScenarioAgents(this.orchestrator, convo.conversation, {
             providerManager: this.providerManager
           }).catch(err => {

@@ -45,11 +45,12 @@ describe("DB timestamp precision", () => {
 
     // Insert a conversation
     const stmt = sqlite.raw.prepare(`
-      INSERT INTO conversations (title, description, status) 
-      VALUES ('Test', 'Test conversation', 'active')
+      INSERT INTO conversations (meta_json, status) 
+      VALUES (?, 'active')
       RETURNING created_at, updated_at
     `);
-    const result = stmt.get() as { created_at: string; updated_at: string };
+    const metadata = JSON.stringify({ title: 'Test', description: 'Test conversation', agents: [] });
+    const result = stmt.get(metadata) as { created_at: string; updated_at: string };
 
     // Check both timestamps have millisecond precision
     expect(result.created_at).toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);

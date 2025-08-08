@@ -9,22 +9,24 @@ export interface AgentMeta {
 }
 
 export interface ConversationMeta {
+  // Core fields
   title?: string;
   description?: string;
   scenarioId?: string;
+  
+  // Agent configuration
   agents: AgentMeta[];
   startingAgentId?: string;                // which agent should start the conversation
+  
+  // Configuration
   config?: Record<string, unknown>;
   custom?: Record<string, unknown>;        // namespaced ext
+  
+  // Versioning
+  metaVersion?: number;                    // defaults to 1 if not specified
 }
 
-// For creating conversations
+// For creating conversations - now requires full meta object
 export interface CreateConversationRequest {
-  title?: string;
-  description?: string;
-  scenarioId?: string;
-  agents?: AgentMeta[];
-  startingAgentId?: string;                // which agent should start the conversation
-  config?: Record<string, unknown>;
-  custom?: Record<string, unknown>;
+  meta: ConversationMeta;
 }

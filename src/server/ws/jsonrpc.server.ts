@@ -228,8 +228,8 @@ async function handleRpc(
       // Start internal loops now if providerManager is available
       // Only start if there's a scenario or internal agents defined
       if (providerManager) {
-        const hasInternalAgents = convo.metadata.agents?.some(a => a.kind === 'internal');
-        if (convo.scenarioId || hasInternalAgents) {
+        const hasInternalAgents = convo.metadata.agents?.some((a: any) => a.kind === 'internal');
+        if (convo.metadata.scenarioId || hasInternalAgents) {
           try {
             await startScenarioAgents(orchestrator, conversationId, {
               providerManager

@@ -12,7 +12,7 @@ import type {
   SystemPayload,
   AttachmentRow,
 } from '$src/types/event.types';
-import type { ConversationRow, ConversationWithMeta, CreateConversationParams, ListConversationsParams } from '$src/db/conversation.store';
+import type { Conversation, CreateConversationParams, ListConversationsParams } from '$src/db/conversation.store';
 import { StrictAlternationPolicy } from './strict-alternation-policy';
 
 export class OrchestratorService {
@@ -167,8 +167,8 @@ export class OrchestratorService {
 
     const events = this.storage.events.getEvents(conversationId);
     let scenario: ScenarioConfiguration | null = null;
-    if (convo.scenarioId) {
-      const scenarioItem = this.storage.scenarios.findScenarioById(convo.scenarioId);
+    if (convo.metadata.scenarioId) {
+      const scenarioItem = this.storage.scenarios.findScenarioById(convo.metadata.scenarioId);
       scenario = scenarioItem?.config || null;
     }
     
@@ -186,11 +186,11 @@ export class OrchestratorService {
 
   // Expose storage methods for conversations and attachments
   createConversation(params: CreateConversationParams): number {
-    if (params.scenarioId) {
-      const scenarioItem = this.storage.scenarios.findScenarioById(params.scenarioId);
+    if (params.meta.scenarioId) {
+      const scenarioItem = this.storage.scenarios.findScenarioById(params.meta.scenarioId);
       if (scenarioItem) {
         const scenarioIds = new Set(scenarioItem.config.agents.map(a => a.agentId));
-        const runtimeIds = new Set((params.agents || []).map(a => a.id));
+        const runtimeIds = new Set(params.meta.agents.map(a => a.id));
         if (
           scenarioIds.size !== runtimeIds.size ||
           [...scenarioIds].some(id => !runtimeIds.has(id))
@@ -218,15 +218,15 @@ export class OrchestratorService {
     return conversationId;
   }
 
-  getConversation(id: number): ConversationRow | null {
+  getConversation(id: number): Conversation | null {
     return this.storage.conversations.get(id);
   }
   
-  getConversationWithMetadata(id: number): ConversationWithMeta | null {
+  getConversationWithMetadata(id: number): Conversation | null {
     return this.storage.conversations.getWithMetadata(id);
   }
 
-  listConversations(params: ListConversationsParams): ConversationRow[] {
+  listConversations(params: ListConversationsParams): Conversation[] {
     return this.storage.conversations.list(params);
   }
 

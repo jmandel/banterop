@@ -146,14 +146,16 @@ export class McpBridgeServer {
     });
     
     const conversationId = orchestrator.createConversation({
-      ...(meta.title !== undefined ? { title: meta.title } : {}),
-      ...(meta.description !== undefined ? { description: meta.description } : {}),
-      ...(meta.scenarioId !== undefined ? { scenarioId: meta.scenarioId } : {}),
-      agents,
-      ...(meta.config !== undefined ? { config: meta.config } : {}),
-      custom: {
-        ...(meta.custom ?? {}),
-        bridgeSession: this.sessionId,
+      meta: {
+        ...(meta.title !== undefined ? { title: meta.title } : {}),
+        ...(meta.description !== undefined ? { description: meta.description } : {}),
+        ...(meta.scenarioId !== undefined ? { scenarioId: meta.scenarioId } : {}),
+        agents,
+        ...(meta.config !== undefined ? { config: meta.config } : {}),
+        custom: {
+          ...(meta.custom ?? {}),
+          bridgeSession: this.sessionId,
+        },
       },
     });
 
