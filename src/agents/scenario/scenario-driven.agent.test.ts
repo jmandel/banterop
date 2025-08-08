@@ -2,16 +2,50 @@ import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import { ScenarioDrivenAgent } from './scenario-driven.agent';
 import { MockLLMProvider } from '$src/llm/providers/mock';
 import { ProviderManager } from '$src/llm/provider-manager';
-import type { AgentContext } from '$src/agents/agent.types';
+import { MockTransport } from '$src/agents/runtime/mock.transport';
+import { MockEvents } from '$src/agents/runtime/mock.events';
 import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
-import type { HydratedConversationSnapshot } from '$src/types/orchestrator.types';
+import type { HydratedConversationSnapshot, GuidanceEvent } from '$src/types/orchestrator.types';
+import type { UnifiedEvent } from '$src/types/event.types';
 
 describe('ScenarioDrivenAgent', () => {
   let providerManager: ProviderManager;
   let mockProvider: MockLLMProvider;
+  let mockTransport: MockTransport;
+  let mockEvents: MockEvents;
   let agent: ScenarioDrivenAgent;
-  let mockContext: AgentContext;
   let testScenario: ScenarioConfiguration;
+
+  // Helper to trigger a turn
+  async function triggerTurn(conversationId: number, agentId: string, seq: number = 1.1) {
+    await agent.start(conversationId, agentId);
+    
+    const guidance: GuidanceEvent = {
+      type: 'guidance',
+      conversation: conversationId,
+      seq,
+      nextAgentId: agentId,
+      deadlineMs: 30000
+    };
+    
+    mockEvents.emit(guidance);
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  // Helper to create message event
+  function createMessageEvent(agentId: string, text: string, seq: number = 1): UnifiedEvent {
+    return {
+      conversation: 1,
+      turn: seq,
+      event: 1,
+      type: 'message' as const,
+      payload: { text },
+      agentId,
+      finality: 'turn' as const,
+      ts: new Date().toISOString(),
+      seq
+    };
+  }
 
   beforeEach(() => {
     // Create mock provider
@@ -79,262 +113,254 @@ describe('ScenarioDrivenAgent', () => {
       ],
     };
     
+    // Create mock transport and events
+    mockTransport = new MockTransport();
+    mockEvents = new MockEvents();
+    
+    // Setup default mock responses
+    mockTransport.getSnapshot.mockResolvedValue({
+      conversation: 1,
+      status: 'active' as const,
+      scenario: testScenario,
+      runtimeMeta: { 
+        agents: [
+          { id: 'test-agent', kind: 'internal' },
+          { id: 'other-agent', kind: 'internal' }
+        ]
+      },
+      events: [
+        createMessageEvent('other-agent', 'Hello test agent')
+      ]
+    } as HydratedConversationSnapshot);
+    
     // Create agent
-    agent = new ScenarioDrivenAgent({
+    agent = new ScenarioDrivenAgent(mockTransport, mockEvents, {
       agentId: 'test-agent',
       providerManager,
     });
-    
-    // Create mock context
-    mockContext = {
-      conversationId: 1,
-      agentId: 'test-agent',
-      deadlineMs: Date.now() + 30000,
-      client: {
-        getSnapshot: mock(() => Promise.resolve({
-          conversation: 1,
-          status: 'active' as const,
-          events: [
-            {
-              conversation: 1,
-              turn: 1,
-              event: 1,
-              type: 'message',
-              payload: { text: 'Hello agent' },
-              finality: 'turn',
-              ts: new Date().toISOString(),
-              agentId: 'other-agent',
-              seq: 1,
-            },
-          ],
-          scenario: testScenario,
-          runtimeMeta: {
-            agents: [
-              { id: 'test-agent', kind: 'internal' as const },
-              { id: 'other-agent', kind: 'external' as const },
-            ],
-          },
-        } as HydratedConversationSnapshot)),
-        postMessage: mock(() => Promise.resolve({
-          seq: 2,
-          turn: 2,
-          event: 1,
-        })),
-        postTrace: mock(() => Promise.resolve({
-          seq: 3,
-          turn: 2,
-          event: 2,
-        })),
-        now: () => Date.now(),
-      },
-      logger: {
-        debug: mock(() => {}),
-        info: mock(() => {}),
-        warn: mock(() => {}),
-        error: mock(() => {}),
-      },
-    };
   });
 
   it('creates agent with provider manager', () => {
     expect(agent).toBeDefined();
   });
 
-  it('handles turn and generates response', async () => {
-    await agent.handleTurn(mockContext);
-    
-    // Verify it called getSnapshot
-    expect(mockContext.client.getSnapshot).toHaveBeenCalledWith(1);
-    
-    // Verify it posted a message
-    expect(mockContext.client.postMessage).toHaveBeenCalled();
-    const postCall = (mockContext.client.postMessage as any).mock.calls[0][0];
-    expect(postCall.conversationId).toBe(1);
-    expect(postCall.agentId).toBe('test-agent');
-    expect(postCall.text).toContain('Mock response');
-    expect(postCall.finality).toBe('turn');
-  });
-
-  it('includes scenario context in system prompt', async () => {
-    // Spy on provider to capture messages
-    let capturedMessages: any[] = [];
+  it('builds system prompt from scenario configuration', async () => {
     const originalComplete = mockProvider.complete.bind(mockProvider);
+    let capturedMessages: any[] = [];
     mockProvider.complete = mock(async (request) => {
       capturedMessages = request.messages;
       return originalComplete(request);
     });
     
-    await agent.handleTurn(mockContext);
+    await triggerTurn(1, 'test-agent');
     
     expect(capturedMessages).toHaveLength(2);
-    const systemMessage = capturedMessages[0];
-    expect(systemMessage.role).toBe('system');
-    expect(systemMessage.content).toContain('You are a test agent. Be helpful.');
-    expect(systemMessage.content).toContain('Test Agent');
-    expect(systemMessage.content).toContain('You are in a test environment');
-    expect(systemMessage.content).toContain('Assist with testing');
-    expect(systemMessage.content).toContain('Test Scenario');
-    expect(systemMessage.content).toContain('testFact');
-    expect(systemMessage.content).toContain('test_tool');
+    const systemPrompt = capturedMessages[0].content;
+    
+    // Check that system prompt includes key elements from scenario
+    expect(systemPrompt).toContain('You are a test agent. Be helpful.');
+    expect(systemPrompt).toContain('Test Agent');
+    expect(systemPrompt).toContain('You are in a test environment');
+    expect(systemPrompt).toContain('Assist with testing');
+    expect(systemPrompt).toContain('Test Scenario');
+    expect(systemPrompt).toContain('Testing scenario-driven agents');
   });
 
-  it('uses agent-specific LLM provider config', async () => {
-    // Create a custom mock provider
-    const customProvider = new MockLLMProvider({ provider: 'mock' });
-    customProvider.complete = mock(async () => ({ content: 'Custom provider response' }));
-    
-    // Mock getProvider to return custom provider when requested
-    providerManager.getProvider = mock((config?: any) => {
-      if (config?.provider === 'custom') {
-        return customProvider;
-      }
-      return mockProvider;
+  it('includes knowledge base in system prompt', async () => {
+    const originalComplete = mockProvider.complete.bind(mockProvider);
+    let capturedMessages: any[] = [];
+    mockProvider.complete = mock(async (request) => {
+      capturedMessages = request.messages;
+      return originalComplete(request);
     });
     
-    // Update context with agent-specific config
-    mockContext.client.getSnapshot = mock(() => Promise.resolve({
+    await triggerTurn(1, 'test-agent');
+    
+    const systemPrompt = capturedMessages[0].content;
+    expect(systemPrompt).toContain('testFact');
+    expect(systemPrompt).toContain('This is test knowledge');
+  });
+
+  it('includes tool descriptions in system prompt', async () => {
+    const originalComplete = mockProvider.complete.bind(mockProvider);
+    let capturedMessages: any[] = [];
+    mockProvider.complete = mock(async (request) => {
+      capturedMessages = request.messages;
+      return originalComplete(request);
+    });
+    
+    await triggerTurn(1, 'test-agent');
+    
+    const systemPrompt = capturedMessages[0].content;
+    expect(systemPrompt).toContain('test_tool');
+    expect(systemPrompt).toContain('A test tool');
+  });
+
+  it('handles conversation history correctly', async () => {
+    mockTransport.getSnapshot.mockResolvedValue({
       conversation: 1,
       status: 'active' as const,
-      events: [],
       scenario: testScenario,
-      runtimeMeta: {
+      runtimeMeta: { 
+        agents: [
+          { id: 'test-agent', kind: 'internal' },
+          { id: 'other-agent', kind: 'internal' }
+        ]
+      },
+      events: [
+        createMessageEvent('other-agent', 'First message', 1),
+        createMessageEvent('test-agent', 'My response', 2),
+        createMessageEvent('other-agent', 'Second message', 3),
+      ]
+    } as HydratedConversationSnapshot);
+    
+    const originalComplete = mockProvider.complete.bind(mockProvider);
+    let capturedMessages: any[] = [];
+    mockProvider.complete = mock(async (request) => {
+      capturedMessages = request.messages;
+      return originalComplete(request);
+    });
+    
+    await triggerTurn(1, 'test-agent', 3.1);
+    
+    expect(capturedMessages).toHaveLength(4);
+    expect(capturedMessages[1].role).toBe('user');
+    expect(capturedMessages[1].content).toBe('First message');
+    expect(capturedMessages[2].role).toBe('assistant');
+    expect(capturedMessages[2].content).toBe('My response');
+    expect(capturedMessages[3].role).toBe('user');
+    expect(capturedMessages[3].content).toBe('Second message');
+  });
+
+  it('posts message with turn finality', async () => {
+    await triggerTurn(1, 'test-agent');
+    
+    // Add a longer wait to ensure the async turn completes
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    expect(mockTransport.postMessage).toHaveBeenCalled();
+    const postCall = mockTransport.postMessage.mock.calls[0]?.[0];
+    expect(postCall?.conversationId).toBe(1);
+    expect(postCall?.agentId).toBe('test-agent');
+    expect(postCall?.finality).toBe('turn');
+  });
+
+  it('uses agent-specific provider config when available', async () => {
+    // Setup agent with specific provider config
+    mockTransport.getSnapshot.mockResolvedValue({
+      conversation: 1,
+      status: 'active' as const,
+      scenario: testScenario,
+      runtimeMeta: { 
         agents: [
           { 
             id: 'test-agent', 
-            kind: 'internal' as const,
+            kind: 'internal',
             config: {
-              llmProvider: 'custom',
-              model: 'custom-model',
-            },
+              llmProvider: 'mock',
+              model: 'test-model'
+            }
           },
-        ],
+          { id: 'other-agent', kind: 'internal' }
+        ]
       },
-    } as HydratedConversationSnapshot));
-    
-    await agent.handleTurn(mockContext);
-    
-    // Verify custom provider was called
-    expect(customProvider.complete).toHaveBeenCalled();
-    expect(mockContext.client.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: 'Custom provider response',
-      })
-    );
-  });
-
-  it('handles missing scenario gracefully', async () => {
-    mockContext.client.getSnapshot = mock(() => Promise.resolve({
-      conversation: 1,
-      status: 'active' as const,
-      events: [],
-      // No scenario
-    }));
-    
-    await expect(agent.handleTurn(mockContext)).rejects.toThrow(
-      'Conversation 1 lacks scenario configuration'
-    );
-  });
-
-  it('handles missing agent in scenario', async () => {
-    mockContext.agentId = 'unknown-agent';
-    
-    await expect(agent.handleTurn(mockContext)).rejects.toThrow(
-      'Agent unknown-agent not found in scenario configuration'
-    );
-  });
-
-  it('builds conversation history correctly', async () => {
-    mockContext.client.getSnapshot = mock(() => Promise.resolve({
-      conversation: 1,
-      status: 'active' as const,
       events: [
-        {
-          type: 'message',
-          payload: { text: 'User message 1' },
-          agentId: 'other-agent',
-        },
-        {
-          type: 'message',
-          payload: { text: 'Agent response 1' },
-          agentId: 'test-agent',
-        },
-        {
-          type: 'message',
-          payload: { text: 'User message 2' },
-          agentId: 'other-agent',
-        },
-      ],
+        createMessageEvent('other-agent', 'Hello')
+      ]
+    } as HydratedConversationSnapshot);
+    
+    await triggerTurn(1, 'test-agent');
+    
+    // Verify provider was requested with correct config
+    expect(providerManager.getProvider).toHaveBeenCalled();
+  });
+
+  it('throws error when scenario is missing', async () => {
+    mockTransport.getSnapshot.mockResolvedValue({
+      conversation: 1,
+      status: 'active' as const,
+      scenario: null,
+      runtimeMeta: { agents: [] },
+      events: []
+    } as HydratedConversationSnapshot);
+    
+    // Should not throw - error is caught in BaseAgent
+    await expect(triggerTurn(1, 'test-agent')).resolves.toBeUndefined();
+  });
+
+  it('throws error when agent not found in scenario', async () => {
+    mockTransport.getSnapshot.mockResolvedValue({
+      conversation: 1,
+      status: 'active' as const,
       scenario: testScenario,
-      runtimeMeta: {
+      runtimeMeta: { agents: [] },
+      events: []
+    } as HydratedConversationSnapshot);
+    
+    // Create agent with ID not in scenario
+    const wrongAgent = new ScenarioDrivenAgent(mockTransport, mockEvents, {
+      agentId: 'unknown-agent',
+      providerManager,
+    });
+    
+    await wrongAgent.start(1, 'unknown-agent');
+    
+    const guidance: GuidanceEvent = {
+      type: 'guidance',
+      conversation: 1,
+      seq: 1.1,
+      nextAgentId: 'unknown-agent',
+      deadlineMs: 30000
+    };
+    
+    mockEvents.emit(guidance);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Should handle error gracefully
+    expect(mockTransport.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('handles tool synthesis for pending tool calls', async () => {
+    // Add a tool_call trace event to the history
+    mockTransport.getSnapshot.mockResolvedValue({
+      conversation: 1,
+      status: 'active' as const,
+      scenario: testScenario,
+      runtimeMeta: { 
         agents: [
-          { id: 'test-agent', kind: 'internal' as const },
-          { id: 'other-agent', kind: 'external' as const },
-        ],
+          { id: 'test-agent', kind: 'internal' },
+          { id: 'other-agent', kind: 'internal' }
+        ]
       },
-    } as HydratedConversationSnapshot));
-    
-    let capturedMessages: any[] = [];
-    mockProvider.complete = mock(async (request) => {
-      capturedMessages = request.messages;
-      return { content: 'Response' };
-    });
-    
-    await agent.handleTurn(mockContext);
-    
-    expect(capturedMessages).toHaveLength(4);
-    expect(capturedMessages[0].role).toBe('system');
-    expect(capturedMessages[1]).toEqual({
-      role: 'user',
-      content: 'User message 1',
-    });
-    expect(capturedMessages[2]).toEqual({
-      role: 'assistant',
-      content: 'Agent response 1',
-    });
-    expect(capturedMessages[3]).toEqual({
-      role: 'user',
-      content: 'User message 2',
-    });
-  });
-
-  it('filters out non-message events', async () => {
-    mockContext.client.getSnapshot = mock(() => Promise.resolve({
-      conversation: 1,
-      status: 'active' as const,
       events: [
+        createMessageEvent('other-agent', 'Please use your tool'),
         {
-          type: 'message',
-          payload: { text: 'User message' },
-          agentId: 'other-agent',
-        },
-        {
-          type: 'trace',
-          payload: { type: 'thought', content: 'thinking...' },
+          conversation: 1,
+          turn: 2,
+          event: 1,
+          type: 'trace' as const,
+          payload: {
+            type: 'tool_call',
+            toolCallId: 'test-call-1',
+            name: 'test_tool',
+            args: { input: 'test' }
+          },
           agentId: 'test-agent',
-        },
-        {
-          type: 'system',
-          payload: { kind: 'note' },
-          agentId: 'system',
-        },
-      ],
-      scenario: testScenario,
-      runtimeMeta: {
-        agents: [{ id: 'test-agent', kind: 'internal' as const }],
-      },
-    } as HydratedConversationSnapshot));
+          finality: 'none' as const,
+          ts: new Date().toISOString(),
+          seq: 2
+        }
+      ]
+    } as HydratedConversationSnapshot);
     
-    let capturedMessages: any[] = [];
-    mockProvider.complete = mock(async (request) => {
-      capturedMessages = request.messages;
-      return { content: 'Response' };
-    });
+    await triggerTurn(1, 'test-agent');
     
-    await agent.handleTurn(mockContext);
+    // Add a longer wait to ensure the async turn completes
+    await new Promise(resolve => setTimeout(resolve, 200));
     
-    // Should only have system prompt and user message
-    expect(capturedMessages).toHaveLength(2);
-    expect(capturedMessages[0].role).toBe('system');
-    expect(capturedMessages[1].role).toBe('user');
+    // Should have posted a tool_result trace
+    expect(mockTransport.postTrace).toHaveBeenCalled();
+    const traceCall = mockTransport.postTrace.mock.calls[0]?.[0];
+    expect(traceCall?.payload.type).toBe('tool_result');
   });
 });

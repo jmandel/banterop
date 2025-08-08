@@ -1,4 +1,5 @@
-import type { Agent, AgentContext } from '$src/agents/agent.types';
+import { BaseAgent, type TurnContext } from '$src/agents/runtime/base-agent';
+import type { IAgentTransport, IAgentEvents } from '$src/agents/runtime/runtime.interfaces';
 import type { ScenarioConfigAgentDetails, ScenarioConfiguration } from '$src/types/scenario-configuration.types';
 import type { LLMMessage, LLMProvider } from '$src/types/llm.types';
 import type { UnifiedEvent, TracePayload } from '$src/types/event.types';
@@ -8,6 +9,7 @@ import type { ProviderManager } from '$src/llm/provider-manager';
 import type { SupportedProvider } from '$src/types/llm.types';
 import type { AgentMeta } from '$src/types/conversation.meta';
 import { ToolSynthesisService } from '$src/agents/services/tool-synthesis.service';
+import { logLine } from '$src/lib/utils/logger';
 
 export interface ScenarioDrivenAgentConfig {
   agentId: string;
@@ -21,25 +23,30 @@ export interface ScenarioDrivenAgentConfig {
  * - Produces one assistant message with finality='turn'
  * - Future: optional traces/tool synthesis with Oracle
  */
-export class ScenarioDrivenAgent implements Agent {
+export class ScenarioDrivenAgent extends BaseAgent<HydratedConversationSnapshot> {
   private providerManager: ProviderManager;
   // TODO: Implement multi-step support
   // private maxSteps: number;
   // TODO: Implement oracle/tool synthesis
   // private useOracle: boolean;
 
-  constructor(cfg: ScenarioDrivenAgentConfig) {
+  constructor(
+    transport: IAgentTransport,
+    events: IAgentEvents,
+    cfg: ScenarioDrivenAgentConfig
+  ) {
+    super(transport, events);
     this.providerManager = cfg.providerManager;
     // TODO: Implement multi-step and oracle support
     // this.maxSteps = cfg.options?.maxStepsPerTurn ?? 1;
     // this.useOracle = cfg.options?.useOracle ?? false;
   }
 
-  async handleTurn(ctx: AgentContext): Promise<void> {
-    const { conversationId, agentId, client, logger } = ctx;
+  protected async takeTurn(ctx: TurnContext<HydratedConversationSnapshot>): Promise<void> {
+    const { conversationId, agentId, transport } = ctx;
 
-    // Get snapshot (will be hydrated for internal agents)
-    const hydrated = await client.getSnapshot(conversationId) as HydratedConversationSnapshot;
+    // Use the snapshot from context (stable view at turn start)
+    const hydrated = ctx.snapshot;
     
     if (!hydrated.scenario) {
       throw new Error(`Conversation ${conversationId} lacks scenario configuration`);
@@ -68,7 +75,7 @@ export class ScenarioDrivenAgent implements Agent {
         const toolDef = myAgent.tools?.find(t => t.toolName === toolCall.name);
         
         if (toolDef && toolDef.synthesisGuidance) {
-          logger.info(`ScenarioDrivenAgent(${agentId}) synthesizing tool result for ${toolCall.name}`);
+          logLine(agentId, 'info', `ScenarioDrivenAgent(${agentId}) synthesizing tool result for ${toolCall.name}`);
           
           const synthesis = new ToolSynthesisService(provider);
           const result = await synthesis.execute({
@@ -92,7 +99,7 @@ export class ScenarioDrivenAgent implements Agent {
             conversationHistory: hydrated.events.map(e => JSON.stringify(e.payload)).join('\n'),
           });
 
-          await client.postTrace({
+          await transport.postTrace({
             conversationId,
             agentId,
             payload: { 
@@ -105,13 +112,13 @@ export class ScenarioDrivenAgent implements Agent {
           // If the tool ends the conversation, handle that
           if (toolDef.endsConversation) {
             const finalText = `Tool ${toolDef.toolName} completed successfully.`;
-            await client.postMessage({
+            await transport.postMessage({
               conversationId,
               agentId,
               text: finalText,
               finality: 'conversation',
             });
-            logger.info(`ScenarioDrivenAgent(${agentId}) ended conversation via tool ${toolDef.toolName}`);
+            logLine(agentId, 'info', `ScenarioDrivenAgent(${agentId}) ended conversation via tool ${toolDef.toolName}`);
             return;
           }
         }
@@ -122,21 +129,21 @@ export class ScenarioDrivenAgent implements Agent {
     // Build LLM messages from scenario persona and conversation history
     const messages = this.buildMessages(agentId, myAgent, scenario, hydrated.events);
 
-    logger.info(`ScenarioDrivenAgent(${agentId}) starting turn with ${provider.getMetadata().name} provider`);
+    logLine(agentId, 'info', `ScenarioDrivenAgent(${agentId}) starting turn with ${provider.getMetadata().name} provider`);
 
     // Single-step completion
     const response = await provider.complete({ messages });
 
     const text = response.content?.trim() || '...';
     
-    await client.postMessage({
+    await transport.postMessage({
       conversationId,
       agentId,
       text,
       finality: 'turn',
     });
 
-    logger.info(`ScenarioDrivenAgent(${agentId}) completed turn`);
+    logLine(agentId, 'info', `ScenarioDrivenAgent(${agentId}) completed turn`);
   }
 
   private getProviderForAgent(hydrated: HydratedConversationSnapshot, agentId: string): LLMProvider {

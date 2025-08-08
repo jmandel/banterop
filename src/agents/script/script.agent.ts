@@ -1,11 +1,18 @@
-import type { Agent, AgentContext } from '$src/agents/agent.types';
+import { BaseAgent, type TurnContext } from '$src/agents/runtime/base-agent';
+import type { IAgentTransport, IAgentEvents } from '$src/agents/runtime/runtime.interfaces';
 import type { AgentScript, ScriptAction } from './script.types';
 import type { TracePayload } from '$src/types/event.types';
 
-export class ScriptAgent implements Agent {
-  constructor(private script: AgentScript) {}
+export class ScriptAgent extends BaseAgent {
+  constructor(
+    transport: IAgentTransport,
+    events: IAgentEvents,
+    private script: AgentScript
+  ) {
+    super(transport, events);
+  }
 
-  async handleTurn(ctx: AgentContext): Promise<void> {
+  protected async takeTurn(ctx: TurnContext): Promise<void> {
     for (const step of this.script.steps) {
       switch (step.kind) {
         case 'sleep':
@@ -13,7 +20,7 @@ export class ScriptAgent implements Agent {
           break;
         case 'trace':
           if (step.delayMs) await sleep(step.delayMs);
-          await ctx.client.postTrace({
+          await ctx.transport.postTrace({
             conversationId: ctx.conversationId,
             agentId: ctx.agentId,
             payload: step.payload as TracePayload,
@@ -21,7 +28,7 @@ export class ScriptAgent implements Agent {
           break;
         case 'post':
           if (step.delayMs) await sleep(step.delayMs);
-          await ctx.client.postMessage({
+          await ctx.transport.postMessage({
             conversationId: ctx.conversationId,
             agentId: ctx.agentId,
             text: step.text,
@@ -36,8 +43,8 @@ export class ScriptAgent implements Agent {
   }
 }
 
-async function assertPredicate(ctx: AgentContext, step: Extract<ScriptAction, {kind:'assert'}>) {
-  const snap = await ctx.client.getSnapshot(ctx.conversationId);
+async function assertPredicate(ctx: TurnContext, step: Extract<ScriptAction, {kind:'assert'}>) {
+  const snap = ctx.snapshot;
   const lastMsg = [...snap.events].reverse().find((e: unknown) => {
     const typed = e as { type: string };
     return typed.type === 'message';

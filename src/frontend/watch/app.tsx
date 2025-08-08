@@ -337,9 +337,9 @@ function ConversationView() {
           systems: [],
         };
       }
-      if (e.type === "message") byTurn[e.turn].messages.push(e);
-      else if (e.type === "trace") byTurn[e.turn].traces.push(e);
-      else if (e.type === "system") byTurn[e.turn].systems.push(e);
+      if (e.type === "message") byTurn[e.turn]?.messages.push(e);
+      else if (e.type === "trace") byTurn[e.turn]?.traces.push(e);
+      else if (e.type === "system") byTurn[e.turn]?.systems.push(e);
     }
     return Object.values(byTurn).sort((a, b) => a.turn - b.turn);
   }, [events]);

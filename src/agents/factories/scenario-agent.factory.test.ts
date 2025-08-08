@@ -87,7 +87,7 @@ describe('scenario-agent.factory', () => {
         }
       );
 
-      expect(handle.loops).toHaveLength(1); // Only agent-1 is internal
+      expect(handle.agents).toHaveLength(1); // Only agent-1 is internal
       expect(mockOrchestrator.getHydratedConversationSnapshot).toHaveBeenCalledWith(1);
       
       // Clean up
@@ -104,7 +104,7 @@ describe('scenario-agent.factory', () => {
         }
       );
 
-      expect(handle.loops).toHaveLength(2); // Both agents requested
+      expect(handle.agents).toHaveLength(2); // Both agents requested
       
       // Clean up
       await handle.stop();
@@ -132,7 +132,7 @@ describe('scenario-agent.factory', () => {
         }
       );
 
-      expect(handle.loops).toHaveLength(0);
+      expect(handle.agents).toHaveLength(0);
       await handle.stop(); // Should not throw
     });
 
@@ -188,7 +188,7 @@ describe('scenario-agent.factory', () => {
           { id: 'agent-2', kind: 'external' },
         ],
       });
-      expect(handle.loops).toHaveLength(1); // Only internal agent started
+      expect(handle.agents).toHaveLength(1); // Only internal agent started
       
       // Clean up
       await handle.stop();

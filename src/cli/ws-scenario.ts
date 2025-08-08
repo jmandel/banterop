@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 import fs from "fs";
-import { TurnLoopExecutorExternal } from "$src/agents/executors/turn-loop-executor.external";
+import { BaseAgent } from "$src/agents/runtime/base-agent";
+import { WsTransport } from "$src/agents/runtime/ws.transport";
+import { WsEvents } from "$src/agents/runtime/ws.events";
 import { EchoAgent } from "$src/agents/echo.agent";
 import { AssistantAgent } from "$src/agents/assistant.agent";
 import { wsRpcCall } from "./cli-utils/wsRpcCall";
@@ -42,18 +44,19 @@ async function main() {
 
   console.log(`✅ Conversation ${conversationId} created from scenario`);
 
-  const agentImpl =
-    argv["agent-class"] === "AssistantAgent"
-      ? new AssistantAgent(new MockLLMProvider({ provider: 'mock' }))
-      : new EchoAgent("Thinking...", "Done");
-
-  const exec = new TurnLoopExecutorExternal(agentImpl, {
+  // Create transport and events for external agent
+  const transport = new WsTransport(argv.url);
+  const events = new WsEvents(argv.url, {
     conversationId,
-    agentId: argv["agent-id"],
-    wsUrl: argv.url,
+    includeGuidance: true
   });
 
-  await exec.start();
+  const agentImpl: BaseAgent =
+    argv["agent-class"] === "AssistantAgent"
+      ? new AssistantAgent(transport, events, new MockLLMProvider({ provider: 'mock' }))
+      : new EchoAgent(transport, events, "Thinking...", "Done");
+
+  await agentImpl.start(conversationId, argv["agent-id"]);
   console.log("🏁 Scenario conversation ended");
 }
 

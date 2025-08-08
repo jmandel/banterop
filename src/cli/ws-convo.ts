@@ -1,6 +1,7 @@
 import { parseArgs } from "./cli-utils/parseArgs";
 import { wsRpcCall } from "./cli-utils/wsRpcCall";
-import { TurnLoopExecutorExternal } from "$src/agents/executors/turn-loop-executor.external";
+import { WsTransport } from "$src/agents/runtime/ws.transport";
+import { WsEvents } from "$src/agents/runtime/ws.events";
 import { EchoAgent } from "$src/agents/echo.agent";
 
 const argv = parseArgs();
@@ -14,7 +15,7 @@ async function main() {
         id: argv["agent-id"],
         kind: "external" as const,  // Mark as external since we're connecting via WebSocket
         agentClass: argv["agent-class"] || "EchoAgent",
-        config: argv["agent-config"] ? JSON.parse(argv["agent-config"]) : {},
+        config: argv["agent-config"] ? JSON.parse(argv["agent-config"] as string) : {},
       }
     ];
 
@@ -23,8 +24,9 @@ async function main() {
     if (!argv.solo && policy === "strict-alternation") {
       agents.push({
         id: "dummy-bot",
-        kind: "internal",
+        kind: "external" as const,
         agentClass: "EchoAgent",
+        config: {}
       });
       console.log("ℹ️ Added dummy-bot for alternation policy");
     }
@@ -58,23 +60,23 @@ async function main() {
     if (!argv["conversation-id"]) {
       throw new Error("Must pass --create or --conversation-id");
     }
-    conversationId = parseInt(argv["conversation-id"]);
+    conversationId = Number(argv["conversation-id"]);
   }
 
-  const agentImpl = new EchoAgent({ name: argv["agent-id"] });
+  // Create transport and events for external agent
+  const transport = new WsTransport(argv.url);
+  const events = new WsEvents(argv.url, {
+    conversationId,
+    includeGuidance: true
+  });
+  
+  const agentImpl = new EchoAgent(transport, events, `${argv["agent-id"]} is thinking...`, "Done");
 
   console.log(
     `🤖 Joining conversation ${conversationId} as ${argv["agent-id"]} (${agentImpl.constructor.name})`
   );
 
-  const executor = new TurnLoopExecutorExternal(agentImpl, {
-    conversationId,
-    agentId: argv["agent-id"],
-    wsUrl: argv.url,
-    maxTurns: argv["max-turns"] ? parseInt(argv["max-turns"]) : undefined,
-  });
-
-  await executor.start();
+  await agentImpl.start(conversationId, argv["agent-id"]);
 }
 
 main().catch((err) => {

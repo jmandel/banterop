@@ -7,7 +7,9 @@
  */
 
 import { App } from "../server/app";
-import { TurnLoopExecutorInternal } from "../agents/executors/turn-loop-executor.internal";
+import { BaseAgent } from "../agents/runtime/base-agent";
+import { InProcessTransport } from "../agents/runtime/inprocess.transport";
+import { InProcessEvents } from "../agents/runtime/inprocess.events";
 import { EchoAgent } from "../agents/echo.agent";
 import { AssistantAgent } from "../agents/assistant.agent";
 
@@ -35,9 +37,9 @@ async function main() {
 
   console.log(`📋 Starting internal agents for conversation ${conversationId}: "${convo.title}"`);
   
-  const loops: TurnLoopExecutorInternal[] = [];
+  const agents: BaseAgent[] = [];
   
-  // Start an executor for each internal agent
+  // Start an agent for each internal agent
   for (const agent of convo.metadata.agents) {
     if (agent.kind !== "internal") {
       console.log(`⏭️  Skipping ${agent.id} (${agent.kind} agent)`);
@@ -46,54 +48,50 @@ async function main() {
     
     console.log(`🤖 Starting ${agent.id} (${agent.agentClass || "default"})`);
     
+    // Create transport and events for this agent
+    const transport = new InProcessTransport(app.orchestrator);
+    const events = new InProcessEvents(app.orchestrator, conversationId, true);
+    
     // Create the agent implementation based on agentClass
-    let agentImpl;
+    let agentImpl: BaseAgent;
     const agentClass = (agent.agentClass || "EchoAgent").toLowerCase();
     
     if (agentClass === "echoagent") {
       agentImpl = new EchoAgent(
+        transport,
+        events,
         `${agent.id} is thinking...`,
         `Hello from ${agent.id}!`
       );
     } else if (agentClass === "assistantagent") {
       const provider = app.providerManager.getProvider();
-      agentImpl = new AssistantAgent(provider);
+      agentImpl = new AssistantAgent(transport, events, provider);
     } else {
       // Default to echo agent
-      agentImpl = new EchoAgent();
+      agentImpl = new EchoAgent(transport, events);
     }
     
-    // Create and start the executor
-    const loop = new TurnLoopExecutorInternal(
-      app.orchestrator,
-      {
-        conversationId,
-        agentId: agent.id,
-        meta: agent,
-        buildAgent: () => agentImpl,  // For backward compatibility
-      }
-    );
-    
-    loops.push(loop);
-    loop.start().catch(err => {
+    // Start the agent
+    agents.push(agentImpl);
+    agentImpl.start(conversationId, agent.id).catch(err => {
       console.error(`❌ Error in ${agent.id}:`, err);
     });
   }
   
-  if (loops.length === 0) {
+  if (agents.length === 0) {
     console.log("⚠️  No internal agents found in this conversation");
     await app.shutdown();
     return;
   }
   
-  console.log(`✅ Started ${loops.length} internal agent(s)`);
+  console.log(`✅ Started ${agents.length} internal agent(s)`);
   console.log("Press Ctrl+C to stop...");
   
   // Handle shutdown
   process.on("SIGINT", async () => {
     console.log("\n🛑 Stopping agents...");
-    for (const loop of loops) {
-      loop.stop();
+    for (const agent of agents) {
+      agent.stop();
     }
     await app.shutdown();
     process.exit(0);
