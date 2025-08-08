@@ -11,39 +11,25 @@ export class ScriptAgent implements Agent {
         case 'sleep':
           await sleep(step.ms);
           break;
-          
-        case 'wait': {
-          // Wait is no longer needed with guidance-based approach
-          // Just sleep for the timeout
-          await sleep(step.timeoutMs);
-          break;
-        }
-        
         case 'trace':
           if (step.delayMs) await sleep(step.delayMs);
-          await ctx.client.postTrace({ 
-            conversationId: ctx.conversationId, 
-            agentId: ctx.agentId, 
-            payload: step.payload as TracePayload 
+          await ctx.client.postTrace({
+            conversationId: ctx.conversationId,
+            agentId: ctx.agentId,
+            payload: step.payload as TracePayload,
           });
           break;
-          
         case 'post':
           if (step.delayMs) await sleep(step.delayMs);
-          await ctx.client.postMessage({ 
-            conversationId: ctx.conversationId, 
-            agentId: ctx.agentId, 
-            text: step.text, 
-            finality: step.finality ?? 'turn' 
+          await ctx.client.postMessage({
+            conversationId: ctx.conversationId,
+            agentId: ctx.agentId,
+            text: step.text,
+            finality: step.finality ?? 'turn',
           });
           break;
-          
         case 'assert':
           await assertPredicate(ctx, step);
-          break;
-          
-        case 'yield':
-          // Yield is no longer meaningful with guidance-based coordination
           break;
       }
     }

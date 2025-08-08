@@ -71,17 +71,3 @@ export function getStartingAgentId(meta: ConvConversationMeta): string {
   if (externals.length === 1) return externals[0]!.id;
   return meta.agents[0]!.id;
 }
-
-/**
- * List internal agent IDs (counterparties managed by our runtime).
- */
-export function listInternalAgentIds(meta: ConvConversationMeta): string[] {
-  return meta.agents.filter(a => a.kind === 'internal').map(a => a.id);
-}
-
-/**
- * Find an agent meta by id.
- */
-export function findAgentMeta(meta: ConvConversationMeta, agentId: string): ConvAgentMeta | undefined {
-  return meta.agents.find(a => a.id === agentId);
-}

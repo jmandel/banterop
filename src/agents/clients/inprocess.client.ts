@@ -1,64 +1,59 @@
 import type { IAgentClient } from '$src/agents/agent.types';
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
-import type { TracePayload, MessagePayload } from '$src/types/event.types';
+import type { MessagePayload, TracePayload } from '$src/types/event.types';
 
 export class InProcessClient implements IAgentClient {
-  constructor(private orch: OrchestratorService) {}
+  constructor(private orchestrator: OrchestratorService) {}
 
   async getSnapshot(conversationId: number) {
-    const hydrated = this.orch.getHydratedConversationSnapshot(conversationId);
+    const hydrated = this.orchestrator.getHydratedConversationSnapshot(conversationId);
     if (!hydrated) {
       throw new Error(`Conversation ${conversationId} not found`);
     }
     return hydrated;
   }
 
-
-  async postMessage(params: { 
-    conversationId: number; 
-    agentId: string; 
-    text: string; 
-    finality: 'none' | 'turn' | 'conversation'; 
-    attachments?: NonNullable<MessagePayload['attachments']>; 
-    clientRequestId?: string; 
-    turnHint?: number 
+  async postMessage(params: {
+    conversationId: number;
+    agentId: string;
+    text: string;
+    finality: 'none' | 'turn' | 'conversation';
+    attachments?: NonNullable<MessagePayload['attachments']>;
+    clientRequestId?: string;
+    turn?: number;
   }) {
-    const payload: MessagePayload = { text: params.text };
-    if (params.attachments) payload.attachments = params.attachments;
-    if (params.clientRequestId) payload.clientRequestId = params.clientRequestId;
-    
-    const res = this.orch.appendEvent({
-      conversation: params.conversationId,
-      type: 'message',
+    const payload: MessagePayload = {
+      text: params.text,
+      ...(params.attachments ? { attachments: params.attachments } : {}),
+      ...(params.clientRequestId ? { clientRequestId: params.clientRequestId } : {}),
+    };
+    const res = this.orchestrator.sendMessage(
+      params.conversationId,
+      params.agentId,
       payload,
-      finality: params.finality,
-      agentId: params.agentId,
-      ...(params.turnHint !== undefined ? { turn: params.turnHint } : {}),
-    });
-    
+      params.finality,
+      params.turn
+    );
     return { seq: res.seq, turn: res.turn, event: res.event };
   }
 
-  async postTrace(params: { 
-    conversationId: number; 
-    agentId: string; 
-    payload: TracePayload; 
-    turn?: number; 
-    clientRequestId?: string 
+  async postTrace(params: {
+    conversationId: number;
+    agentId: string;
+    payload: TracePayload;
+    turn?: number;
+    clientRequestId?: string;
   }) {
-    const res = this.orch.appendEvent({
-      conversation: params.conversationId,
-      type: 'trace',
-      payload: params.payload,
-      finality: 'none',
-      agentId: params.agentId,
-      ...(params.turn !== undefined ? { turn: params.turn } : {}),
-    });
-    
+    const res = this.orchestrator.sendTrace(
+      params.conversationId,
+      params.agentId,
+      params.payload,
+      params.turn
+    );
     return { seq: res.seq, turn: res.turn, event: res.event };
   }
 
-  now(): Date {
-    return new Date();
+  now() {
+    return Date.now();
   }
 }

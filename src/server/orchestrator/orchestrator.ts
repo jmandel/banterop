@@ -70,12 +70,12 @@ export class OrchestratorService {
 
   // Convenience helpers for common patterns
 
-  sendTrace(conversation: number, agentId: string, payload: TracePayload, turn?: number): void {
+  sendTrace(conversation: number, agentId: string, payload: TracePayload, turn?: number): AppendEventResult {
     // Determine turn: use provided or try to find an open turn
     // If no open turn exists, traces can now start a new turn
     const targetTurn = turn ?? this.tryFindOpenTurn(conversation);
     // Pass undefined turn to appendEvent to allow trace-started turn
-    this.appendEvent({
+    return this.appendEvent({
       conversation,
       ...(targetTurn !== undefined ? { turn: targetTurn } : {}),
       type: 'trace',
@@ -85,7 +85,7 @@ export class OrchestratorService {
     });
   }
 
-  sendMessage(conversation: number, agentId: string, payload: MessagePayload, finality: Finality, turn?: number): void {
+  sendMessage(conversation: number, agentId: string, payload: MessagePayload, finality: Finality, turn?: number): AppendEventResult {
     // If turn is omitted, this starts a new turn (allowed for message)
     const input: AppendEventInput<MessagePayload> = {
       conversation,
@@ -97,7 +97,7 @@ export class OrchestratorService {
     if (turn !== undefined) {
       input.turn = turn;
     }
-    this.appendEvent(input);
+    return this.appendEvent(input);
   }
 
   // Reads

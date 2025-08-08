@@ -15,21 +15,14 @@ export interface GetConversationRequest {
 }
 
 // WebSocket JSON-RPC types
-export interface AuthenticateRequest {
-  token: string;
-}
-
-export interface AuthenticateResponse {
-  authenticated: boolean;
-  agentId?: string;
-}
-
 export interface SubscribeRequest {
   conversationId: number;
+  includeGuidance?: boolean;
   filters?: {
     types?: Array<'message' | 'trace' | 'system'>;
     agents?: string[];
   };
+  sinceSeq?: number;
 }
 
 export interface SubscribeResponse {
@@ -38,8 +31,9 @@ export interface SubscribeResponse {
 
 export interface SendTraceRequest {
   conversationId: number;
-  currentTurn?: number;
+  agentId: string;
   tracePayload: TracePayload;
+  turn?: number;
 }
 
 export interface SendTraceResponse {
@@ -50,9 +44,10 @@ export interface SendTraceResponse {
 
 export interface SendMessageRequest {
   conversationId: number;
-  currentTurn?: number;
-  messagePayload: MessagePayload;
+  agentId: string;
+  messagePayload: MessagePayload; // clientRequestId must be inside this payload for idempotency
   finality: Finality;
+  turn?: number;
 }
 
 export interface SendMessageResponse {
@@ -67,11 +62,6 @@ export interface GetConversationResponse {
   events: UnifiedEvent[];
 }
 
-export interface TailEventsRequest {
-  conversationId: number;
-  sinceEvent?: number;
-  sinceTs?: string;
-}
 
 // Turn claim API types
 export interface ClaimTurnRequest {

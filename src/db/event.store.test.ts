@@ -283,7 +283,7 @@ describe('EventStore append invariants and retrieval', () => {
       finality: 'none',
       agentId: 'a1',
     });
-    const e2 = events.appendEvent({
+    events.appendEvent({
       conversation: 1,
       type: 'message',
       payload: { text: 'two' } as MessagePayload,
