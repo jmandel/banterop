@@ -181,53 +181,58 @@ class ClaimClient {
     agentId: string;
     text: string;
     finality: 'none' | 'turn' | 'conversation';
-    attachments?: Array<{ 
-      id?: string; 
-      docId?: string; 
-      name: string; 
-      contentType: string; 
-      content?: string; 
-      summary?: string 
-    }>; 
-    clientRequestId?: string; 
-    turnHint?: number
+    attachments?: Array<{
+      id?: string;
+      docId?: string;
+      name: string;
+      contentType: string;
+      content?: string;
+      summary?: string;
+    }>;
+    clientRequestId?: string;
+    turn?: number; // unified
   }): Promise<{ seq: number; turn: number; event: number }> {
-    const result = await this.call<{ conversation: number; turn: number; event: number; seq: number }>('sendMessage', {
-      conversationId: params.conversationId,
-      agentId: params.agentId,
-      messagePayload: { 
-        text: params.text,
-        attachments: params.attachments,
-      },
-      finality: params.finality,
-      turnHint: params.turnHint,
-      clientRequestId: params.clientRequestId,
-    });
+    const result = await this.call<{ conversation: number; turn: number; event: number; seq: number }>(
+      'sendMessage',
+      {
+        conversationId: params.conversationId,
+        agentId: params.agentId,
+        messagePayload: {
+          text: params.text,
+          attachments: params.attachments,
+          ...(params.clientRequestId ? { clientRequestId: params.clientRequestId } : {}),
+        },
+        finality: params.finality,
+        turn: params.turn, // unified
+      }
+    );
     return { seq: result.seq || 0, turn: result.turn || 0, event: result.event || 0 };
   }
   
   async getSnapshot(conversationId: number): Promise<any> {
     return this.call('getConversation', { conversationId });
   }
-  
-  async postTrace(params: { 
-    conversationId: number; 
-    agentId: string; 
-    payload: TracePayload; 
-    turn?: number; 
-    clientRequestId?: string 
+
+  async postTrace(params: {
+    conversationId: number;
+    agentId: string;
+    payload: any;
+    turn?: number;
+    clientRequestId?: string;
   }): Promise<{ seq: number; turn: number; event: number }> {
-    const result = await this.call<{ conversation: number; turn: number; event: number; seq: number }>('sendTrace', {
-      conversationId: params.conversationId,
-      agentId: params.agentId,
-      tracePayload: params.payload,
-      currentTurn: params.turn,
-      clientRequestId: params.clientRequestId,
-    });
+    const result = await this.call<{ conversation: number; turn: number; event: number; seq: number }>(
+      'sendTrace',
+      {
+        conversationId: params.conversationId,
+        agentId: params.agentId,
+        tracePayload: params.payload,
+        turn: params.turn, // unified
+      }
+    );
     return { seq: result.seq || 0, turn: result.turn || 0, event: result.event || 0 };
   }
   
-  now(): Date {
-    return new Date();
+  now() {
+    return Date.now();
   }
 }

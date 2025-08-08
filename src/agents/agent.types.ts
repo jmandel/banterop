@@ -1,4 +1,4 @@
-import type { TracePayload } from '$src/types/event.types';
+import type { MessagePayload, TracePayload } from '$src/types/event.types';
 
 export interface Agent {
   handleTurn(ctx: AgentContext): Promise<void>;
@@ -13,48 +13,31 @@ export interface AgentContext {
 }
 
 export interface IAgentClient {
-  // Reads
-  getSnapshot(conversationId: number): Promise<{ 
-    conversation: number; 
-    status: 'active' | 'completed'; 
-    events: any[] 
-  }>;
-  
-  // Writes
-  postMessage(params: { 
-    conversationId: number; 
-    agentId: string; 
-    text: string; 
-    finality: 'none' | 'turn' | 'conversation'; 
-    attachments?: Array<{ 
-      id?: string; 
-      docId?: string; 
-      name: string; 
-      contentType: string; 
-      content?: string; 
-      summary?: string 
-    }>; 
-    clientRequestId?: string; 
-    turnHint?: number 
-  }): Promise<{ 
-    seq: number; 
-    turn: number; 
-    event: number 
-  }>;
-  
-  postTrace(params: { 
-    conversationId: number; 
-    agentId: string; 
-    payload: TracePayload; 
-    turn?: number; 
-    clientRequestId?: string 
-  }): Promise<{ 
-    seq: number; 
-    turn: number; 
-    event: number 
+  getSnapshot(conversationId: number): Promise<{
+    conversation: number;
+    status: 'active' | 'completed';
+    events: any[];
   }>;
 
-  now(): Date;
+  postMessage(params: {
+    conversationId: number;
+    agentId: string;
+    text: string;
+    finality: 'none' | 'turn' | 'conversation';
+    attachments?: NonNullable<MessagePayload['attachments']>;
+    clientRequestId?: string;
+    turn?: number; // unified
+  }): Promise<{ seq: number; turn: number; event: number }>;
+
+  postTrace(params: {
+    conversationId: number;
+    agentId: string;
+    payload: TracePayload;
+    turn?: number; // unified
+    clientRequestId?: string;
+  }): Promise<{ seq: number; turn: number; event: number }>;
+
+  now(): number;
 }
 
 export interface Logger {

@@ -112,15 +112,15 @@ async function handleRpc(
   }
 
   if (method === 'sendTrace') {
-    const { conversationId, agentId, tracePayload, currentTurn } = params as {
+    const { conversationId, agentId, tracePayload, turn } = params as {
       conversationId: number;
       agentId: string;
       tracePayload: TracePayload;
-      currentTurn?: number;
+      turn?: number;
     };
     try {
-      orchestrator.sendTrace(conversationId, agentId, tracePayload, currentTurn);
-      ws.send(JSON.stringify(ok(id, { ok: true })));
+      const res = orchestrator.sendTrace(conversationId, agentId, tracePayload, turn);
+      ws.send(JSON.stringify(ok(id, res)));
     } catch (e) {
       const err = e as Error;
       ws.send(JSON.stringify(errResp(id, -32000, err.message)));
@@ -129,16 +129,16 @@ async function handleRpc(
   }
 
   if (method === 'sendMessage') {
-    const { conversationId, agentId, messagePayload, finality, currentTurn } = params as {
+    const { conversationId, agentId, messagePayload, finality, turn } = params as {
       conversationId: number;
       agentId: string;
       messagePayload: MessagePayload;
       finality: Finality;
-      currentTurn?: number;
+      turn?: number;
     };
     try {
-      orchestrator.sendMessage(conversationId, agentId, messagePayload, finality, currentTurn);
-      ws.send(JSON.stringify(ok(id, { ok: true })));
+      const res = orchestrator.sendMessage(conversationId, agentId, messagePayload, finality, turn);
+      ws.send(JSON.stringify(ok(id, res)));
     } catch (e) {
       const err = e as Error;
       ws.send(JSON.stringify(errResp(id, -32000, err.message)));
