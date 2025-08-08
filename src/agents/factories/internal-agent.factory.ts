@@ -86,9 +86,19 @@ export async function startInternalAgentsFromMeta(
       }
     }
 
-    const loop = new TurnLoopExecutorInternal(impl, orchestrator, { 
-      conversationId, 
-      agentId, 
+    const loop = new TurnLoopExecutorInternal(orchestrator, {
+      conversationId,
+      agentId,
+      meta: {
+        id: agent.id,
+        kind: agent.kind,
+        ...(agent.agentClass !== undefined ? { agentClass: agent.agentClass } : {}),
+        ...(agent.role !== undefined ? { role: agent.role } : {}),
+        ...(agent.displayName !== undefined ? { displayName: agent.displayName } : {}),
+        ...(agent.avatarUrl !== undefined ? { avatarUrl: agent.avatarUrl } : {}),
+        ...(agent.config !== undefined ? { config: agent.config } : {}),
+      },
+      buildAgent: () => impl,  // For backward compatibility, wrap the pre-built agent
       ...(logger !== undefined ? { logger } : {})
     });
     void loop.start();

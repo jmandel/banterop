@@ -7,6 +7,7 @@ import { startScenarioAgents } from '$src/agents/factories/scenario-agent.factor
 
 export interface AppOptions extends Partial<Config> {
   policy?: SchedulePolicy;
+  skipAutoRun?: boolean;  // Explicitly control autoRun resumption
 }
 
 export class App {
@@ -16,7 +17,7 @@ export class App {
   readonly providerManager: ProviderManager;
 
   constructor(options?: AppOptions) {
-    const { policy, ...configOverrides } = options || {};
+    const { policy, skipAutoRun, ...configOverrides } = options || {};
     this.config = new ConfigManager(configOverrides);
     this.storage = new Storage(this.config.dbPath);
     this.providerManager = new ProviderManager(this.config.get());
@@ -28,7 +29,11 @@ export class App {
     );
     
     // Resume any autoRun conversations post-restart
-    this.resumeAutoRunConversations();
+    // Skip if explicitly disabled or in test mode (unless explicitly enabled)
+    const shouldSkipAutoRun = skipAutoRun ?? (this.config.get().nodeEnv === 'test');
+    if (!shouldSkipAutoRun) {
+      this.resumeAutoRunConversations();
+    }
   }
 
   private resumeAutoRunConversations(maxAgeHours = 6) {

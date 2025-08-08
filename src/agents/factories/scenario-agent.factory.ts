@@ -81,9 +81,11 @@ export async function startScenarioAgents(
     });
 
     // Create the internal turn loop executor
-    const loop = new TurnLoopExecutorInternal(agentImpl, orchestrator, {
+    const loop = new TurnLoopExecutorInternal(orchestrator, {
       conversationId,
       agentId,
+      meta: { id: agentId, kind: 'internal' },  // Minimal metadata for backward compatibility
+      buildAgent: () => agentImpl,  // For backward compatibility, wrap the pre-built agent
       ...(logger !== undefined ? { logger } : {}),
     });
 
