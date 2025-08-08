@@ -14,6 +14,8 @@ export class WsEvents implements IAgentEvents {
   ) {}
 
   subscribe(listener: (ev: StreamEvent) => void): () => void {
+    console.log(`[WsEvents] Creating stream for conversation ${this.options.conversationId}, includeGuidance=${this.options.includeGuidance ?? true}`);
+    
     const stream = new WsEventStream(this.wsUrl, {
       conversationId: this.options.conversationId,
       includeGuidance: this.options.includeGuidance ?? true,
@@ -26,8 +28,10 @@ export class WsEvents implements IAgentEvents {
     // Start consuming the stream
     (async () => {
       try {
+        console.log(`[WsEvents] Starting to consume stream...`);
         for await (const event of stream) {
           if (stopped) break;
+          console.log(`[WsEvents] Got event from stream: ${JSON.stringify(event).substring(0, 100)}`);
           listener(event);
         }
       } catch (error) {

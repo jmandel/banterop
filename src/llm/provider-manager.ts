@@ -1,4 +1,3 @@
-import type { Config } from '$src/server/config';
 import { LLMProvider, type LLMProviderConfig, type SupportedProvider, type LLMProviderMetadata } from '$src/types/llm.types';
 import { GoogleLLMProvider } from './providers/google';
 import { OpenRouterLLMProvider } from './providers/openrouter';
@@ -11,8 +10,14 @@ const PROVIDER_MAP = {
   mock: MockLLMProvider,
 } as const;
 
-export class ProviderManager {
-  constructor(private appConfig: Config) {}
+export interface LLMConfig {
+  defaultLlmProvider: 'google' | 'openrouter' | 'mock';
+  googleApiKey?: string | undefined;
+  openRouterApiKey?: string | undefined;
+}
+
+export class LLMProviderManager {
+  constructor(private config: LLMConfig) {}
 
   /**
    * Creates an LLM provider instance based on the requested configuration.
@@ -39,7 +44,7 @@ export class ProviderManager {
       }
     } else {
       // Use explicit provider or fall back to default
-      providerName = config?.provider ?? this.appConfig.defaultLlmProvider;
+      providerName = config?.provider ?? this.config.defaultLlmProvider;
     }
 
     // Create a new provider instance each time (no caching in Connectathon mode)
@@ -105,9 +110,9 @@ export class ProviderManager {
     if (overrideKey) return overrideKey;
     
     if (providerName === 'google') {
-      return this.appConfig.googleApiKey;
+      return this.config.googleApiKey;
     } else if (providerName === 'openrouter') {
-      return this.appConfig.openRouterApiKey;
+      return this.config.openRouterApiKey;
     } else if (providerName === 'mock') {
       return 'mock-key'; // Mock provider doesn't need a real key
     }

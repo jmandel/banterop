@@ -36,7 +36,8 @@ export type TracePayload =
   | { type: 'tool_call'; name: string; args: unknown; toolCallId: string; clientRequestId?: string }
   | { type: 'tool_result'; toolCallId: string; result?: unknown; error?: string; clientRequestId?: string }
   | { type: 'user_query'; question: string; context?: unknown; clientRequestId?: string }
-  | { type: 'user_response'; queryId: string; response: string; clientRequestId?: string };
+  | { type: 'user_response'; queryId: string; response: string; clientRequestId?: string }
+  | { type: 'turn_aborted'; abortedBy: string; timestamp: string; reason?: string };
 
 export interface SystemPayload {
   kind: 'idle_timeout' | 'note' | 'meta_created' | 'meta_updated' | 'turn_started' | 'turn_phase_changed';

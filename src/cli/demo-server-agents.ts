@@ -42,7 +42,7 @@ ws.onopen = async () => {
     let lastClosedSeq = 0;
     const refreshLastClosedSeq = async (conversationId: number) => {
       try {
-        const snap = await sendRequest('getHydratedConversation', { conversationId });
+        const snap = await sendRequest('getConversationSnapshot', { conversationId });
         if (typeof snap?.lastClosedSeq === 'number') {
           lastClosedSeq = snap.lastClosedSeq;
         }
@@ -118,8 +118,7 @@ ws.onopen = async () => {
       conversationId,
       agentId: 'user',
       messagePayload: { text: 'Hello agents! Please introduce yourselves.' },
-      finality: 'turn',
-      precondition: { lastClosedSeq }  // First turn uses 0
+      finality: 'turn'
     });
     // We can also track seq from the result if needed
     
@@ -135,8 +134,7 @@ ws.onopen = async () => {
       conversationId,
       agentId: 'user',
       messagePayload: { text: 'Thank you both! Goodbye.' },
-      finality: 'turn',
-      precondition: { lastClosedSeq }  // Use the tracked lastClosedSeq
+      finality: 'turn'
     });
     
     // Wait a bit more
@@ -150,8 +148,7 @@ ws.onopen = async () => {
       conversationId,
       agentId: 'user',
       messagePayload: { text: 'End of demo.' },
-      finality: 'conversation',
-      precondition: { lastClosedSeq }  // Use the tracked lastClosedSeq
+      finality: 'conversation'
     });
     
     console.log('\n✅ Demo complete! Agents ran entirely on the server.');

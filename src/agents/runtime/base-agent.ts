@@ -19,10 +19,10 @@ export abstract class BaseAgent<TSnap = any> {
   private liveSnapshot: TSnap | undefined;
   private latestSeq = 0;
   private running = false;
+  private events: IAgentEvents | undefined;
 
   constructor(
-    protected transport: IAgentTransport,
-    protected events: IAgentEvents
+    protected transport: IAgentTransport
   ) {}
 
   async start(conversationId: number, agentId: string) {
@@ -34,13 +34,28 @@ export abstract class BaseAgent<TSnap = any> {
     this.running = true;
     logLine(agentId, 'start', `Starting agent for conversation ${conversationId}`);
 
+    // Create event stream from transport
+    logLine(agentId, 'debug', `Creating event stream for conversation ${conversationId} with guidance=true`);
+    this.events = this.transport.createEventStream(conversationId, true);
+
     // Get live mirror initial state
+    logLine(agentId, 'debug', `Getting initial snapshot for conversation ${conversationId}`);
     this.liveSnapshot = await this.transport.getSnapshot(conversationId, { includeScenario: true }) as TSnap;
+    logLine(agentId, 'debug', `Initial snapshot has ${(this.liveSnapshot as any)?.events?.length || 0} events`);
     this.latestSeq = this.maxSeq(this.liveSnapshot);
+    
+    // Debug: Check if scenario is loaded for scenario-driven agents
+    const snap = this.liveSnapshot as any;
+    if (snap && !snap.scenario && snap.metadata?.scenarioId) {
+      logLine(agentId, 'warn', `Snapshot missing scenario despite scenarioId: ${snap.metadata.scenarioId}`);
+    }
 
     // Subscribe to events
+    logLine(agentId, 'debug', `Subscribing to events...`);
     this.unsubscribe = this.events.subscribe(async (ev) => {
       if (!this.running) return;
+      
+      logLine(agentId, 'debug', `Received event: ${JSON.stringify(ev).substring(0, 200)}`);
       
       // Apply event to live snapshot
       this.applyEvent(this.liveSnapshot, ev);
@@ -55,13 +70,20 @@ export abstract class BaseAgent<TSnap = any> {
       // Handle guidance events
       if ((ev as GuidanceEvent).type === 'guidance') {
         const g = ev as GuidanceEvent;
+        logLine(agentId, 'debug', `Received guidance for ${g.nextAgentId}, seq=${g.seq}`);
+        
         if (g.nextAgentId !== agentId) {
+          logLine(agentId, 'debug', `Guidance not for us (looking for ${agentId})`);
           return; // Not for us
         }
         
-        logLine(agentId, 'guidance', `Received guidance seq=${g.seq}`);
+        logLine(agentId, 'guidance', `Received guidance seq=${g.seq} - TAKING TURN`);
 
-        // Create turn context (no claiming needed with CAS preconditions)
+        // Abort any previous incomplete turn
+        const { turn } = await this.transport.abortTurn(conversationId, agentId);
+        logLine(agentId, 'abort', `Using turn ${turn} after abort`);
+
+        // Create turn context (no preconditions needed anymore)
         const ctx: TurnContext<TSnap> = {
           conversationId,
           agentId,
@@ -90,6 +112,7 @@ export abstract class BaseAgent<TSnap = any> {
       this.unsubscribe();
       this.unsubscribe = undefined;
     }
+    this.events = undefined;
     this.liveSnapshot = undefined;
   }
 

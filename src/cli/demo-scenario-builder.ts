@@ -8,9 +8,6 @@
 // 4. Allow user to send messages and see agent responses
 // 5. Demonstrates scenario-driven agent behavior
 
-import { startAgents } from '$src/agents/factories/agent.factory';
-import { WsTransport } from '$src/agents/runtime/ws.transport';
-import { ProviderManager } from '$src/llm/provider-manager';
 import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
 import * as readline from 'readline';
 

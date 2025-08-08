@@ -1,6 +1,6 @@
 import { Storage } from './storage';
 import { SubscriptionBus } from './subscriptions';
-import type { ConversationSnapshot, HydratedConversationSnapshot, OrchestratorConfig, SchedulePolicy, GuidanceEvent, EventListener } from '$src/types/orchestrator.types';
+import type { ConversationSnapshot, OrchestratorConfig, SchedulePolicy, GuidanceEvent, EventListener } from '$src/types/orchestrator.types';
 import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
 import type {
   AppendEventInput,
@@ -14,79 +14,117 @@ import type {
 } from '$src/types/event.types';
 import type { Conversation, CreateConversationParams, ListConversationsParams } from '$src/db/conversation.store';
 import { StrictAlternationPolicy } from './strict-alternation-policy';
+import { logLine } from '$src/lib/utils/logger';
 
 export class OrchestratorService {
   public readonly storage: Storage;
   private bus: SubscriptionBus;
   private policy: SchedulePolicy;
   private isShuttingDown = false;
+  private guidanceHeartbeatTimer?: Timer;
+  private lastGuidanceSeq = new Map<number, number>(); // Track last guidance seq per conversation
 
   constructor(storage: Storage, bus?: SubscriptionBus, policy?: SchedulePolicy, _cfg?: OrchestratorConfig) {
     this.storage = storage;
     this.bus = bus ?? new SubscriptionBus();
     this.policy = policy ?? new StrictAlternationPolicy();
+    
+    // Start guidance heartbeat (every 2 seconds)
+    this.startGuidanceHeartbeat();
   }
 
   // Graceful shutdown
   async shutdown(): Promise<void> {
     this.isShuttingDown = true;
     
+    // Stop guidance heartbeat
+    if (this.guidanceHeartbeatTimer) {
+      clearInterval(this.guidanceHeartbeatTimer);
+      this.guidanceHeartbeatTimer = undefined;
+    }
+    
     // Clear subscriptions
     this.bus = new SubscriptionBus();
   }
+  
+  private startGuidanceHeartbeat(): void {
+    this.guidanceHeartbeatTimer = setInterval(() => {
+      if (this.isShuttingDown) return;
+      this.checkAndBroadcastGuidance();
+    }, 2000); // Check every 2 seconds
+  }
+  
+  private checkAndBroadcastGuidance(): void {
+    // Get all active conversations
+    const activeConversations = this.storage.conversations.list({ status: 'active' });
+    
+    for (const convo of activeConversations) {
+      const events = this.storage.events.getEvents(convo.conversation);
+      const metadata = convo.metadata;
+      
+      // Determine who should go next
+      let nextAgentId: string | null = null;
+      let guidanceSeq = 0.1; // Default for initial guidance
+      
+      // Check if conversation has started
+      const messages = events.filter(e => e.type === 'message');
+      
+      if (messages.length === 0) {
+        // No messages yet - use startingAgentId if available
+        if (metadata?.startingAgentId) {
+          nextAgentId = metadata.startingAgentId;
+        }
+      } else {
+        // Has messages - use policy to determine next agent
+        const lastMessage = messages[messages.length - 1];
+        if (lastMessage.finality === 'turn') {
+          const snapshot = this.getConversationSnapshot(convo.conversation);
+          const decision = this.policy.decide({ snapshot, lastEvent: lastMessage });
+          
+          if (decision.kind === 'internal' || decision.kind === 'external') {
+            nextAgentId = decision.kind === 'internal' 
+              ? decision.agentId 
+              : decision.candidates?.[0] || null;
+            guidanceSeq = lastMessage.seq + 0.1;
+          }
+        }
+      }
+      
+      // If we have a next agent and haven't sent this guidance yet
+      if (nextAgentId) {
+        const lastSent = this.lastGuidanceSeq.get(convo.conversation) || 0;
+        
+        if (guidanceSeq > lastSent) {
+          const agent = metadata?.agents?.find(a => a.id === nextAgentId);
+          
+          if (agent) {
+            const guidanceEvent: GuidanceEvent = {
+              type: 'guidance',
+              conversation: convo.conversation,
+              seq: guidanceSeq,
+              nextAgentId,
+              deadlineMs: Date.now() + 30000,
+              ...(agent.kind === 'external' ? { note: `Your turn (heartbeat)` } : {})
+            };
+            
+            logLine('orchestrator', 'guidance-heartbeat', 
+              `Broadcasting guidance for ${nextAgentId} in conversation ${convo.conversation} (seq ${guidanceSeq})`);
+            
+            this.bus.publishGuidance(guidanceEvent);
+            this.lastGuidanceSeq.set(convo.conversation, guidanceSeq);
+          }
+        }
+      }
+    }
+  }
 
-  // Writes with fanout and post-write orchestration hooks (with CAS support)
-  appendEvent<T = unknown>(input: AppendEventInput<T> & { precondition?: { lastClosedSeq: number } }): AppendEventResult {
+  // Writes with fanout and post-write orchestration hooks
+  appendEvent<T = unknown>(input: AppendEventInput<T>): AppendEventResult {
     if (this.isShuttingDown) {
       throw new Error('Orchestrator is shutting down');
     }
     
-    // Get conversation head for CAS checking
-    const head = this.storage.events.getHead(input.conversation);
-    
-    const openingNewTurn = input.turn == null; // caller didn't specify a turn
-    if (openingNewTurn) {
-      // Check precondition for opening a new turn
-      // Initial turn can omit precondition (treated as 0)
-      const requiredSeq = head.lastClosedSeq;
-      const providedSeq = input.precondition?.lastClosedSeq ?? 0;
-      
-      // For the very first turn (no events yet), allow missing precondition
-      const isFirstTurn = head.lastTurn === 0;
-      if (!isFirstTurn && providedSeq !== requiredSeq) {
-        throw new Error(`Precondition failed: expected lastClosedSeq=${requiredSeq}, got ${providedSeq}`);
-      }
-      
-      // Allocate new turn number
-      const newTurn = head.lastTurn + 1;
-      input.turn = newTurn;
-      
-      // If first event is a trace, emit a system turn_started event
-      if (input.type === 'trace') {
-        // First append the turn_started system event
-        this.storage.events.appendEvent({
-          conversation: input.conversation,
-          turn: newTurn,
-          type: 'system',
-          payload: { 
-            kind: 'turn_started', 
-            data: { 
-              turn: newTurn, 
-              phase: 'work', 
-              opener: input.agentId 
-            } 
-          },
-          finality: 'none',
-          agentId: 'system-orchestrator'
-        });
-      }
-    } else {
-      // Appending to an existing turn: check if it's closed
-      if (this.storage.events.isTurnClosed(input.conversation, input.turn!)) {
-        throw new Error(`Cannot append to closed turn ${input.turn}`);
-      }
-    }
-    
+    // No precondition checking - rely on turn validation in sendMessage/sendTrace
     const res = this.storage.events.appendEvent(input);
     // Fanout the exact event we wrote (robust to ordering)
     const persisted = this.storage.events.getEventBySeq(res.seq);
@@ -114,76 +152,137 @@ export class OrchestratorService {
     return res;
   }
 
+  // Abort turn - adds marker and returns turn to use
+  abortTurn(conversationId: number, agentId: string): { turn: number } {
+    const head = this.storage.events.getHead(conversationId);
+    
+    // Check if there is an open turn and last event is by this agent
+    if (head.hasOpenTurn) {
+      const events = this.storage.events.getEvents(conversationId);
+      const turnEvents = events.filter(e => e.turn === head.lastTurn);
+      
+      if (turnEvents.length > 0) {
+        const lastEvent = turnEvents[turnEvents.length - 1];
+        
+        if (lastEvent && lastEvent.agentId === agentId) {
+          // Check if last event is already an abort marker
+          if (lastEvent && lastEvent.type === 'trace' && 
+              lastEvent.payload && 
+              typeof lastEvent.payload === 'object' && 
+              'type' in lastEvent.payload &&
+              lastEvent.payload.type === 'turn_aborted') {
+            // Already aborted, don't write another
+            return { turn: head.lastTurn };
+          }
+          
+          // Append abort marker trace
+          this.appendEvent({
+            conversation: conversationId,
+            turn: head.lastTurn,
+            type: 'trace',
+            payload: {
+              type: 'turn_aborted',
+              abortedBy: agentId,
+              timestamp: new Date().toISOString(),
+              reason: 'agent_restart'
+            } as TracePayload,
+            finality: 'none',
+            agentId
+          });
+          
+          return { turn: head.lastTurn };
+        }
+      }
+    }
+    
+    // Turn closed or wrong agent - return next turn
+    return { turn: head.lastTurn + 1 };
+  }
+
   // Convenience helpers for common patterns
 
-  sendTrace(conversation: number, agentId: string, payload: TracePayload, turn?: number, precondition?: { lastClosedSeq: number }): AppendEventResult {
-    // Determine turn: use provided or try to find an open turn
-    // If no open turn exists, traces can now start a new turn
-    const targetTurn = turn ?? this.tryFindOpenTurn(conversation);
-    // Pass undefined turn to appendEvent to allow trace-started turn
+  sendTrace(conversation: number, agentId: string, payload: TracePayload, turn?: number): AppendEventResult {
+    const head = this.storage.events.getHead(conversation);
+    
+    // Validate explicit turn if provided
+    if (turn !== undefined) {
+      if (head.hasOpenTurn && turn !== head.lastTurn) {
+        throw new Error(`Turn already open (expected turn ${head.lastTurn})`);
+      }
+      if (!head.hasOpenTurn && turn !== head.lastTurn + 1) {
+        throw new Error(`Invalid turn number (next is ${head.lastTurn + 1})`);
+      }
+    }
+    
+    // Use provided turn, or continue open turn, or start new turn
+    const targetTurn = turn ?? (head.hasOpenTurn ? head.lastTurn : undefined);
+    
     return this.appendEvent({
       conversation,
       ...(targetTurn !== undefined ? { turn: targetTurn } : {}),
       type: 'trace',
       payload,
       finality: 'none',
-      agentId,
-      ...(precondition !== undefined ? { precondition } : {}),
+      agentId
     });
   }
 
-  sendMessage(conversation: number, agentId: string, payload: MessagePayload, finality: Finality, turn?: number, precondition?: { lastClosedSeq: number }): AppendEventResult {
-    // If turn is omitted, this starts a new turn (allowed for message)
-    const input: AppendEventInput<MessagePayload> & { precondition?: { lastClosedSeq: number } } = {
+  sendMessage(conversation: number, agentId: string, payload: MessagePayload, finality: Finality, turn?: number): AppendEventResult {
+    const head = this.storage.events.getHead(conversation);
+    
+    // Validate explicit turn if provided
+    if (turn !== undefined) {
+      if (head.hasOpenTurn && turn !== head.lastTurn) {
+        throw new Error(`Turn already open (expected turn ${head.lastTurn})`);
+      }
+      if (!head.hasOpenTurn && turn !== head.lastTurn + 1) {
+        throw new Error(`Invalid turn number (next is ${head.lastTurn + 1})`);
+      }
+    }
+    
+    // Use provided turn, or continue open turn, or start new turn
+    const targetTurn = turn ?? (head.hasOpenTurn ? head.lastTurn : undefined);
+    
+    return this.appendEvent({
       conversation,
+      ...(targetTurn !== undefined ? { turn: targetTurn } : {}),
       type: 'message',
       payload,
       finality,
-      agentId,
-    };
-    if (turn !== undefined) {
-      input.turn = turn;
-    }
-    if (precondition !== undefined) {
-      input.precondition = precondition;
-    }
-    return this.appendEvent(input);
+      agentId
+    });
   }
 
   // Reads
 
-  getConversationSnapshot(conversation: number): ConversationSnapshot {
+  getConversationSnapshot(conversation: number, opts: { includeScenario?: boolean } = { includeScenario: true }): ConversationSnapshot {
     const events = this.storage.events.getEvents(conversation);
     const status = this.storage.events.getConversationStatus(conversation);
     const convoWithMeta = this.storage.conversations.getWithMetadata(conversation);
     const metadata = convoWithMeta?.metadata || { agents: [] };
     const head = this.storage.events.getHead(conversation);
-    return { conversation, status, metadata, events, lastClosedSeq: head.lastClosedSeq };
-  }
-
-  getHydratedConversationSnapshot(conversationId: number): HydratedConversationSnapshot | null {
-    const convo = this.storage.conversations.getWithMetadata(conversationId);
-    if (!convo) return null;
-
-    const events = this.storage.events.getEvents(conversationId);
-    let scenario: ScenarioConfiguration | null = null;
-    if (convo.metadata.scenarioId) {
-      const scenarioItem = this.storage.scenarios.findScenarioById(convo.metadata.scenarioId);
-      scenario = scenarioItem?.config || null;
-    }
     
-    const head = this.storage.events.getHead(conversationId);
-
-    return {
-      conversation: convo.conversation,
-      status: convo.status as 'active' | 'completed',
-      scenario,
-      runtimeMeta: convo.metadata,
-      events,
-      lastClosedSeq: head.lastClosedSeq,
+    const snapshot: ConversationSnapshot = { 
+      conversation, 
+      status, 
+      metadata, 
+      events, 
+      lastClosedSeq: head.lastClosedSeq 
     };
-  }
 
+    // Include scenario if requested
+    if (opts?.includeScenario) {
+      if (metadata.scenarioId) {
+        const scenarioItem = this.storage.scenarios.findScenarioById(metadata.scenarioId);
+        snapshot.scenario = scenarioItem?.config || null;
+      } else {
+        snapshot.scenario = null;
+      }
+      snapshot.runtimeMeta = metadata;
+    }
+
+    return snapshot;
+  }
   // Expose storage methods for conversations and attachments
   createConversation(params: CreateConversationParams): number {
     if (params.meta.scenarioId) {
@@ -213,6 +312,39 @@ export class OrchestratorService {
         kind: 'meta_created',
         metadata: convoWithMeta.metadata,
       });
+      
+      // Emit initial guidance if startingAgentId is specified
+      if (convoWithMeta.metadata.startingAgentId) {
+        logLine('orchestrator', 'info', 
+          `Conversation ${conversationId} has startingAgentId: ${convoWithMeta.metadata.startingAgentId}`);
+        
+        const startingAgent = convoWithMeta.metadata.agents.find(
+          a => a.id === convoWithMeta.metadata.startingAgentId
+        );
+        
+        if (startingAgent) {
+          const guidanceEvent: GuidanceEvent = {
+            type: 'guidance',
+            conversation: conversationId,
+            seq: 0.1, // Initial guidance gets a fractional seq
+            nextAgentId: startingAgent.id,
+            deadlineMs: Date.now() + 30000,
+            ...(startingAgent.kind === 'external' ? { note: `Starting with ${startingAgent.id}` } : {})
+          };
+          
+          // Publish guidance immediately
+          this.bus.publishGuidance(guidanceEvent);
+          
+          logLine('orchestrator', 'guidance', 
+            `Emitted initial guidance for ${startingAgent.id} (${startingAgent.kind}) on conversation ${conversationId}`);
+        } else {
+          logLine('orchestrator', 'warn', 
+            `startingAgentId ${convoWithMeta.metadata.startingAgentId} not found in agents list`);
+        }
+      } else {
+        logLine('orchestrator', 'info', 
+          `Conversation ${conversationId} has no startingAgentId, no initial guidance emitted`);
+      }
     }
     
     return conversationId;
@@ -239,7 +371,12 @@ export class OrchestratorService {
   }
 
   subscribe(conversation: number, listener: ((e: UnifiedEvent | GuidanceEvent) => void) | ((e: UnifiedEvent) => void), includeGuidance = false): string {
-    return this.bus.subscribe({ conversation }, listener as EventListener, includeGuidance);
+    const subId = this.bus.subscribe({ conversation }, listener as EventListener, includeGuidance);
+    
+    // The guidance heartbeat will handle sending guidance at regular intervals
+    // No need for special initial guidance logic here
+    
+    return subId;
   }
 
   // New: filtered subscribe (types/agents)
@@ -332,24 +469,6 @@ export class OrchestratorService {
     }
   }
 
-  private tryFindOpenTurn(conversation: number): number | undefined {
-    // Non-throwing helper to find an open turn, or return undefined if none exists
-    const events = this.storage.events.getEvents(conversation);
-    if (events.length === 0) return undefined;
-    const lastEvent = events[events.length - 1];
-    if (!lastEvent) return undefined;
-    const currentTurn = lastEvent.turn;
-    // Check if the last message finalized the turn; if yes, no open turn
-    for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i];
-      if (!e) continue;
-      if (e.turn !== currentTurn) break;
-      if (e.type === 'message' && e.finality !== 'none') {
-        return undefined; // Turn is closed
-      }
-    }
-    return currentTurn;
-  }
 
   // Wait for this agent's turn - used by internal executors
   async waitForTurn(conversationId: number, agentId: string): Promise<{ deadlineMs: number } | null> {

@@ -64,7 +64,7 @@ async function main() {
         `Hello from ${agent.id}!`
       );
     } else if (agentClass === "assistantagent") {
-      const provider = app.providerManager.getProvider();
+      const provider = app.llmProviderManager.getProvider();
       agentImpl = new AssistantAgent(transport, events, provider);
     } else {
       // Default to echo agent

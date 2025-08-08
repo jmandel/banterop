@@ -9,11 +9,11 @@ import type { CreateConversationRequest } from '$src/types/conversation.meta';
 import type { ListConversationsParams } from '$src/db/conversation.store';
 import { startAgents } from '$src/agents/factories/agent.factory';
 import { InProcessTransport } from '$src/agents/runtime/inprocess.transport';
-import type { ProviderManager } from '$src/llm/provider-manager';
+import type { LLMProviderManager } from '$src/llm/provider-manager';
 
 const { upgradeWebSocket, websocket } = createBunWebSocket();
 
-export function createWebSocketServer(orchestrator: OrchestratorService, providerManager?: ProviderManager) {
+export function createWebSocketServer(orchestrator: OrchestratorService, providerManager?: LLMProviderManager) {
   const app = new Hono();
 
   // Store subscription IDs per connection
@@ -60,8 +60,10 @@ function errResp(id: string | number | null | undefined, code: number, message: 
 
 function mapError(e: unknown): { code: number; message: string } {
   const msg = e instanceof Error ? e.message : String(e);
+  if (/Turn already open/i.test(msg)) return { code: -32010, message: msg };
   if (/Turn already finalized/i.test(msg)) return { code: -32010, message: msg };
   if (/Conversation is finalized/i.test(msg) || /finalized/i.test(msg)) return { code: -32011, message: msg };
+  if (/Invalid turn number/i.test(msg)) return { code: -32012, message: msg };
   if (/Only message events may set finality/i.test(msg)) return { code: -32013, message: msg };
   // Optionally detect idempotency duplicate if message text is added
   return { code: -32000, message: msg };
@@ -72,7 +74,7 @@ async function handleRpc(
   ws: { send: (data: string) => void },
   req: JsonRpcRequest,
   activeSubs: Set<string>,
-  providerManager?: ProviderManager
+  providerManager?: LLMProviderManager
 ) {
   const { id = null, method, params = {} } = req;
 
@@ -105,10 +107,12 @@ async function handleRpc(
     return;
   }
 
-  if (method === 'getHydratedConversation') {
+  if (method === 'getConversationSnapshot') {
     const { conversationId } = params as { conversationId: number };
     try {
-      const snap = orchestrator.getHydratedConversationSnapshot(conversationId);
+      const snap = orchestrator.getConversationSnapshot(conversationId, {
+        includeScenario: true, // Always include scenario in snapshot
+      });
       if (!snap) return ws.send(JSON.stringify(errResp(id, 404, 'Conversation not found')));
       ws.send(JSON.stringify(ok(id, snap)));
     } catch (e) {
@@ -178,16 +182,28 @@ async function handleRpc(
   }
 
   if (method === 'getConversation') {
-    const { conversationId } = params as { conversationId: number };
-    const snap = orchestrator.getConversationSnapshot(conversationId);
+    const { conversationId, includeScenario } = params as { conversationId: number; includeScenario?: boolean };
+    const snap = orchestrator.getConversationSnapshot(conversationId, {includeScenario: includeScenario ?? true});
     ws.send(JSON.stringify(ok(id, snap)));
     return;
   }
 
-  if (method === 'sendTrace') {
-    const { conversationId, agentId, tracePayload, turn, precondition } = params as SendTraceRequest;
+  if (method === 'abortTurn') {
+    const { conversationId, agentId } = params as { conversationId: number; agentId: string };
     try {
-      const res = orchestrator.sendTrace(conversationId, agentId, tracePayload, turn, precondition);
+      const res = orchestrator.abortTurn(conversationId, agentId);
+      ws.send(JSON.stringify(ok(id, res)));
+    } catch (e) {
+      const { code, message } = mapError(e);
+      ws.send(JSON.stringify(errResp(id, code, message)));
+    }
+    return;
+  }
+
+  if (method === 'sendTrace') {
+    const { conversationId, agentId, tracePayload, turn } = params as SendTraceRequest;
+    try {
+      const res = orchestrator.sendTrace(conversationId, agentId, tracePayload, turn);
       ws.send(JSON.stringify(ok(id, res)));
     } catch (e) {
       const { code, message } = mapError(e);
@@ -197,9 +213,9 @@ async function handleRpc(
   }
 
   if (method === 'sendMessage') {
-    const { conversationId, agentId, messagePayload, finality, turn, precondition } = params as SendMessageRequest;
+    const { conversationId, agentId, messagePayload, finality, turn } = params as SendMessageRequest;
     try {
-      const res = orchestrator.sendMessage(conversationId, agentId, messagePayload, finality, turn, precondition);
+      const res = orchestrator.sendMessage(conversationId, agentId, messagePayload, finality, turn);
       ws.send(JSON.stringify(ok(id, res)));
     } catch (e) {
       const { code, message } = mapError(e);

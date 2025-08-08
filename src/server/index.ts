@@ -21,13 +21,13 @@ server.route('/api/scenarios', createScenarioRoutes(appInstance.orchestrator.sto
 server.route('/api', createAttachmentRoutes(appInstance.orchestrator));
 
 // HTTP: LLM helper under /api/llm
-server.route('/api', createLLMRoutes(appInstance.providerManager));
+server.route('/api', createLLMRoutes(appInstance.llmProviderManager));
 
 // Optional: MCP bridge under /api/bridge/:config64/mcp
-server.route('/api/bridge', createBridgeRoutes(appInstance.orchestrator, appInstance.providerManager));
+server.route('/api/bridge', createBridgeRoutes(appInstance.orchestrator, appInstance.llmProviderManager));
 
 // WS: JSON-RPC under /api/ws (already configured in createWebSocketServer)
-server.route('/', createWebSocketServer(appInstance.orchestrator, appInstance.providerManager));
+server.route('/', createWebSocketServer(appInstance.orchestrator, appInstance.llmProviderManager));
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {

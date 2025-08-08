@@ -10,7 +10,7 @@
 
 import { startAgents } from '$src/agents/factories/agent.factory';
 import { WsTransport } from '$src/agents/runtime/ws.transport';
-import { ProviderManager } from '$src/llm/provider-manager';
+import { LLMProviderManager } from '$src/llm/provider-manager';
 
 // Connect to existing server
 const WS_URL = process.env.WS_URL || 'ws://localhost:3000/api/ws';
@@ -99,7 +99,11 @@ ws.onopen = async () => {
     
     // Step 3: Start client-side agents using WsTransport
     console.log('\n🤖 Starting local agents with WsTransport...');
-    const clientProvider = new ProviderManager({ defaultLlmProvider: 'mock' });
+    const clientProvider = new LLMProviderManager({ 
+      defaultLlmProvider: 'mock',
+      googleApiKey: process.env.GOOGLE_API_KEY,
+      openRouterApiKey: process.env.OPENROUTER_API_KEY
+    });
     
     const agentHandle = await startAgents({
       conversationId,
@@ -116,8 +120,7 @@ ws.onopen = async () => {
       conversationId,
       agentId: 'user',
       messagePayload: { text: 'Hello local agents! How are you running?' },
-      finality: 'turn',
-      precondition: { lastClosedSeq }
+      finality: 'turn'
     });
     
     // Wait for local agents to respond
@@ -130,8 +133,7 @@ ws.onopen = async () => {
       conversationId,
       agentId: 'user',
       messagePayload: { text: 'Great to hear you are running locally!' },
-      finality: 'turn',
-      precondition: { lastClosedSeq }
+      finality: 'turn'
     });
     
     await new Promise(resolve => setTimeout(resolve, 2000));
@@ -146,8 +148,7 @@ ws.onopen = async () => {
       conversationId,
       agentId: 'user',
       messagePayload: { text: 'Demo complete - agents ran on the client!' },
-      finality: 'conversation',
-      precondition: { lastClosedSeq }
+      finality: 'conversation'
     });
     
     console.log('\n✅ Demo complete! Agents ran entirely on the client using WsTransport.');

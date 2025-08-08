@@ -1,7 +1,7 @@
 import { Storage } from './orchestrator/storage';
 import { OrchestratorService } from './orchestrator/orchestrator';
 import { ConfigManager, type Config } from './config';
-import { ProviderManager } from '$src/llm/provider-manager';
+import { LLMProviderManager } from '$src/llm/provider-manager';
 import type { SchedulePolicy } from '$src/types/orchestrator.types';
 import { startAgents } from '$src/agents/factories/agent.factory';
 import { InProcessTransport } from '$src/agents/runtime/inprocess.transport';
@@ -12,26 +12,31 @@ export interface AppOptions extends Partial<Config> {
 }
 
 export class App {
-  readonly config: ConfigManager;
+  readonly configManager: ConfigManager;
   readonly storage: Storage;
   readonly orchestrator: OrchestratorService;
-  readonly providerManager: ProviderManager;
+  readonly llmProviderManager: LLMProviderManager;
 
   constructor(options?: AppOptions) {
     const { policy, skipAutoRun, ...configOverrides } = options || {};
-    this.config = new ConfigManager(configOverrides);
-    this.storage = new Storage(this.config.dbPath);
-    this.providerManager = new ProviderManager(this.config.get());
+    this.configManager = new ConfigManager(configOverrides);
+    this.storage = new Storage(this.configManager.dbPath);
+    const config = this.configManager.get();
+    this.llmProviderManager = new LLMProviderManager({
+      defaultLlmProvider: config.defaultLlmProvider,
+      googleApiKey: config.googleApiKey,
+      openRouterApiKey: config.openRouterApiKey
+    });
     this.orchestrator = new OrchestratorService(
       this.storage,
       undefined, // Use default subscription bus
       policy, // Use provided policy or default
-      this.config.orchestratorConfig
+      this.configManager.orchestratorConfig
     );
     
     // Resume any autoRun conversations post-restart
     // Skip if explicitly disabled or in test mode (unless explicitly enabled)
-    const shouldSkipAutoRun = skipAutoRun ?? (this.config.get().nodeEnv === 'test');
+    const shouldSkipAutoRun = skipAutoRun ?? (this.configManager.get().nodeEnv === 'test');
     if (!shouldSkipAutoRun) {
       this.resumeAutoRunConversations();
     }
@@ -59,7 +64,7 @@ export class App {
           startAgents({
             conversationId: convo.conversation,
             transport: new InProcessTransport(this.orchestrator),
-            providerManager: this.providerManager
+            providerManager: this.llmProviderManager
           }).catch(err => {
             console.error(`[AutoRun Resume] Failed to start convo ${convo.conversation}`, err);
           });

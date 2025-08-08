@@ -4,7 +4,7 @@
 // This replaces both startInternalAgents and startScenarioAgents with a single unified API
 
 import type { IAgentTransport } from '$src/agents/runtime/runtime.interfaces';
-import type { ProviderManager } from '$src/llm/provider-manager';
+import type { LLMProviderManager } from '$src/llm/provider-manager';
 import type { AgentMeta } from '$src/types/conversation.meta';
 import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
 import type { LLMProvider } from '$src/types/llm.types';
@@ -19,7 +19,7 @@ import { logLine } from '$src/lib/utils/logger';
 export interface StartAgentsOptions {
   conversationId: number;
   transport: IAgentTransport;
-  providerManager: ProviderManager;
+  providerManager: LLMProviderManager;
   agentIds?: string[];  // Optional filter for which agents to start
 }
 
@@ -92,48 +92,45 @@ export async function startAgents(options: StartAgentsOptions): Promise<AgentHan
 export function createAgent(
   agentMeta: AgentMeta,
   transport: IAgentTransport,
-  providerManager: ProviderManager,
+  providerManager: LLMProviderManager,
   conversationId: number,
   scenario?: ScenarioConfiguration | null
 ): BaseAgent {
   const agentClass = (agentMeta.agentClass || 'default').toLowerCase();
   const provider = selectProvider(providerManager, agentMeta.config);
-
-  // Create event stream from transport
-  const events = transport.createEventStream(conversationId, true);
   
-  // Map agentClass to implementation (using existing constructors for now)
+  // Map agentClass to implementation (agents now create their own event streams)
   switch (agentClass) {
     case 'echoagent':
-      return new EchoAgent(transport, events, 'Processing...', 'Done');
+      return new EchoAgent(transport, 'Processing...', 'Done');
     
     case 'assistantagent':
-      return new AssistantAgent(transport, events, provider);
+      return new AssistantAgent(transport, provider);
     
     case 'scenariodrivenagent':
     case 'default':
       // Try ScenarioDrivenAgent if we have a scenario with this agent
       if (scenario?.agents.some(a => a.agentId === agentMeta.id)) {
-        return new ScenarioDrivenAgent(transport, events, {
+        return new ScenarioDrivenAgent(transport, {
           agentId: agentMeta.id,
           providerManager
         });
       }
       // Fall back to AssistantAgent
       logLine(agentMeta.id, 'factory', `No scenario role for ${agentMeta.id}, using AssistantAgent`);
-      return new AssistantAgent(transport, events, provider);
+      return new AssistantAgent(transport, provider);
     
     default:
       // Unknown agent class, default to AssistantAgent
       logLine(agentMeta.id, 'factory', `Unknown agentClass '${agentClass}', using AssistantAgent`);
-      return new AssistantAgent(transport, events, provider);
+      return new AssistantAgent(transport, provider);
   }
 }
 
 /**
  * Helper to select LLM provider based on agent config
  */
-function selectProvider(providerManager: ProviderManager, config?: Record<string, unknown>): LLMProvider {
+function selectProvider(providerManager: LLMProviderManager, config?: Record<string, unknown>): LLMProvider {
   // Support both 'llmProvider' and 'provider' for backward compatibility
   const provider = (config?.llmProvider ?? config?.provider) as string | undefined;
   const model = config?.model as string | undefined;

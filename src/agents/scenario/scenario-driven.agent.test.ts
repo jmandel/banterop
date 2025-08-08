@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import { ScenarioDrivenAgent } from './scenario-driven.agent';
 import { MockLLMProvider } from '$src/llm/providers/mock';
-import { ProviderManager } from '$src/llm/provider-manager';
+import { LLMProviderManager } from '$src/llm/provider-manager';
 import { MockTransport } from '$src/agents/runtime/mock.transport';
 import { MockEvents } from '$src/agents/runtime/mock.events';
 import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
-import type { HydratedConversationSnapshot, GuidanceEvent } from '$src/types/orchestrator.types';
+import type { ConversationSnapshot, GuidanceEvent } from '$src/types/orchestrator.types';
 import type { UnifiedEvent } from '$src/types/event.types';
 
 describe('ScenarioDrivenAgent', () => {
-  let providerManager: ProviderManager;
+  let providerManager: LLMProviderManager;
   let mockProvider: MockLLMProvider;
   let mockTransport: MockTransport;
   let mockEvents: MockEvents;
@@ -57,7 +57,7 @@ describe('ScenarioDrivenAgent', () => {
       googleApiKey: '',
       openRouterApiKey: '',
     };
-    providerManager = new ProviderManager(config as any);
+    providerManager = new LLMProviderManager(config);
     
     // Mock getProvider to always return the same instance
     providerManager.getProvider = mock(() => mockProvider);
@@ -132,7 +132,7 @@ describe('ScenarioDrivenAgent', () => {
         createMessageEvent('other-agent', 'Hello test agent')
       ],
       lastClosedSeq: 0
-    } as HydratedConversationSnapshot);
+    } as ConversationSnapshot);
     
     // Create agent
     agent = new ScenarioDrivenAgent(mockTransport, mockEvents, {
@@ -214,7 +214,7 @@ describe('ScenarioDrivenAgent', () => {
         createMessageEvent('other-agent', 'Second message', 3),
       ],
       lastClosedSeq: 0
-    } as HydratedConversationSnapshot);
+    } as ConversationSnapshot);
     
     const originalComplete = mockProvider.complete.bind(mockProvider);
     let capturedMessages: any[] = [];
@@ -276,7 +276,7 @@ describe('ScenarioDrivenAgent', () => {
         createMessageEvent('other-agent', 'Hello')
       ],
       lastClosedSeq: 0
-    } as HydratedConversationSnapshot);
+    } as ConversationSnapshot);
     
     await triggerTurn(1, 'test-agent');
     
@@ -292,7 +292,7 @@ describe('ScenarioDrivenAgent', () => {
       runtimeMeta: { agents: [] },
       events: [],
       lastClosedSeq: 0
-    } as HydratedConversationSnapshot);
+    } as ConversationSnapshot);
     
     // Should not throw - error is caught in BaseAgent
     await expect(triggerTurn(1, 'test-agent')).resolves.toBeUndefined();
@@ -306,7 +306,7 @@ describe('ScenarioDrivenAgent', () => {
       runtimeMeta: { agents: [] },
       events: [],
       lastClosedSeq: 0
-    } as HydratedConversationSnapshot);
+    } as ConversationSnapshot);
     
     // Create agent with ID not in scenario
     const wrongAgent = new ScenarioDrivenAgent(mockTransport, mockEvents, {
@@ -364,7 +364,7 @@ describe('ScenarioDrivenAgent', () => {
         }
       ],
       lastClosedSeq: 0
-    } as HydratedConversationSnapshot);
+    } as ConversationSnapshot);
     
     await triggerTurn(1, 'test-agent');
     

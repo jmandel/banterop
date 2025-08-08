@@ -1,11 +1,11 @@
 import { BaseAgent, type TurnContext } from '$src/agents/runtime/base-agent';
-import type { IAgentTransport, IAgentEvents } from '$src/agents/runtime/runtime.interfaces';
+import type { IAgentTransport } from '$src/agents/runtime/runtime.interfaces';
 import type { ScenarioConfigAgentDetails, ScenarioConfiguration, Tool } from '$src/types/scenario-configuration.types';
 import type { LLMMessage, LLMProvider, LLMRequest } from '$src/types/llm.types';
 import type { UnifiedEvent, TracePayload, MessagePayload } from '$src/types/event.types';
-import type { HydratedConversationSnapshot } from '$src/types/orchestrator.types';
+import type { ConversationSnapshot } from '$src/types/orchestrator.types';
 import type { ScenarioDrivenAgentOptions } from './scenario-driven.types';
-import type { ProviderManager } from '$src/llm/provider-manager';
+import type { LLMProviderManager } from '$src/llm/provider-manager';
 import type { SupportedProvider } from '$src/types/llm.types';
 import type { AgentMeta } from '$src/types/conversation.meta';
 import { ToolSynthesisService } from '$src/agents/services/tool-synthesis.service';
@@ -14,7 +14,7 @@ import { ParsedResponse, parseToolsFromResponse } from '$src/lib/utils/tool-pars
 
 export interface ScenarioDrivenAgentConfig {
   agentId: string;
-  providerManager: ProviderManager;
+  providerManager: LLMProviderManager;
   options?: ScenarioDrivenAgentOptions;
 }
 
@@ -39,8 +39,8 @@ interface TraceEntry {
  * - Document/attachment handling
  * - Tool synthesis integration
  */
-export class ScenarioDrivenAgent extends BaseAgent<HydratedConversationSnapshot> {
-  private providerManager: ProviderManager;
+export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
+  private providerManager: LLMProviderManager;
   private scenario?: ScenarioConfiguration;
   private agentConfig?: ScenarioConfigAgentDetails;
   private llmProvider?: LLMProvider;
@@ -52,24 +52,33 @@ export class ScenarioDrivenAgent extends BaseAgent<HydratedConversationSnapshot>
 
   constructor(
     transport: IAgentTransport,
-    events: IAgentEvents,
     cfg: ScenarioDrivenAgentConfig
   ) {
-    super(transport, events);
+    super(transport);
     this.providerManager = cfg.providerManager;
   }
 
-  protected async takeTurn(ctx: TurnContext<HydratedConversationSnapshot>): Promise<void> {
+  protected async takeTurn(ctx: TurnContext<ConversationSnapshot>): Promise<void> {
     const { conversationId, agentId } = ctx;
-
-    // Use the snapshot from context (stable view at turn start)
-    const hydrated = ctx.snapshot;
     
-    if (!hydrated.scenario) {
-      throw new Error(`Conversation ${conversationId} lacks scenario configuration`);
+    // Use the snapshot from context (stable view at turn start)
+    const snapshot = ctx.snapshot;
+    
+    console.log(`[${agentId}] takeTurn - full snapshot:`, JSON.stringify(snapshot, null, 2));
+    
+    if (!snapshot.scenario) {
+      // If no scenario, just provide a simple response instead of throwing
+      logLine(agentId, 'warn', `No scenario found, using fallback response`);
+      await ctx.transport.postMessage({
+        conversationId,
+        agentId,
+        text: 'I understand. How can I assist you?',
+        finality: 'turn'
+      });
+      return;
     }
 
-    this.scenario = hydrated.scenario;
+    this.scenario = snapshot.scenario;
     
     // Find my agent configuration in the scenario
     const myAgent = this.scenario.agents.find(a => a.agentId === agentId);
@@ -83,12 +92,12 @@ export class ScenarioDrivenAgent extends BaseAgent<HydratedConversationSnapshot>
     this.agentConfig.tools = [...builtInTools, ...(this.agentConfig.tools || [])];
 
     // Get LLM provider - check for agent-specific config first
-    this.llmProvider = this.getProviderForAgent(hydrated, agentId);
+    this.llmProvider = this.getProviderForAgent(snapshot, agentId);
     this.toolSynthesis = new ToolSynthesisService(this.llmProvider);
 
     // Clear and rebuild available documents from conversation history
     this.availableDocuments.clear();
-    this.extractDocumentsFromHistory(hydrated.events, agentId);
+    this.extractDocumentsFromHistory(snapshot.events, agentId);
 
     // Clear current turn trace
     this.currentTurnTrace = [];
@@ -97,7 +106,7 @@ export class ScenarioDrivenAgent extends BaseAgent<HydratedConversationSnapshot>
     await this._processAndRespondToTurn(ctx);
   }
 
-  private async _processAndRespondToTurn(ctx: TurnContext<HydratedConversationSnapshot>): Promise<void> {
+  private async _processAndRespondToTurn(ctx: TurnContext<ConversationSnapshot>): Promise<void> {
     if (this.processingTurn) return;
     
     this.processingTurn = true;
@@ -204,7 +213,7 @@ export class ScenarioDrivenAgent extends BaseAgent<HydratedConversationSnapshot>
 
     const separator = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
 
-    // Get scenario metadata from the hydrated snapshot
+    // Get scenario metadata from the snapshot
     const scenarioMeta = this.scenario?.metadata;
     const scenarioData = this.scenario?.scenario;
     const scenarioInfo = scenarioMeta 
@@ -405,12 +414,16 @@ Your response MUST follow this EXACT format:
     const request: LLMRequest = { messages };
 
     const response = await this.llmProvider!.complete(request);
+    
+    // Add 100ms delay after LLM generation
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
     const responseContent = response.content || '';
     return parseToolsFromResponse(responseContent);
   }
 
   private async executeSingleToolCallWithReasoning(
-    ctx: TurnContext<HydratedConversationSnapshot>,
+    ctx: TurnContext<ConversationSnapshot>,
     result: ParsedResponse,
     timeToConcludeConversation = false
   ): Promise<{ completedTurn: boolean; isTerminal?: boolean }> {
@@ -939,7 +952,7 @@ ${thoughts.join('\n')}
     ];
   }
 
-  private async addThought(ctx: TurnContext<HydratedConversationSnapshot>, content: string): Promise<void> {
+  private async addThought(ctx: TurnContext<ConversationSnapshot>, content: string): Promise<void> {
     this.currentTurnTrace.push({
       type: 'thought',
       content
@@ -952,7 +965,7 @@ ${thoughts.join('\n')}
     });
   }
 
-  private async addToolCall(ctx: TurnContext<HydratedConversationSnapshot>, toolName: string, args: any): Promise<string> {
+  private async addToolCall(ctx: TurnContext<ConversationSnapshot>, toolName: string, args: any): Promise<string> {
     const toolCallId = `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     this.currentTurnTrace.push({
@@ -976,7 +989,7 @@ ${thoughts.join('\n')}
     return toolCallId;
   }
 
-  private async addToolResult(ctx: TurnContext<HydratedConversationSnapshot>, toolCallId: string, result: any, error?: string): Promise<void> {
+  private async addToolResult(ctx: TurnContext<ConversationSnapshot>, toolCallId: string, result: any, error?: string): Promise<void> {
     this.currentTurnTrace.push({
       type: 'tool_result',
       toolCallId,
@@ -996,22 +1009,21 @@ ${thoughts.join('\n')}
     });
   }
 
-  private async completeTurn(ctx: TurnContext<HydratedConversationSnapshot>, text: string, concludeConversation: boolean, attachments?: any[]): Promise<void> {
+  private async completeTurn(ctx: TurnContext<ConversationSnapshot>, text: string, concludeConversation: boolean, attachments?: any[]): Promise<void> {
     await ctx.transport.postMessage({
       conversationId: ctx.conversationId,
       agentId: ctx.agentId,
       text,
       finality: concludeConversation ? 'conversation' : 'turn',
-      ...(attachments && attachments.length > 0 ? { attachments } : {}),
-      precondition: { lastClosedSeq: ctx.snapshot.lastClosedSeq }
+      ...(attachments && attachments.length > 0 ? { attachments } : {})
     });
     
     logLine(ctx.agentId, 'info', `ScenarioDrivenAgent(${ctx.agentId}) completed turn`);
   }
 
-  private getProviderForAgent(hydrated: HydratedConversationSnapshot, agentId: string): LLMProvider {
+  private getProviderForAgent(snapshot: ConversationSnapshot, agentId: string): LLMProvider {
     // Check for runtime agent configuration
-    const runtimeAgent = hydrated.runtimeMeta?.agents?.find((a: AgentMeta) => a.id === agentId);
+    const runtimeAgent = snapshot.runtimeMeta?.agents?.find((a: AgentMeta) => a.id === agentId);
     
     if (runtimeAgent?.config?.llmProvider) {
       const providerName = runtimeAgent.config.llmProvider as string;

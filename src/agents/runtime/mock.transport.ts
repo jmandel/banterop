@@ -1,10 +1,10 @@
 import type { IAgentTransport, IAgentEvents } from './runtime.interfaces';
 import type { MessagePayload, TracePayload } from '$src/types/event.types';
-import type { ConversationSnapshot, HydratedConversationSnapshot } from '$src/types/orchestrator.types';
+import type { ConversationSnapshot, ConversationSnapshot } from '$src/types/orchestrator.types';
 import { mock } from 'bun:test';
 
 export class MockTransport implements IAgentTransport {
-  getSnapshot = mock(async (_conversationId: number, _opts?: { includeScenario?: boolean }): Promise<ConversationSnapshot | HydratedConversationSnapshot> => {
+  getSnapshot = mock(async (_conversationId: number, _opts?: { includeScenario?: boolean }): Promise<ConversationSnapshot | ConversationSnapshot> => {
     return {
       conversation: _conversationId,
       status: 'active' as const,
@@ -12,6 +12,10 @@ export class MockTransport implements IAgentTransport {
       events: [],
       lastClosedSeq: 0
     };
+  });
+
+  abortTurn = mock(async (_conversationId: number, _agentId: string): Promise<{ turn: number }> => {
+    return { turn: 1 };
   });
 
   postMessage = mock(async (_params: {
@@ -22,7 +26,6 @@ export class MockTransport implements IAgentTransport {
     attachments?: NonNullable<MessagePayload['attachments']>;
     clientRequestId?: string;
     turn?: number;
-    precondition?: { lastClosedSeq: number };
   }): Promise<{ seq: number; turn: number; event: number }> => {
     return { seq: 1, turn: 1, event: 1 };
   });
@@ -33,7 +36,6 @@ export class MockTransport implements IAgentTransport {
     payload: TracePayload;
     turn?: number;
     clientRequestId?: string;
-    precondition?: { lastClosedSeq: number };
   }): Promise<{ seq: number; turn: number; event: number }> => {
     return { seq: 2, turn: 1, event: 2 };
   });

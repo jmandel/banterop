@@ -25,6 +25,8 @@ export class WsEventStream {
   private connected = false;
   private reconnectTimer: Timer | undefined;
   private heartbeatTimer: Timer | undefined;
+  // Optional UI callback for connection state changes
+  public onStateChange?: (state: 'connecting' | 'open' | 'reconnecting' | 'closed') => void;
   
   constructor(
     private url: string,
@@ -36,11 +38,13 @@ export class WsEventStream {
     if (this.connected) return;
     
     return new Promise((resolve, reject) => {
+      this.onStateChange?.('connecting');
       const ws = new WebSocket(this.url);
       this.ws = ws;
       
       ws.onopen = async () => {
         this.connected = true;
+        this.onStateChange?.('open');
         
         // Subscribe to events
         const subReq = {
@@ -55,6 +59,7 @@ export class WsEventStream {
           jsonrpc: '2.0',
         };
         
+        console.log(`[WsEventStream] Sending subscribe request:`, JSON.stringify(subReq));
         ws.send(JSON.stringify(subReq));
         
         // Start heartbeat
@@ -69,12 +74,14 @@ export class WsEventStream {
           // Handle subscription response
           if (msg.id && msg.result?.subId) {
             this.subId = msg.result.subId;
+            console.log(`[WsEventStream] Subscription confirmed, subId=${this.subId}`);
             return;
           }
           
           // Handle events and guidance
           if (msg.method === 'event' || msg.method === 'guidance') {
             const event = msg.params as StreamEvent;
+            console.log(`[WsEventStream] Received ${msg.method}:`, JSON.stringify(event).substring(0, 100));
             this.enqueue(event);
           }
         } catch (err) {
@@ -89,6 +96,7 @@ export class WsEventStream {
         if (!this.closed && this.options.reconnectDelayMs !== 0) {
           // Schedule reconnection
           const delay = this.options.reconnectDelayMs ?? 1000;
+          this.onStateChange?.('reconnecting');
           this.reconnectTimer = setTimeout(() => {
             this.connect().catch(console.error);
           }, delay);
@@ -215,6 +223,7 @@ export class WsEventStream {
       this.ws.close();
       this.ws = undefined;
     }
+    this.onStateChange?.('closed');
     
     // Resolve any waiting consumers
     for (const resolver of this.resolvers) {

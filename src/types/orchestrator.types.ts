@@ -8,15 +8,9 @@ export interface ConversationSnapshot {
   metadata: ConversationMeta;
   events: UnifiedEvent[];
   lastClosedSeq: number;
-}
-
-export interface HydratedConversationSnapshot {
-  conversation: number;
-  status: 'active' | 'completed';
-  scenario: ScenarioConfiguration | null;
-  runtimeMeta: ConversationMeta;
-  events: UnifiedEvent[];
-  lastClosedSeq: number;
+  // Optional fields populated when includeScenario is true
+  scenario?: ScenarioConfiguration | null;
+  runtimeMeta?: ConversationMeta;
 }
 
 export interface SubscribeFilter {

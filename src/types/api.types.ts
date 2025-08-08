@@ -29,12 +29,20 @@ export interface SubscribeResponse {
   subId: string;
 }
 
+export interface AbortTurnRequest {
+  conversationId: number;
+  agentId: string;
+}
+
+export interface AbortTurnResponse {
+  turn: number;
+}
+
 export interface SendTraceRequest {
   conversationId: number;
   agentId: string;
   tracePayload: TracePayload;
-  turn?: number; // omit to open a new turn
-  precondition?: { lastClosedSeq: number }; // NEW (only required when opening a new turn)
+  turn?: number; // optional turn override for advanced clients
 }
 
 export interface SendTraceResponse {
@@ -48,8 +56,7 @@ export interface SendMessageRequest {
   agentId: string;
   messagePayload: MessagePayload; // clientRequestId must be inside this payload for idempotency
   finality: Finality;
-  turn?: number; // omit to open a new turn
-  precondition?: { lastClosedSeq: number }; // NEW (only required when opening a new turn)
+  turn?: number; // optional turn override for advanced clients
 }
 
 export interface SendMessageResponse {

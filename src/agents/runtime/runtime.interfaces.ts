@@ -1,9 +1,11 @@
 import type { StreamEvent } from '$src/agents/clients/event-stream';
 import type { MessagePayload, TracePayload } from '$src/types/event.types';
-import type { ConversationSnapshot, HydratedConversationSnapshot } from '$src/types/orchestrator.types';
+import type { ConversationSnapshot } from '$src/types/orchestrator.types';
 
 export interface IAgentTransport {
-  getSnapshot(conversationId: number, opts?: { includeScenario?: boolean }): Promise<ConversationSnapshot | HydratedConversationSnapshot>;
+  getSnapshot(conversationId: number, opts?: { includeScenario?: boolean }): Promise<ConversationSnapshot>;
+  
+  abortTurn(conversationId: number, agentId: string): Promise<{ turn: number }>;
   
   postMessage(params: {
     conversationId: number;
@@ -13,7 +15,6 @@ export interface IAgentTransport {
     attachments?: NonNullable<MessagePayload['attachments']>;
     clientRequestId?: string;
     turn?: number;
-    precondition?: { lastClosedSeq: number };
   }): Promise<{ seq: number; turn: number; event: number }>;
   
   postTrace(params: {
@@ -22,7 +23,6 @@ export interface IAgentTransport {
     payload: TracePayload;
     turn?: number;
     clientRequestId?: string;
-    precondition?: { lastClosedSeq: number };
   }): Promise<{ seq: number; turn: number; event: number }>;
   
   now(): number;
