@@ -13,6 +13,8 @@ export interface IdempotencyKey {
   clientRequestId: string;
 }
 
+/// NOTE: Idempotency keys are never pruned in Connectathon mode.
+/// This is acceptable for short-lived runs; production would add TTL cleanup.
 export class IdempotencyStore {
   constructor(private db: Database) {}
 

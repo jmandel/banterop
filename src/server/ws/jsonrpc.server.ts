@@ -2,8 +2,8 @@ import { Hono } from 'hono';
 import { createBunWebSocket } from 'hono/bun';
 import type { WSContext } from 'hono/ws';
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
-import type { MessagePayload, TracePayload, Finality, UnifiedEvent } from '$src/types/event.types';
-import type { JsonRpcRequest, JsonRpcResponse } from '$src/types/api.types';
+import type { UnifiedEvent } from '$src/types/event.types';
+import type { JsonRpcRequest, JsonRpcResponse, SendMessageRequest, SendTraceRequest } from '$src/types/api.types';
 import type { GuidanceEvent } from '$src/types/orchestrator.types';
 import type { CreateConversationRequest } from '$src/types/conversation.meta';
 import type { ListConversationsParams } from '$src/db/conversation.store';
@@ -181,12 +181,7 @@ async function handleRpc(
   }
 
   if (method === 'sendTrace') {
-    const { conversationId, agentId, tracePayload, turn } = params as {
-      conversationId: number;
-      agentId: string;
-      tracePayload: TracePayload;
-      turn?: number;
-    };
+    const { conversationId, agentId, tracePayload, turn } = params as SendTraceRequest;
     try {
       const res = orchestrator.sendTrace(conversationId, agentId, tracePayload, turn);
       ws.send(JSON.stringify(ok(id, res)));
@@ -198,13 +193,7 @@ async function handleRpc(
   }
 
   if (method === 'sendMessage') {
-    const { conversationId, agentId, messagePayload, finality, turn } = params as {
-      conversationId: number;
-      agentId: string;
-      messagePayload: MessagePayload;
-      finality: Finality;
-      turn?: number;
-    };
+    const { conversationId, agentId, messagePayload, finality, turn } = params as SendMessageRequest;
     try {
       const res = orchestrator.sendMessage(conversationId, agentId, messagePayload, finality, turn);
       ws.send(JSON.stringify(ok(id, res)));

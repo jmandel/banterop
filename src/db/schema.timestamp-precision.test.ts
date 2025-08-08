@@ -11,7 +11,7 @@ describe("DB timestamp precision", () => {
 
     sqlite.raw.prepare(`INSERT INTO conversations (status) VALUES ('active')`).run();
 
-    const e1 = store.appendEvent({
+    store.appendEvent({
       conversation: 1,
       type: "message",
       payload: { text: "First" } as MessagePayload,
@@ -22,7 +22,7 @@ describe("DB timestamp precision", () => {
     // Small delay to ensure different millisecond
     Bun.sleepSync(2);
 
-    const e2 = store.appendEvent({
+    store.appendEvent({
       conversation: 1,
       type: "message",
       payload: { text: "Second" } as MessagePayload,

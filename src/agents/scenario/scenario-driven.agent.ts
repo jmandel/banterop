@@ -1,12 +1,13 @@
 import type { Agent, AgentContext } from '$src/agents/agent.types';
 import type { AgentConfiguration, ScenarioConfiguration } from '$src/types/scenario-configuration.types';
 import type { LLMMessage, LLMProvider } from '$src/types/llm.types';
-import type { UnifiedEvent } from '$src/types/event.types';
+import type { UnifiedEvent, TracePayload } from '$src/types/event.types';
 import type { HydratedConversationSnapshot } from '$src/types/orchestrator.types';
 import type { ScenarioDrivenAgentOptions } from './scenario-driven.types';
 import type { ProviderManager } from '$src/llm/provider-manager';
 import type { SupportedProvider } from '$src/types/llm.types';
 import type { AgentMeta } from '$src/types/conversation.meta';
+import { ToolSynthesisService } from '$src/agents/services/tool-synthesis.service';
 
 export interface ScenarioDrivenAgentConfig {
   agentId: string;
@@ -55,6 +56,69 @@ export class ScenarioDrivenAgent implements Agent {
     // Get LLM provider - check for agent-specific config first
     const provider = this.getProviderForAgent(hydrated, agentId);
     
+    /// NOTE: This is Connectathon-demo logic for Oracle/tool synthesis integration.
+    /// It handles pending tool_call traces from this agent's history.
+    
+    // Check for pending tool calls from this agent
+    for (const ev of hydrated.events) {
+      if (ev.type === 'trace' && ev.agentId === agentId) {
+        const tracePayload = ev.payload as TracePayload;
+        if (tracePayload.type === 'tool_call') {
+          const toolCall = tracePayload as any;
+        const toolDef = myAgent.tools?.find(t => t.toolName === toolCall.name);
+        
+        if (toolDef && toolDef.synthesisGuidance) {
+          logger.info(`ScenarioDrivenAgent(${agentId}) synthesizing tool result for ${toolCall.name}`);
+          
+          const synthesis = new ToolSynthesisService(provider);
+          const result = await synthesis.execute({
+            tool: {
+              toolName: toolDef.toolName,
+              description: toolDef.description,
+              synthesisGuidance: toolDef.synthesisGuidance,
+              inputSchema: toolDef.inputSchema,
+              ...(toolDef.endsConversation !== undefined ? { endsConversation: toolDef.endsConversation } : {}),
+              ...(toolDef.conversationEndStatus !== undefined ? { conversationEndStatus: toolDef.conversationEndStatus } : {}),
+            },
+            args: toolCall.args || {},
+            agent: {
+              agentId,
+              principal: myAgent.principal,
+              situation: myAgent.situation,
+              systemPrompt: myAgent.systemPrompt,
+              goals: myAgent.goals,
+            },
+            scenario,
+            conversationHistory: hydrated.events.map(e => JSON.stringify(e.payload)).join('\n'),
+          });
+
+          await client.postTrace({
+            conversationId,
+            agentId,
+            payload: { 
+              type: 'tool_result', 
+              toolCallId: toolCall.toolCallId, 
+              result: result.output 
+            },
+          });
+
+          // If the tool ends the conversation, handle that
+          if (toolDef.endsConversation) {
+            const finalText = `Tool ${toolDef.toolName} completed successfully.`;
+            await client.postMessage({
+              conversationId,
+              agentId,
+              text: finalText,
+              finality: 'conversation',
+            });
+            logger.info(`ScenarioDrivenAgent(${agentId}) ended conversation via tool ${toolDef.toolName}`);
+            return;
+          }
+        }
+        }
+      }
+    }
+    
     // Build LLM messages from scenario persona and conversation history
     const messages = this.buildMessages(agentId, myAgent, scenario, hydrated.events);
 
@@ -63,23 +127,13 @@ export class ScenarioDrivenAgent implements Agent {
     // Single-step completion
     const response = await provider.complete({ messages });
 
-    // TODO: If useOracle is true and response contains tool calls:
-    // 1. Parse tool calls from response
-    // 2. Call ToolSynthesisService for each tool
-    // 3. Post trace events for thought/tool_call/tool_result
-    // 4. Build final message with attachments
-
     const text = response.content?.trim() || '...';
     
-    // Check if any tools should end the conversation
-    // TODO: Parse tool calls and check endsConversation flag
-    const finality = 'turn'; // Default to turn, would be 'conversation' if tool ends it
-
     await client.postMessage({
       conversationId,
       agentId,
       text,
-      finality,
+      finality: 'turn',
     });
 
     logger.info(`ScenarioDrivenAgent(${agentId}) completed turn`);

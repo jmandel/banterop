@@ -310,6 +310,10 @@ export class OrchestratorService {
     }
   }
 
+  /// NOTE: All system events are stored in turn 0 as an out-of-band "meta lane"
+  /// regardless of the current open turn. This allows orchestration/meta signals
+  /// (e.g., claim_expired, meta_created) to exist in parallel to regular turn 1..N
+  /// streams and be replayed independently.
   private appendSystemEvent(conversation: number, systemPayload: SystemPayload) {
     if (this.isShuttingDown) return;
     
@@ -390,6 +394,9 @@ export class OrchestratorService {
     }, 5000);
   }
   
+  /// NOTE: In Connectathon mode, we delete ALL active claims for the conversation
+  /// when any turn completes. This is intentional and matches the 1-guidance-at-a-time
+  /// policy for the event.
   // Clean up claims when a turn is successfully completed
   private cleanupClaims(conversation: number) {
     try {
