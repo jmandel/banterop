@@ -10,7 +10,9 @@ import type { OrchestratorService } from '$src/server/orchestrator/orchestrator'
 import type { ProviderManager } from '$src/llm/provider-manager';
 import type { Logger } from '$src/agents/agent.types';
 import type { ConvConversationMeta } from '$src/server/bridge/conv-config.types';
-import { TurnLoopExecutorInternal } from '$src/agents/executors/turn-loop-executor.internal';
+import { BaseAgent } from '$src/agents/runtime/base-agent';
+import { InProcessTransport } from '$src/agents/runtime/inprocess.transport';
+import { InProcessEvents } from '$src/agents/runtime/inprocess.events';
 import { AssistantAgent } from '$src/agents/assistant.agent';
 import { EchoAgent } from '$src/agents/echo.agent';
 import { ScenarioDrivenAgent } from '$src/agents/scenario/scenario-driven.agent';
@@ -30,9 +32,8 @@ export async function startInternalAgentsFromMeta(
   conversationId: number,
   meta: ConvConversationMeta,
   opts: StartInternalAgentsOptions
-): Promise<{ loops: TurnLoopExecutorInternal[]; stop: () => Promise<void> }> {
-  const loops: TurnLoopExecutorInternal[] = [];
-  const logger = opts.logger;
+): Promise<{ agents: BaseAgent[]; stop: () => Promise<void> }> {
+  const agents: BaseAgent[] = [];
 
   // Hydrated snapshot -> scenario for ScenarioDrivenAgent fallback
   const hydrated = orchestrator.getHydratedConversationSnapshot(conversationId);
@@ -57,28 +58,29 @@ export async function startInternalAgentsFromMeta(
     // Provider selection per agent (config override) or global default
     const provider = pickProvider(opts.providerManager, agent.config);
 
+    // Create transport and events for this agent
+    const transport = new InProcessTransport(orchestrator);
+    const events = new InProcessEvents(orchestrator, conversationId, true);
+
     // Instantiate agent implementation
-    let impl:
-      | AssistantAgent
-      | EchoAgent
-      | ScenarioDrivenAgent;
+    let impl: BaseAgent;
 
     if (agentClass === 'assistantagent') {
-      impl = new AssistantAgent(provider);
+      impl = new AssistantAgent(transport, events, provider);
     } else if (agentClass === 'echoagent') {
-      impl = new EchoAgent('Processing...', 'Done');
+      impl = new EchoAgent(transport, events, 'Processing...', 'Done');
     } else {
       // Default: ScenarioDrivenAgent (requires scenario + scenario role match)
       if (!scenario) {
         // If no scenario is present, fall back to AssistantAgent
-        impl = new AssistantAgent(provider);
+        impl = new AssistantAgent(transport, events, provider);
       } else {
         const myAgent = scenario.agents.find(a => a.agentId === agentId);
         if (!myAgent) {
           // If scenario lacks this agent role, fall back to AssistantAgent
-          impl = new AssistantAgent(provider);
+          impl = new AssistantAgent(transport, events, provider);
         } else {
-          impl = new ScenarioDrivenAgent({
+          impl = new ScenarioDrivenAgent(transport, events, {
             agentId,
             providerManager: opts.providerManager,
           });
@@ -86,29 +88,15 @@ export async function startInternalAgentsFromMeta(
       }
     }
 
-    const loop = new TurnLoopExecutorInternal(orchestrator, {
-      conversationId,
-      agentId,
-      meta: {
-        id: agent.id,
-        kind: agent.kind,
-        ...(agent.agentClass !== undefined ? { agentClass: agent.agentClass } : {}),
-        ...(agent.role !== undefined ? { role: agent.role } : {}),
-        ...(agent.displayName !== undefined ? { displayName: agent.displayName } : {}),
-        ...(agent.avatarUrl !== undefined ? { avatarUrl: agent.avatarUrl } : {}),
-        ...(agent.config !== undefined ? { config: agent.config } : {}),
-      },
-      buildAgent: () => impl,  // For backward compatibility, wrap the pre-built agent
-      ...(logger !== undefined ? { logger } : {})
-    });
-    void loop.start();
-    loops.push(loop);
+    // Start the agent
+    await impl.start(conversationId, agentId);
+    agents.push(impl);
   }
 
   return {
-    loops,
+    agents,
     stop: async () => {
-      for (const l of loops) l.stop();
+      for (const a of agents) a.stop();
     },
   };
 }

@@ -28,7 +28,7 @@ async function main() {
     title: argv.title || "Internal Agents Test",
     agents,
     config: { policy: "strict-alternation" },
-    startingAgentId: agents[0].id,
+    startingAgentId: agents[0]?.id,
   };
 
   console.log("📝 Creating conversation with internal agents:", agents.map(a => a.id).join(", "));

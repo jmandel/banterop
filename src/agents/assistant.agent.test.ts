@@ -1,58 +1,93 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import { AssistantAgent } from './assistant.agent';
 import { MockLLMProvider } from '$src/llm/providers/mock';
-import type { AgentContext } from './agent.types';
+import { MockTransport } from '$src/agents/runtime/mock.transport';
+import { MockEvents } from '$src/agents/runtime/mock.events';
+import type { GuidanceEvent, HydratedConversationSnapshot } from '$src/types/orchestrator.types';
+import type { UnifiedEvent } from '$src/types/event.types';
 
 describe('AssistantAgent', () => {
   let mockProvider: MockLLMProvider;
+  let mockTransport: MockTransport;
+  let mockEvents: MockEvents;
   let agent: AssistantAgent;
-  let mockContext: AgentContext;
+
+  // Helper to trigger a turn
+  async function triggerTurn(conversationId: number, agentId: string, seq: number = 1.1) {
+    await agent.start(conversationId, agentId);
+    
+    const guidance: GuidanceEvent = {
+      type: 'guidance',
+      conversation: conversationId,
+      seq,
+      nextAgentId: agentId,
+      deadlineMs: 30000
+    };
+    
+    mockEvents.emit(guidance);
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  // Helper to create events
+  function createMessageEvent(agentId: string, text: string, seq: number = 1): UnifiedEvent {
+    return {
+      conversation: 1,
+      turn: seq,
+      event: 1,
+      type: 'message' as const,
+      payload: { text },
+      agentId,
+      finality: 'turn' as const,
+      ts: new Date().toISOString(),
+      seq
+    };
+  }
+
+  function createTraceEvent(agentId: string, content: any, seq: number = 2): UnifiedEvent {
+    return {
+      conversation: 1,
+      turn: seq,
+      event: 2,
+      type: 'trace' as const,
+      payload: { type: 'thought', content },
+      agentId,
+      finality: 'none' as const,
+      ts: new Date().toISOString(),
+      seq
+    };
+  }
+
+  function createSystemEvent(seq: number = 3): UnifiedEvent {
+    return {
+      conversation: 1,
+      turn: seq,
+      event: 3,
+      type: 'system' as const,
+      payload: { kind: 'note' },
+      agentId: 'system',
+      finality: 'none' as const,
+      ts: new Date().toISOString(),
+      seq
+    };
+  }
 
   beforeEach(() => {
     mockProvider = new MockLLMProvider({ provider: 'mock' });
-    agent = new AssistantAgent(mockProvider);
+    mockTransport = new MockTransport();
+    mockEvents = new MockEvents();
+    agent = new AssistantAgent(mockTransport, mockEvents, mockProvider);
     
-    mockContext = {
-      conversationId: 1,
-      agentId: 'assistant',
-      deadlineMs: Date.now() + 30000,
-      client: {
-        getSnapshot: mock(() => Promise.resolve({
-          conversation: 1,
-          status: 'active' as const,
-          events: [
-            {
-              conversation: 1,
-              turn: 1,
-              event: 1,
-              type: 'message',
-              payload: { text: 'Hello assistant' },
-              finality: 'turn',
-              ts: new Date().toISOString(),
-              agentId: 'user',
-              seq: 1
-            }
-          ]
-        })),
-        postMessage: mock(() => Promise.resolve({
-          seq: 2,
-          turn: 2,
-          event: 1
-        })),
-        postTrace: mock(() => Promise.resolve({
-          seq: 3,
-          turn: 2,
-          event: 2
-        })),
-        now: () => Date.now()
-      },
-      logger: {
-        debug: mock(() => {}),
-        info: mock(() => {}),
-        warn: mock(() => {}),
-        error: mock(() => {})
-      }
-    };
+    // Setup default mock responses
+    mockTransport.getSnapshot.mockResolvedValue({
+      conversation: 1,
+      status: 'active' as const,
+      metadata: { agents: [] },
+      events: [
+        createMessageEvent('user', 'Hello assistant')
+      ],
+      scenario: null,
+      runtimeMeta: { agents: [] }
+    } as HydratedConversationSnapshot);
   });
 
   it('creates agent with LLM provider', () => {
@@ -60,18 +95,18 @@ describe('AssistantAgent', () => {
   });
 
   it('processes turn and generates response', async () => {
-    await agent.handleTurn(mockContext);
+    await triggerTurn(1, 'assistant');
     
-    // Verify it called getSnapshot
-    expect(mockContext.client.getSnapshot).toHaveBeenCalledWith(1);
+    // Add a longer wait to ensure the async turn completes
+    await new Promise(resolve => setTimeout(resolve, 200));
     
     // Verify it posted a message
-    expect(mockContext.client.postMessage).toHaveBeenCalled();
-    const postCall = (mockContext.client.postMessage as any).mock.calls[0][0];
-    expect(postCall.conversationId).toBe(1);
-    expect(postCall.agentId).toBe('assistant');
-    expect(postCall.text).toContain('Mock response');
-    expect(postCall.finality).toBe('turn');
+    expect(mockTransport.postMessage).toHaveBeenCalled();
+    const postCall = mockTransport.postMessage.mock.calls[0]?.[0];
+    expect(postCall?.conversationId).toBe(1);
+    expect(postCall?.agentId).toBe('assistant');
+    expect(postCall?.text).toContain('Mock response');
+    expect(postCall?.finality).toBe('turn');
   });
 
   it('includes system prompt in LLM messages', async () => {
@@ -83,7 +118,7 @@ describe('AssistantAgent', () => {
       return originalComplete(request);
     });
     
-    await agent.handleTurn(mockContext);
+    await triggerTurn(1, 'assistant');
     
     expect(capturedMessages).toHaveLength(2);
     expect(capturedMessages[0]).toEqual({
@@ -97,27 +132,18 @@ describe('AssistantAgent', () => {
   });
 
   it('handles conversation with multiple messages', async () => {
-    mockContext.client.getSnapshot = mock(() => Promise.resolve({
+    mockTransport.getSnapshot.mockResolvedValue({
       conversation: 1,
       status: 'active' as const,
+      metadata: { agents: [] },
       events: [
-        {
-          type: 'message',
-          payload: { text: 'User message 1' },
-          agentId: 'user',
-        },
-        {
-          type: 'message',
-          payload: { text: 'Assistant response 1' },
-          agentId: 'assistant',
-        },
-        {
-          type: 'message',
-          payload: { text: 'User message 2' },
-          agentId: 'user',
-        }
-      ]
-    }));
+        createMessageEvent('user', 'User message 1', 1),
+        createMessageEvent('assistant', 'Assistant response 1', 2),
+        createMessageEvent('user', 'User message 2', 3)
+      ],
+      scenario: null,
+      runtimeMeta: { agents: [] }
+    } as HydratedConversationSnapshot);
     
     const originalComplete = mockProvider.complete.bind(mockProvider);
     let capturedMessages: any[] = [];
@@ -126,7 +152,7 @@ describe('AssistantAgent', () => {
       return originalComplete(request);
     });
     
-    await agent.handleTurn(mockContext);
+    await triggerTurn(1, 'assistant', 3.1);
     
     expect(capturedMessages).toHaveLength(4);
     expect(capturedMessages[0].role).toBe('system');
@@ -145,27 +171,18 @@ describe('AssistantAgent', () => {
   });
 
   it('filters out non-message events', async () => {
-    mockContext.client.getSnapshot = mock(() => Promise.resolve({
+    mockTransport.getSnapshot.mockResolvedValue({
       conversation: 1,
       status: 'active' as const,
+      metadata: { agents: [] },
       events: [
-        {
-          type: 'message',
-          payload: { text: 'User message' },
-          agentId: 'user',
-        },
-        {
-          type: 'trace',
-          payload: { type: 'thought', content: 'thinking...' },
-          agentId: 'assistant',
-        },
-        {
-          type: 'system',
-          payload: { kind: 'note' },
-          agentId: 'system',
-        }
-      ]
-    }));
+        createMessageEvent('user', 'User message'),
+        createTraceEvent('assistant', 'thinking...'),
+        createSystemEvent()
+      ],
+      scenario: null,
+      runtimeMeta: { agents: [] }
+    } as HydratedConversationSnapshot);
     
     const originalComplete = mockProvider.complete.bind(mockProvider);
     let capturedMessages: any[] = [];
@@ -174,46 +191,85 @@ describe('AssistantAgent', () => {
       return originalComplete(request);
     });
     
-    await agent.handleTurn(mockContext);
+    await triggerTurn(1, 'assistant');
     
     // Should only have system prompt and user message
     expect(capturedMessages).toHaveLength(2);
     expect(capturedMessages[0].role).toBe('system');
-    expect(capturedMessages[1].role).toBe('user');
+    expect(capturedMessages[1]).toEqual({
+      role: 'user',
+      content: 'User message'
+    });
   });
 
-  it('logs start and completion of turn', async () => {
-    await agent.handleTurn(mockContext);
+  it('handles empty conversation history', async () => {
+    mockTransport.getSnapshot.mockResolvedValue({
+      conversation: 1,
+      status: 'active' as const,
+      metadata: { agents: [] },
+      events: [],
+      scenario: null,
+      runtimeMeta: { agents: [] }
+    } as HydratedConversationSnapshot);
     
-    expect(mockContext.logger.info).toHaveBeenCalledTimes(2);
-    const calls = (mockContext.logger.info as any).mock.calls;
-    expect(calls[0][0]).toContain('AssistantAgent turn started');
-    expect(calls[0][0]).toContain('mock'); // provider name
-    expect(calls[1][0]).toContain('AssistantAgent turn completed');
+    await triggerTurn(1, 'assistant');
+    
+    // Add a longer wait to ensure the async turn completes
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    expect(mockTransport.postMessage).toHaveBeenCalled();
   });
 
-  it('works with different LLM providers', async () => {
-    // Test that it can work with any provider implementing the interface
-    const customProvider = {
-      getMetadata: () => ({
-        name: 'custom' as const,
-        description: 'Custom provider',
-        models: ['model-1'],
-        defaultModel: 'model-1'
-      }),
-      complete: mock(async () => ({
-        content: 'Custom response'
-      }))
-    };
+  it('correctly identifies own messages vs other agents', async () => {
+    mockTransport.getSnapshot.mockResolvedValue({
+      conversation: 1,
+      status: 'active' as const,
+      metadata: { agents: [] },
+      events: [
+        createMessageEvent('user', 'First user message', 1),
+        createMessageEvent('assistant', 'My response', 2),
+        createMessageEvent('other-agent', 'Other agent message', 3),
+        createMessageEvent('assistant', 'Another of my responses', 4)
+      ],
+      scenario: null,
+      runtimeMeta: { agents: [] }
+    } as HydratedConversationSnapshot);
     
-    const customAgent = new AssistantAgent(customProvider as any);
-    await customAgent.handleTurn(mockContext);
+    const originalComplete = mockProvider.complete.bind(mockProvider);
+    let capturedMessages: any[] = [];
+    mockProvider.complete = mock(async (request) => {
+      capturedMessages = request.messages;
+      return originalComplete(request);
+    });
     
-    expect(customProvider.complete).toHaveBeenCalled();
-    expect(mockContext.client.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: 'Custom response'
-      })
-    );
+    await triggerTurn(1, 'assistant');
+    
+    expect(capturedMessages).toHaveLength(5);
+    expect(capturedMessages[1].role).toBe('user'); // First user message
+    expect(capturedMessages[2].role).toBe('assistant'); // My response  
+    expect(capturedMessages[3].role).toBe('user'); // Other agent treated as user
+    expect(capturedMessages[4].role).toBe('assistant'); // Another of my responses
+  });
+
+  it('handles provider errors gracefully', async () => {
+    const errorMessage = 'Provider error';
+    mockProvider.complete = mock(() => Promise.reject(new Error(errorMessage)));
+    
+    // Should not throw - errors are caught in BaseAgent
+    await expect(triggerTurn(1, 'assistant')).resolves.toBeUndefined();
+  });
+
+  it('posts message with correct structure', async () => {
+    await triggerTurn(1, 'assistant');
+    
+    // Add a longer wait to ensure the async turn completes
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    expect(mockTransport.postMessage).toHaveBeenCalledWith({
+      conversationId: 1,
+      agentId: 'assistant',
+      text: expect.stringContaining('Mock response'),
+      finality: 'turn'
+    });
   });
 });

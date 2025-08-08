@@ -3,7 +3,9 @@ import type { ProviderManager } from '$src/llm/provider-manager';
 import type { Logger } from '$src/agents/agent.types';
 import type { AgentMeta } from '$src/types/conversation.meta';
 import { ScenarioDrivenAgent } from '$src/agents/scenario/scenario-driven.agent';
-import { TurnLoopExecutorInternal } from '$src/agents/executors/turn-loop-executor.internal';
+import { BaseAgent } from '$src/agents/runtime/base-agent';
+import { InProcessTransport } from '$src/agents/runtime/inprocess.transport';
+import { InProcessEvents } from '$src/agents/runtime/inprocess.events';
 
 export interface StartScenarioAgentsOptions {
   providerManager: ProviderManager;      // Provider manager for LLM access
@@ -14,7 +16,7 @@ export interface StartScenarioAgentsOptions {
 }
 
 export interface ScenarioAgentHandle {
-  loops: TurnLoopExecutorInternal[];
+  agents: BaseAgent[];
   stop: () => Promise<void>;
 }
 
@@ -27,7 +29,7 @@ export async function startScenarioAgents(
   conversationId: number,
   options: StartScenarioAgentsOptions
 ): Promise<ScenarioAgentHandle> {
-  const { providerManager, agentIds, logger, maxStepsPerTurn, useOracle } = options;
+  const { providerManager, agentIds } = options;
 
   const hydrated = orchestrator.getHydratedConversationSnapshot(conversationId);
   if (!hydrated || !hydrated.scenario) {
@@ -53,12 +55,12 @@ export async function startScenarioAgents(
   if (idsToRun.length === 0) {
     // No agents to run
     return {
-      loops: [],
+      agents: [],
       stop: async () => {},
     };
   }
 
-  const loops: TurnLoopExecutorInternal[] = [];
+  const agents: BaseAgent[] = [];
 
   for (const agentId of idsToRun) {
     // Verify strict match with scenario
@@ -69,40 +71,33 @@ export async function startScenarioAgents(
       );
     }
 
+    // Create transport and events for this agent
+    const transport = new InProcessTransport(orchestrator);
+    const events = new InProcessEvents(orchestrator, conversationId, true);
+
     // Create the scenario-driven agent implementation
-    const agentImpl = new ScenarioDrivenAgent({
+    const agentImpl = new ScenarioDrivenAgent(transport, events, {
       agentId,
       providerManager,
       options: {
         agentId,
-        ...(maxStepsPerTurn !== undefined ? { maxStepsPerTurn } : {}),
-        ...(useOracle !== undefined ? { useOracle } : {}),
       },
     });
 
-    // Create the internal turn loop executor
-    const loop = new TurnLoopExecutorInternal(orchestrator, {
-      conversationId,
-      agentId,
-      meta: { id: agentId, kind: 'internal' },  // Minimal metadata for backward compatibility
-      buildAgent: () => agentImpl,  // For backward compatibility, wrap the pre-built agent
-      ...(logger !== undefined ? { logger } : {}),
-    });
-
-    // Start the loop (fire and forget)
-    void loop.start().catch(err => {
-      console.error(`Error in scenario agent loop for ${agentId}:`, err);
+    // Start the agent
+    void agentImpl.start(conversationId, agentId).catch(err => {
+      console.error(`Error in scenario agent for ${agentId}:`, err);
     });
     
-    loops.push(loop);
+    agents.push(agentImpl);
   }
 
   return {
-    loops,
+    agents,
     stop: async () => {
-      // Stop all loops
-      for (const loop of loops) {
-        loop.stop();
+      // Stop all agents
+      for (const agent of agents) {
+        agent.stop();
       }
       // Give them a moment to clean up
       await new Promise(resolve => setTimeout(resolve, 100));

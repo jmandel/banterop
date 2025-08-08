@@ -6,7 +6,7 @@ import { wsRpcCall } from "$src/cli/cli-utils/wsRpcCall";
 import type { ScenarioConfiguration } from "$src/types/scenario-configuration.types";
 
 async function startServer(dbPath: string = ":memory:", skipAutoRun?: boolean): Promise<{ app: App; server: any; wsUrl: string }> {
-  const app = new App({ dbPath, skipAutoRun });
+  const app = new App({ dbPath, skipAutoRun: skipAutoRun ?? false });
   const hono = new Hono().route("/", createWebSocketServer(app.orchestrator, app.providerManager));
   const server = Bun.serve({ port: 0, fetch: hono.fetch, websocket });
   const wsUrl = `ws://localhost:${server.port}/api/ws`;
