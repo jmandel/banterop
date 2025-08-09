@@ -64,8 +64,15 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
     // Use the snapshot from context (stable view at turn start)
     const snapshot = ctx.snapshot;
     
-    console.log(`[${agentId}] takeTurn - runtimeMeta:`, JSON.stringify(snapshot.runtimeMeta, null, 2));
-    console.log(`[${agentId}] takeTurn - has scenario:`, !!snapshot.scenario);
+    // Only log essential info, not the full objects
+    console.log(`[${agentId}] takeTurn - has scenario: ${!!snapshot.scenario}, has runtimeMeta: ${!!snapshot.runtimeMeta}`);
+    if (snapshot.runtimeMeta?.agents) {
+      console.log(`[${agentId}] takeTurn - runtime agents:`, snapshot.runtimeMeta.agents.map((a: any) => ({ 
+        id: a.id, 
+        llmProvider: a.config?.llmProvider,
+        model: a.config?.model 
+      })));
+    }
     
     if (!snapshot.scenario) {
       // If no scenario, just provide a simple response instead of throwing
@@ -1026,8 +1033,11 @@ ${thoughts.join('\n')}
     // Check for runtime agent configuration
     const runtimeAgent = snapshot.runtimeMeta?.agents?.find((a: AgentMeta) => a.id === agentId);
     
-    console.log(`[${agentId}] getProviderForAgent - runtimeAgent:`, JSON.stringify(runtimeAgent, null, 2));
-    console.log(`[${agentId}] getProviderForAgent - config:`, runtimeAgent?.config);
+    console.log(`[${agentId}] getProviderForAgent - found runtime config:`, {
+      hasAgent: !!runtimeAgent,
+      llmProvider: runtimeAgent?.config?.llmProvider,
+      model: runtimeAgent?.config?.model
+    });
     
     if (runtimeAgent?.config?.llmProvider) {
       const providerName = runtimeAgent.config.llmProvider as string;
