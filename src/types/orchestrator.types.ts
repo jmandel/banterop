@@ -23,6 +23,8 @@ export type EventListener = (e: UnifiedEvent) => void;
 
 export interface OrchestratorConfig {
   idleTurnMs?: number; // optional watchdog for open turns
+  // When true, disables the guidance heartbeat timer (useful in tests)
+  disableHeartbeat?: boolean;
 }
 
 export interface SchedulePolicyInput {

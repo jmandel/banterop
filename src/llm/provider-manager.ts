@@ -3,7 +3,6 @@ import { GoogleLLMProvider } from './providers/google';
 import { OpenRouterLLMProvider } from './providers/openrouter';
 import { MockLLMProvider } from './providers/mock';
 import { BrowsersideLLMProvider } from './providers/browserside';
-import { findProviderForModel } from './model-registry';
 
 const PROVIDER_MAP = {
   google: GoogleLLMProvider,
@@ -14,6 +13,7 @@ const PROVIDER_MAP = {
 
 export interface LLMConfig {
   defaultLlmProvider: 'google' | 'openrouter' | 'mock' | 'browserside';
+  defaultLlmModel?: string | undefined;
   googleApiKey?: string | undefined;
   openRouterApiKey?: string | undefined;
   serverUrl?: string | undefined;
@@ -35,23 +35,34 @@ export class LLMProviderManager {
    */
   getProvider(config?: Partial<LLMProviderConfig>): LLMProvider {
     let providerName: SupportedProvider;
-    const model = config?.model;
+    // Use specified model, or fall back to default model from config
+    const model = config?.model ?? this.config.defaultLlmModel;
 
-    // If a model is specified, try to auto-detect the provider
+    console.log('[LLMProviderManager] getProvider called with:', { 
+      configProvider: config?.provider, 
+      configModel: config?.model,
+      defaultProvider: this.config.defaultLlmProvider,
+      defaultModel: this.config.defaultLlmModel,
+      resolvedModel: model
+    });
+
+    // If a model is specified and no explicit provider, try to auto-detect the provider
     if (model && !config?.provider) {
       const detectedProvider = this.findProviderForModel(model);
       if (detectedProvider) {
         providerName = detectedProvider;
+        console.log(`[LLMProviderManager] Auto-detected provider '${providerName}' for model '${model}'`);
       } else {
         throw new Error(`Unknown model '${model}'. Please specify a provider or use a known model name.`);
       }
     } else {
       // Use explicit provider or fall back to default
       providerName = config?.provider ?? this.config.defaultLlmProvider;
+      console.log(`[LLMProviderManager] Using provider '${providerName}' (explicit or default)`);
     }
 
     // Create a new provider instance each time (no caching in Connectathon mode)
-    return this.createProviderInstance(providerName, config);
+    return this.createProviderInstance(providerName, { ...config, model });
   }
 
   /**
@@ -59,13 +70,7 @@ export class LLMProviderManager {
    * Checks each provider's model list dynamically.
    */
   private findProviderForModel(modelName: string): SupportedProvider | null {
-    // First check the static registry
-    const registryProvider = findProviderForModel(modelName);
-    if (registryProvider) {
-      return registryProvider;
-    }
-
-    // Then dynamically check each provider's supported models using static metadata
+    // Single source of truth: check each provider's supported models using static metadata
     for (const [providerName, ProviderClass] of Object.entries(PROVIDER_MAP)) {
       try {
         const metadata = ProviderClass.getMetadata();
@@ -102,12 +107,16 @@ export class LLMProviderManager {
       throw new Error(`API key for provider '${providerName}' not found in configuration or environment variables.`);
     }
 
-    return new ProviderClass({ 
+    const providerConfig = { 
       provider: providerName, 
       ...(apiKey !== undefined ? { apiKey } : {}),
       ...(config?.model !== undefined ? { model: config.model } : {}),
       ...(providerName === 'browserside' && this.config.serverUrl ? { serverUrl: this.config.serverUrl } : {})
-    } as any);
+    };
+    
+    console.log(`[LLMProviderManager] Creating ${providerName} provider with config:`, providerConfig);
+    
+    return new ProviderClass(providerConfig as any);
   }
 
   private getApiKeyForProvider(providerName: SupportedProvider, overrideKey?: string): string | undefined {

@@ -64,7 +64,8 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
     // Use the snapshot from context (stable view at turn start)
     const snapshot = ctx.snapshot;
     
-    console.log(`[${agentId}] takeTurn - full snapshot:`, JSON.stringify(snapshot, null, 2));
+    console.log(`[${agentId}] takeTurn - runtimeMeta:`, JSON.stringify(snapshot.runtimeMeta, null, 2));
+    console.log(`[${agentId}] takeTurn - has scenario:`, !!snapshot.scenario);
     
     if (!snapshot.scenario) {
       // If no scenario, just provide a simple response instead of throwing
@@ -1025,16 +1026,25 @@ ${thoughts.join('\n')}
     // Check for runtime agent configuration
     const runtimeAgent = snapshot.runtimeMeta?.agents?.find((a: AgentMeta) => a.id === agentId);
     
+    console.log(`[${agentId}] getProviderForAgent - runtimeAgent:`, JSON.stringify(runtimeAgent, null, 2));
+    console.log(`[${agentId}] getProviderForAgent - config:`, runtimeAgent?.config);
+    
     if (runtimeAgent?.config?.llmProvider) {
       const providerName = runtimeAgent.config.llmProvider as string;
       const model = runtimeAgent.config.model as string | undefined;
+      
+      console.log(`[${agentId}] Using configured provider: ${providerName}, model: ${model}`);
+      
+      // For browserside provider, the serverUrl is already configured in the providerManager
+      // since it was passed when creating the LLMProviderManager instance
       return this.providerManager.getProvider({ 
         provider: providerName as SupportedProvider,
         ...(model !== undefined ? { model } : {})
       });
     }
     
-    // Fall back to system default
+    console.log(`[${agentId}] Falling back to default provider`);
+    // Fall back to system default - this will use browserside with serverUrl if configured
     return this.providerManager.getProvider();
   }
 }

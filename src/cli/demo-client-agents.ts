@@ -97,7 +97,7 @@ ws.onopen = async () => {
     console.log('\n🤖 Ensuring local agents are running...');
     const clientProvider = new LLMProviderManager({ 
       defaultLlmProvider: 'mock',
-      googleApiKey: process.env.GOOGLE_API_KEY,
+      googleApiKey: process.env.GEMINI_API_KEY,
       openRouterApiKey: process.env.OPENROUTER_API_KEY
     });
     
