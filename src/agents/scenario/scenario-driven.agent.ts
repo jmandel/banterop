@@ -1,4 +1,4 @@
-import { BaseAgent, type TurnContext } from '$src/agents/runtime/base-agent';
+import { BaseAgent, type TurnContext, type TurnRecoveryMode } from '$src/agents/runtime/base-agent';
 import type { IAgentTransport } from '$src/agents/runtime/runtime.interfaces';
 import type { ScenarioConfigAgentDetails, ScenarioConfiguration, Tool } from '$src/types/scenario-configuration.types';
 import type { LLMMessage, LLMProvider, LLMRequest } from '$src/types/llm.types';
@@ -16,6 +16,7 @@ export interface ScenarioDrivenAgentConfig {
   agentId: string;
   providerManager: LLMProviderManager;
   options?: ScenarioDrivenAgentOptions;
+  turnRecoveryMode?: TurnRecoveryMode;
 }
 
 // Removed unused ToolCall interface
@@ -54,7 +55,7 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
     transport: IAgentTransport,
     cfg: ScenarioDrivenAgentConfig
   ) {
-    super(transport);
+    super(transport, { turnRecoveryMode: cfg.turnRecoveryMode });
     this.providerManager = cfg.providerManager;
   }
 

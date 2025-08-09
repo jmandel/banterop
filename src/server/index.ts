@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { App } from './app';
 import { createWebSocketServer, websocket } from './ws/jsonrpc.server';
 import { createScenarioRoutes } from './routes/scenarios.http';
@@ -10,6 +11,12 @@ import { createBridgeRoutes } from './routes/bridge.mcp';
 const appInstance = new App();
 
 const server = new Hono();
+
+// Enable CORS for all routes
+server.use('*', cors({
+  origin: ['http://localhost:3001', 'http://localhost:3003'],
+  credentials: true,
+}));
 
 // HTTP: health under /api
 server.get('/api/health', (c) => c.json({ ok: true }));

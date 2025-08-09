@@ -1,14 +1,20 @@
-import { BaseAgent, type TurnContext } from '$src/agents/runtime/base-agent';
+import { BaseAgent, type TurnContext, type TurnRecoveryMode } from '$src/agents/runtime/base-agent';
 import type { IAgentTransport } from '$src/agents/runtime/runtime.interfaces';
 import { logLine } from '$src/lib/utils/logger';
 
 export class EchoAgent extends BaseAgent {
+  private progressText: string;
+  private finalText: string;
+  
   constructor(
     transport: IAgentTransport,
-    private progressText = 'Processing...', 
-    private finalText = 'Done'
+    progressText = 'Processing...', 
+    finalText = 'Done',
+    options?: { turnRecoveryMode?: TurnRecoveryMode }
   ) {
-    super(transport);
+    super(transport, options);
+    this.progressText = progressText;
+    this.finalText = finalText;
   }
 
   protected async takeTurn(ctx: TurnContext): Promise<void> {

@@ -394,6 +394,8 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = focusRef ?? useRef<HTMLDivElement>(null);
+  const gPendingRef = useRef(false);
+  const ggTimerRef = useRef<number | null>(null);
 
   const fetchHistory = async () => {
     if (!id) return;
@@ -464,6 +466,10 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
       wsRef.current = null;
       setConnState("closed");
       onConnStateChange?.("closed");
+      if (ggTimerRef.current) {
+        window.clearTimeout(ggTimerRef.current);
+        ggTimerRef.current = null;
+      }
     };
   }, [id]);
 
@@ -515,6 +521,28 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
       // Scroll up a notch (like ArrowUp)
       e.preventDefault();
       scrollRef.current?.scrollBy({ top: -50, behavior: 'smooth' });
+    } else if (e.key === 'g' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      // Vim-style gg: press g twice quickly to jump to top
+      e.preventDefault();
+      if (gPendingRef.current) {
+        gPendingRef.current = false;
+        if (ggTimerRef.current) {
+          window.clearTimeout(ggTimerRef.current);
+          ggTimerRef.current = null;
+        }
+        scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        gPendingRef.current = true;
+        ggTimerRef.current = window.setTimeout(() => {
+          gPendingRef.current = false;
+          ggTimerRef.current = null;
+        }, 400) as unknown as number;
+      }
+    } else if (e.key === 'G' && !e.ctrlKey && !e.metaKey) {
+      // Vim-style G: jump to bottom
+      e.preventDefault();
+      const el = scrollRef.current;
+      if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
     }
   };
 
@@ -538,6 +566,13 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
     }
     return Object.values(byTurn).sort((a, b) => a.turn - b.turn);
   }, [events]);
+
+  const isThinking = useMemo(() => {
+    if (!turns.length) return false;
+    const last = turns[turns.length - 1]!;
+    // Finality 'none' means the turn is still open/streaming
+    return last.finality === 'none';
+  }, [turns]);
 
   return (
     <div
@@ -669,6 +704,21 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
               {t.messages.map((m) => {
                 const text = (m.payload as any)?.text;
                 const html = typeof text === 'string' ? marked.parse(text) : undefined;
+                const atts: Array<{ id?: string; name: string; contentType: string; docId?: string }> | undefined = (m.payload as any)?.attachments;
+
+                const openAttachment = async (att: { id?: string; name: string; contentType: string }) => {
+                  try {
+                    if (!att.id) return;
+                    const res = await fetch(`${API_BASE}/attachments/${att.id}/content`);
+                    if (!res.ok) throw new Error(`Failed to fetch attachment ${att.id}`);
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    window.open(url, '_blank', 'noopener');
+                  } catch (e) {
+                    console.error('openAttachment error', e);
+                    alert('Unable to open attachment');
+                  }
+                };
                 return (
                   <div key={m.seq} data-block className="bg-white rounded px-3 py-2 mb-1 shadow-sm">
                     <div className="text-gray-500 text-[0.7rem] mb-1">{m.type}/{m.finality}</div>
@@ -679,12 +729,29 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
                         {text ?? JSON.stringify(m.payload)}
                       </div>
                     )}
+                    {Array.isArray(atts) && atts.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {atts.map((a, idx) => (
+                          <div key={`${m.seq}-att-${a.id ?? a.docId ?? idx}`} className="text-xs text-blue-700 hover:underline cursor-pointer flex items-center gap-1"
+                               onClick={(e) => { e.preventDefault(); openAttachment(a as any); }}
+                               title={a.contentType}>
+                            <span aria-hidden>📎</span>
+                            <span>{a.name || 'attachment'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
           );
         })}
+        {isThinking && (
+          <div className="sticky bottom-0 pt-1">
+            <div className="text-[0.75rem] text-gray-400 italic animate-pulse select-none">thinking …</div>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
     </div>
@@ -876,6 +943,8 @@ function HelpModal({ onClose }: { onClose: () => void }) {
           <Shortcut label="r" desc="Refresh list / reconnect details" />
           <Shortcut label="t" desc="Toggle traces (details)" />
           <Shortcut label="a" desc="Toggle autoscroll (details)" />
+          <Shortcut label="gg" desc="Jump to top (details)" />
+          <Shortcut label="G" desc="Jump to bottom (details)" />
           <Shortcut label="?" desc="Toggle this help" />
         </div>
       </div>

@@ -15,7 +15,7 @@ const ConfigSchema = z.object({
   googleApiKey: z.string().optional(),
   openRouterApiKey: z.string().optional(),
   defaultLlmProvider: z.enum(['google', 'openrouter', 'mock']).default('mock'),
-  defaultLlmModel: z.string().optional(), // e.g. 'gpt-4o', 'claude-3-5-sonnet-20241022', 'gemini-2.0-flash-exp'
+  defaultLlmModel: z.string().optional(), // e.g. 'gemini-2.5-flash'
   
   // Logging
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),

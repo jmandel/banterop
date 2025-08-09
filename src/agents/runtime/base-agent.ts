@@ -14,16 +14,27 @@ export interface TurnContext<TSnap = any> {
   getLatestSnapshot(): TSnap; // live mirror
 }
 
+export type TurnRecoveryMode = 'resume' | 'restart' | ((snap: any) => 'resume' | 'restart');
+
 export abstract class BaseAgent<TSnap = any> {
   private unsubscribe: (() => void) | undefined;
   private liveSnapshot: TSnap | undefined;
   private latestSeq = 0;
   private running = false;
   private events: IAgentEvents | undefined;
+  private inTurn = false;
+  private lastProcessedClosedSeq = 0;
+  
+  protected turnRecoveryMode: TurnRecoveryMode = 'resume';
 
   constructor(
-    protected transport: IAgentTransport
-  ) {}
+    protected transport: IAgentTransport,
+    options?: { turnRecoveryMode?: TurnRecoveryMode }
+  ) {
+    if (options?.turnRecoveryMode) {
+      this.turnRecoveryMode = options.turnRecoveryMode;
+    }
+  }
 
   async start(conversationId: number, agentId: string) {
     if (this.running) {
@@ -50,12 +61,18 @@ export abstract class BaseAgent<TSnap = any> {
       logLine(agentId, 'warn', `Snapshot missing scenario despite scenarioId: ${snap.metadata.scenarioId}`);
     }
 
-    // Subscribe to events
+    // Subscribe to events first
     logLine(agentId, 'debug', `Subscribing to events...`);
     this.unsubscribe = this.events.subscribe(async (ev) => {
       if (!this.running) return;
       
-      logLine(agentId, 'debug', `Received event: ${JSON.stringify(ev).substring(0, 200)}`);
+      // More detailed logging for guidance events
+      if ((ev as any).type === 'guidance') {
+        const g = ev as GuidanceEvent;
+        logLine(agentId, 'debug', `Received GUIDANCE event: nextAgentId=${g.nextAgentId}, seq=${g.seq}, forUs=${g.nextAgentId === agentId}`);
+      } else {
+        logLine(agentId, 'debug', `Received event: ${JSON.stringify(ev).substring(0, 200)}`);
+      }
       
       // Apply event to live snapshot
       this.applyEvent(this.liveSnapshot, ev);
@@ -77,31 +94,22 @@ export abstract class BaseAgent<TSnap = any> {
           return; // Not for us
         }
         
-        logLine(agentId, 'guidance', `Received guidance seq=${g.seq} - TAKING TURN`);
+        logLine(agentId, 'guidance', `Received guidance seq=${g.seq}`);
 
-        // Abort any previous incomplete turn
-        const { turn } = await this.transport.abortTurn(conversationId, agentId);
-        logLine(agentId, 'abort', `Using turn ${turn} after abort`);
-
-        // Create turn context (no preconditions needed anymore)
-        const ctx: TurnContext<TSnap> = {
-          conversationId,
-          agentId,
-          guidanceSeq: g.seq,
-          deadlineMs: g.deadlineMs || Date.now() + 30000,
-          snapshot: this.clone(this.liveSnapshot!),
-          transport: this.transport,
-          getLatestSnapshot: () => this.clone(this.liveSnapshot!),
-        };
-
-        // Execute the turn
-        try {
-          await this.takeTurn(ctx);
-        } catch (error) {
-          logLine(agentId, 'error', `Error in takeTurn: ${error}`);
+        // If we're currently in a turn, ignore guidance (we're already working)
+        if (this.inTurn) {
+          logLine(agentId, 'debug', `Ignoring guidance - already in turn`);
+          return;
         }
+
+        // Reconcile and maybe act
+        await this.reconcileAndMaybeAct(conversationId, agentId, g);
       }
     });
+    
+    // After subscribing, check if we should take action (reconcile without guidance)
+    logLine(agentId, 'startup', 'Performing initial reconciliation');
+    await this.reconcileAndMaybeAct(conversationId, agentId, null);
   }
 
   stop() {
@@ -117,6 +125,119 @@ export abstract class BaseAgent<TSnap = any> {
   }
 
   protected abstract takeTurn(ctx: TurnContext<TSnap>): Promise<void>;
+
+  private async reconcileAndMaybeAct(conversationId: number, agentId: string, guidance: GuidanceEvent | null): Promise<void> {
+    // Fetch fresh snapshot
+    const snapshot = await this.transport.getSnapshot(conversationId, { includeScenario: true }) as TSnap;
+    const snap = snapshot as any;
+    
+    // Check if completed
+    if (snap.status === 'completed') {
+      logLine(agentId, 'reconcile', 'Conversation completed, stopping');
+      this.stop();
+      return;
+    }
+
+    // Check if lastClosedSeq has advanced (avoid duplicate work)
+    const currentClosedSeq = snap.lastClosedSeq || 0;
+    if (guidance && this.lastProcessedClosedSeq > 0 && currentClosedSeq === this.lastProcessedClosedSeq) {
+      logLine(agentId, 'reconcile', `No new closed turns since seq ${this.lastProcessedClosedSeq}, skipping`);
+      return;
+    }
+
+    // Determine if there's an open turn and who owns it
+    const hasOpenTurn = this.hasOpenTurn(snap);
+    const lastEventAgent = this.getLastEventAgent(snap);
+    const weOwnOpenTurn = hasOpenTurn && lastEventAgent === agentId;
+    
+    logLine(agentId, 'reconcile', `hasOpenTurn=${hasOpenTurn}, lastEventAgent=${lastEventAgent}, weOwn=${weOwnOpenTurn}`);
+
+    if (hasOpenTurn && weOwnOpenTurn) {
+      // We own the open turn - decide based on recovery mode
+      const mode = typeof this.turnRecoveryMode === 'function' 
+        ? this.turnRecoveryMode(snapshot)
+        : this.turnRecoveryMode;
+      
+      logLine(agentId, 'reconcile', `We own open turn, recovery mode: ${mode}`);
+      
+      if (mode === 'restart') {
+        // Abort the turn and start fresh
+        const { turn } = await this.transport.abortTurn(conversationId, agentId);
+        logLine(agentId, 'abort', `Aborted turn ${turn} per restart policy`);
+        await this.startTurn(conversationId, agentId, guidance);
+      } else {
+        // Resume the open turn
+        logLine(agentId, 'reconcile', `Resuming open turn`);
+        await this.startTurn(conversationId, agentId, guidance);
+      }
+    } else if (hasOpenTurn && !weOwnOpenTurn) {
+      // Someone else owns the open turn - do nothing
+      logLine(agentId, 'reconcile', `Open turn owned by ${lastEventAgent}, waiting`);
+    } else {
+      // No open turn - check if it's our turn to start
+      if (guidance && guidance.nextAgentId === agentId) {
+        logLine(agentId, 'reconcile', `No open turn and guidance targets us, starting turn`);
+        await this.startTurn(conversationId, agentId, guidance);
+      } else {
+        logLine(agentId, 'reconcile', `No open turn, no guidance for us`);
+      }
+    }
+
+    // Update lastProcessedClosedSeq only if we took action
+    if ((hasOpenTurn && weOwnOpenTurn) || (!hasOpenTurn && guidance && guidance.nextAgentId === agentId)) {
+      this.lastProcessedClosedSeq = currentClosedSeq;
+    }
+  }
+
+  private async startTurn(conversationId: number, agentId: string, guidance: GuidanceEvent | null): Promise<void> {
+    if (this.inTurn) {
+      logLine(agentId, 'warn', 'Already in turn, skipping start');
+      return;
+    }
+
+    this.inTurn = true;
+    try {
+      // Create turn context
+      const ctx: TurnContext<TSnap> = {
+        conversationId,
+        agentId,
+        guidanceSeq: guidance?.seq || 0,
+        deadlineMs: guidance?.deadlineMs || Date.now() + 30000,
+        snapshot: this.clone(this.liveSnapshot!),
+        transport: this.transport,
+        getLatestSnapshot: () => this.clone(this.liveSnapshot!),
+      };
+
+      // Execute the turn
+      logLine(agentId, 'turn', 'Starting turn execution');
+      await this.takeTurn(ctx);
+    } catch (error) {
+      logLine(agentId, 'error', `Error in takeTurn: ${error}`);
+    } finally {
+      this.inTurn = false;
+      logLine(agentId, 'turn', 'Turn execution completed');
+    }
+  }
+
+  private hasOpenTurn(snapshot: any): boolean {
+    if (!snapshot.events || snapshot.events.length === 0) {
+      return false;
+    }
+    
+    const lastEvent = snapshot.events[snapshot.events.length - 1];
+    // Open turn = last event doesn't have turn or conversation finality
+    return lastEvent.type === 'message' && 
+           (!lastEvent.finality || lastEvent.finality === 'none');
+  }
+
+  private getLastEventAgent(snapshot: any): string | null {
+    if (!snapshot.events || snapshot.events.length === 0) {
+      return null;
+    }
+    
+    const lastEvent = snapshot.events[snapshot.events.length - 1];
+    return lastEvent.agentId || null;
+  }
 
   private applyEvent(snap: any, ev: StreamEvent) {
     if (!snap) return;

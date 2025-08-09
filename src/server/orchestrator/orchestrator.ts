@@ -110,10 +110,14 @@ export class OrchestratorService {
         // No messages yet - use startingAgentId if available
         if (metadata?.startingAgentId) {
           nextAgentId = metadata.startingAgentId;
+          logLine('orchestrator', 'heartbeat-check', 
+            `Conversation ${convo.conversation} has no messages, startingAgentId=${nextAgentId}`);
         }
       } else {
-        // Has messages - use policy to determine next agent
+        // Has messages - check if last turn is complete
         const lastMessage = messages[messages.length - 1];
+        
+        // Only send guidance if the last message finalized a turn (not still in progress)
         if (lastMessage && lastMessage.finality === 'turn') {
           const snapshot = this.getConversationSnapshot(convo.conversation);
           const decision = this.policy.decide({ snapshot, lastEvent: lastMessage });
@@ -122,14 +126,25 @@ export class OrchestratorService {
             nextAgentId = decision.agentId;
             guidanceSeq = lastMessage.seq + 0.1;
           }
+        } else if (lastMessage && lastMessage.finality === 'none') {
+          // Turn is still in progress, don't send guidance
+          logLine('orchestrator', 'heartbeat-skip', 
+            `Conversation ${convo.conversation} has turn in progress, skipping guidance`);
+          nextAgentId = null;
         }
       }
       
-      // If we have a next agent and haven't sent this guidance yet
+      // If we determined we need guidance (either no messages yet, or last message ended a turn)
+      // then keep sending it until someone takes the turn
       if (nextAgentId) {
-        const lastSent = this.lastGuidanceSeq.get(convo.conversation) || 0;
+        // Check if someone already started working on this turn
+        // (any trace or message with seq > guidanceSeq means someone is working)
+        const turnInProgress = events.some(e => 
+          (e.type === 'trace' || e.type === 'message') && 
+          e.seq > guidanceSeq
+        );
         
-        if (guidanceSeq > lastSent) {
+        if (!turnInProgress) {
           const agent = metadata?.agents?.find(a => a.id === nextAgentId);
           
           if (agent) {
@@ -145,8 +160,10 @@ export class OrchestratorService {
               `Broadcasting guidance for ${nextAgentId} in conversation ${convo.conversation} (seq ${guidanceSeq})`);
             
             this.bus.publishGuidance(guidanceEvent);
-            this.lastGuidanceSeq.set(convo.conversation, guidanceSeq);
           }
+        } else {
+          logLine('orchestrator', 'heartbeat-skip', 
+            `Turn in progress for conversation ${convo.conversation} (events after seq ${guidanceSeq}), skipping guidance`);
         }
       }
     }
@@ -373,6 +390,7 @@ export class OrchestratorService {
           
           // Publish guidance immediately
           this.bus.publishGuidance(guidanceEvent);
+          // Don't set lastGuidanceSeq - let heartbeat keep sending until claimed
           
           logLine('orchestrator', 'guidance', 
             `Emitted initial guidance for ${startingAgent.id} on conversation ${conversationId}`);

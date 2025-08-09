@@ -1,7 +1,11 @@
-import React, { useEffect, useState, useCallback } from "react";
-import { HashRouter as Router, Routes, Route, useNavigate } from "react-router-dom";
+import React, { useEffect, useState, useCallback, useRef } from "react";
+import { HashRouter as Router, Routes, Route, useNavigate, useParams } from "react-router-dom";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
+import { ScenarioDrivenAgent } from "$src/agents/scenario/scenario-driven.agent";
+import { WsTransport } from "$src/agents/runtime/ws.transport";
+import { LLMProviderManager } from "$src/llm/provider-manager";
+import type { UnifiedEvent } from "$src/types/event.types";
 
 dayjs.extend(relativeTime);
 
@@ -87,17 +91,19 @@ function useHealthPing(intervalMs = 8000) {
 
 function ScenarioList() {
   const navigate = useNavigate();
+  const params = useParams<{ scenarioId?: string }>();
   const [scenarios, setScenarios] = useState<ScenarioItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedScenario, setSelectedScenario] = useState<ScenarioItem | null>(null);
   const [launchConfig, setLaunchConfig] = useState<LaunchConfig | null>(null);
   const [launching, setLaunching] = useState(false);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
 
   const loadScenarios = async () => {
     try {
       setLoading(true);
-      const result = await wsRpcCall<ScenarioItem[]>("listScenarios", {});
-      setScenarios(result);
+      const result = await wsRpcCall<{ scenarios: ScenarioItem[] }>("listScenarios", {});
+      setScenarios(result.scenarios || []);
     } catch (err) {
       console.error("Failed to load scenarios:", err);
     } finally {
@@ -105,19 +111,120 @@ function ScenarioList() {
     }
   };
 
+  const loadAvailableModels = async () => {
+    try {
+      // Construct the correct URL - API_BASE already includes /api
+      const url = API_BASE.startsWith('http') 
+        ? `${API_BASE}/llm/providers`
+        : `${location.protocol}//${location.host}${API_BASE}/llm/providers`;
+      
+      console.log('Fetching models from:', url);
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch providers: ${response.statusText}`);
+      }
+      
+      const providers = await response.json();
+      console.log('Received providers:', providers);
+      
+      // Extract all model names from all providers (except browserside)
+      const models = new Set<string>();
+      for (const provider of providers) {
+        // Skip browserside provider since it's just a proxy
+        if (provider.name === 'browserside') {
+          continue;
+        }
+        
+        if (provider.models && Array.isArray(provider.models)) {
+          // Models are directly strings in the array
+          for (const model of provider.models) {
+            models.add(model);
+          }
+        }
+      }
+      
+      const sortedModels = Array.from(models).sort();
+      console.log('Available models from server:', sortedModels);
+      setAvailableModels(sortedModels);
+    } catch (err) {
+      console.error("Failed to load available models:", err);
+      // No fallback - if we can't get models from server, we have no models
+      setAvailableModels([]);
+    }
+  };
+
   useEffect(() => {
     loadScenarios();
+    loadAvailableModels();
   }, []);
+
+  // Handle URL-based scenario selection
+  useEffect(() => {
+    if (params.scenarioId && scenarios.length > 0) {
+      const scenario = scenarios.find(s => s.id === params.scenarioId);
+      if (scenario && scenario.id !== selectedScenario?.id) {
+        // Don't update URL when selecting from URL
+        setSelectedScenario(scenario);
+        
+        // Use the first available model, or empty string if none available yet
+        const defaultModel = availableModels.length > 0 ? availableModels[0] : '';
+        
+        // Extract agent configurations from scenario
+        const agents = scenario.config?.agents?.map((a: any) => ({
+          id: a.agentId,
+          displayName: a.agentId.replace(/-/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+          llmProvider: 'browserside',
+          model: defaultModel
+        })) || [];
+
+        setLaunchConfig({
+          scenarioId: scenario.id,
+          title: `${scenario.name} - ${new Date().toLocaleString()}`,
+          agents,
+          startingAgentId: agents[0]?.id || ''
+        });
+      }
+    }
+  }, [params.scenarioId, scenarios, availableModels]);
+
+  // Update launch config when models become available
+  useEffect(() => {
+    if (launchConfig && availableModels.length > 0) {
+      // If any agent has no model selected, update it to the first available
+      const needsUpdate = launchConfig.agents.some(a => !a.model);
+      if (needsUpdate) {
+        setLaunchConfig(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            agents: prev.agents.map(agent => ({
+              ...agent,
+              model: agent.model || availableModels[0] || ''
+            }))
+          };
+        });
+      }
+    }
+  }, [availableModels]);
 
   const handleSelectScenario = (scenario: ScenarioItem) => {
     setSelectedScenario(scenario);
+    
+    // Update URL to reflect selected scenario
+    if (scenario.id !== params.scenarioId) {
+      navigate(`/scenario/${scenario.id}`);
+    }
+    
+    // Use the first available model, or empty string if none available yet
+    const defaultModel = availableModels.length > 0 ? availableModels[0] : '';
     
     // Extract agent configurations from scenario
     const agents = scenario.config?.agents?.map((a: any) => ({
       id: a.agentId,
       displayName: a.agentId.replace(/-/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
       llmProvider: 'browserside',
-      model: 'gemini-2.5-flash'
+      model: defaultModel
     })) || [];
 
     setLaunchConfig({
@@ -134,7 +241,8 @@ function ScenarioList() {
     try {
       setLaunching(true);
       
-      // Create conversation with scenario
+      // Create conversation with scenario - exactly like CLI demo
+      console.log('Creating conversation with startingAgentId:', launchConfig.startingAgentId);
       const result = await wsRpcCall<{ conversationId: number }>("createConversation", {
         meta: {
           title: launchConfig.title,
@@ -143,16 +251,20 @@ function ScenarioList() {
             id: a.id,
             displayName: a.displayName,
             config: {
-              llmProvider: a.llmProvider,
-              model: a.model
+              model: a.model,
+              llmProvider: a.llmProvider
             }
           })),
-          startingAgentId: launchConfig.startingAgentId
+          startingAgentId: launchConfig.startingAgentId,
+          custom: {
+            autoRun: false  // Don't auto-run server-side, we're running browserside
+          }
         }
       });
+      console.log('Created conversation:', result);
       
-      // Navigate to conversation view
-      navigate(`/conversation/${result.conversationId}`);
+      // Navigate to conversation view with auto-start flag
+      navigate(`/conversation/${result.conversationId}?autostart=true`);
     } catch (err) {
       console.error("Failed to launch scenario:", err);
       alert(`Failed to launch: ${err}`);
@@ -269,11 +381,9 @@ function ScenarioList() {
                               setLaunchConfig({ ...launchConfig, agents: newAgents });
                             }}
                             className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
+                            disabled
                           >
                             <option value="browserside">Browserside</option>
-                            <option value="google">Google</option>
-                            <option value="openrouter">OpenRouter</option>
-                            <option value="mock">Mock</option>
                           </select>
                         </div>
                         <div>
@@ -286,11 +396,17 @@ function ScenarioList() {
                               setLaunchConfig({ ...launchConfig, agents: newAgents });
                             }}
                             className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
+                            disabled={availableModels.length === 0}
                           >
-                            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                            <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
-                            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-                            <option value="mock-model">Mock Model</option>
+                            {availableModels.length > 0 ? (
+                              availableModels.map((model) => (
+                                <option key={model} value={model}>
+                                  {model}
+                                </option>
+                              ))
+                            ) : (
+                              <option value="">No models available</option>
+                            )}
                           </select>
                         </div>
                       </div>
@@ -344,11 +460,125 @@ function ScenarioList() {
   );
 }
 
+function ConversationViewWrapper() {
+  const params = useParams<{ id: string }>();
+  const id = params.id ? Number(params.id) : 0;
+  console.log('ConversationViewWrapper - params:', params, 'id:', id);
+  return <ConversationView id={id} />;
+}
+
 function ConversationView({ id }: { id: number }) {
   const navigate = useNavigate();
   const [conversation, setConversation] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [agentsRunning, setAgentsRunning] = useState(false);
+  const [messages, setMessages] = useState<UnifiedEvent[]>([]);
+  const agentsRef = useRef<Map<string, ScenarioDrivenAgent>>(new Map());
+  const eventWsRef = useRef<WebSocket | null>(null);
+  
+  // Check if we should auto-start agents
+  const urlParams = new URLSearchParams(window.location.search);
+  const shouldAutoStart = urlParams.get('autostart') === 'true';
 
+  const startAgents = async () => {
+    if (!conversation || agentsRunning) return;
+    
+    try {
+      setAgentsRunning(true);
+      
+      // Extract server URL for browserside provider
+      const wsUrl = API_BASE.startsWith('http')
+        ? API_BASE.replace(/^http/, 'ws') + '/ws'
+        : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${API_BASE}/ws`;
+      const serverUrl = API_BASE.replace('/api', '');
+      
+      // Don't call ensureAgentsRunning - we're running agents in the browser
+      const agentIds = conversation.metadata?.agents?.map((a: any) => a.id) || [];
+      console.log('Agent IDs to start in browser:', agentIds);
+      console.log('Full agent metadata:', conversation.metadata?.agents);
+      
+      // Create LLM provider manager
+      const providerManager = new LLMProviderManager({
+        defaultLlmProvider: 'browserside',
+        defaultLlmModel: conversation.metadata?.agents?.[0]?.config?.model || 'gemini-2.5-flash',
+        serverUrl: serverUrl
+      });
+      
+      // Create and start agents
+      const agents = new Map<string, ScenarioDrivenAgent>();
+      
+      for (const agentMeta of conversation.metadata?.agents || []) {
+        try {
+          console.log(`Creating agent: ${agentMeta.id} for conversation ${id}...`);
+          const transport = new WsTransport(wsUrl);
+          const agent = new ScenarioDrivenAgent(transport, {
+            agentId: agentMeta.id,
+            providerManager
+          });
+          agents.set(agentMeta.id, agent);
+          
+          console.log(`Starting agent: ${agentMeta.id} for conversation ${id}...`);
+          await agent.start(id, agentMeta.id);
+          console.log(`✓ Started agent: ${agentMeta.id} for conversation ${id}`);
+        } catch (err) {
+          console.error(`Failed to start agent ${agentMeta.id}:`, err);
+        }
+      }
+      
+      // All agents are connected
+      console.log('All agents started successfully');
+      
+      agentsRef.current = agents;
+      
+      // Subscribe to events
+      const eventWs = new WebSocket(wsUrl);
+      eventWsRef.current = eventWs;
+      
+      eventWs.addEventListener('open', () => {
+        eventWs.send(JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'subscribe',
+          params: { conversationId: id },
+          id: 'sub-1'
+        }));
+      });
+      
+      eventWs.addEventListener('message', (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.method === 'event' && msg.params) {
+            const evt = msg.params as UnifiedEvent;
+            if (evt.type === 'message') {
+              setMessages(prev => [...prev, evt]);
+            }
+          }
+        } catch (e) {
+          console.error('Failed to parse event:', e);
+        }
+      });
+      
+    } catch (err) {
+      console.error('Failed to start agents:', err);
+      setAgentsRunning(false);
+    }
+  };
+  
+  const stopAgents = async () => {
+    // Stop all agents
+    for (const agent of agentsRef.current.values()) {
+      await agent.stop();
+    }
+    agentsRef.current.clear();
+    
+    // Close event WebSocket
+    if (eventWsRef.current) {
+      eventWsRef.current.close();
+      eventWsRef.current = null;
+    }
+    
+    setAgentsRunning(false);
+  };
+  
   useEffect(() => {
     const loadConversation = async () => {
       try {
@@ -358,6 +588,14 @@ function ConversationView({ id }: { id: number }) {
           includeScenario: false
         });
         setConversation(result);
+        
+        // Auto-start agents if requested and this is a fresh conversation
+        if (shouldAutoStart && !agentsRunning) {
+          // Clear the autostart param to prevent re-runs
+          window.history.replaceState(null, '', `#/conversation/${id}`);
+          // Start agents immediately - no timeout needed, heartbeat handles guidance
+          startAgents();
+        }
       } catch (err) {
         console.error("Failed to load conversation:", err);
       } finally {
@@ -366,7 +604,25 @@ function ConversationView({ id }: { id: number }) {
     };
     
     loadConversation();
+    
+    // Cleanup on unmount
+    return () => {
+      stopAgents();
+    };
   }, [id]);
+  
+  // Warn before leaving if agents are running
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (agentsRunning) {
+        e.preventDefault();
+        e.returnValue = 'Agents are still running. Are you sure you want to leave?';
+      }
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [agentsRunning]);
 
   if (loading) {
     return (
@@ -407,12 +663,59 @@ function ConversationView({ id }: { id: number }) {
             </div>
           </div>
           
-          <div className="p-4 border border-blue-200 bg-blue-50 rounded-lg">
-            <div className="text-sm text-blue-800">
-              <strong>View in Watch App:</strong> The conversation has been created and agents are running.
-              Open the <a href="/watch#/conversation/{id}" className="underline hover:text-blue-900">Watch app</a> to monitor the conversation in real-time.
+          {!agentsRunning ? (
+            <div className="p-4 border border-blue-200 bg-blue-50 rounded-lg">
+              <div className="text-sm text-blue-800 mb-3">
+                <strong>Conversation created!</strong> The agents need to be started to begin the dialogue.
+              </div>
+              <button
+                onClick={startAgents}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              >
+                Start Agents
+              </button>
             </div>
-          </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="p-4 border border-green-200 bg-green-50 rounded-lg">
+                <div className="text-sm text-green-800 flex items-center justify-between">
+                  <div>
+                    <strong>Agents are running!</strong> The conversation is in progress.
+                    <span className="ml-2 text-xs">({messages.length} messages)</span>
+                  </div>
+                  <button
+                    onClick={stopAgents}
+                    className="px-3 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-700"
+                  >
+                    Stop Agents
+                  </button>
+                </div>
+              </div>
+              
+              <div className="p-4 border border-gray-200 rounded-lg max-h-96 overflow-y-auto">
+                <div className="text-sm font-semibold mb-2">Recent Messages:</div>
+                <div className="space-y-2">
+                  {messages.length === 0 ? (
+                    <div className="text-gray-500 text-sm">Waiting for messages...</div>
+                  ) : (
+                    messages.slice(-10).map((msg, idx) => (
+                      <div key={idx} className="p-2 bg-gray-50 rounded text-sm">
+                        <div className="font-medium text-blue-600">[{msg.agentId}]</div>
+                        <div className="text-gray-700">{(msg.payload as any)?.text || JSON.stringify(msg.payload)}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              
+              <div className="p-4 border border-yellow-200 bg-yellow-50 rounded-lg">
+                <div className="text-sm text-yellow-800">
+                  <strong>Monitor in Watch App:</strong> For a better viewing experience,
+                  open the <a href={`/watch#/conversation/${id}`} className="underline hover:text-yellow-900">Watch app</a> in a new tab.
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -439,9 +742,8 @@ function App() {
       <Router>
         <Routes>
           <Route path="/" element={<ScenarioList />} />
-          <Route path="/conversation/:id" element={
-            <ConversationView id={Number(window.location.hash.split("/").pop())} />
-          } />
+          <Route path="/scenario/:scenarioId" element={<ScenarioList />} />
+          <Route path="/conversation/:id" element={<ConversationViewWrapper />} />
         </Routes>
       </Router>
     </div>
