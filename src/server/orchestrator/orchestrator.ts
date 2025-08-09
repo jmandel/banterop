@@ -23,6 +23,7 @@ export class OrchestratorService {
   private isShuttingDown = false;
   private guidanceHeartbeatTimer?: Timer;
   private lastGuidanceSeq = new Map<number, number>(); // Track last guidance seq per conversation
+  private pendingGuidanceCheck: Promise<void> | null = null; // Track pending guidance check
 
   constructor(storage: Storage, bus?: SubscriptionBus, policy?: SchedulePolicy, _cfg?: OrchestratorConfig) {
     this.storage = storage;
@@ -43,11 +44,17 @@ export class OrchestratorService {
       this.guidanceHeartbeatTimer = undefined;
     }
     
+    // Wait for any pending guidance check to complete
+    if (this.pendingGuidanceCheck) {
+      try {
+        await this.pendingGuidanceCheck;
+      } catch {
+        // Ignore errors during shutdown
+      }
+    }
+    
     // Clear subscriptions
     this.bus = new SubscriptionBus();
-    
-    // Add a small delay to ensure any pending timer callbacks complete
-    await new Promise(resolve => setTimeout(resolve, 10));
   }
   
   private startGuidanceHeartbeat(): void {
@@ -58,16 +65,28 @@ export class OrchestratorService {
     
     this.guidanceHeartbeatTimer = setInterval(() => {
       if (this.isShuttingDown) return;
-      this.checkAndBroadcastGuidance();
+      
+      // Track the pending operation
+      this.pendingGuidanceCheck = this.checkAndBroadcastGuidance()
+        .catch(error => {
+          // Log error but don't crash
+          if (!this.isShuttingDown) {
+            console.error('[OrchestratorService] Error in guidance check:', error);
+          }
+        })
+        .finally(() => {
+          this.pendingGuidanceCheck = null;
+        });
     }, 2000); // Check every 2 seconds
   }
   
-  private checkAndBroadcastGuidance(): void {
+  private async checkAndBroadcastGuidance(): Promise<void> {
     // Don't access database if shutting down
     if (this.isShuttingDown) return;
     
-    // Get all active conversations
-    const activeConversations = this.storage.conversations.list({ status: 'active' });
+    try {
+      // Get all active conversations
+      const activeConversations = this.storage.conversations.list({ status: 'active' });
     
     for (const convo of activeConversations) {
       const events = this.storage.events.getEvents(convo.conversation);
@@ -122,6 +141,12 @@ export class OrchestratorService {
             this.lastGuidanceSeq.set(convo.conversation, guidanceSeq);
           }
         }
+      }
+    }
+    } catch (error) {
+      // Re-throw if not shutting down
+      if (!this.isShuttingDown) {
+        throw error;
       }
     }
   }
