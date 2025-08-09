@@ -50,14 +50,17 @@ describe("OrchestratorService config validation", () => {
     });
   });
 
-  afterEach(() => storage.close());
+  afterEach(async () => {
+    await orch.shutdown();
+    storage.close();
+  });
 
   it("throws if runtime agent IDs don't match scenario agents 1:1", () => {
     expect(() =>
       orch.createConversation({
         meta: {
           scenarioId: "demo-scn",
-          agents: [{ id: "agent-1", kind: "internal" }], // missing agent-2
+          agents: [{ id: "agent-1",  }], // missing agent-2
         },
       })
     ).toThrow(/runtime agents must match scenario agents exactly/);
@@ -68,8 +71,8 @@ describe("OrchestratorService config validation", () => {
       meta: {
         scenarioId: "demo-scn",
         agents: [
-          { id: "agent-1", kind: "internal" },
-          { id: "agent-2", kind: "external" },
+          { id: "agent-1",  },
+          { id: "agent-2",  },
         ],
       },
     });
@@ -82,9 +85,9 @@ describe("OrchestratorService config validation", () => {
         meta: {
           scenarioId: "demo-scn",
           agents: [
-            { id: "agent-1", kind: "internal" },
-            { id: "agent-2", kind: "external" },
-            { id: "agent-3", kind: "external" }, // extra agent
+            { id: "agent-1",  },
+            { id: "agent-2",  },
+            { id: "agent-3",  }, // extra agent
           ],
         },
       })
@@ -97,8 +100,8 @@ describe("OrchestratorService config validation", () => {
         meta: {
           scenarioId: "demo-scn",
           agents: [
-            { id: "agent-2", kind: "internal" },
-            { id: "agent-3", kind: "external" }, // wrong agent
+            { id: "agent-2",  },
+            { id: "agent-3",  }, // wrong agent
           ],
         },
       })
@@ -109,7 +112,7 @@ describe("OrchestratorService config validation", () => {
     const id = orch.createConversation({
       meta: {
         agents: [
-          { id: "any-agent", kind: "internal" },
+          { id: "any-agent",  },
         ],
       },
     });

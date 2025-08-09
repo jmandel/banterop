@@ -33,19 +33,17 @@ async function runDemo() {
         agents: [
           {
             id: 'system',
-            kind: 'external',
             displayName: 'System'
           },
           {
             id: 'backend-agent-1',
-            kind: 'internal',
             displayName: 'Backend Agent 1',
             agentClass: 'AssistantAgent',
             config: { llmProvider: 'mock' }
           },
           {
             id: 'backend-agent-2',
-            kind: 'internal', 
+ 
             displayName: 'Backend Agent 2',
             agentClass: 'EchoAgent'
           }
@@ -62,7 +60,7 @@ async function runDemo() {
       (event: UnifiedEvent) => {
         events.push(event);
         if (event.type === 'message') {
-          console.log(`📨 [${event.agentId}]: ${event.payload.text}`);
+          console.log(`📨 [${event.agentId}]: ${(event.payload as any).text}`);
         } else if (event.type === 'trace') {
           console.log(`🔍 [${event.agentId}]: ${JSON.stringify(event.payload)}`);
         } else if (event.type === 'system') {

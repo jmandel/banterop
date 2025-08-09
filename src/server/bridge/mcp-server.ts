@@ -2,7 +2,7 @@
 //
 // McpBridgeServer – updated to accept a generic base64url ConversationMeta config.
 // begin_chat_thread will create a conversation from the provided meta and start internal agents
-// (based on agentClass and kind='internal'). The external startingAgentId will be the initiator.
+// (based on agentClass). The startingAgentId will be the initiator.
 //
 // send_message_to_chat_thread and wait_for_reply remain the same behaviorally, but now derive
 // the bridgedAgentId from meta.startingAgentId (or fallback rules).
@@ -136,7 +136,6 @@ export class McpBridgeServer {
     const agents: AgentMeta[] = meta.agents.map(a => {
       const agent: AgentMeta = {
         id: a.id,
-        kind: a.kind,
       };
       if (a.agentClass !== undefined) agent.agentClass = a.agentClass;
       if (a.role !== undefined) agent.role = a.role;

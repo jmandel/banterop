@@ -15,6 +15,7 @@ describe('ScenarioDrivenAgent', () => {
   let mockEvents: MockEvents;
   let agent: ScenarioDrivenAgent;
   let testScenario: ScenarioConfiguration;
+  let eventHandlers: ((event: any) => void)[] = [];
 
   // Helper to trigger a turn
   async function triggerTurn(conversationId: number, agentId: string, seq: number = 1.1) {
@@ -28,7 +29,8 @@ describe('ScenarioDrivenAgent', () => {
       deadlineMs: 30000
     };
     
-    mockEvents.emit(guidance);
+    // Emit to all registered handlers
+    eventHandlers.forEach(handler => handler(guidance));
     await new Promise(resolve => setTimeout(resolve, 100));
   }
 
@@ -48,6 +50,9 @@ describe('ScenarioDrivenAgent', () => {
   }
 
   beforeEach(() => {
+    // Reset event handlers
+    eventHandlers = [];
+    
     // Create mock provider
     mockProvider = new MockLLMProvider({ provider: 'mock' });
     
@@ -117,15 +122,37 @@ describe('ScenarioDrivenAgent', () => {
     mockTransport = new MockTransport();
     mockEvents = new MockEvents();
     
+    // Mock createEventStream to capture and use event handlers
+    mockTransport.createEventStream.mockImplementation(() => {
+      return {
+        subscribe: (handler: (event: any) => void) => {
+          eventHandlers.push(handler);
+          return () => {
+            const idx = eventHandlers.indexOf(handler);
+            if (idx > -1) eventHandlers.splice(idx, 1);
+          };
+        }
+      };
+    });
+    
+    // Mock abortTurn
+    mockTransport.abortTurn.mockResolvedValue({ turn: 2 });
+    
     // Setup default mock responses
     mockTransport.getSnapshot.mockResolvedValue({
       conversation: 1,
       status: 'active' as const,
       scenario: testScenario,
+      metadata: { 
+        agents: [
+          { id: 'test-agent' },
+          { id: 'other-agent' }
+        ]
+      },
       runtimeMeta: { 
         agents: [
-          { id: 'test-agent', kind: 'internal' },
-          { id: 'other-agent', kind: 'internal' }
+          { id: 'test-agent' },
+          { id: 'other-agent' }
         ]
       },
       events: [
@@ -135,7 +162,7 @@ describe('ScenarioDrivenAgent', () => {
     } as ConversationSnapshot);
     
     // Create agent
-    agent = new ScenarioDrivenAgent(mockTransport, mockEvents, {
+    agent = new ScenarioDrivenAgent(mockTransport, {
       agentId: 'test-agent',
       providerManager,
     });
@@ -202,10 +229,16 @@ describe('ScenarioDrivenAgent', () => {
       conversation: 1,
       status: 'active' as const,
       scenario: testScenario,
+      metadata: {
+        agents: [
+          { id: 'test-agent' },
+          { id: 'other-agent' }
+        ]
+      },
       runtimeMeta: { 
         agents: [
-          { id: 'test-agent', kind: 'internal' },
-          { id: 'other-agent', kind: 'internal' }
+          { id: 'test-agent' },
+          { id: 'other-agent' }
         ]
       },
       events: [
@@ -263,13 +296,12 @@ describe('ScenarioDrivenAgent', () => {
         agents: [
           { 
             id: 'test-agent', 
-            kind: 'internal',
             config: {
               llmProvider: 'mock',
               model: 'test-model'
             }
           },
-          { id: 'other-agent', kind: 'internal' }
+          { id: 'other-agent' }
         ]
       },
       events: [
@@ -289,6 +321,7 @@ describe('ScenarioDrivenAgent', () => {
       conversation: 1,
       status: 'active' as const,
       scenario: null,
+      metadata: { agents: [] },
       runtimeMeta: { agents: [] },
       events: [],
       lastClosedSeq: 0
@@ -303,13 +336,14 @@ describe('ScenarioDrivenAgent', () => {
       conversation: 1,
       status: 'active' as const,
       scenario: testScenario,
+      metadata: { agents: [] },
       runtimeMeta: { agents: [] },
       events: [],
       lastClosedSeq: 0
     } as ConversationSnapshot);
     
     // Create agent with ID not in scenario
-    const wrongAgent = new ScenarioDrivenAgent(mockTransport, mockEvents, {
+    const wrongAgent = new ScenarioDrivenAgent(mockTransport, {
       agentId: 'unknown-agent',
       providerManager,
     });
@@ -340,8 +374,8 @@ describe('ScenarioDrivenAgent', () => {
       scenario: testScenario,
       runtimeMeta: { 
         agents: [
-          { id: 'test-agent', kind: 'internal' },
-          { id: 'other-agent', kind: 'internal' }
+          { id: 'test-agent' },
+          { id: 'other-agent' }
         ]
       },
       events: [

@@ -21,7 +21,7 @@ const LLMCompleteSchema = z.object({
   maxTokens: z.number().int().positive().optional(),
   tools: z.array(LLMToolSchema).optional(),
   // Server-side override: which configured provider to use (no apiKey from clients)
-  provider: z.enum(['google', 'openrouter', 'mock']).optional(),
+  provider: z.enum(['google', 'openrouter', 'mock', 'browserside']).optional(),
 });
 
 export function createLLMRoutes(pm: LLMProviderManager) {

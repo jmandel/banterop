@@ -23,13 +23,11 @@ describe('Conversation Metadata', () => {
         agents: [
           {
             id: 'user-1',
-            kind: 'external',
             role: 'user',
             displayName: 'Test User',
           },
           {
             id: 'assistant-1',
-            kind: 'internal',
             role: 'assistant',
             config: { model: 'gpt-4' },
           },
@@ -54,7 +52,6 @@ describe('Conversation Metadata', () => {
     expect(convo!.metadata.agents).toHaveLength(2);
     expect(convo!.metadata.agents[0]).toEqual({
       id: 'user-1',
-      kind: 'external',
       role: 'user',
       displayName: 'Test User',
     });
@@ -103,7 +100,6 @@ describe('Conversation Metadata', () => {
         agents: [
           {
             id: 'complex-agent',
-            kind: 'internal',
             config: {
               model: 'gpt-4',
               temperature: 0.7,

@@ -60,7 +60,7 @@ describe('OrchestratorService', () => {
     const snapshot1 = orch.getConversationSnapshot(1);
     
     // Now sendTrace can start a new turn (turn 2) with proper precondition
-    orch.sendTrace(1, 'assistant', { type: 'thought', content: 'starting new turn' }, undefined, { lastClosedSeq: snapshot1.lastClosedSeq });
+    orch.sendTrace(1, 'assistant', { type: 'thought', content: 'starting new turn' }, undefined);
     
     // Verify the trace started a new turn
     const snapshot = orch.getConversationSnapshot(1);
@@ -75,8 +75,8 @@ describe('OrchestratorService', () => {
       meta: {
         title: 'Test Conversation',
         agents: [
-          { id: 'user', kind: 'external' },
-          { id: 'bot', kind: 'internal' },
+          { id: 'user',  },
+          { id: 'bot',  },
         ],
       },
     });
@@ -101,8 +101,8 @@ describe('OrchestratorService', () => {
     const convId = orch2.createConversation({
       meta: {
         agents: [
-          { id: 'user', kind: 'external' },
-          { id: 'assistant', kind: 'internal' },
+          { id: 'user',  },
+          { id: 'assistant',  },
         ],
       },
     });

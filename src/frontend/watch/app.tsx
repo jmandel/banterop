@@ -408,7 +408,7 @@ function ConversationView({ id, focusRef }: ConversationViewProps) {
     const wsUrl = API_BASE.startsWith("http")
       ? API_BASE.replace(/^http/, "ws") + "/ws"
       : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${API_BASE}/ws`;
-    const lastSeq = events.length ? events[events.length - 1].seq : undefined;
+    const lastSeq = events.length ? events[events.length - 1]?.seq : undefined;
     const s = new WsEventStream(wsUrl, {
       conversationId: Number(id),
       includeGuidance: true,

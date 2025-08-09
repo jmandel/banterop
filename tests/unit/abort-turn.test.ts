@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { App } from '$src/server/app';
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
 
@@ -11,8 +11,12 @@ describe('Abort Turn Mechanism', () => {
     app = new App({ dbPath: ':memory:' });
     orchestrator = app.orchestrator;
     conversationId = orchestrator.createConversation({ 
-      meta: { agents: [{ id: 'agent-a', kind: 'internal' }, { id: 'agent-b', kind: 'external' }] } 
+      meta: { agents: [{ id: 'agent-a' }, { id: 'agent-b' }] } 
     });
+  });
+
+  afterEach(async () => {
+    await app.shutdown();
   });
 
   describe('abortTurn', () => {

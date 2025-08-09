@@ -56,8 +56,8 @@ describe('Event Coalescing', () => {
       
       // Should only include abort marker and events after
       expect(coalesced.length).toBe(2);
-      expect(coalesced[0].seq).toBe(3); // Abort marker
-      expect(coalesced[1].seq).toBe(4); // Message after abort
+      expect(coalesced[0]?.seq).toBe(3); // Abort marker
+      expect(coalesced[1]?.seq).toBe(4); // Message after abort
     });
 
     it('should preserve all events if no abort marker', () => {
@@ -90,8 +90,8 @@ describe('Event Coalescing', () => {
       
       // Should include all events
       expect(coalesced.length).toBe(2);
-      expect(coalesced[0].seq).toBe(1);
-      expect(coalesced[1].seq).toBe(2);
+      expect(coalesced[0]?.seq).toBe(1);
+      expect(coalesced[1]?.seq).toBe(2);
     });
 
     it('should not coalesce turn 0 (system events)', () => {
@@ -200,8 +200,8 @@ describe('Event Coalescing', () => {
       
       // Should only include last abort and events after
       expect(coalesced.length).toBe(2);
-      expect(coalesced[0].seq).toBe(4); // Last abort marker
-      expect(coalesced[1].seq).toBe(5); // Final message
+      expect(coalesced[0]?.seq).toBe(4); // Last abort marker
+      expect(coalesced[1]?.seq).toBe(5); // Final message
     });
   });
 
@@ -264,8 +264,8 @@ describe('Event Coalescing', () => {
       
       // Turn 2 should only have abort and after
       expect(turns.get(2)?.length).toBe(2);
-      expect(turns.get(2)?.[0].seq).toBe(3); // Abort marker
-      expect(turns.get(2)?.[1].seq).toBe(4); // Final message
+      expect(turns.get(2)?.[0]?.seq).toBe(3); // Abort marker
+      expect(turns.get(2)?.[1]?.seq).toBe(4); // Final message
     });
   });
 });

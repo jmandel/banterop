@@ -11,6 +11,7 @@ describe('AssistantAgent', () => {
   let mockTransport: MockTransport;
   let mockEvents: MockEvents;
   let agent: AssistantAgent;
+  let eventHandlers: ((event: any) => void)[] = [];
 
   // Helper to trigger a turn
   async function triggerTurn(conversationId: number, agentId: string, seq: number = 1.1) {
@@ -24,7 +25,8 @@ describe('AssistantAgent', () => {
       deadlineMs: 30000
     };
     
-    mockEvents.emit(guidance);
+    // Emit to all registered handlers
+    eventHandlers.forEach(handler => handler(guidance));
     await new Promise(resolve => setTimeout(resolve, 100));
   }
 
@@ -75,6 +77,21 @@ describe('AssistantAgent', () => {
     mockProvider = new MockLLMProvider({ provider: 'mock' });
     mockTransport = new MockTransport();
     mockEvents = new MockEvents();
+    eventHandlers = [];
+    
+    // Mock createEventStream to capture and use event handlers
+    mockTransport.createEventStream.mockImplementation(() => {
+      return {
+        subscribe: (handler: (event: any) => void) => {
+          eventHandlers.push(handler);
+          return () => {
+            const idx = eventHandlers.indexOf(handler);
+            if (idx > -1) eventHandlers.splice(idx, 1);
+          };
+        }
+      };
+    });
+    
     agent = new AssistantAgent(mockTransport, mockProvider);
     
     // Setup default mock responses
@@ -88,7 +105,9 @@ describe('AssistantAgent', () => {
       scenario: null,
       runtimeMeta: { agents: [] },
       lastClosedSeq: 0
-    }) 
+    });
+    
+    mockTransport.abortTurn.mockResolvedValue({ turn: 2 });
   });
 
   it('creates agent with LLM provider', () => {

@@ -48,6 +48,32 @@ This stack makes it practical and testable:
 
 - **Glass‑box runs** where you see every message, thought, simulated action.
 - **Scenario‑based control** over context, roles, and rules.
+
+---
+
+## 🚀 Quick Start
+
+```bash
+# Install dependencies
+bun install
+
+# Start the server
+bun run dev
+
+# Run a demo (in another terminal)
+bun run src/cli/demo-server-managed.ts
+```
+
+## 🎯 Agent Launch Patterns
+
+The system supports multiple patterns for deploying agents:
+
+1. **External/Distributed** (`demo-scenario-remote.ts`) - Agents run as separate clients connecting via WebSocket
+2. **Server-Managed** (`demo-server-managed.ts`) - Server creates and manages agents internally  
+3. **Granular Handoff** (`demo-granular-handoff.ts`) - Start external, selectively hand off to server
+4. **Monolithic** (`demo-scenario-agents.ts`) - Everything in-process for testing
+
+See [AGENT-PATTERNS.md](./AGENT-PATTERNS.md) for detailed documentation and examples.
 - **Turn‑based orchestration** ensuring order and replayability.
 
 ---
@@ -300,6 +326,17 @@ Lightweight watch/debug UI at `src/frontend/watch/`:
 bun run dev:frontend   # serves http://localhost:3001
 ```
 
+#### Keyboard Shortcuts (Watch)
+
+- j / k: Move selection down / up (list)
+- Enter: Open selected conversation
+- /: Focus list search
+- h / l: Focus list / details
+- r: Refresh list / reconnect details
+- t: Toggle traces (details pane)
+- a: Toggle autoscroll (details pane)
+- ?: Toggle shortcuts help overlay
+
 ---
 
 You can now:
@@ -373,3 +410,17 @@ CAS: When opening a new turn, internal clients include a CAS precondition (`last
 
 - Bridge endpoint: `/api/bridge/:config64/mcp` where `config64` is base64url‑encoded ConversationMeta.
 - Diagnostic: `/api/bridge/:config64/mcp/diag` echoes parsed meta.
+
+## 📝 TODO / Future Improvements
+
+### WebSocket Client Architecture Refactoring
+- **Deduplicate WebSocket subscription logic**: Currently we have two separate implementations:
+  - `WsEventStream` (used by agents via WsTransport → WsEvents) - async iteration pattern
+  - `WsJsonRpcClient` (used by external.executor.ts) - callback pattern with built-in subscription
+- Both handle WebSocket RPC subscriptions and push events but with different APIs
+- Consider unifying into a single WebSocket client that can support both patterns
+- Related files:
+  - `src/agents/clients/event-stream.ts` (WsEventStream)
+  - `src/agents/clients/ws.client.ts` (WsJsonRpcClient)  
+  - `src/agents/runtime/ws.transport.ts` (WsTransport)
+  - `src/agents/runtime/ws.events.ts` (WsEvents)

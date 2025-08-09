@@ -103,7 +103,7 @@ describe('ProviderManager', () => {
     const manager = new LLMProviderManager(mockConfig);
     const providers = manager.getAvailableProviders();
     
-    expect(providers).toHaveLength(3);
+    expect(providers).toHaveLength(4);
     
     const names = providers.map(p => p.name);
     expect(names).toContain('google');

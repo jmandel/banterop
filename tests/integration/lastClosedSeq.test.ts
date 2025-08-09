@@ -19,7 +19,7 @@ describe('lastClosedSeq per-conversation isolation', () => {
     const conv1 = orchestrator.createConversation({
       meta: {
         title: 'First conversation',
-        agents: [{ id: 'user', kind: 'external' }]
+        agents: [{ id: 'user' }]
       }
     });
     
@@ -30,7 +30,7 @@ describe('lastClosedSeq per-conversation isolation', () => {
     const conv2 = orchestrator.createConversation({
       meta: {
         title: 'Second conversation', 
-        agents: [{ id: 'user', kind: 'external' }]
+        agents: [{ id: 'user' }]
       }
     });
     
@@ -75,7 +75,7 @@ describe('lastClosedSeq per-conversation isolation', () => {
       const id = orchestrator.createConversation({
         meta: {
           title: `Conversation ${i}`,
-          agents: [{ id: 'agent', kind: 'external' }]
+          agents: [{ id: 'agent' }]
         }
       });
       convIds.push(id);
@@ -85,40 +85,39 @@ describe('lastClosedSeq per-conversation isolation', () => {
     const results = [];
     
     // Conv 2 gets first message
-    results[2] = orchestrator.sendMessage(convIds[2], 'agent', { text: 'Conv 2 msg' }, 'turn');
+    results[2] = orchestrator.sendMessage(convIds[2]!, 'agent', { text: 'Conv 2 msg' }, 'turn');
     
     // Conv 0 gets second message  
-    results[0] = orchestrator.sendMessage(convIds[0], 'agent', { text: 'Conv 0 msg' }, 'turn');
+    results[0] = orchestrator.sendMessage(convIds[0]!, 'agent', { text: 'Conv 0 msg' }, 'turn');
     
     // Conv 1 gets third message
-    results[1] = orchestrator.sendMessage(convIds[1], 'agent', { text: 'Conv 1 msg' }, 'turn');
+    results[1] = orchestrator.sendMessage(convIds[1]!, 'agent', { text: 'Conv 1 msg' }, 'turn');
     
     // Each conversation should have its own lastClosedSeq
     for (let i = 0; i < 3; i++) {
-      const snapshot = orchestrator.getConversationSnapshot(convIds[i]);
-      expect(snapshot.lastClosedSeq).toBe(results[i].seq);
+      const snapshot = orchestrator.getConversationSnapshot(convIds[i]!);
+      expect(snapshot.lastClosedSeq).toBe(results[i]!.seq);
     }
     
     // Now add a second turn to conv 0
     // It should use its own lastClosedSeq as precondition
-    const conv0Snapshot = orchestrator.getConversationSnapshot(convIds[0]);
+    const conv0Snapshot = orchestrator.getConversationSnapshot(convIds[0]!);
     const secondMsg = orchestrator.sendMessage(
-      convIds[0],
+      convIds[0]!,
       'agent', 
       { text: 'Second message' },
       'turn',
-      undefined, // new turn
-      { lastClosedSeq: conv0Snapshot.lastClosedSeq }
+      undefined // new turn
     );
     
     expect(secondMsg.turn).toBe(2);
     
     // Other conversations should be unaffected
-    const conv1Snapshot = orchestrator.getConversationSnapshot(convIds[1]);
-    const conv2Snapshot = orchestrator.getConversationSnapshot(convIds[2]);
+    const conv1Snapshot = orchestrator.getConversationSnapshot(convIds[1]!);
+    const conv2Snapshot = orchestrator.getConversationSnapshot(convIds[2]!);
     
-    expect(conv1Snapshot.lastClosedSeq).toBe(results[1].seq);
-    expect(conv2Snapshot.lastClosedSeq).toBe(results[2].seq);
+    expect(conv1Snapshot.lastClosedSeq).toBe(results[1]!.seq);
+    expect(conv2Snapshot.lastClosedSeq).toBe(results[2]!.seq);
   });
 
   test('turns should increment correctly without preconditions', async () => {
@@ -127,7 +126,7 @@ describe('lastClosedSeq per-conversation isolation', () => {
     const conv = orchestrator.createConversation({
       meta: {
         title: 'Test conversation',
-        agents: [{ id: 'agent', kind: 'external' }]
+        agents: [{ id: 'agent' }]
       }
     });
     

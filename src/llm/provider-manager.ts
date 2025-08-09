@@ -2,18 +2,21 @@ import { LLMProvider, type LLMProviderConfig, type SupportedProvider, type LLMPr
 import { GoogleLLMProvider } from './providers/google';
 import { OpenRouterLLMProvider } from './providers/openrouter';
 import { MockLLMProvider } from './providers/mock';
+import { BrowsersideLLMProvider } from './providers/browserside';
 import { findProviderForModel } from './model-registry';
 
 const PROVIDER_MAP = {
   google: GoogleLLMProvider,
   openrouter: OpenRouterLLMProvider,
   mock: MockLLMProvider,
+  browserside: BrowsersideLLMProvider,
 } as const;
 
 export interface LLMConfig {
-  defaultLlmProvider: 'google' | 'openrouter' | 'mock';
+  defaultLlmProvider: 'google' | 'openrouter' | 'mock' | 'browserside';
   googleApiKey?: string | undefined;
   openRouterApiKey?: string | undefined;
+  serverUrl?: string | undefined;
 }
 
 export class LLMProviderManager {
@@ -95,15 +98,16 @@ export class LLMProviderManager {
 
     const apiKey = this.getApiKeyForProvider(providerName, config?.apiKey);
 
-    if (!apiKey && providerName !== 'mock') {
+    if (!apiKey && providerName !== 'mock' && providerName !== 'browserside') {
       throw new Error(`API key for provider '${providerName}' not found in configuration or environment variables.`);
     }
 
     return new ProviderClass({ 
       provider: providerName, 
       ...(apiKey !== undefined ? { apiKey } : {}),
-      ...(config?.model !== undefined ? { model: config.model } : {})
-    });
+      ...(config?.model !== undefined ? { model: config.model } : {}),
+      ...(providerName === 'browserside' && this.config.serverUrl ? { serverUrl: this.config.serverUrl } : {})
+    } as any);
   }
 
   private getApiKeyForProvider(providerName: SupportedProvider, overrideKey?: string): string | undefined {
@@ -115,6 +119,8 @@ export class LLMProviderManager {
       return this.config.openRouterApiKey;
     } else if (providerName === 'mock') {
       return 'mock-key'; // Mock provider doesn't need a real key
+    } else if (providerName === 'browserside') {
+      return undefined; // Browserside provider doesn't need an API key
     }
     
     return undefined;
