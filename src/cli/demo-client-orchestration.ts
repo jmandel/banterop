@@ -142,7 +142,7 @@ ws.onopen = async () => {
     // Step 3: Run conversation to completion FROM THE CLIENT
     const clientProvider = new LLMProviderManager({ 
       defaultLlmProvider: 'mock',
-      googleApiKey: process.env.GOOGLE_API_KEY,
+      googleApiKey: process.env.GEMINI_API_KEY,
       openRouterApiKey: process.env.OPENROUTER_API_KEY
     });
     const wsUrl = `ws://localhost:${server.port}/api/ws`;

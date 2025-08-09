@@ -24,6 +24,7 @@ export class App {
     const config = this.configManager.get();
     this.llmProviderManager = new LLMProviderManager({
       defaultLlmProvider: config.defaultLlmProvider,
+      defaultLlmModel: config.defaultLlmModel,
       googleApiKey: config.googleApiKey,
       openRouterApiKey: config.openRouterApiKey
     });

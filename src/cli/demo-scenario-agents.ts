@@ -66,7 +66,7 @@ async function runDemo() {
   const app = new App({ 
     dbPath: ':memory:',
     defaultLlmProvider: defaultProvider,
-    googleApiKey: process.env.GOOGLE_API_KEY,
+    googleApiKey: process.env.GEMINI_API_KEY,
     openRouterApiKey: process.env.OPENROUTER_API_KEY
   });
   

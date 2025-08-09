@@ -24,14 +24,21 @@ export class OrchestratorService {
   private guidanceHeartbeatTimer?: Timer;
   private lastGuidanceSeq = new Map<number, number>(); // Track last guidance seq per conversation
   private pendingGuidanceCheck: Promise<void> | null = null; // Track pending guidance check
+  private heartbeatEnabled = true;
 
   constructor(storage: Storage, bus?: SubscriptionBus, policy?: SchedulePolicy, _cfg?: OrchestratorConfig) {
     this.storage = storage;
     this.bus = bus ?? new SubscriptionBus();
     this.policy = policy ?? new StrictAlternationPolicy();
     
-    // Start guidance heartbeat (every 2 seconds)
-    this.startGuidanceHeartbeat();
+    // Determine if heartbeat should be enabled (disable in tests or when configured)
+    const isTestEnv = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
+    this.heartbeatEnabled = !(_cfg?.disableHeartbeat || isTestEnv);
+
+    // Start guidance heartbeat (every 2 seconds) when enabled
+    if (this.heartbeatEnabled) {
+      this.startGuidanceHeartbeat();
+    }
   }
 
   // Graceful shutdown
@@ -82,7 +89,7 @@ export class OrchestratorService {
   
   private async checkAndBroadcastGuidance(): Promise<void> {
     // Don't access database if shutting down
-    if (this.isShuttingDown) return;
+    if (this.isShuttingDown || !this.heartbeatEnabled) return;
     
     try {
       // Get all active conversations

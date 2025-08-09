@@ -15,6 +15,7 @@ const ConfigSchema = z.object({
   googleApiKey: z.string().optional(),
   openRouterApiKey: z.string().optional(),
   defaultLlmProvider: z.enum(['google', 'openrouter', 'mock']).default('mock'),
+  defaultLlmModel: z.string().optional(), // e.g. 'gpt-4o', 'claude-3-5-sonnet-20241022', 'gemini-2.0-flash-exp'
   
   // Logging
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
@@ -41,9 +42,10 @@ export class ConfigManager {
       idleTurnMs: process.env.IDLE_TURN_MS ? Number(process.env.IDLE_TURN_MS) : undefined,
       
       // LLM Providers
-      googleApiKey: process.env.GOOGLE_API_KEY,
+      googleApiKey: process.env.GEMINI_API_KEY,
       openRouterApiKey: process.env.OPENROUTER_API_KEY,
       defaultLlmProvider: process.env.DEFAULT_LLM_PROVIDER as Config['defaultLlmProvider'],
+      defaultLlmModel: process.env.DEFAULT_LLM_MODEL,
       
       // Logging
       logLevel: process.env.LOG_LEVEL as Config['logLevel'],
@@ -85,6 +87,8 @@ export class ConfigManager {
   get orchestratorConfig() {
     return {
       idleTurnMs: this.config.idleTurnMs,
+      // Disable heartbeat in tests to avoid timer/teardown races
+      disableHeartbeat: this.config.nodeEnv === 'test',
     };
   }
   

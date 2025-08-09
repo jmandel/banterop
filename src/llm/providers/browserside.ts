@@ -33,7 +33,7 @@ export class BrowsersideLLMProvider extends LLMProvider {
       return;
     }
     
-    const response = await fetch(`${this.serverUrl}/llm/providers`);
+    const response = await fetch(`${this.serverUrl}/api/llm/providers`);
     if (!response.ok) {
       throw new Error(`Failed to fetch providers from server: ${response.statusText}`);
     }
@@ -57,7 +57,7 @@ export class BrowsersideLLMProvider extends LLMProvider {
   async complete(request: LLMRequest): Promise<LLMResponse> {
     await this.fetchAvailableModels();
     
-    const response = await fetch(`${this.serverUrl}/llm/complete`, {
+    const response = await fetch(`${this.serverUrl}/api/llm/complete`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

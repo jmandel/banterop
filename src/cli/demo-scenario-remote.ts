@@ -251,7 +251,7 @@ async function runDemo() {
   const defaultProvider = (process.env.LLM_PROVIDER as any) || 'mock';
   const providerManager = new LLMProviderManager({
     defaultLlmProvider: defaultProvider,
-    googleApiKey: process.env.GOOGLE_API_KEY,
+    googleApiKey: process.env.GEMINI_API_KEY,
     openRouterApiKey: process.env.OPENROUTER_API_KEY
   });
   
