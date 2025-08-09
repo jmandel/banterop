@@ -15,7 +15,6 @@ import { z } from 'zod';
 // Zod schemas mirroring ConversationMeta/AgentMeta shape but validation-friendly
 const AgentMetaSchema = z.object({
   id: z.string(),
-  kind: z.enum(['internal', 'external']),
   agentClass: z.string().optional(),       // e.g. "ScenarioDrivenAgent", "AssistantAgent", "EchoAgent", "ScriptAgent"
   role: z.string().optional(),
   displayName: z.string().optional(),
@@ -64,12 +63,9 @@ export function parseConversationMetaFromConfig64(config64: string): ConvConvers
  * Determine which agent should start the conversation.
  * Priority:
  *  1) meta.startingAgentId
- *  2) If exactly one external agent exists, use that one
- *  3) Fallback: first agent id
+ *  2) Fallback: first agent id
  */
 export function getStartingAgentId(meta: ConvConversationMeta): string {
   if (meta.startingAgentId) return meta.startingAgentId;
-  const externals = meta.agents.filter(a => a.kind === 'external');
-  if (externals.length === 1) return externals[0]!.id;
   return meta.agents[0]!.id;
 }

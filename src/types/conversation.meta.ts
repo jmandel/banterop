@@ -1,6 +1,5 @@
 export interface AgentMeta {
   id: string;                              // slug, immutable (matches agentId from scenario)
-  kind: 'internal' | 'external';           // explicitly specify if internal or external
   agentClass?: string;                     // e.g., "AssistantAgent", "EchoAgent", "ScriptAgent"
   role?: string;
   displayName?: string;

@@ -51,49 +51,72 @@ ws.onopen = async () => {
     const medicalScenario: ScenarioConfiguration = {
       metadata: {
         id: 'medical-auth-demo-v2',
-        name: 'Medical Authorization Demo',
-        description: 'Provider requests authorization from insurer',
-        version: '1.0.0'
+        title: 'Medical Authorization Demo',
+        description: 'Provider requests authorization from insurer'
+      },
+      scenario: {
+        background: 'A healthcare provider needs to obtain insurance authorization for a patient\'s MRI scan.',
+        challenges: ['Insurance coverage verification', 'Medical necessity documentation', 'Prior authorization requirements']
       },
       agents: [
         {
           agentId: 'provider',
-          principal: 'Healthcare Provider',
-          goal: 'Obtain authorization for patient treatment',
-          systemPrompt: 'You are a healthcare provider requesting authorization for a medical procedure.'
+          principal: {
+            type: 'individual',
+            name: 'Dr. Smith',
+            description: 'Healthcare Provider'
+          },
+          situation: 'You need to obtain authorization for a patient\'s MRI scan.',
+          systemPrompt: 'You are a healthcare provider requesting authorization for a medical procedure.',
+          goals: ['Obtain authorization for patient treatment'],
+          tools: [],
+          knowledgeBase: { patientRecord: 'John Doe medical history' }
         },
         {
           agentId: 'insurer',
-          principal: 'Insurance Company',
-          goal: 'Review and process authorization requests',
-          systemPrompt: 'You are an insurance company representative reviewing authorization requests.'
+          principal: {
+            type: 'organization',
+            name: 'Blue Shield',
+            description: 'Insurance Company'
+          },
+          situation: 'You are reviewing authorization requests from healthcare providers.',
+          systemPrompt: 'You are an insurance company representative reviewing authorization requests.',
+          goals: ['Review and process authorization requests'],
+          tools: [],
+          knowledgeBase: { policies: 'Insurance coverage policies' }
         },
         {
           agentId: 'patient',
-          principal: 'Patient Representative',
-          goal: 'Ensure appropriate care is authorized',
-          systemPrompt: 'You represent the patient in the authorization process.'
+          principal: {
+            type: 'individual',
+            name: 'John Doe',
+            description: 'Patient Representative'
+          },
+          situation: 'You are a patient needing medical care authorization.',
+          systemPrompt: 'You represent the patient in the authorization process.',
+          goals: ['Ensure appropriate care is authorized'],
+          tools: [],
+          knowledgeBase: { medicalHistory: 'Patient medical background' }
         },
         {
           agentId: 'coordinator',
-          principal: 'Care Coordinator',
-          goal: 'Facilitate the authorization process',
-          systemPrompt: 'You are coordinating the authorization request process.'
+          principal: {
+            type: 'individual',
+            name: 'Care Coordinator',
+            description: 'Care Coordinator'
+          },
+          situation: 'You are coordinating the authorization process between provider and insurer.',
+          systemPrompt: 'You are coordinating the authorization request process.',
+          goals: ['Facilitate the authorization process'],
+          tools: [],
+          knowledgeBase: { procedures: 'Authorization procedures' }
         }
-      ],
-      knowledge: {
-        sharedFacts: [
-          'Patient: John Doe, DOB: 1980-01-15',
-          'Insurance ID: INS-123456',
-          'Procedure: MRI Scan',
-          'Diagnosis: Lower back pain, chronic'
-        ]
-      }
+      ]
     };
     
     await sendRequest('createScenario', {
       id: medicalScenario.metadata.id,
-      name: medicalScenario.metadata.name,
+      name: medicalScenario.metadata.title,
       config: medicalScenario
     }).catch(() => console.log('  (Scenario may already exist)'));
     

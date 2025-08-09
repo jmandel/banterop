@@ -3,13 +3,12 @@
 //
 // This demo shows running agents locally on the client side:
 // 1. Connect to existing server on port 3000
-// 2. Create a conversation (agents marked as external)
-// 3. Use WsTransport to run agents locally on the client
+// 2. Create a conversation (no 'kind' - location is runtime decision)
+// 3. Use client ensure helper to run agents locally
 // 4. Agents communicate with server via WebSocket JSON-RPC
 // 5. Client manages the agent lifecycle and execution
 
-import { startAgents } from '$src/agents/factories/agent.factory';
-import { WsTransport } from '$src/agents/runtime/ws.transport';
+import { ensureAgentsRunningClient } from '$src/agents/clients/ensure-client';
 import { LLMProviderManager } from '$src/llm/provider-manager';
 
 // Connect to existing server
@@ -45,8 +44,8 @@ ws.onopen = async () => {
     // Track lastClosedSeq for the conversation
     let lastClosedSeq = 0;
     
-    // Step 1: Create a conversation with external agents
-    console.log('\n📝 Creating conversation with external agents...');
+    // Step 1: Create a conversation (no 'kind' property - location is runtime decision)
+    console.log('\n📝 Creating conversation...');
     const { conversationId } = await sendRequest('createConversation', {
       meta: {
         title: 'Client-Side Demo',
@@ -54,19 +53,16 @@ ws.onopen = async () => {
         agents: [
           {
             id: 'user',
-            kind: 'external',
             displayName: 'User',
           },
           {
             id: 'local-assistant',
-            kind: 'external', // External = client-managed
             displayName: 'Local Assistant',
             agentClass: 'AssistantAgent',
             config: { llmProvider: 'mock' }
           },
           {
             id: 'local-echo',
-            kind: 'external',
             displayName: 'Local Echo',
             agentClass: 'EchoAgent'
           }
@@ -97,22 +93,32 @@ ws.onopen = async () => {
       }
     });
     
-    // Step 3: Start client-side agents using WsTransport
-    console.log('\n🤖 Starting local agents with WsTransport...');
+    // Step 3: Ensure client-side agents are running
+    console.log('\n🤖 Ensuring local agents are running...');
     const clientProvider = new LLMProviderManager({ 
       defaultLlmProvider: 'mock',
       googleApiKey: process.env.GOOGLE_API_KEY,
       openRouterApiKey: process.env.OPENROUTER_API_KEY
     });
     
-    const agentHandle = await startAgents({
+    const { ensured, handles } = await ensureAgentsRunningClient({
       conversationId,
-      transport: new WsTransport(WS_URL),
-      providerManager: clientProvider,
-      agentIds: ['local-assistant', 'local-echo'] // Only our local agents
+      agentIds: ['local-assistant', 'local-echo'],
+      wsUrl: WS_URL,
+      onGuidance: async ({ conversationId, agentId, sendMessage, getConversation }) => {
+        // Simple mock response for demo
+        const { lastClosedSeq } = await getConversation();
+        await sendMessage({
+          conversationId,
+          agentId,
+          text: `Agent ${agentId} responding from client! (seq: ${lastClosedSeq})`,
+          finality: 'turn',
+          clientRequestId: crypto.randomUUID()
+        });
+      }
     });
     
-    console.log(`✅ Started ${agentHandle.agents.length} local agents`);
+    console.log(`✅ Ensured ${ensured.length} local agents`);
     
     // Step 4: Send messages to trigger agent responses
     console.log('\n💬 Sending initial message...');
@@ -140,7 +146,9 @@ ws.onopen = async () => {
     
     // Step 5: Clean shutdown
     console.log('\n🛑 Stopping local agents...');
-    await agentHandle.stop();
+    for (const handle of Object.values(handles)) {
+      handle.stop();
+    }
     
     // End the conversation
     console.log(`\n🏁 Ending conversation... (lastClosedSeq=${lastClosedSeq})`);

@@ -104,14 +104,26 @@ console.log('This demo lets you create and test custom scenarios.\n');
     const scenario: ScenarioConfiguration = {
       metadata: {
         id: scenarioId,
-        name: scenarioName,
-        description: scenarioDesc,
-        version: '1.0.0'
+        title: scenarioName,
+        description: scenarioDesc
       },
-      agents,
-      knowledge: {
-        sharedFacts
-      }
+      scenario: {
+        background: scenarioDesc,
+        challenges: ['Interactive scenario challenge']
+      },
+      agents: agents.map(a => ({
+        agentId: a.agentId,
+        principal: {
+          type: 'individual' as const,
+          name: a.principal,
+          description: a.principal
+        },
+        situation: a.goal,
+        systemPrompt: a.systemPrompt,
+        goals: [a.goal],
+        tools: [],
+        knowledgeBase: { sharedFacts }
+      }))
     };
     
     console.log('\n💾 Creating scenario...');

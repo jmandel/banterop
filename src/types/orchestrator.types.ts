@@ -32,8 +32,7 @@ export interface SchedulePolicyInput {
 
 export type ScheduleDecision =
   | { kind: 'none' }
-  | { kind: 'internal'; agentId: string }
-  | { kind: 'external'; candidates: string[]; note?: string };
+  | { kind: 'agent'; agentId: string; note?: string };
 
 export interface SchedulePolicy {
   decide(input: SchedulePolicyInput): ScheduleDecision;

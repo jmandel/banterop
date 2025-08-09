@@ -32,7 +32,7 @@ export interface LLMResponse {
 }
 
 // Provider-specific types
-export type SupportedProvider = 'google' | 'openrouter' | 'mock';
+export type SupportedProvider = 'google' | 'openrouter' | 'mock' | 'browserside';
 
 export interface LLMProviderConfig {
   provider: SupportedProvider;

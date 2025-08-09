@@ -34,8 +34,8 @@ describe('WsEventStream Integration Tests', () => {
       meta: {
         title: 'Test Conversation',
         agents: [
-          { id: 'user', kind: 'external' },
-          { id: 'test-agent', kind: 'internal' },
+          { id: 'user' },
+          { id: 'test-agent' },
         ],
       },
     });

@@ -22,8 +22,8 @@ async function main() {
 
   const agentImpl: BaseAgent =
     argv["agent-class"] === "AssistantAgent"
-      ? new AssistantAgent(transport, events, new MockLLMProvider({ provider: 'mock' }))
-      : new EchoAgent(transport, events, "Thinking...", "Done");
+      ? new AssistantAgent(transport, new MockLLMProvider({ provider: 'mock' }))
+      : new EchoAgent(transport, "Thinking...", "Done");
 
   console.log(
     `🤖 Joining conversation ${conversationId} as ${argv["agent-id"]} (${argv["agent-class"]})`

@@ -21,19 +21,19 @@ export class CompetitionPolicy implements SchedulePolicy {
       if (lastEvent.agentId === 'user') {
         // Find a competitor agent to schedule
         const competitorAgent = metadataAgents.find(a => 
-          a.kind === 'internal' && a.id.startsWith('competitor-')
+          a.id.startsWith('competitor-')
         );
         if (competitorAgent) {
           // Create guidance for the first competitor
-          return { kind: 'internal', agentId: competitorAgent.id };
+          return { kind: 'agent', agentId: competitorAgent.id };
         }
       }
       
-      // For non-user agents, schedule user as external
+      // For non-user agents, schedule user
       if (lastEvent.agentId !== 'user') {
         const userAgent = metadataAgents.find(a => a.id === 'user');
         if (userAgent) {
-          return { kind: 'external', candidates: ['user'], note: 'Waiting for user' };
+          return { kind: 'agent', agentId: 'user', note: 'Waiting for user' };
         }
       }
     }

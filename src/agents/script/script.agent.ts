@@ -67,7 +67,7 @@ export class ScriptAgent extends BaseAgent {
     // If this is the last planned turn, end the conversation
     if (this.turnCount === maxTurns && turnSteps.length > 0) {
       const lastStep = turnSteps[turnSteps.length - 1];
-      if (lastStep.kind === 'post' && lastStep.finality !== 'conversation') {
+      if (lastStep && lastStep.kind === 'post' && lastStep.finality !== 'conversation') {
         // Override finality to end conversation
         await ctx.transport.postMessage({
           conversationId: ctx.conversationId,

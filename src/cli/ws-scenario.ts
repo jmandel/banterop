@@ -53,8 +53,8 @@ async function main() {
 
   const agentImpl: BaseAgent =
     argv["agent-class"] === "AssistantAgent"
-      ? new AssistantAgent(transport, events, new MockLLMProvider({ provider: 'mock' }))
-      : new EchoAgent(transport, events, "Thinking...", "Done");
+      ? new AssistantAgent(transport, new MockLLMProvider({ provider: 'mock' }))
+      : new EchoAgent(transport, "Thinking...", "Done");
 
   await agentImpl.start(conversationId, argv["agent-id"]);
   console.log("🏁 Scenario conversation ended");

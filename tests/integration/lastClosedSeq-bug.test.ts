@@ -13,7 +13,7 @@ describe('lastClosedSeq bug reproduction', () => {
     const db = new Database(':memory:');
     db.exec(SCHEMA_SQL);
     
-    const eventStore = new EventStore(db, new AttachmentStore(db), new IdempotencyStore(db));
+    const eventStore = new EventStore(db);
     const convStore = new ConversationStore(db);
     
     // Create first conversation
@@ -21,7 +21,7 @@ describe('lastClosedSeq bug reproduction', () => {
       meta: {
         title: 'Conv 1',
         description: 'First conversation',
-        agents: [{ id: 'user', kind: 'external' }]
+        agents: [{ id: 'user' }]
       }
     });
     
@@ -45,7 +45,7 @@ describe('lastClosedSeq bug reproduction', () => {
       meta: {
         title: 'Conv 2',
         description: 'Second conversation',
-        agents: [{ id: 'user', kind: 'external' }]
+        agents: [{ id: 'user' }]
       }
     });
     
@@ -80,7 +80,7 @@ describe('lastClosedSeq bug reproduction', () => {
       meta: {
         title: 'Conv 3',
         description: 'Third conversation',
-        agents: [{ id: 'user', kind: 'external' }]
+        agents: [{ id: 'user' }]
       }
     });
     

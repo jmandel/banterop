@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'bun:test';
 import { StrictAlternationPolicy } from './strict-alternation-policy';
-import type { ConversationSnapshot } from '$src/types/orchestrator.types';
+import type { ConversationSnapshot, ScheduleDecision } from '$src/types/orchestrator.types';
 import type { UnifiedEvent } from '$src/types/event.types';
 
 describe('StrictAlternationPolicy', () => {
   const policy = new StrictAlternationPolicy();
   
-  const createSnapshot = (agents: Array<{ id: string; kind: 'internal' | 'external' }>): ConversationSnapshot => ({
+  const createSnapshot = (agents: Array<{ id: string }>): ConversationSnapshot => ({
     conversation: 1,
     status: 'active',
     metadata: {
@@ -43,8 +43,8 @@ describe('StrictAlternationPolicy', () => {
   describe('scheduling decisions', () => {
     it('should return none when no last event', () => {
       const snapshot = createSnapshot([
-        { id: 'agent-a', kind: 'internal' },
-        { id: 'agent-b', kind: 'internal' },
+        { id: 'agent-a' },
+        { id: 'agent-b' },
       ]);
       
       const decision = policy.decide({ snapshot });
@@ -53,8 +53,8 @@ describe('StrictAlternationPolicy', () => {
     
     it('should return none for non-message events', () => {
       const snapshot = createSnapshot([
-        { id: 'agent-a', kind: 'internal' },
-        { id: 'agent-b', kind: 'internal' },
+        { id: 'agent-a' },
+        { id: 'agent-b' },
       ]);
       
       const decision = policy.decide({ 
@@ -66,8 +66,8 @@ describe('StrictAlternationPolicy', () => {
     
     it('should return none for message without turn finality', () => {
       const snapshot = createSnapshot([
-        { id: 'agent-a', kind: 'internal' },
-        { id: 'agent-b', kind: 'internal' },
+        { id: 'agent-a' },
+        { id: 'agent-b' },
       ]);
       
       const decision = policy.decide({ 
@@ -79,8 +79,8 @@ describe('StrictAlternationPolicy', () => {
     
     it('should schedule next internal agent after turn finality', () => {
       const snapshot = createSnapshot([
-        { id: 'agent-a', kind: 'internal' },
-        { id: 'agent-b', kind: 'internal' },
+        { id: 'agent-a' },
+        { id: 'agent-b' },
       ]);
       
       const decision = policy.decide({ 
@@ -88,14 +88,16 @@ describe('StrictAlternationPolicy', () => {
         lastEvent: createMessageEvent('agent-a', 'turn')
       });
       
-      expect(decision.kind).toBe('internal');
-      expect((decision as any).agentId).toBe('agent-b');
+      expect(decision.kind).toBe('agent');
+      if (decision.kind === 'agent') {
+        expect(decision.agentId).toBe('agent-b');
+      }
     });
     
     it('should schedule external agent after internal turn finality', () => {
       const snapshot = createSnapshot([
-        { id: 'agent-a', kind: 'internal' },
-        { id: 'agent-b', kind: 'external' },
+        { id: 'agent-a' },
+        { id: 'agent-b' },
       ]);
       
       const decision = policy.decide({ 
@@ -103,16 +105,18 @@ describe('StrictAlternationPolicy', () => {
         lastEvent: createMessageEvent('agent-a', 'turn')
       });
       
-      expect(decision.kind).toBe('external');
-      expect((decision as any).candidates).toEqual(['agent-b']);
-      expect((decision as any).note).toContain('agent-b');
+      expect(decision.kind).toBe('agent');
+      if (decision.kind === 'agent') {
+        expect(decision.agentId).toBe('agent-b');
+        expect(decision.note).toContain('agent-b');
+      }
     });
     
     it('should wrap around to first agent after last agent', () => {
       const snapshot = createSnapshot([
-        { id: 'agent-a', kind: 'internal' },
-        { id: 'agent-b', kind: 'internal' },
-        { id: 'agent-c', kind: 'internal' },
+        { id: 'agent-a' },
+        { id: 'agent-b' },
+        { id: 'agent-c' },
       ]);
       
       const decision = policy.decide({ 
@@ -120,14 +124,16 @@ describe('StrictAlternationPolicy', () => {
         lastEvent: createMessageEvent('agent-c', 'turn')
       });
       
-      expect(decision.kind).toBe('internal');
-      expect((decision as any).agentId).toBe('agent-a');
+      expect(decision.kind).toBe('agent');
+      if (decision.kind === 'agent') {
+        expect(decision.agentId).toBe('agent-a');
+      }
     });
     
     it('should handle conversation finality', () => {
       const snapshot = createSnapshot([
-        { id: 'agent-a', kind: 'internal' },
-        { id: 'agent-b', kind: 'internal' },
+        { id: 'agent-a' },
+        { id: 'agent-b' },
       ]);
       
       const decision = policy.decide({ 
@@ -135,13 +141,15 @@ describe('StrictAlternationPolicy', () => {
         lastEvent: createMessageEvent('agent-a', 'conversation')
       });
       
-      expect(decision.kind).toBe('internal');
-      expect((decision as any).agentId).toBe('agent-b');
+      expect(decision.kind).toBe('agent');
+      if (decision.kind === 'agent') {
+        expect(decision.agentId).toBe('agent-b');
+      }
     });
     
     it('should return none when less than 2 agents', () => {
       const snapshot = createSnapshot([
-        { id: 'agent-a', kind: 'internal' },
+        { id: 'agent-a' },
       ]);
       
       const decision = policy.decide({ 
@@ -154,8 +162,8 @@ describe('StrictAlternationPolicy', () => {
     
     it('should return none when speaker not in agent list', () => {
       const snapshot = createSnapshot([
-        { id: 'agent-a', kind: 'internal' },
-        { id: 'agent-b', kind: 'internal' },
+        { id: 'agent-a' },
+        { id: 'agent-b' },
       ]);
       
       const decision = policy.decide({ 
@@ -170,9 +178,9 @@ describe('StrictAlternationPolicy', () => {
   describe('multi-agent scenarios', () => {
     it('should handle 3 internal agents', () => {
       const snapshot = createSnapshot([
-        { id: 'agent-a', kind: 'internal' },
-        { id: 'agent-b', kind: 'internal' },
-        { id: 'agent-c', kind: 'internal' },
+        { id: 'agent-a' },
+        { id: 'agent-b' },
+        { id: 'agent-c' },
       ]);
       
       // A -> B
@@ -180,32 +188,38 @@ describe('StrictAlternationPolicy', () => {
         snapshot, 
         lastEvent: createMessageEvent('agent-a', 'turn')
       });
-      expect(decision.kind).toBe('internal');
-      expect((decision as any).agentId).toBe('agent-b');
+      expect(decision.kind).toBe('agent');
+      if (decision.kind === 'agent') {
+        expect(decision.agentId).toBe('agent-b');
+      }
       
       // B -> C
       decision = policy.decide({ 
         snapshot, 
         lastEvent: createMessageEvent('agent-b', 'turn')
       });
-      expect(decision.kind).toBe('internal');
-      expect((decision as any).agentId).toBe('agent-c');
+      expect(decision.kind).toBe('agent');
+      if (decision.kind === 'agent') {
+        expect(decision.agentId).toBe('agent-c');
+      }
       
       // C -> A (wrap around)
       decision = policy.decide({ 
         snapshot, 
         lastEvent: createMessageEvent('agent-c', 'turn')
       });
-      expect(decision.kind).toBe('internal');
-      expect((decision as any).agentId).toBe('agent-a');
+      expect(decision.kind).toBe('agent');
+      if (decision.kind === 'agent') {
+        expect(decision.agentId).toBe('agent-a');
+      }
     });
     
     it('should handle mixed internal and external agents', () => {
       const snapshot = createSnapshot([
-        { id: 'agent-a', kind: 'internal' },
-        { id: 'agent-b', kind: 'external' },
-        { id: 'agent-c', kind: 'internal' },
-        { id: 'agent-d', kind: 'external' },
+        { id: 'agent-a' },
+        { id: 'agent-b' },
+        { id: 'agent-c' },
+        { id: 'agent-d' },
       ]);
       
       // A (internal) -> B (external)
@@ -213,32 +227,40 @@ describe('StrictAlternationPolicy', () => {
         snapshot, 
         lastEvent: createMessageEvent('agent-a', 'turn')
       });
-      expect(decision.kind).toBe('external');
-      expect((decision as any).candidates).toEqual(['agent-b']);
+      expect(decision.kind).toBe('agent');
+      if (decision.kind === 'agent') {
+        expect(decision.agentId).toBe('agent-b');
+      }
       
       // B (external) -> C (internal)
       decision = policy.decide({ 
         snapshot, 
         lastEvent: createMessageEvent('agent-b', 'turn')
       });
-      expect(decision.kind).toBe('internal');
-      expect((decision as any).agentId).toBe('agent-c');
+      expect(decision.kind).toBe('agent');
+      if (decision.kind === 'agent') {
+        expect(decision.agentId).toBe('agent-c');
+      }
       
       // C (internal) -> D (external)
       decision = policy.decide({ 
         snapshot, 
         lastEvent: createMessageEvent('agent-c', 'turn')
       });
-      expect(decision.kind).toBe('external');
-      expect((decision as any).candidates).toEqual(['agent-d']);
+      expect(decision.kind).toBe('agent');
+      if (decision.kind === 'agent') {
+        expect(decision.agentId).toBe('agent-d');
+      }
       
       // D (external) -> A (internal, wrap around)
       decision = policy.decide({ 
         snapshot, 
         lastEvent: createMessageEvent('agent-d', 'turn')
       });
-      expect(decision.kind).toBe('internal');
-      expect((decision as any).agentId).toBe('agent-a');
+      expect(decision.kind).toBe('agent');
+      if (decision.kind === 'agent') {
+        expect(decision.agentId).toBe('agent-a');
+      }
     });
   });
 });

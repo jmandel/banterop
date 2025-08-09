@@ -1,10 +1,10 @@
 import type { IAgentTransport, IAgentEvents } from './runtime.interfaces';
 import type { MessagePayload, TracePayload } from '$src/types/event.types';
-import type { ConversationSnapshot, ConversationSnapshot } from '$src/types/orchestrator.types';
+import type { ConversationSnapshot } from '$src/types/orchestrator.types';
 import { mock } from 'bun:test';
 
 export class MockTransport implements IAgentTransport {
-  getSnapshot = mock(async (_conversationId: number, _opts?: { includeScenario?: boolean }): Promise<ConversationSnapshot | ConversationSnapshot> => {
+  getSnapshot = mock(async (_conversationId: number, _opts?: { includeScenario?: boolean }): Promise<ConversationSnapshot> => {
     return {
       conversation: _conversationId,
       status: 'active' as const,

@@ -87,7 +87,7 @@ async function handleRpc(
     try {
       const createParams = params as CreateConversationRequest;
       const conversationId = orchestrator.createConversation(createParams);
-      ws.send(JSON.stringify(ok(id, { conversationId })));
+      ws.send(JSON.stringify(ok(id, { conversationId, title: createParams.meta?.title })));
     } catch (e) {
       const { code, message } = mapError(e);
       ws.send(JSON.stringify(errResp(id, code, message)));
@@ -242,14 +242,14 @@ async function handleRpc(
       convo.metadata.custom = { ...(convo.metadata.custom || {}), autoRun: true };
       orchestrator.storage.conversations.updateMeta(conversationId, convo.metadata);
       
-      // Start internal loops now if providerManager is available
-      // Only start if there are internal agents defined
+      // Start agents now if providerManager is available
+      // Location is a runtime decision, not based on 'kind'
       if (providerManager) {
-        const hasInternalAgents = convo.metadata.agents?.some((a: any) => a.kind === 'internal');
-        console.log(`[AutoRun] hasInternalAgents: ${hasInternalAgents}, scenarioId: ${convo.metadata.scenarioId}`);
-        if (hasInternalAgents) {
+        const hasAgents = convo.metadata.agents?.length > 0;
+        console.log(`[AutoRun] hasAgents: ${hasAgents}, scenarioId: ${convo.metadata.scenarioId}`);
+        if (hasAgents) {
           try {
-            // Use the unified factory for all internal agents
+            // Use the unified factory for all agents
             console.log(`[AutoRun] Starting agents for conversation ${conversationId}`);
             await startAgents({
               conversationId,
@@ -272,6 +272,62 @@ async function handleRpc(
       ws.send(JSON.stringify(errResp(id, code, message)));
     }
     return;
+  }
+
+  // Ensure agents running (new minimal API)
+  if (method === 'ensureAgentsRunning') {
+    const { conversationId, agentIds, providerConfig } = params as { 
+      conversationId: number; 
+      agentIds: string[];
+      providerConfig?: unknown;
+    };
+    
+    try {
+      if (!providerManager) {
+        throw new Error('Provider manager not available');
+      }
+      
+      // Get conversation to verify it exists
+      const snapshot = orchestrator.getConversationSnapshot(conversationId);
+      if (!snapshot) {
+        throw new Error(`Conversation ${conversationId} not found`);
+      }
+      
+      // De-dupe agent IDs to avoid obvious duplicates
+      const uniqueAgentIds = Array.from(new Set(agentIds));
+      const ensured: Array<{ agentId: string; status: 'running' | 'starting' }> = [];
+      
+      // Start the requested agents using the factory
+      console.log(`[ensureAgentsRunning] Ensuring agents ${uniqueAgentIds.join(', ')} for conversation ${conversationId}`);
+      const handle = await startAgents({
+        conversationId,
+        transport: new InProcessTransport(orchestrator),
+        providerManager,
+        agentIds: uniqueAgentIds
+      });
+      
+      // Build response with status for each agent
+      for (const agentId of uniqueAgentIds) {
+        ensured.push({ agentId, status: 'running' });
+      }
+      
+      console.log(`[ensureAgentsRunning] Successfully ensured ${handle.agents.length} agents`);
+      
+      ws.send(JSON.stringify(ok(id, { ensured })));
+    } catch (e) {
+      const { code, message } = mapError(e);
+      ws.send(JSON.stringify(errResp(id, code, message)));
+    }
+    return;
+  }
+
+  // Legacy startAgents method (kept for backward compatibility)
+  if (method === 'startAgents') {
+    // Redirect to ensureAgentsRunning
+    const { conversationId, agentIds } = params as { conversationId: number; agentIds: string[] };
+    req.method = 'ensureAgentsRunning';
+    req.params = { conversationId, agentIds };
+    return handleRpc(orchestrator, ws, req, activeSubs, providerManager);
   }
 
   if (method === 'subscribeAll') {

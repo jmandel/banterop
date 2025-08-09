@@ -37,7 +37,7 @@ export class OrchestratorService {
   async shutdown(): Promise<void> {
     this.isShuttingDown = true;
     
-    // Stop guidance heartbeat
+    // Stop guidance heartbeat immediately
     if (this.guidanceHeartbeatTimer) {
       clearInterval(this.guidanceHeartbeatTimer);
       this.guidanceHeartbeatTimer = undefined;
@@ -45,9 +45,17 @@ export class OrchestratorService {
     
     // Clear subscriptions
     this.bus = new SubscriptionBus();
+    
+    // Add a small delay to ensure any pending timer callbacks complete
+    await new Promise(resolve => setTimeout(resolve, 10));
   }
   
   private startGuidanceHeartbeat(): void {
+    // Clear any existing timer first
+    if (this.guidanceHeartbeatTimer) {
+      clearInterval(this.guidanceHeartbeatTimer);
+    }
+    
     this.guidanceHeartbeatTimer = setInterval(() => {
       if (this.isShuttingDown) return;
       this.checkAndBroadcastGuidance();
@@ -55,6 +63,9 @@ export class OrchestratorService {
   }
   
   private checkAndBroadcastGuidance(): void {
+    // Don't access database if shutting down
+    if (this.isShuttingDown) return;
+    
     // Get all active conversations
     const activeConversations = this.storage.conversations.list({ status: 'active' });
     
@@ -77,14 +88,12 @@ export class OrchestratorService {
       } else {
         // Has messages - use policy to determine next agent
         const lastMessage = messages[messages.length - 1];
-        if (lastMessage.finality === 'turn') {
+        if (lastMessage && lastMessage.finality === 'turn') {
           const snapshot = this.getConversationSnapshot(convo.conversation);
           const decision = this.policy.decide({ snapshot, lastEvent: lastMessage });
           
-          if (decision.kind === 'internal' || decision.kind === 'external') {
-            nextAgentId = decision.kind === 'internal' 
-              ? decision.agentId 
-              : decision.candidates?.[0] || null;
+          if (decision.kind === 'agent') {
+            nextAgentId = decision.agentId;
             guidanceSeq = lastMessage.seq + 0.1;
           }
         }
@@ -104,7 +113,6 @@ export class OrchestratorService {
               seq: guidanceSeq,
               nextAgentId,
               deadlineMs: Date.now() + 30000,
-              ...(agent.kind === 'external' ? { note: `Your turn (heartbeat)` } : {})
             };
             
             logLine('orchestrator', 'guidance-heartbeat', 
@@ -329,14 +337,13 @@ export class OrchestratorService {
             seq: 0.1, // Initial guidance gets a fractional seq
             nextAgentId: startingAgent.id,
             deadlineMs: Date.now() + 30000,
-            ...(startingAgent.kind === 'external' ? { note: `Starting with ${startingAgent.id}` } : {})
           };
           
           // Publish guidance immediately
           this.bus.publishGuidance(guidanceEvent);
           
           logLine('orchestrator', 'guidance', 
-            `Emitted initial guidance for ${startingAgent.id} (${startingAgent.kind}) on conversation ${conversationId}`);
+            `Emitted initial guidance for ${startingAgent.id} on conversation ${conversationId}`);
         } else {
           logLine('orchestrator', 'warn', 
             `startingAgentId ${convoWithMeta.metadata.startingAgentId} not found in agents list`);
@@ -422,10 +429,8 @@ export class OrchestratorService {
 
       // Emit guidance events based on policy decision
       if (!this.isShuttingDown) {
-        if (decision.kind === 'internal' || decision.kind === 'external') {
-          const nextAgentId = decision.kind === 'internal' 
-            ? decision.agentId 
-            : decision.candidates[0]; // For external, use first candidate as hint
+        if (decision.kind === 'agent') {
+          const nextAgentId = decision.agentId;
           
           if (nextAgentId) {
             const guidanceEvent: GuidanceEvent = {
@@ -513,7 +518,7 @@ export class OrchestratorService {
       const lastEvent = snapshot.events[snapshot.events.length - 1];
       if (lastEvent) {
         const decision = this.policy.decide({ snapshot, lastEvent });
-        if (decision.kind === 'internal' && decision.agentId === agentId) {
+        if (decision.kind === 'agent' && decision.agentId === agentId) {
           this.unsubscribe(subId);
           const deadlineMs = Date.now() + 30000;
           resolve({ deadlineMs });

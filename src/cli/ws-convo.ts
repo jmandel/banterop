@@ -70,7 +70,7 @@ async function main() {
     includeGuidance: true
   });
   
-  const agentImpl = new EchoAgent(transport, events, `${argv["agent-id"]} is thinking...`, "Done");
+  const agentImpl = new EchoAgent(transport, `${argv["agent-id"]} is thinking...`, "Done");
 
   console.log(
     `🤖 Joining conversation ${conversationId} as ${argv["agent-id"]} (${agentImpl.constructor.name})`

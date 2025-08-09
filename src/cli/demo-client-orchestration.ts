@@ -8,7 +8,7 @@
 // 4. Server only stores events and provides coordination primitives
 // 5. This is essentially "runConversationToCompletion" but client-side
 
-import { Bun } from 'bun';
+// import { Bun } from 'bun'; // Bun is a global, not an import
 import { App } from '$src/server/app';
 import { createWebSocketServer } from '$src/server/ws/jsonrpc.server';
 import { startAgents } from '$src/agents/factories/agent.factory';
@@ -17,11 +17,12 @@ import { LLMProviderManager } from '$src/llm/provider-manager';
 
 // Start the server
 const app = new App({ dbPath: ':memory:', nodeEnv: 'test' });
+const { websocket } = await import('$src/server/ws/jsonrpc.server');
 const wsServer = createWebSocketServer(app.orchestrator, app.llmProviderManager);
 const server = Bun.serve({
   port: 3459,
   fetch: wsServer.fetch,
-  websocket: wsServer.websocket,
+  websocket,
 });
 
 console.log(`🚀 Server running on ws://localhost:${server.port}/api/ws`);
@@ -85,27 +86,23 @@ ws.onopen = async () => {
         agents: [
           {
             id: 'alice',
-            kind: 'external', // All external = client-managed
             displayName: 'Alice',
             agentClass: 'AssistantAgent',
             config: { llmProvider: 'mock' }
           },
           {
             id: 'bob',
-            kind: 'external',
             displayName: 'Bob',
             agentClass: 'AssistantAgent',
             config: { llmProvider: 'mock' }
           },
           {
             id: 'charlie',
-            kind: 'external',
             displayName: 'Charlie',
             agentClass: 'EchoAgent'
           },
           {
             id: 'user',
-            kind: 'external',
             displayName: 'User'
           }
         ]

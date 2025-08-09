@@ -22,10 +22,7 @@ export class StrictAlternationPolicy implements SchedulePolicy {
     const nextMeta = snapshot.metadata.agents.find(a => a.id === nextId);
     if (!nextMeta) return { kind: 'none' };
 
-    if (nextMeta.kind === 'internal') {
-      return { kind: 'internal', agentId: nextId };
-    } else {
-      return { kind: 'external', candidates: [nextId], note: `Waiting for ${nextId}` };
-    }
+    // Location is runtime decision - just indicate which agent should go
+    return { kind: 'agent', agentId: nextId, note: `Next turn: ${nextId}` };
   }
 }

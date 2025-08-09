@@ -39,10 +39,10 @@ async function main() {
   
   const agents: BaseAgent[] = [];
   
-  // Start an agent for each internal agent
+  // Start an agent for each agent that has an agentClass (indicating it should run internally)
   for (const agent of convo.metadata.agents) {
-    if (agent.kind !== "internal") {
-      console.log(`⏭️  Skipping ${agent.id} (${agent.kind} agent)`);
+    if (!agent.agentClass) {
+      console.log(`⏭️  Skipping ${agent.id} (no agentClass specified)`);
       continue;
     }
     
@@ -59,16 +59,15 @@ async function main() {
     if (agentClass === "echoagent") {
       agentImpl = new EchoAgent(
         transport,
-        events,
         `${agent.id} is thinking...`,
         `Hello from ${agent.id}!`
       );
     } else if (agentClass === "assistantagent") {
       const provider = app.llmProviderManager.getProvider();
-      agentImpl = new AssistantAgent(transport, events, provider);
+      agentImpl = new AssistantAgent(transport, provider);
     } else {
       // Default to echo agent
-      agentImpl = new EchoAgent(transport, events);
+      agentImpl = new EchoAgent(transport);
     }
     
     // Start the agent
