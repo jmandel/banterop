@@ -1,4 +1,4 @@
-import { BaseAgent, type TurnContext } from '$src/agents/runtime/base-agent';
+import { BaseAgent, type TurnContext, type TurnRecoveryMode } from '$src/agents/runtime/base-agent';
 import type { IAgentTransport } from '$src/agents/runtime/runtime.interfaces';
 import type { AgentScript, TurnBasedScript, ScriptAction } from './script.types';
 import type { TracePayload } from '$src/types/event.types';
@@ -10,9 +10,10 @@ export class ScriptAgent extends BaseAgent {
   
   constructor(
     transport: IAgentTransport,
-    script: AgentScript | TurnBasedScript
+    script: AgentScript | TurnBasedScript,
+    options?: { turnRecoveryMode?: TurnRecoveryMode }
   ) {
-    super(transport);
+    super(transport, options);
     this.script = script;
   }
 

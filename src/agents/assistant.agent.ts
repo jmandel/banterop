@@ -1,4 +1,4 @@
-import { BaseAgent, type TurnContext } from '$src/agents/runtime/base-agent';
+import { BaseAgent, type TurnContext, type TurnRecoveryMode } from '$src/agents/runtime/base-agent';
 import type { IAgentTransport } from '$src/agents/runtime/runtime.interfaces';
 import type { LLMProvider, LLMMessage } from '$src/types/llm.types';
 import type { ConversationSnapshot } from '$src/types/orchestrator.types';
@@ -7,9 +7,10 @@ import { logLine } from '$src/lib/utils/logger';
 export class AssistantAgent extends BaseAgent<ConversationSnapshot> {
   constructor(
     transport: IAgentTransport,
-    private llmProvider: LLMProvider
+    private llmProvider: LLMProvider,
+    options?: { turnRecoveryMode?: TurnRecoveryMode }
   ) {
-    super(transport);
+    super(transport, options);
   }
 
   protected async takeTurn(ctx: TurnContext<ConversationSnapshot>): Promise<void> {

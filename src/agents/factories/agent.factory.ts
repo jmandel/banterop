@@ -9,7 +9,7 @@ import type { AgentMeta } from '$src/types/conversation.meta';
 import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
 import type { LLMProvider } from '$src/types/llm.types';
 
-import { BaseAgent } from '$src/agents/runtime/base-agent';
+import { BaseAgent, type TurnRecoveryMode } from '$src/agents/runtime/base-agent';
 import { AssistantAgent } from '$src/agents/assistant.agent';
 import { EchoAgent } from '$src/agents/echo.agent';
 import { ScenarioDrivenAgent } from '$src/agents/scenario/scenario-driven.agent';
@@ -23,6 +23,7 @@ export interface StartAgentsOptions {
   transport: IAgentTransport;
   providerManager: LLMProviderManager;
   agentIds?: string[];  // Optional filter for which agents to start
+  turnRecoveryMode?: TurnRecoveryMode;  // Optional override for all agents
 }
 
 export interface AgentHandle {
@@ -60,7 +61,7 @@ export async function startAgents(options: StartAgentsOptions): Promise<AgentHan
     console.log(`[startAgents] Creating agent ${agentId} with class ${agentMeta.agentClass || 'default'}`);
 
     // Create the agent with appropriate implementation
-    const agent = createAgent(agentMeta, transport, providerManager, conversationId, scenario);
+    const agent = createAgent(agentMeta, transport, providerManager, conversationId, scenario, options.turnRecoveryMode);
     
     // Start the agent
     await agent.start(conversationId, agentId);
@@ -89,28 +90,42 @@ export function createAgent(
   transport: IAgentTransport,
   providerManager: LLMProviderManager,
   conversationId: number,
-  scenario?: ScenarioConfiguration | null
+  scenario?: ScenarioConfiguration | null,
+  turnRecoveryModeOverride?: TurnRecoveryMode
 ): BaseAgent {
   const agentClass = (agentMeta.agentClass || 'default').toLowerCase();
   const provider = selectProvider(providerManager, agentMeta.config);
   
+  // Determine default recovery mode based on agent class
+  let defaultRecoveryMode: TurnRecoveryMode = 'resume';
+  if (agentClass === 'scenariodrivenagent' || agentClass === 'scenario') {
+    defaultRecoveryMode = 'restart';  // Scenario agents should restart for consistency
+  }
+  
+  // Use override if provided, otherwise use default for agent type
+  const turnRecoveryMode = turnRecoveryModeOverride ?? 
+    (agentMeta.config?.turnRecoveryMode as TurnRecoveryMode) ?? 
+    defaultRecoveryMode;
+  
+  logLine(agentMeta.id, 'factory', `Creating ${agentClass} with recovery mode: ${typeof turnRecoveryMode === 'function' ? 'custom' : turnRecoveryMode}`);
+  
   // Map agentClass to implementation (agents now create their own event streams)
   switch (agentClass) {
     case 'echoagent':
-      return new EchoAgent(transport, 'Processing...', 'Done');
+      return new EchoAgent(transport, 'Processing...', 'Done', { turnRecoveryMode });
     
     case 'assistantagent':
-      return new AssistantAgent(transport, provider);
+      return new AssistantAgent(transport, provider, { turnRecoveryMode });
     
     case 'script':
       // Script agent needs script data from config
       const script = agentMeta.config?.script as TurnBasedScript | undefined;
       if (!script) {
         logLine(agentMeta.id, 'factory', `No script provided for script agent ${agentMeta.id}, falling back to AssistantAgent`);
-        return new AssistantAgent(transport, provider);
+        return new AssistantAgent(transport, provider, { turnRecoveryMode });
       }
       logLine(agentMeta.id, 'factory', `Creating ScriptAgent with ${script.turns?.length || 0} turns`);
-      return new ScriptAgent(transport, script);
+      return new ScriptAgent(transport, script, { turnRecoveryMode });
     
     case 'scenariodrivenagent':
     case 'scenario':
@@ -119,17 +134,18 @@ export function createAgent(
       if (scenario?.agents.some(a => a.agentId === agentMeta.id)) {
         return new ScenarioDrivenAgent(transport, {
           agentId: agentMeta.id,
-          providerManager
+          providerManager,
+          turnRecoveryMode  // Pass recovery mode to scenario agent
         });
       }
       // Fall back to AssistantAgent
       logLine(agentMeta.id, 'factory', `No scenario role for ${agentMeta.id}, using AssistantAgent`);
-      return new AssistantAgent(transport, provider);
+      return new AssistantAgent(transport, provider, { turnRecoveryMode });
     
     default:
       // Unknown agent class, default to AssistantAgent
       logLine(agentMeta.id, 'factory', `Unknown agentClass '${agentClass}', using AssistantAgent`);
-      return new AssistantAgent(transport, provider);
+      return new AssistantAgent(transport, provider, { turnRecoveryMode });
   }
 }
 
