@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { marked } from "marked";
 import { HashRouter as Router, Routes, Route, Link, useNavigate, useParams } from "react-router-dom";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
@@ -232,13 +233,15 @@ function ConversationList({ onSelect, selectedId = null, focusRef, requestFocusK
       input?.focus();
       input?.select();
     } else if (e.key === "r" || (e.key === "R" && e.shiftKey)) {
+      // Allow browser reload shortcuts (Ctrl/Cmd+R variants)
+      if (e.ctrlKey || e.metaKey) return;
       e.preventDefault();
       loadList().catch(console.error);
-    } else if (e.key === "ArrowRight" || e.key === "l") {
+  } else if (e.key === "ArrowRight" || e.key === "l") {
       e.preventDefault();
-      // ask parent to focus details
-      requestDetailFocusRef.current?.();
-    }
+      // request focus shift to details
+      window.dispatchEvent(new CustomEvent("watch:focus:detail"));
+  }
   };
 
   // request focus
@@ -368,11 +371,20 @@ function ConversationList({ onSelect, selectedId = null, focusRef, requestFocusK
 interface ConversationViewProps {
   id?: number | null;
   focusRef?: React.RefObject<HTMLDivElement>;
+  requestFocusKey?: number;
+  onConnStateChange?: (state: ConnState) => void;
 }
 
-function ConversationView({ id, focusRef }: ConversationViewProps) {
+function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: ConversationViewProps) {
   const [events, setEvents] = useState<UnifiedEvent[]>([]);
-  const [showTraces, setShowTraces] = useState(false);
+  const [showTraces, setShowTraces] = useState<boolean>(() => {
+    try {
+      const raw = localStorage.getItem('watch.showTraces');
+      return raw === null ? true : raw === 'true';
+    } catch {
+      return true;
+    }
+  });
   const [autoScroll, setAutoScroll] = useState(true);
   const [meta, setMeta] = useState<any>(null);
   const [connState, setConnState] = useState<ConnState>("idle");
@@ -380,6 +392,7 @@ function ConversationView({ id, focusRef }: ConversationViewProps) {
   const seenSeqRef = useRef<Set<number>>(new Set());
   const wsRef = useRef<WsEventStream | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = focusRef ?? useRef<HTMLDivElement>(null);
 
   const fetchHistory = async () => {
@@ -405,6 +418,7 @@ function ConversationView({ id, focusRef }: ConversationViewProps) {
   const connectWS = () => {
     if (!id) return;
     setConnState((s) => (s === "idle" ? "connecting" : "reconnecting"));
+    onConnStateChange?.(connState === "idle" ? "connecting" : "reconnecting");
     const wsUrl = API_BASE.startsWith("http")
       ? API_BASE.replace(/^http/, "ws") + "/ws"
       : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${API_BASE}/ws`;
@@ -415,7 +429,10 @@ function ConversationView({ id, focusRef }: ConversationViewProps) {
       reconnectDelayMs: 1500,
       ...(typeof lastSeq === 'number' ? { sinceSeq: lastSeq } : {}),
     });
-    s.onStateChange = (st) => setConnState(st as ConnState);
+    s.onStateChange = (st) => {
+      setConnState(st as ConnState);
+      onConnStateChange?.(st as ConnState);
+    };
     wsRef.current = s;
     (async () => {
       try {
@@ -446,14 +463,27 @@ function ConversationView({ id, focusRef }: ConversationViewProps) {
       wsRef.current?.close();
       wsRef.current = null;
       setConnState("closed");
+      onConnStateChange?.("closed");
     };
   }, [id]);
+
+  // Focus when parent requests it
+  useEffect(() => {
+    if (requestFocusKey && containerRef.current) {
+      containerRef.current.focus();
+    }
+  }, [requestFocusKey]);
 
   useEffect(() => {
     if (autoScroll && bottomRef.current) {
       bottomRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [events, autoScroll]);
+
+  // Persist showTraces across reloads
+  useEffect(() => {
+    try { localStorage.setItem('watch.showTraces', String(showTraces)); } catch {}
+  }, [showTraces]);
 
    // keyboard controls for detail pane
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -465,15 +495,26 @@ function ConversationView({ id, focusRef }: ConversationViewProps) {
       e.preventDefault();
       setAutoScroll((v) => !v);
     } else if (e.key === "r") {
+      // Allow browser reload shortcuts (Ctrl/Cmd+R and Ctrl/Cmd+Shift+R)
+      if (e.ctrlKey || e.metaKey) return;
       e.preventDefault();
       // manual reconnect + refresh
       wsRef.current?.close();
       setConnState("reconnecting");
+      onConnStateChange?.("reconnecting");
       fetchHistory().then(connectWS);
     } else if (e.key === "ArrowLeft" || e.key === "h") {
       e.preventDefault();
       // focus list pane by dispatching a custom event
       window.dispatchEvent(new CustomEvent("watch:focus:list"));
+    } else if (e.key === "j") {
+      // Scroll down a notch (like ArrowDown)
+      e.preventDefault();
+      scrollRef.current?.scrollBy({ top: 50, behavior: 'smooth' });
+    } else if (e.key === "k") {
+      // Scroll up a notch (like ArrowUp)
+      e.preventDefault();
+      scrollRef.current?.scrollBy({ top: -50, behavior: 'smooth' });
     }
   };
 
@@ -516,7 +557,7 @@ function ConversationView({ id, focusRef }: ConversationViewProps) {
             </>
           )}
         </div>
-        <ConnBadge state={connState} />
+        {/* Connection badge moved to top header */}
       </div>
       {meta && (
         <div className="mb-2 text-xs text-gray-500">Conversation #{id}</div>
@@ -529,7 +570,7 @@ function ConversationView({ id, focusRef }: ConversationViewProps) {
           <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} /> Auto‑scroll
         </label>
       </div>
-      <div className="flex-1 overflow-y-auto space-y-4">
+      <div className="flex-1 overflow-y-auto space-y-4" ref={scrollRef} data-scroll="detail">
         {turns.map((t, i) => {
           const colorClass = colorForAgent(t.agentId);
           return (
@@ -538,28 +579,109 @@ function ConversationView({ id, focusRef }: ConversationViewProps) {
                 <span>Turn {t.turn} — {t.agentId || 'system'}</span>
                 <span>{dayjs(t.startedAt).format("HH:mm:ss")}</span>
               </div>
-              {t.messages.map((m) => (
-                <div key={m.seq} className="bg-white rounded px-3 py-1 mb-1 shadow-sm">
-                  <div className="text-gray-500 text-[0.7rem]">{m.type}/{m.finality}</div>
-                  <div className="whitespace-pre-wrap font-sans text-sm">
-                    {(m.payload as any).text || JSON.stringify(m.payload)}
-                  </div>
-                </div>
-              ))}
               {showTraces && t.traces.length > 0 && (
-                <details className="mt-2">
-                  <summary className="text-xs text-gray-700 cursor-pointer">
-                    {t.traces.length} trace events
-                  </summary>
-                  <div className="mt-1 space-y-1">
-                    {t.traces.map((tr) => (
-                      <div key={tr.seq} className="bg-yellow-50 p-1 rounded text-xs font-mono break-words">
-                        {JSON.stringify(tr.payload)}
+                <div className="mb-2 space-y-2 pl-2 border-l border-gray-200">
+                  {t.traces.map((tr) => {
+                    const p = tr.payload as any;
+                    const label = (typeof p === 'object' && p?.type ? String(p.type) : 'trace').toUpperCase();
+
+                    // Special rendering for TOOL_RESULT with markdown content
+                    const isToolResult = label === 'TOOL_RESULT';
+                    const hasMarkdown = isToolResult && p?.result && typeof p.result === 'object' && typeof p.result.content === 'string' && typeof p.result.contentType === 'string' && p.result.contentType.toLowerCase() === 'text/markdown';
+                    const hasJson = isToolResult && p?.result && typeof p.result === 'object' && typeof p.result.content === 'string' && typeof p.result.contentType === 'string' && p.result.contentType.toLowerCase().includes('json');
+
+                    if (hasMarkdown) {
+                      const SENTINEL = '___MARKDOWN_SENTINEL___';
+                      const resultClone: any = { ...p.result, content: SENTINEL };
+                      const jsonStr = JSON.stringify(resultClone, null, 2);
+                      const token = `"${SENTINEL}"`;
+                      const pos = jsonStr.indexOf(token);
+                      const before = pos >= 0 ? jsonStr.slice(0, pos) : jsonStr;
+                      const after = pos >= 0 ? jsonStr.slice(pos + token.length) : '';
+                      // Compute indentation aligned to the 'c' in "content"
+                      const lastNl = before.lastIndexOf('\n');
+                      const lastLine = lastNl >= 0 ? before.slice(lastNl + 1) : before;
+                      const contentIdx = lastLine.indexOf('"content"');
+                      const indentCols = contentIdx >= 0 ? contentIdx + 1 : (lastLine.match(/^\s*/)?.[0].length ?? 0);
+                      const html = marked.parse(p.result.content as string) as string;
+                      return (
+                        <div key={tr.seq} className="bg-yellow-50/70 border border-yellow-200 text-gray-800 px-2 py-2 rounded shadow-[0_0_0_1px_rgba(0,0,0,0.02)]">
+                          <div className="uppercase tracking-wide text-[0.7rem] font-semibold text-yellow-700 mb-1">{label}</div>
+                          <pre className="text-xs font-mono whitespace-pre-wrap break-words leading-snug">{before}</pre>
+                          <div className="my-1">
+                            <div
+                              className="inline-block max-w-full border border-yellow-300 bg-white/60 rounded px-1 py-1 text-xs font-mono leading-snug"
+                              style={{ marginLeft: `${indentCols}ch` }}
+                              dangerouslySetInnerHTML={{ __html: html }}
+                            />
+                          </div>
+                          <pre className="text-xs font-mono whitespace-pre-wrap break-words leading-snug">{after}</pre>
+                        </div>
+                      );
+                    }
+
+                    if (hasJson) {
+                      const SENTINEL = '___JSON_SENTINEL___';
+                      const resultClone: any = { ...p.result, content: SENTINEL };
+                      const jsonStr = JSON.stringify(resultClone, null, 2);
+                      const token = `"${SENTINEL}"`;
+                      const pos = jsonStr.indexOf(token);
+                      const before = pos >= 0 ? jsonStr.slice(0, pos) : jsonStr;
+                      const after = pos >= 0 ? jsonStr.slice(pos + token.length) : '';
+                      const lastNl = before.lastIndexOf('\n');
+                      const lastLine = lastNl >= 0 ? before.slice(lastNl + 1) : before;
+                      const contentIdx = lastLine.indexOf('"content"');
+                      const indentCols = contentIdx >= 0 ? contentIdx + 1 : (lastLine.match(/^\s*/)?.[0].length ?? 0);
+                      let prettyInner = '';
+                      try { prettyInner = JSON.stringify(JSON.parse(p.result.content as string), null, 2); } catch { prettyInner = p.result.content as string; }
+                      return (
+                        <div key={tr.seq} className="bg-yellow-50/70 border border-yellow-200 text-gray-800 px-2 py-2 rounded shadow-[0_0_0_1px_rgba(0,0,0,0.02)]">
+                          <div className="uppercase tracking-wide text-[0.7rem] font-semibold text-yellow-700 mb-1">{label}</div>
+                          <pre className="text-xs font-mono whitespace-pre-wrap break-words leading-snug">{before}</pre>
+                          <div className="my-1">
+                            <pre
+                              className="inline-block max-w-full border border-yellow-300 bg-white/60 rounded px-1 py-1 text-xs font-mono leading-snug whitespace-pre-wrap break-words"
+                              style={{ marginLeft: `${indentCols}ch` }}
+                            >{prettyInner}</pre>
+                          </div>
+                          <pre className="text-xs font-mono whitespace-pre-wrap break-words leading-snug">{after}</pre>
+                        </div>
+                      );
+                    }
+
+                    // Default pretty JSON for other traces
+                    let pretty = '';
+                    try {
+                      const obj = typeof tr.payload === 'string' ? JSON.parse(tr.payload as any) : tr.payload;
+                      pretty = JSON.stringify(obj, null, 2);
+                    } catch {
+                      pretty = typeof tr.payload === 'string' ? tr.payload : JSON.stringify(tr.payload, null, 2);
+                    }
+                    return (
+                      <div key={tr.seq} className="bg-yellow-50/70 border border-yellow-200 text-gray-800 px-2 py-2 rounded shadow-[0_0_0_1px_rgba(0,0,0,0.02)]">
+                        <div className="uppercase tracking-wide text-[0.7rem] font-semibold text-yellow-700 mb-1">{label}</div>
+                        <pre className="text-xs font-mono whitespace-pre-wrap break-words leading-snug">{pretty}</pre>
                       </div>
-                    ))}
-                  </div>
-                </details>
+                    );
+                  })}
+                </div>
               )}
+              {t.messages.map((m) => {
+                const text = (m.payload as any)?.text;
+                const html = typeof text === 'string' ? marked.parse(text) : undefined;
+                return (
+                  <div key={m.seq} data-block className="bg-white rounded px-3 py-2 mb-1 shadow-sm">
+                    <div className="text-gray-500 text-[0.7rem] mb-1">{m.type}/{m.finality}</div>
+                    {html ? (
+                      <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: html as string }} />
+                    ) : (
+                      <div className="whitespace-pre-wrap font-sans text-sm">
+                        {text ?? JSON.stringify(m.payload)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           );
         })}
@@ -603,6 +725,8 @@ function SplitLayout() {
   const [dragging, setDragging] = useState(false);
   const [listFocusKey, setListFocusKey] = useState(0);
   const [detailFocusKey, setDetailFocusKey] = useState(0);
+  const [focusedPane, setFocusedPane] = useState<'list' | 'detail'>('list');
+  const [connState, setConnState] = useState<ConnState>('idle');
   const listRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
 
@@ -635,15 +759,19 @@ function SplitLayout() {
       } else if (e.key === "h") {
         e.preventDefault();
         setListFocusKey((k) => k + 1);
+        setFocusedPane('list');
       } else if (e.key === "l") {
         e.preventDefault();
         setDetailFocusKey((k) => k + 1);
+        setFocusedPane('detail');
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
         setListFocusKey((k) => k + 1);
+        setFocusedPane('list');
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
         setDetailFocusKey((k) => k + 1);
+        setFocusedPane('detail');
       }
     };
     window.addEventListener("keydown", onKey);
@@ -653,13 +781,19 @@ function SplitLayout() {
   // initial focus on list
   useEffect(() => {
     setListFocusKey((k) => k + 1);
+    setFocusedPane('list');
   }, []);
 
   // listen for detail pane requesting focus shift to list
   useEffect(() => {
-    const onEvt = () => setListFocusKey((k) => k + 1);
-    window.addEventListener("watch:focus:list", onEvt as any);
-    return () => window.removeEventListener("watch:focus:list", onEvt as any);
+    const onList = () => { setListFocusKey((k) => k + 1); setFocusedPane('list'); };
+    const onDetail = () => { setDetailFocusKey((k) => k + 1); setFocusedPane('detail'); };
+    window.addEventListener("watch:focus:list", onList as any);
+    window.addEventListener("watch:focus:detail", onDetail as any);
+    return () => {
+      window.removeEventListener("watch:focus:list", onList as any);
+      window.removeEventListener("watch:focus:detail", onDetail as any);
+    };
   }, []);
 
   return (
@@ -667,15 +801,34 @@ function SplitLayout() {
       <header className="flex items-center justify-between px-3 py-2 border-b bg-white">
         <div className="font-semibold">Watch</div>
         <div className="flex items-center gap-4 text-xs">
-          <div className="flex items-center gap-2 text-gray-600">
-            <span className={`inline-block w-2 h-2 rounded-full ${health ? "bg-green-500" : health === false ? "bg-red-500" : "bg-gray-400"}`} />
-            <span>{health ? "API OK" : health === false ? "API down" : "checking"}</span>
-          </div>
+          {(() => {
+            // Collapse API + live into one status
+            let color = 'bg-gray-400';
+            let label = 'idle';
+            if (health === false) {
+              color = 'bg-red-500';
+              label = 'api down';
+            } else if (health === true) {
+              if (connState === 'open') { color = 'bg-green-500'; label = 'live'; }
+              else if (connState === 'connecting' || connState === 'reconnecting') { color = 'bg-yellow-500'; label = connState; }
+              else if (connState === 'closed') { color = 'bg-gray-400'; label = 'disconnected'; }
+              else { color = 'bg-gray-400'; label = 'ready'; }
+            } else {
+              color = 'bg-gray-400';
+              label = 'checking';
+            }
+            return (
+              <div className="flex items-center gap-2 text-gray-600">
+                <span className={`inline-block w-2 h-2 rounded-full ${color}`} />
+                <span className="capitalize">{label}</span>
+              </div>
+            );
+          })()}
           <div className="text-gray-500">Shortcuts: ?</div>
         </div>
       </header>
       <div className="flex-1 flex min-h-0">
-        <div className="border-r bg-white min-w-[240px] flex flex-col min-h-0 overflow-hidden" style={{ width: leftWidth }}>
+        <div className={`border-r border-gray-200 bg-white min-w-[240px] flex flex-col min-h-0 overflow-hidden border-t-2 ${focusedPane==='list' ? 'border-t-blue-400' : 'border-t-transparent'}`} style={{ width: leftWidth }}>
           <ConversationList onSelect={onSelect} selectedId={selectedId ?? null} focusRef={listRef} requestFocusKey={listFocusKey} />
         </div>
         <div
@@ -683,9 +836,9 @@ function SplitLayout() {
           onMouseDown={() => setDragging(true)}
           title="Drag to resize"
         />
-        <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+        <div className={`flex-1 min-w-0 min-h-0 flex flex-col border-t-2 ${focusedPane==='detail' ? 'border-t-blue-400' : 'border-t-transparent'}`}>
           {selectedId ? (
-            <ConversationView id={selectedId} focusRef={detailRef} />
+            <ConversationView id={selectedId} focusRef={detailRef} requestFocusKey={detailFocusKey} onConnStateChange={setConnState} />
           ) : (
             <div className="h-full flex items-center justify-center text-gray-400 text-sm">
               Select a conversation from the left

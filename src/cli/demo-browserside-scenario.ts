@@ -18,7 +18,8 @@
 import { ScenarioDrivenAgent } from '$src/agents/scenario/scenario-driven.agent';
 import { WsTransport } from '$src/agents/runtime/ws.transport';
 import { LLMProviderManager } from '$src/llm/provider-manager';
-import { createScenarioConfiguration } from './scenarios/knee-mri-scenario';
+import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
+import kneeMriScenario from '$src/db/fixtures/knee-mri-scenario.json';
 import type { UnifiedEvent } from '$src/types/event.types';
 
 // Parse command line arguments
@@ -113,8 +114,8 @@ async function main() {
   const rpc = new WsRpcClient();
   await rpc.connect(wsUrl);
   
-  // Create scenario configuration for knee MRI
-  const scenario = createScenarioConfiguration();
+  // Use knee MRI scenario from fixture
+  const scenario = kneeMriScenario as ScenarioConfiguration;
   const scenarioId = scenario.metadata.id;
   
   // First, store the scenario in the database
@@ -258,7 +259,7 @@ async function main() {
         console.log('\n⏱️ Demo timeout reached');
         resolve();
       }
-    }, 60000); // 60 second timeout
+    }, 180000); // 60 second timeout
   });
   
   // Cleanup

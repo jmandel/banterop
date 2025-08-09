@@ -38,27 +38,19 @@ export class LLMProviderManager {
     // Use specified model, or fall back to default model from config
     const model = config?.model ?? this.config.defaultLlmModel;
 
-    console.log('[LLMProviderManager] getProvider called with:', { 
-      configProvider: config?.provider, 
-      configModel: config?.model,
-      defaultProvider: this.config.defaultLlmProvider,
-      defaultModel: this.config.defaultLlmModel,
-      resolvedModel: model
-    });
+    console.log('[LLMProviderManager] getProvider:', `provider=${config?.provider || this.config.defaultLlmProvider}, model=${model || 'default'}`);
 
     // If a model is specified and no explicit provider, try to auto-detect the provider
     if (model && !config?.provider) {
       const detectedProvider = this.findProviderForModel(model);
       if (detectedProvider) {
         providerName = detectedProvider;
-        console.log(`[LLMProviderManager] Auto-detected provider '${providerName}' for model '${model}'`);
       } else {
         throw new Error(`Unknown model '${model}'. Please specify a provider or use a known model name.`);
       }
     } else {
       // Use explicit provider or fall back to default
       providerName = config?.provider ?? this.config.defaultLlmProvider;
-      console.log(`[LLMProviderManager] Using provider '${providerName}' (explicit or default)`);
     }
 
     // Create a new provider instance each time (no caching in Connectathon mode)
@@ -114,7 +106,7 @@ export class LLMProviderManager {
       ...(providerName === 'browserside' && this.config.serverUrl ? { serverUrl: this.config.serverUrl } : {})
     };
     
-    console.log(`[LLMProviderManager] Creating ${providerName} provider with config:`, providerConfig);
+    console.log(`[LLMProviderManager] Creating ${providerName} provider, serverUrl=${(providerConfig as any).serverUrl || 'none'}`);
     
     return new ProviderClass(providerConfig as any);
   }
