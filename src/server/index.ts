@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import { App } from './app';
 import { createWebSocketServer, websocket } from './ws/jsonrpc.server';
 import { createScenarioRoutes } from './routes/scenarios.http';
+import { createConversationRoutes } from './routes/conversations.http';
 import { createAttachmentRoutes } from './routes/attachments.http';
 import { createLLMRoutes } from './routes/llm.http';
 import { createBridgeRoutes } from './routes/bridge.mcp';
@@ -24,6 +25,9 @@ server.get('/api/health', (c) => c.json({ ok: true }));
 // HTTP: scenarios CRUD under /api/scenarios
 server.route('/api/scenarios', createScenarioRoutes(appInstance.orchestrator.storage.scenarios));
 
+// HTTP: conversations list under /api/conversations
+server.route('/api/conversations', createConversationRoutes(appInstance.orchestrator));
+
 // HTTP: attachments under /api/attachments
 server.route('/api', createAttachmentRoutes(appInstance.orchestrator));
 
@@ -34,7 +38,7 @@ server.route('/api', createLLMRoutes(appInstance.llmProviderManager));
 server.route('/api/bridge', createBridgeRoutes(appInstance.orchestrator, appInstance.llmProviderManager));
 
 // WS: JSON-RPC under /api/ws (already configured in createWebSocketServer)
-server.route('/', createWebSocketServer(appInstance.orchestrator, appInstance.llmProviderManager));
+server.route('/', createWebSocketServer(appInstance.orchestrator, appInstance.agentHost));
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {

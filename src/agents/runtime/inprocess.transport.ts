@@ -23,7 +23,7 @@ export class InProcessTransport implements IAgentTransport {
     attachments?: NonNullable<MessagePayload['attachments']>;
     clientRequestId?: string;
     turn?: number;
-  }): Promise<{ seq: number; turn: number; event: number }> {
+  }): Promise<{ conversation: number; seq: number; turn: number; event: number }> {
     const payload: MessagePayload = {
       text: params.text,
       ...(params.attachments ? { attachments: params.attachments } : {}),
@@ -45,7 +45,7 @@ export class InProcessTransport implements IAgentTransport {
     payload: TracePayload;
     turn?: number;
     clientRequestId?: string;
-  }): Promise<{ seq: number; turn: number; event: number }> {
+  }): Promise<{ conversation: number; seq: number; turn: number; event: number }> {
     const payload = {
       ...params.payload,
       ...(params.clientRequestId ? { clientRequestId: params.clientRequestId } : {}),

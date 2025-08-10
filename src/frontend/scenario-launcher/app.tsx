@@ -98,12 +98,19 @@ function ScenarioList() {
   const [launchConfig, setLaunchConfig] = useState<LaunchConfig | null>(null);
   const [launching, setLaunching] = useState(false);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [runMode, setRunMode] = useState<'client'|'server'>(() => {
+    try { return (localStorage.getItem('scenarioLauncher.runMode') as 'client'|'server') || 'client'; } catch { return 'client'; }
+  });
 
   const loadScenarios = async () => {
     try {
       setLoading(true);
-      const result = await wsRpcCall<{ scenarios: ScenarioItem[] }>("listScenarios", {});
-      setScenarios(result.scenarios || []);
+      const url = API_BASE.startsWith('http')
+        ? `${API_BASE}/scenarios`
+        : `${location.protocol}//${location.host}${API_BASE}/scenarios`;
+      const res = await fetch(url);
+      const list = res.ok ? await res.json() : [];
+      setScenarios(list || []);
     } catch (err) {
       console.error("Failed to load scenarios:", err);
     } finally {
@@ -174,7 +181,6 @@ function ScenarioList() {
         const agents = scenario.config?.agents?.map((a: any) => ({
           id: a.agentId,
           displayName: a.agentId.replace(/-/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
-          llmProvider: 'browserside',
           model: defaultModel
         })) || [];
 
@@ -223,7 +229,6 @@ function ScenarioList() {
     const agents = scenario.config?.agents?.map((a: any) => ({
       id: a.agentId,
       displayName: a.agentId.replace(/-/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
-      llmProvider: 'browserside',
       model: defaultModel
     })) || [];
 
@@ -250,10 +255,7 @@ function ScenarioList() {
           agents: launchConfig.agents.map(a => ({
             id: a.id,
             displayName: a.displayName,
-            config: {
-              model: a.model,
-              llmProvider: a.llmProvider
-            }
+            config: { model: a.model }
           })),
           startingAgentId: launchConfig.startingAgentId,
           custom: {
@@ -263,8 +265,9 @@ function ScenarioList() {
       });
       console.log('Created conversation:', result);
       
-      // Navigate to conversation view with auto-start flag
-      navigate(`/conversation/${result.conversationId}?autostart=true`);
+      // Navigate to conversation view with auto-start flag and selected mode
+      try { localStorage.setItem('scenarioLauncher.runMode', runMode); } catch {}
+      navigate(`/conversation/${result.conversationId}?autostart=true&mode=${runMode}`);
     } catch (err) {
       console.error("Failed to launch scenario:", err);
       alert(`Failed to launch: ${err}`);
@@ -330,6 +333,19 @@ function ScenarioList() {
             <h2 className="text-lg font-semibold">Launch Configuration</h2>
             
             <div className="p-4 border border-gray-200 rounded-lg space-y-4">
+              {/* Run Mode */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Run Mode</label>
+                <select
+                  value={runMode}
+                  onChange={(e) => setRunMode(e.target.value as 'client'|'server')}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                >
+                  <option value="client">Run agents in browser (client-managed)</option>
+                  <option value="server">Run agents on server (server-managed)</option>
+                </select>
+              </div>
+
               {/* Title */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -371,23 +387,8 @@ function ScenarioList() {
                     <div key={agent.id} className="p-3 bg-gray-50 rounded-md">
                       <div className="font-medium text-sm mb-2">{agent.displayName}</div>
                       <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-xs text-gray-500">Provider</label>
-                          <select
-                            value={agent.llmProvider}
-                            onChange={(e) => {
-                              const newAgents = [...launchConfig.agents];
-                              newAgents[idx] = { ...agent, llmProvider: e.target.value };
-                              setLaunchConfig({ ...launchConfig, agents: newAgents });
-                            }}
-                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
-                            disabled
-                          >
-                            <option value="browserside">Browserside</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-xs text-gray-500">Model</label>
+                        <div className="col-span-2">
+                          <label className="block text-xs text-gray-500">Model (hint)</label>
                           <select
                             value={agent.model}
                             onChange={(e) => {
@@ -482,6 +483,8 @@ function ConversationView({ id }: { id: number }) {
   // Check if we should auto-start agents
   const urlParams = new URLSearchParams(window.location.search);
   const shouldAutoStart = urlParams.get('autostart') === 'true';
+  const runModeParam = urlParams.get('mode') as ('client'|'server') | null;
+  const runMode: 'client'|'server' = runModeParam || (localStorage.getItem('scenarioLauncher.runMode') as any) || 'client';
 
   // Subscribe to events (separate from agent lifecycle)
   const subscribeToEvents = () => {
@@ -659,12 +662,21 @@ function ConversationView({ id }: { id: number }) {
         // Subscribe to events immediately (for new messages)
         subscribeToEvents();
         
-        // Auto-start agents if requested and this is a fresh conversation
+        // Auto-start agents (client or server) if requested
         if (shouldAutoStart && !agentsRunning) {
-          // Clear the autostart param to prevent re-runs
           window.history.replaceState(null, '', `#/conversation/${id}`);
-          // Start agents immediately - no timeout needed, heartbeat handles guidance
-          startAgents();
+          if (runMode === 'client') {
+            startAgents();
+          } else {
+            // server-managed ensure
+            try {
+              const agentIds = (result.metadata?.agents || []).map((a: any) => a.id);
+              await wsRpcCall('ensureAgentsRunning', { conversationId: id, agentIds });
+              setAgentsRunning(true);
+            } catch (e) {
+              console.error('Failed to ensure server agents:', e);
+            }
+          }
         }
       } catch (err) {
         console.error("Failed to load conversation:", err);
@@ -755,26 +767,40 @@ function ConversationView({ id }: { id: number }) {
             {!agentsRunning ? (
               <div className="p-4 border border-blue-200 bg-blue-50 rounded-lg">
                 <div className="text-sm text-blue-800 mb-3">
-                  <strong>Agents not running.</strong> Start agents to continue the conversation.
+                  <strong>Agents not running.</strong> Start agents to continue the conversation. Mode: <em>{runMode}</em>
                 </div>
                 <button
-                  onClick={startAgents}
+                  onClick={async () => {
+                    if (runMode === 'client') {
+                      await startAgents();
+                    } else {
+                      // Ensure agents on the server
+                      try {
+                        const agentIds = (conversation?.metadata?.agents || []).map((a: any) => a.id);
+                        await wsRpcCall('ensureAgentsRunning', { conversationId: id, agentIds });
+                        setAgentsRunning(true);
+                      } catch (e) {
+                        console.error('Failed to ensure server agents:', e);
+                        alert(`Failed to ensure server agents: ${e}`);
+                      }
+                    }
+                  }}
                   className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
                 >
-                  Start Agents
+                  {runMode === 'client' ? 'Start Agents (Browser)' : 'Ensure Agents (Server)'}
                 </button>
               </div>
             ) : (
               <div className="p-4 border border-green-200 bg-green-50 rounded-lg">
                 <div className="text-sm text-green-800 flex items-center justify-between">
                   <div>
-                    <strong>Agents are running!</strong> The conversation is in progress.
+                    <strong>Agents are running!</strong> The conversation is in progress. Mode: <em>{agentsRef.current.size > 0 ? 'client' : 'server'}</em>
                   </div>
                   <button
                     onClick={stopAgents}
                     className="px-3 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-700"
                   >
-                    Stop Agents
+                    {agentsRef.current.size > 0 ? 'Stop Agents (Browser)' : 'Stop Agents (Server)'}
                   </button>
                 </div>
               </div>

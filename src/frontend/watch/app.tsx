@@ -128,22 +128,34 @@ function ConversationList({ onSelect, selectedId = null, focusRef, requestFocusK
   // helper to load list
   const loadList = async () => {
     const sinceIso = dayjs().subtract(hours, "hour").toISOString();
-    const result = await wsRpcCall<{ conversations: any[] }>(
-      "listConversations", {}
-    );
-    const recent = result.conversations.filter((c) =>
+    // Use HTTP conversations list (include all statuses; we'll filter by time locally)
+    const params = new URLSearchParams();
+    params.set('limit', '200');
+    params.set('hours', String(hours));
+    const base = API_BASE.startsWith('http')
+      ? `${API_BASE}/conversations`
+      : `${location.protocol}//${location.host}${API_BASE}/conversations`;
+    const url = `${base}?${params.toString()}`;
+    const res = await fetch(url);
+    const result = await res.json();
+    const recent = (result.conversations || []).filter((c: any) =>
       dayjs(c.updatedAt).isAfter(sinceIso)
     );
     setConversations(recent);
 
     const scenarioIds = Array.from(
-      new Set(recent.map((c: any) => c.scenarioId).filter(Boolean))
+      new Set(recent.map((c: any) => c.metadata?.scenarioId).filter(Boolean))
     );
     if (scenarioIds.length) {
       const scenarioMapLocal: Record<string, any> = {};
       for (const id of scenarioIds) {
         try {
-          const item = await wsRpcCall<any>('getScenario', { scenarioId: id });
+          // Use HTTP scenario GET
+          const surl = API_BASE.startsWith('http')
+            ? `${API_BASE}/scenarios/${id}`
+            : `${location.protocol}//${location.host}${API_BASE}/scenarios/${id}`;
+          const resp = await fetch(surl);
+          const item = resp.ok ? await resp.json() : null;
           scenarioMapLocal[id] = item ?? { name: id, config: {} };
         } catch {
           scenarioMapLocal[id] = { name: id, config: {} };
@@ -157,8 +169,9 @@ function ConversationList({ onSelect, selectedId = null, focusRef, requestFocusK
     loadList().catch(console.error);
   }, [hours]);
 
-  // subscribeAll to new convos
+  // WS subscription to new conversations (reactive) + polling fallback
   useEffect(() => {
+    let timer: any;
     const wsUrl = API_BASE.startsWith("http")
       ? API_BASE.replace(/^http/, "ws") + "/ws"
       : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${API_BASE}/ws`;
@@ -166,25 +179,27 @@ function ConversationList({ onSelect, selectedId = null, focusRef, requestFocusK
     const id = crypto.randomUUID();
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({
-        jsonrpc: "2.0",
-        id,
-        method: "subscribeAll",
-        params: { includeGuidance: false }
-      }));
+      ws.send(JSON.stringify({ jsonrpc: '2.0', id, method: 'subscribeConversations' }));
+      // kick off initial load
+      loadList().catch(console.error);
+      // start low-frequency poll as a safety net
+      timer = setInterval(() => loadList().catch(console.error), 15000);
     };
 
     ws.onmessage = (evt) => {
-      const msg = JSON.parse(evt.data as string);
-      if (msg.method === "event" && msg.params?.type === "system") {
-        if (msg.params?.payload?.kind === "meta_created") {
+      try {
+        const msg = JSON.parse(String(evt.data));
+        if (msg.method === 'conversation') {
+          // New conversation created => refresh list
           loadList().catch(console.error);
         }
-      }
+      } catch {}
     };
 
-    ws.onerror = (err) => console.error("subscribeAll error", err);
-    return () => ws.close();
+    return () => {
+      if (timer) clearInterval(timer);
+      try { ws.close(); } catch {}
+    };
   }, [hours]);
 
   const availableTags = useMemo(() => {
@@ -196,14 +211,14 @@ function ConversationList({ onSelect, selectedId = null, focusRef, requestFocusK
   }, [scenarioMap]);
 
   const filteredConvos = conversations.filter((c) => {
-    if (scenarioFilter && c.scenarioId !== scenarioFilter) return false;
+    if (scenarioFilter && c.metadata?.scenarioId !== scenarioFilter) return false;
     if (tagFilter) {
       const tags =
-        scenarioMap[c.scenarioId]?.config?.metadata?.tags || [];
+        scenarioMap[c.metadata?.scenarioId]?.config?.metadata?.tags || [];
       return tags.includes(tagFilter);
     }
     if (textFilter) {
-      const hay = `${c.title || ""} ${c.scenarioId || ""} ${c.status || ""}`.toLowerCase();
+      const hay = `${c.metadata?.title || ""} ${c.metadata?.scenarioId || ""} ${c.status || ""}`.toLowerCase();
       if (!hay.includes(textFilter.toLowerCase())) return false;
     }
     return true;
@@ -250,11 +265,11 @@ function ConversationList({ onSelect, selectedId = null, focusRef, requestFocusK
       if (e.ctrlKey || e.metaKey) return;
       e.preventDefault();
       loadList().catch(console.error);
-  } else if (e.key === "ArrowRight" || e.key === "l") {
+    } else if ((e.key === "ArrowRight" || e.key === "l") && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       // request focus shift to details
       window.dispatchEvent(new CustomEvent("watch:focus:detail"));
-  }
+    }
   };
 
   // request focus
@@ -279,61 +294,51 @@ function ConversationList({ onSelect, selectedId = null, focusRef, requestFocusK
       tabIndex={0}
       onKeyDown={onKeyDown}
     >
-      {/* filters */}
-      <div className="flex flex-wrap gap-4 items-end">
-        {/* hours */}
-        <label className="flex flex-col text-sm">
-          Hours back
-          <input
-            type="number"
-            className="border p-1 w-20"
-            value={hours}
-            onChange={(e) => setHours(Number(e.target.value))}
-          />
-        </label>
-        {/* scenario */}
-        <label className="flex flex-col text-sm">
-          Scenario
-          <select
-            className="border p-1"
-            value={scenarioFilter}
-            onChange={(e) => setScenarioFilter(e.target.value)}
-          >
-            <option value="">(all)</option>
-            {Object.entries(scenarioMap).map(([id, sc]) => (
-              <option key={id} value={id}>
-                {id} — {sc.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        {/* tag */}
-        <label className="flex flex-col text-sm">
-          Tag
-          <select
-            className="border p-1"
-            value={tagFilter}
-            onChange={(e) => setTagFilter(e.target.value)}
-          >
-            <option value="">(all)</option>
-            {availableTags.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </label>
-        {/* text filter */}
-        <label className="flex flex-col text-sm flex-1 min-w-[200px]">
-          Search
-          <input
-            name="textFilter"
-            placeholder="/ title, scenario, status"
-            className="border p-1"
-            value={textFilter}
-            onChange={(e) => setTextFilter(e.target.value)}
-          />
-        </label>
+      {/* compact filters (single line) */}
+      <div className="flex items-center gap-2 text-xs">
+        <input
+          type="number"
+          className="border p-1 w-16"
+          value={hours}
+          title="Hours back"
+          aria-label="Hours back"
+          onChange={(e) => setHours(Number(e.target.value))}
+        />
+        <select
+          className="border p-1 max-w-[240px]"
+          value={scenarioFilter}
+          title="Scenario"
+          aria-label="Scenario"
+          onChange={(e) => setScenarioFilter(e.target.value)}
+        >
+          <option value="">Scenario: all</option>
+          {Object.entries(scenarioMap).map(([id, sc]) => (
+            <option key={id} value={id}>
+              {sc.name || id}
+            </option>
+          ))}
+        </select>
+        <select
+          className="border p-1 max-w-[180px]"
+          value={tagFilter}
+          title="Tag"
+          aria-label="Tag"
+          onChange={(e) => setTagFilter(e.target.value)}
+        >
+          <option value="">Tag: all</option>
+          {availableTags.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+        <input
+          name="textFilter"
+          placeholder="/ search title, scenario, status"
+          className="border p-1 flex-1 min-w-[160px]"
+          value={textFilter}
+          onChange={(e) => setTextFilter(e.target.value)}
+        />
       </div>
 
       {/* table */}
@@ -364,7 +369,7 @@ function ConversationList({ onSelect, selectedId = null, focusRef, requestFocusK
                 <td className="p-1">{c.conversation}</td>
                 <td className="p-1">
                   <span className="text-blue-600 hover:underline">
-                    {c.title || "(untitled)"}
+                    {c.metadata?.title || "(untitled)"}
                   </span>
                 </td>
                 <td className="p-1">{c.metadata?.scenarioId || ''}</td>
@@ -926,19 +931,19 @@ function SplitLayout() {
       if (e.key === "?" || (e.shiftKey && e.key === "/")) {
         e.preventDefault();
         setShowHelp((v) => !v);
-      } else if (e.key === "h") {
+      } else if (e.key === "h" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         setListFocusKey((k) => k + 1);
         setFocusedPane('list');
-      } else if (e.key === "l") {
+      } else if (e.key === "l" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         setDetailFocusKey((k) => k + 1);
         setFocusedPane('detail');
-      } else if (e.key === "ArrowLeft") {
+      } else if (e.key === "ArrowLeft" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         setListFocusKey((k) => k + 1);
         setFocusedPane('list');
-      } else if (e.key === "ArrowRight") {
+      } else if (e.key === "ArrowRight" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         setDetailFocusKey((k) => k + 1);
         setFocusedPane('detail');

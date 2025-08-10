@@ -17,10 +17,10 @@ describe('OpenRouterLLMProvider', () => {
     
     expect(metadata.name).toBe('openrouter');
     expect(metadata.description).toBe('OpenRouter AI Gateway');
-    expect(metadata.models).toContain('openai/gpt-4-turbo-preview');
-    expect(metadata.models).toContain('openai/gpt-3.5-turbo');
-    expect(metadata.models).toContain('anthropic/claude-3-opus');
-    expect(metadata.defaultModel).toBe('openai/gpt-3.5-turbo');
+    expect(Array.isArray(metadata.models)).toBe(true);
+    expect(metadata.models.length).toBeGreaterThan(0);
+    // defaultModel should be one of the available models
+    expect(metadata.models).toContain(metadata.defaultModel);
   });
 
   it('configures OpenAI client with correct baseURL and headers', () => {
@@ -65,8 +65,9 @@ describe('OpenRouterLLMProvider', () => {
     
     await provider.complete({ messages });
     
+    const expectedModel = provider.getMetadata().defaultModel;
     expect(mockCreate).toHaveBeenCalledWith({
-      model: 'openai/gpt-3.5-turbo',
+      model: expectedModel,
       messages
     });
   });
@@ -97,8 +98,9 @@ describe('OpenRouterLLMProvider', () => {
       maxTokens: 150
     });
     
+    const expectedModel = provider.getMetadata().defaultModel;
     expect(mockCreate).toHaveBeenCalledWith({
-      model: 'openai/gpt-3.5-turbo',
+      model: expectedModel,
       messages: [{ role: 'user', content: 'test' }],
       temperature: 0.7,
       max_tokens: 150

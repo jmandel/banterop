@@ -137,12 +137,12 @@ describe('ProviderManager', () => {
     const googleProvider = manager.getProvider({ model: 'gemini-2.5-flash' });
     expect(googleProvider.getMetadata().name).toBe('google');
     
-    // Test OpenRouter model with prefix
-    const openrouterProvider = manager.getProvider({ model: 'openai/gpt-3.5-turbo' });
+    // Test OpenRouter model with prefix (must be in provider metadata)
+    const openrouterProvider = manager.getProvider({ model: 'openai/gpt-oss-120b:nitro' });
     expect(openrouterProvider.getMetadata().name).toBe('openrouter');
     
-    // Test common model name without prefix
-    const gptProvider = manager.getProvider({ model: 'gpt-3.5-turbo' });
+    // Test common model name without prefix (suffix match)
+    const gptProvider = manager.getProvider({ model: 'gpt-oss-120b:nitro' });
     expect(gptProvider.getMetadata().name).toBe('openrouter');
     
     // Test mock model
@@ -161,9 +161,9 @@ describe('ProviderManager', () => {
   it('uses explicit provider even with model name', () => {
     const manager = new LLMProviderManager(mockConfig);
     
-    // Model that normally maps to OpenRouter, but we explicitly request Google
+    // Model that would map to OpenRouter, but we explicitly request Google
     const provider = manager.getProvider({ 
-      model: 'gpt-3.5-turbo',
+      model: 'gpt-oss-120b:nitro',
       provider: 'google' 
     });
     
