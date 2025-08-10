@@ -34,8 +34,20 @@ export class AssistantAgent extends BaseAgent<ConversationSnapshot> {
       }
     }
 
+    // Check if stopped before LLM call
+    if (!this.running) {
+      logLine(ctx.agentId, 'warn', 'Agent stopped before LLM call');
+      return;
+    }
+    
     // Call the LLM provider
     const response = await this.llmProvider.complete({ messages });
+
+    // Check if stopped after LLM call
+    if (!this.running) {
+      logLine(ctx.agentId, 'warn', 'Agent stopped after LLM call');
+      return;
+    }
 
     // Post the response back to the conversation
     await ctx.transport.postMessage({

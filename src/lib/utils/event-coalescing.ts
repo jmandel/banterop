@@ -36,7 +36,7 @@ export function coalesceEvents(events: UnifiedEvent[]): UnifiedEvent[] {
         event.payload &&
         typeof event.payload === 'object' &&
         'type' in event.payload &&
-        event.payload.type === 'turn_aborted'
+        event.payload.type === 'turn_cleared'
       ) {
         lastAbortIndex = i;
         break;

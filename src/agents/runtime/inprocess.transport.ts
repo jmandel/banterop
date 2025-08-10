@@ -11,8 +11,8 @@ export class InProcessTransport implements IAgentTransport {
     return this.orchestrator.getConversationSnapshot(conversationId, opts);
   }
 
-  async abortTurn(conversationId: number, agentId: string): Promise<{ turn: number }> {
-    return this.orchestrator.abortTurn(conversationId, agentId);
+  async clearTurn(conversationId: number, agentId: string): Promise<{ turn: number }> {
+    return this.orchestrator.clearTurn(conversationId, agentId);
   }
 
   async postMessage(params: {
