@@ -2,12 +2,12 @@ import { describe, it, expect } from "bun:test";
 import { App } from "$src/server/app";
 import { createWebSocketServer, websocket } from "$src/server/ws/jsonrpc.server";
 import { Hono } from "hono";
-import { wsRpcCall } from "$src/cli/cli-utils/wsRpcCall";
 import type { ScenarioConfiguration } from "$src/types/scenario-configuration.types";
+import { WsControl } from "$src/control/ws.control";
 
 async function startServer(dbPath: string = ":memory:", skipAutoRun?: boolean): Promise<{ app: App; server: any; wsUrl: string }> {
   const app = new App({ dbPath, skipAutoRun: skipAutoRun ?? false });
-  const hono = new Hono().route("/", createWebSocketServer(app.orchestrator, app.llmProviderManager));
+  const hono = new Hono().route("/", createWebSocketServer(app.orchestrator, app.agentHost));
   const server = Bun.serve({ port: 0, fetch: hono.fetch, websocket });
   const wsUrl = `ws://localhost:${server.port}/api/ws`;
   return { app, server, wsUrl };
@@ -62,40 +62,58 @@ function createTestScenario(id: string): ScenarioConfiguration {
   return scenarioConfig;
 }
 
+// Minimal JSON-RPC helper for tests
+async function rpcCall<T = any>(wsUrl: string, method: string, params?: any): Promise<T> {
+  const ws = new WebSocket(wsUrl);
+  return new Promise<T>((resolve, reject) => {
+    const id = crypto.randomUUID();
+    ws.onopen = () => ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+    ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(String(evt.data));
+        if (msg.id !== id) return;
+        ws.close();
+        msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result as T);
+      } catch (e) { ws.close(); reject(e); }
+    };
+    ws.onerror = reject;
+  });
+}
+
 describe("AutoRun conversation feature", () => {
   it("sets and clears autoRun flag correctly", async () => {
     // === 1. Boot orchestrator ===
     const { app, server, wsUrl } = await startServer();
 
     // === 2. Create scenario ===
-    await wsRpcCall(wsUrl, "createScenario", {
+    // Seed scenario via in-process storage (REST exists but in-proc is simpler for test)
+    app.orchestrator.storage.scenarios.insertScenario({
       id: "test-scenario-1",
       name: "Test Scenario 1",
-      config: createTestScenario("test-scenario-1")
+      config: createTestScenario("test-scenario-1"),
+      history: []
     });
 
     // === 3. Create conversation with scenario ===
-    const { conversationId } = await wsRpcCall<{ conversationId: number }>(wsUrl, "createConversation", {
+    const { conversationId } = await rpcCall<{ conversationId: number }>(wsUrl, "createConversation", {
       meta: {
         title: "Test AutoRun Flag",
         scenarioId: "test-scenario-1",
-        agents: [
-          { id: "alpha", kind: "internal", agentClass: "ScenarioDrivenAgent" },
-          { id: "beta", kind: "internal", agentClass: "ScenarioDrivenAgent" }
-        ]
+        agents: [ { id: "alpha" }, { id: "beta" } ]
       }
     });
 
     // === 4. Trigger auto-run ===
-    const runResp = await wsRpcCall<{ started: boolean }>(wsUrl, "runConversationToCompletion", { conversationId });
-    expect(runResp.started).toBe(true);
+    // Ensure agents on server – sets autoRun in metadata
+    const ensured = await rpcCall<{ ensured: Array<{ id: string }> }>(wsUrl, "ensureAgentsRunning", { conversationId });
+    expect(ensured.ensured.length).toBeGreaterThan(0);
 
     // === 5. Verify autoRun flag is set ===
     let convoMeta = app.orchestrator.getConversationWithMetadata(conversationId);
     expect(convoMeta?.metadata.custom?.autoRun).toBe(true);
 
     // === 6. Complete the conversation ===
-    await wsRpcCall(wsUrl, "sendMessage", {
+    await rpcCall(wsUrl, "sendMessage", {
       conversationId,
       agentId: "system",
       messagePayload: { text: "Conversation ended" },
@@ -117,26 +135,19 @@ describe("AutoRun conversation feature", () => {
     let { app, server, wsUrl } = await startServer(tempDbPath);
 
     // === 2. Create scenario ===
-    await wsRpcCall(wsUrl, "createScenario", {
-      id: "test-scenario-2",
-      name: "Test Scenario 2",
-      config: createTestScenario("test-scenario-2")
-    });
+    app.orchestrator.storage.scenarios.insertScenario({ id: "test-scenario-2", name: "Test Scenario 2", config: createTestScenario("test-scenario-2"), history: [] });
 
     // === 3. Create conversation ===
-    const { conversationId } = await wsRpcCall<{ conversationId: number }>(wsUrl, "createConversation", {
+    const { conversationId } = await rpcCall<{ conversationId: number }>(wsUrl, "createConversation", {
       meta: {
         title: "Test Resume",
         scenarioId: "test-scenario-2",
-        agents: [
-          { id: "alpha", kind: "internal", agentClass: "ScenarioDrivenAgent" },
-          { id: "beta", kind: "internal", agentClass: "ScenarioDrivenAgent" }
-        ]
+        agents: [ { id: "alpha" }, { id: "beta" } ]
       }
     });
 
-    // Mark for autoRun
-    await wsRpcCall(wsUrl, "runConversationToCompletion", { conversationId });
+    // Mark for autoRun by ensuring server-managed agents
+    await rpcCall(wsUrl, "ensureAgentsRunning", { conversationId });
 
     // Verify flag is set
     let convoMeta = app.orchestrator.getConversationWithMetadata(conversationId);
@@ -158,60 +169,5 @@ describe("AutoRun conversation feature", () => {
     await stopServer(server, app);
   });
 
-  it("skips and clears autoRun for stale conversations on restart", async () => {
-    // Use a temporary file for the database
-    const tempDbPath = `/tmp/test-autorun-stale-${Date.now()}.db`;
-    
-    // === 1. Boot orchestrator ===
-    let { app, server, wsUrl } = await startServer(tempDbPath);
-
-    // === 2. Create scenario ===
-    await wsRpcCall(wsUrl, "createScenario", {
-      id: "test-scenario-3",
-      name: "Test Scenario 3",
-      config: createTestScenario("test-scenario-3")
-    });
-
-    // === 3. Create conversation ===
-    const { conversationId } = await wsRpcCall<{ conversationId: number }>(wsUrl, "createConversation", {
-      meta: {
-        title: "Old AutoRun",
-        scenarioId: "test-scenario-3",
-        agents: [
-          { id: "alpha", kind: "internal", agentClass: "ScenarioDrivenAgent" },
-          { id: "beta", kind: "internal", agentClass: "ScenarioDrivenAgent" }
-        ]
-      }
-    });
-
-    // Trigger autoRun
-    await wsRpcCall(wsUrl, "runConversationToCompletion", { conversationId });
-
-    // Manually mark updated_at far older than cutoff
-    // Need to drop the trigger to avoid auto-update of timestamp
-    const oldTimestamp = new Date(Date.now() - (8 * 3600 * 1000)).toISOString(); // 8h ago
-    
-    // Disable the trigger (no need to recreate since DB is destroyed after test)
-    app.storage.db.exec("DROP TRIGGER IF EXISTS trg_conversations_touch");
-    
-    // Now update with old timestamp
-    app.storage.db.prepare(
-      `UPDATE conversations SET updated_at = ?, meta_json = json_set(meta_json, '$.custom.autoRun', json('true')) WHERE conversation = ?`
-    ).run(oldTimestamp, conversationId);
-
-    // === 2. Shutdown before completion ===
-    await stopServer(server, app);
-
-    // === 3. Restart orchestrator with same DB (enable autoRun for test) ===
-    ({ app, server, wsUrl } = await startServer(tempDbPath, false));
-
-    // Give it a moment to process
-    await Bun.sleep(100);
-
-    // Flag should be cleared due to skip
-    const convoMeta = app.orchestrator.getConversationWithMetadata(conversationId);
-    expect(convoMeta?.metadata.custom?.autoRun).toBeFalsy();
-
-    await stopServer(server, app);
-  });
+  // Note: Stale autoRun clearing behavior removed in new design (simpler resume).
 });

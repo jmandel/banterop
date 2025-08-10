@@ -61,20 +61,42 @@ bun install
 bun run dev
 
 # Run a demo (in another terminal)
-bun run src/cli/demo-server-managed.ts
+bun run src/cli/demo-browserside-scenario.ts
 ```
 
-## 🎯 Agent Launch Patterns
+## 🧭 Control vs Data Plane
 
-The system supports multiple patterns for deploying agents:
+This codebase cleanly separates how agents are managed (control plane) from how they talk (data plane).
 
-1. **External/Distributed** (`demo-scenario-remote.ts`) - Agents run as separate clients connecting via WebSocket
-2. **Server-Managed** (`demo-server-managed.ts`) - Server creates and manages agents internally  
-3. **Granular Handoff** (`demo-granular-handoff.ts`) - Start external, selectively hand off to server
-4. **Monolithic** (`demo-scenario-agents.ts`) - Everything in-process for testing
+- Control plane: start/stop and inspect agents and conversations
+  - In-process: `InProcessControl` (server only)
+  - WebSocket: `WsControl` (stateless, one-shot calls)
+  - Methods: `createConversation`, `getConversation`, `ensureAgentsRunning`, `stopAgents`
 
-See [AGENT-PATTERNS.md](./AGENT-PATTERNS.md) for detailed documentation and examples.
-- **Turn‑based orchestration** ensuring order and replayability.
+- Data plane: agents exchange events through the orchestrator
+  - In-process transport: `InProcessTransport`
+  - WebSocket transport: `WsTransport`
+  - Unified entry point for execution: `startAgents({ transport, providerManager, turnRecoveryMode: 'restart' })`
+
+Minimal WS JSON-RPC (under `/api/ws`):
+- Control: `createConversation`, `getConversation`, `ensureAgentsRunning`, `stopAgents`, `clearTurn`
+- Data: `sendMessage`, `sendTrace`, `subscribe`, `unsubscribe`, `getEventsPage`
+
+Scenario CRUD is HTTP-only under `/api/scenarios`; conversations list is HTTP under `/api/conversations`.
+
+## 🚦 Launch Recipes
+
+- Server-managed:
+  - Control: `createConversation(meta)`, `ensureAgentsRunning(conversationId)`
+  - Observe: `subscribe` with optional `sinceSeq`, or poll `getEventsPage`
+  - Resume: server persists `autoRun` in conversation metadata and re-ensures on boot
+
+- Client-managed:
+  - Control: `createConversation(meta)` via `WsControl`
+  - Data: `startAgents({ conversationId, transport: new WsTransport(wsUrl), turnRecoveryMode: 'restart' })`
+  - Resume: on reload, call `startAgents` again; strict alternation + restart recovery ensure safety
+
+See `src/cli/demo-browserside-scenario.ts` for a client-managed example.
 
 ---
 
@@ -160,9 +182,9 @@ Store large or structured content once, reference via `docId`.
 
 ---
 
-### 7. Guidance & CAS Preconditions
+### 7. Guidance & Turn Safety
 
-The orchestrator coordinates turns by emitting `guidance` events that name the suggested next agent. When opening a new turn (omitting an explicit `turn`), clients should include a compare‑and‑set precondition (the last closed `seq`) to avoid races. Internal agents handle this automatically; external agents can adopt the same pattern.
+The orchestrator coordinates turns by emitting `guidance` events that name the suggested next agent. Turn validation happens server‑side; clients do not need client‑side CAS. For resilience, agents use restart recovery: if they rejoin mid‑turn, they first send `clearTurn`, then proceed as if starting the turn fresh.
 
 ---
 
