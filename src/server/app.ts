@@ -4,8 +4,8 @@ import { ConfigManager, type Config } from './config';
 import { LLMProviderManager } from '$src/llm/provider-manager';
 import type { SchedulePolicy } from '$src/types/orchestrator.types';
 import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
-import { startAgents } from '$src/agents/factories/agent.factory';
-import { InProcessTransport } from '$src/agents/runtime/inprocess.transport';
+import { AgentHost } from './agent-host';
+import { resumeActiveConversations } from './agent-host-resume';
 import kneeMriScenario from '$src/db/fixtures/knee-mri-scenario.json';
 import visionScreeningScenario from '$src/db/fixtures/vision-screening-scenario.json';
 
@@ -19,6 +19,7 @@ export class App {
   readonly storage: Storage;
   readonly orchestrator: OrchestratorService;
   readonly llmProviderManager: LLMProviderManager;
+  readonly agentHost: AgentHost;
 
   constructor(options?: AppOptions) {
     const { policy, skipAutoRun, ...configOverrides } = options || {};
@@ -37,15 +38,18 @@ export class App {
       policy, // Use provided policy or default
       this.configManager.orchestratorConfig
     );
+    this.agentHost = new AgentHost(this.orchestrator, this.llmProviderManager);
     
     // Seed default scenarios on startup (no-op if already present)
     this.seedDefaultScenarios();
     
     // Resume any autoRun conversations post-restart
-    // Skip if explicitly disabled or in test mode (unless explicitly enabled)
     const shouldSkipAutoRun = skipAutoRun ?? (this.configManager.get().nodeEnv === 'test');
     if (!shouldSkipAutoRun) {
-      this.resumeAutoRunConversations();
+      // Fire and forget; resume ensures idempotency
+      resumeActiveConversations(this.orchestrator, this.agentHost).catch(err => {
+        console.error('[App] Failed to resume active conversations', err);
+      });
     }
   }
 
@@ -84,36 +88,7 @@ export class App {
     }
   }
 
-  private resumeAutoRunConversations(maxAgeHours = 6) {
-    const cutoffIso = new Date(Date.now() - maxAgeHours * 3600 * 1000).toISOString();
-    const activeConvos = this.storage.conversations.list({ status: 'active' });
-
-    for (const convo of activeConvos) {
-      const meta = convo.metadata;
-      const autoRun = meta.custom?.autoRun;
-      if (autoRun) {
-        if (convo.updatedAt < cutoffIso) {
-          console.warn(`[AutoRun Resume] Skipping ${convo.conversation} — last updated too old (${convo.updatedAt})`);
-          meta.custom = { ...(meta.custom || {}), autoRun: false };
-          this.storage.conversations.updateMeta(convo.conversation, meta);
-          continue;
-        }
-        console.log(`[AutoRun Resume] Resuming conversation ${convo.conversation}`);
-        
-        // Only start if there are internal agents defined
-        const hasInternalAgents = meta.agents?.some((a: any) => a.kind === 'internal');
-        if (hasInternalAgents) {
-          startAgents({
-            conversationId: convo.conversation,
-            transport: new InProcessTransport(this.orchestrator),
-            providerManager: this.llmProviderManager
-          }).catch(err => {
-            console.error(`[AutoRun Resume] Failed to start convo ${convo.conversation}`, err);
-          });
-        }
-      }
-    }
-  }
+  // No per-App resume method; handled by AgentHost resume helper
 
   async shutdown() {
     await this.orchestrator.shutdown();

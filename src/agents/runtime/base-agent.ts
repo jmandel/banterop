@@ -184,12 +184,21 @@ export abstract class BaseAgent<TSnap = any> {
         logLine(agentId, 'reconcile', `No open turn and guidance targets us, starting turn`);
         await this.startTurn(conversationId, agentId, guidance);
       } else {
-        logLine(agentId, 'reconcile', `No open turn, no guidance for us`);
+        // Parsimonious bootstrap: if no messages yet and startingAgentId is us, start without guidance
+        const hasAnyMessages = Array.isArray(snap.events) && snap.events.some((e: any) => e.type === 'message');
+        const startingAgentId = snap?.metadata?.startingAgentId;
+        if (!hasAnyMessages && startingAgentId === agentId) {
+          logLine(agentId, 'reconcile', `Bootstrap start: no messages yet and startingAgentId is us`);
+          await this.startTurn(conversationId, agentId, null);
+          // fall through to update lastProcessedClosedSeq below
+        } else {
+          logLine(agentId, 'reconcile', `No open turn, no guidance for us`);
+        }
       }
     }
 
     // Update lastProcessedClosedSeq only if we took action
-    if ((hasOpenTurn && weOwnOpenTurn) || (!hasOpenTurn && guidance && guidance.nextAgentId === agentId)) {
+    if ((hasOpenTurn && weOwnOpenTurn) || (!hasOpenTurn && ((guidance && guidance.nextAgentId === agentId) || ((!Array.isArray(snap.events) || !snap.events.some((e: any) => e.type === 'message')) && snap?.metadata?.startingAgentId === agentId)))) {
       logLine(agentId, 'reconcile', `Updating lastProcessedClosedSeq from ${this.lastProcessedClosedSeq} to ${currentClosedSeq}`);
       this.lastProcessedClosedSeq = currentClosedSeq;
     } else {

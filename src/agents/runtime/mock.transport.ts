@@ -26,8 +26,8 @@ export class MockTransport implements IAgentTransport {
     attachments?: NonNullable<MessagePayload['attachments']>;
     clientRequestId?: string;
     turn?: number;
-  }): Promise<{ seq: number; turn: number; event: number }> => {
-    return { seq: 1, turn: 1, event: 1 };
+  }): Promise<{ conversation: number; seq: number; turn: number; event: number }> => {
+    return { conversation: _params.conversationId, seq: 1, turn: 1, event: 1 };
   });
 
   postTrace = mock(async (_params: {
@@ -36,8 +36,8 @@ export class MockTransport implements IAgentTransport {
     payload: TracePayload;
     turn?: number;
     clientRequestId?: string;
-  }): Promise<{ seq: number; turn: number; event: number }> => {
-    return { seq: 2, turn: 1, event: 2 };
+  }): Promise<{ conversation: number; seq: number; turn: number; event: number }> => {
+    return { conversation: _params.conversationId, seq: 2, turn: 1, event: 2 };
   });
 
   now = mock((): number => Date.now());

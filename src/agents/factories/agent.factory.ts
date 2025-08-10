@@ -94,7 +94,6 @@ export function createAgent(
   turnRecoveryModeOverride?: TurnRecoveryMode
 ): BaseAgent {
   const agentClass = (agentMeta.agentClass || 'default').toLowerCase();
-  const provider = selectProvider(providerManager, agentMeta.config);
   
   // Determine default recovery mode based on agent class
   let defaultRecoveryMode: TurnRecoveryMode = 'resume';
@@ -114,14 +113,17 @@ export function createAgent(
     case 'echoagent':
       return new EchoAgent(transport, 'Processing...', 'Done', { turnRecoveryMode });
     
-    case 'assistantagent':
+    case 'assistantagent': {
+      const provider = selectProvider(providerManager, agentMeta.config);
       return new AssistantAgent(transport, provider, { turnRecoveryMode });
+    }
     
     case 'script':
       // Script agent needs script data from config
       const script = agentMeta.config?.script as TurnBasedScript | undefined;
       if (!script) {
         logLine(agentMeta.id, 'factory', `No script provided for script agent ${agentMeta.id}, falling back to AssistantAgent`);
+        const provider = selectProvider(providerManager, agentMeta.config);
         return new AssistantAgent(transport, provider, { turnRecoveryMode });
       }
       logLine(agentMeta.id, 'factory', `Creating ScriptAgent with ${script.turns?.length || 0} turns`);
@@ -140,12 +142,18 @@ export function createAgent(
       }
       // Fall back to AssistantAgent
       logLine(agentMeta.id, 'factory', `No scenario role for ${agentMeta.id}, using AssistantAgent`);
-      return new AssistantAgent(transport, provider, { turnRecoveryMode });
+      {
+        const provider = selectProvider(providerManager, agentMeta.config);
+        return new AssistantAgent(transport, provider, { turnRecoveryMode });
+      }
     
     default:
       // Unknown agent class, default to AssistantAgent
       logLine(agentMeta.id, 'factory', `Unknown agentClass '${agentClass}', using AssistantAgent`);
-      return new AssistantAgent(transport, provider, { turnRecoveryMode });
+      {
+        const provider = selectProvider(providerManager, agentMeta.config);
+        return new AssistantAgent(transport, provider, { turnRecoveryMode });
+      }
   }
 }
 
@@ -153,15 +161,7 @@ export function createAgent(
  * Helper to select LLM provider based on agent config
  */
 function selectProvider(providerManager: LLMProviderManager, config?: Record<string, unknown>): LLMProvider {
-  // Support both 'llmProvider' and 'provider' for backward compatibility
-  const provider = (config?.llmProvider ?? config?.provider) as string | undefined;
+  // Agent configs can suggest a model; provider selection is owned by the host
   const model = config?.model as string | undefined;
-  const apiKey = config?.apiKey as string | undefined;
-
-  return providerManager.getProvider({
-    ...(provider ? { provider: provider as any } : {}),
-    ...(model ? { model } : {}),
-    ...(apiKey ? { apiKey } : {})
-  });
+  return providerManager.getProvider({ ...(model ? { model } : {}) });
 }
-

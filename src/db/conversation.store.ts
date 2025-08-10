@@ -26,6 +26,7 @@ export interface ListConversationsParams {
   scenarioId?: string;
   limit?: number;
   offset?: number;
+  updatedAfter?: string; // ISO timestamp filter
 }
 
 export class ConversationStore {
@@ -93,7 +94,7 @@ export class ConversationStore {
   }
 
   list(params: ListConversationsParams = {}): Conversation[] {
-    const { status, scenarioId, limit = 50, offset = 0 } = params;
+    const { status, scenarioId, limit = 50, offset = 0, updatedAfter } = params;
     const wh: string[] = [];
     const args: (string | number)[] = [];
     
@@ -105,6 +106,10 @@ export class ConversationStore {
       // Use JSON extract for scenarioId filtering
       wh.push("json_extract(meta_json, '$.scenarioId') = ?");
       args.push(scenarioId);
+    }
+    if (updatedAfter) {
+      wh.push('updated_at >= ?');
+      args.push(updatedAfter);
     }
     
     const where = wh.length ? `WHERE ${wh.join(' AND ')}` : '';

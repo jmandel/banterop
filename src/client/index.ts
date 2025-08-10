@@ -1,18 +1,4 @@
 // src/client/index.ts
-//
-// Client-side API exports
+// Thin client exports for browser usage
 
-export { 
-  ensureAgentsRunningClient, 
-  autoResumeAgents,
-  type ClientEnsureOptions,
-  type ClientEnsureHandle
-} from './ensure-agents';
-
-export {
-  createEventStream,
-  sendMessage,
-  getConversation,
-  rpcCall,
-  type EventStreamOptions
-} from './client-api';
+export { WsControl } from '$src/control/ws.control';

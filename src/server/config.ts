@@ -56,6 +56,13 @@ export class ConfigManager {
       // Apply overrides
       ...overrides,
     };
+
+    // In test environments, never use real API keys from env
+    const effectiveNodeEnv = (overrides?.nodeEnv as string) ?? process.env.NODE_ENV;
+    if (effectiveNodeEnv === 'test') {
+      (raw as any).googleApiKey = undefined;
+      (raw as any).openRouterApiKey = undefined;
+    }
     
     // Filter out undefined values
     const filtered = Object.fromEntries(

@@ -1088,22 +1088,13 @@ ${thoughts.join('\n')}
       model: runtimeAgent?.config?.model
     });
     
-    if (runtimeAgent?.config?.llmProvider) {
-      const providerName = runtimeAgent.config.llmProvider as string;
-      const model = runtimeAgent.config.model as string | undefined;
-      
-      console.log(`[${agentId}] Using configured provider: ${providerName}, model: ${model}`);
-      
-      // For browserside provider, the serverUrl is already configured in the providerManager
-      // since it was passed when creating the LLMProviderManager instance
-      return this.providerManager.getProvider({ 
-        provider: providerName as SupportedProvider,
-        ...(model !== undefined ? { model } : {})
-      });
+    // Provider is selected by the host (ProviderManager default); agents may suggest a model
+    const model = runtimeAgent?.config?.model as string | undefined;
+    if (model) {
+      console.log(`[${agentId}] Using host-selected provider with model override: ${model}`);
+      return this.providerManager.getProvider({ model });
     }
-    
-    console.log(`[${agentId}] Falling back to default provider`);
-    // Fall back to system default - this will use browserside with serverUrl if configured
+    console.log(`[${agentId}] Using host-selected default provider`);
     return this.providerManager.getProvider();
   }
 }

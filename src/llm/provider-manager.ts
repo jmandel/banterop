@@ -38,10 +38,15 @@ export class LLMProviderManager {
     // Use specified model, or fall back to default model from config
     const model = config?.model ?? this.config.defaultLlmModel;
 
-    console.log('[LLMProviderManager] getProvider:', `provider=${config?.provider || this.config.defaultLlmProvider}, model=${model || 'default'}`);
+    console.log('[LLMProviderManager] getProvider:', `requestedProvider=${config?.provider || 'auto'}, default=${this.config.defaultLlmProvider}, model=${model || 'default'}`);
 
-    // If a model is specified and no explicit provider, try to auto-detect the provider
-    if (model && !config?.provider) {
+    if (config?.provider) {
+      providerName = config.provider;
+    } else if (this.config.defaultLlmProvider === 'browserside') {
+      // Honor explicit default of browserside; do not auto-detect to a server provider
+      providerName = 'browserside';
+    } else if (model) {
+      // If a model is specified and no explicit provider, try to auto-detect the provider
       const detectedProvider = this.findProviderForModel(model);
       if (detectedProvider) {
         providerName = detectedProvider;
@@ -49,10 +54,11 @@ export class LLMProviderManager {
         throw new Error(`Unknown model '${model}'. Please specify a provider or use a known model name.`);
       }
     } else {
-      // Use explicit provider or fall back to default
-      providerName = config?.provider ?? this.config.defaultLlmProvider;
+      // Use default
+      providerName = this.config.defaultLlmProvider;
     }
 
+    console.log(`[LLMProviderManager] Chosen provider: ${providerName}`);
     // Create a new provider instance each time (no caching in Connectathon mode)
     return this.createProviderInstance(providerName, { ...config, model });
   }

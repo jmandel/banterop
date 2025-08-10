@@ -86,7 +86,7 @@ export class WsTransport implements IAgentTransport {
     attachments?: NonNullable<MessagePayload['attachments']>;
     clientRequestId?: string;
     turn?: number;
-  }): Promise<{ seq: number; turn: number; event: number }> {
+  }): Promise<{ conversation: number; seq: number; turn: number; event: number }> {
     const result = await this.call<any>('sendMessage', {
       conversationId: params.conversationId,
       agentId: params.agentId,
@@ -98,17 +98,11 @@ export class WsTransport implements IAgentTransport {
       finality: params.finality,
       ...(params.turn !== undefined ? { turn: params.turn } : {}),
     });
-    
-    // Handle both response formats
-    if (result.ok === true) {
-      // Simplified response format - need to get the actual values
-      return { seq: 0, turn: 0, event: 0 }; // Will be improved when we have proper response
-    }
-    
-    return { 
-      seq: result.seq || 0, 
-      turn: result.turn || 0, 
-      event: result.event || 0 
+    return {
+      conversation: result.conversation,
+      seq: result.seq,
+      turn: result.turn,
+      event: result.event,
     };
   }
   
@@ -118,7 +112,7 @@ export class WsTransport implements IAgentTransport {
     payload: TracePayload;
     turn?: number;
     clientRequestId?: string;
-  }): Promise<{ seq: number; turn: number; event: number }> {
+  }): Promise<{ conversation: number; seq: number; turn: number; event: number }> {
     const tracePayload = {
       ...params.payload,
       ...(params.clientRequestId ? { clientRequestId: params.clientRequestId } : {}),
@@ -130,16 +124,11 @@ export class WsTransport implements IAgentTransport {
       tracePayload,
       ...(params.turn !== undefined ? { turn: params.turn } : {}),
     });
-    
-    // Handle both response formats
-    if (result.ok === true) {
-      return { seq: 0, turn: 0, event: 0 };
-    }
-    
-    return { 
-      seq: result.seq || 0, 
-      turn: result.turn || 0, 
-      event: result.event || 0 
+    return {
+      conversation: result.conversation,
+      seq: result.seq,
+      turn: result.turn,
+      event: result.event,
     };
   }
   
