@@ -5,7 +5,7 @@ import type { ConversationSnapshot } from '$src/types/orchestrator.types';
 export interface IAgentTransport {
   getSnapshot(conversationId: number, opts?: { includeScenario?: boolean }): Promise<ConversationSnapshot>;
   
-  abortTurn(conversationId: number, agentId: string): Promise<{ turn: number }>;
+  clearTurn(conversationId: number, agentId: string): Promise<{ turn: number }>;
   
   postMessage(params: {
     conversationId: number;

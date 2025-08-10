@@ -29,12 +29,12 @@ export interface SubscribeResponse {
   subId: string;
 }
 
-export interface AbortTurnRequest {
+export interface clearTurnRequest {
   conversationId: number;
   agentId: string;
 }
 
-export interface AbortTurnResponse {
+export interface clearTurnResponse {
   turn: number;
 }
 

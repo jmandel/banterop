@@ -20,7 +20,7 @@ export abstract class BaseAgent<TSnap = any> {
   private unsubscribe: (() => void) | undefined;
   private liveSnapshot: TSnap | undefined;
   private latestSeq = 0;
-  private running = false;
+  protected running = false;  // Made protected so derived classes can check it
   private events: IAgentEvents | undefined;
   private inTurn = false;
   private lastProcessedClosedSeq = 0;
@@ -115,7 +115,7 @@ export abstract class BaseAgent<TSnap = any> {
   stop() {
     if (!this.running) return;
     
-    this.running = false;
+    this.running = false;  // Signal to interrupt any in-progress turn
     if (this.unsubscribe) {
       this.unsubscribe();
       this.unsubscribe = undefined;
@@ -127,9 +127,13 @@ export abstract class BaseAgent<TSnap = any> {
   protected abstract takeTurn(ctx: TurnContext<TSnap>): Promise<void>;
 
   private async reconcileAndMaybeAct(conversationId: number, agentId: string, guidance: GuidanceEvent | null): Promise<void> {
+    logLine(agentId, 'reconcile', `Starting reconcile (guidance seq: ${guidance?.seq || 'none'})`);
+    
     // Fetch fresh snapshot
+    logLine(agentId, 'reconcile', `Fetching snapshot for conversation ${conversationId}`);
     const snapshot = await this.transport.getSnapshot(conversationId, { includeScenario: true }) as TSnap;
     const snap = snapshot as any;
+    logLine(agentId, 'reconcile', `Got snapshot with ${snap?.events?.length || 0} events, status: ${snap?.status}`);
     
     // Check if completed
     if (snap.status === 'completed') {
@@ -140,6 +144,7 @@ export abstract class BaseAgent<TSnap = any> {
 
     // Check if lastClosedSeq has advanced (avoid duplicate work)
     const currentClosedSeq = snap.lastClosedSeq || 0;
+    logLine(agentId, 'reconcile', `currentClosedSeq=${currentClosedSeq}, lastProcessedClosedSeq=${this.lastProcessedClosedSeq}`);
     if (guidance && this.lastProcessedClosedSeq > 0 && currentClosedSeq === this.lastProcessedClosedSeq) {
       logLine(agentId, 'reconcile', `No new closed turns since seq ${this.lastProcessedClosedSeq}, skipping`);
       return;
@@ -162,7 +167,7 @@ export abstract class BaseAgent<TSnap = any> {
       
       if (mode === 'restart') {
         // Abort the turn and start fresh
-        const { turn } = await this.transport.abortTurn(conversationId, agentId);
+        const { turn } = await this.transport.clearTurn(conversationId, agentId);
         logLine(agentId, 'abort', `Aborted turn ${turn} per restart policy`);
         await this.startTurn(conversationId, agentId, guidance);
       } else {
@@ -185,11 +190,15 @@ export abstract class BaseAgent<TSnap = any> {
 
     // Update lastProcessedClosedSeq only if we took action
     if ((hasOpenTurn && weOwnOpenTurn) || (!hasOpenTurn && guidance && guidance.nextAgentId === agentId)) {
+      logLine(agentId, 'reconcile', `Updating lastProcessedClosedSeq from ${this.lastProcessedClosedSeq} to ${currentClosedSeq}`);
       this.lastProcessedClosedSeq = currentClosedSeq;
+    } else {
+      logLine(agentId, 'reconcile', `Not updating lastProcessedClosedSeq (no action taken)`);
     }
   }
 
   private async startTurn(conversationId: number, agentId: string, guidance: GuidanceEvent | null): Promise<void> {
+    logLine(agentId, 'startTurn', `Called with guidance seq: ${guidance?.seq || 'none'}, inTurn=${this.inTurn}`);
     if (this.inTurn) {
       logLine(agentId, 'warn', 'Already in turn, skipping start');
       return;
@@ -225,9 +234,15 @@ export abstract class BaseAgent<TSnap = any> {
     }
     
     const lastEvent = snapshot.events[snapshot.events.length - 1];
-    // Open turn = last event doesn't have turn or conversation finality
-    return lastEvent.type === 'message' && 
-           (!lastEvent.finality || lastEvent.finality === 'none');
+    // System events (turn 0) don't count as open turns - they're metadata
+    if (lastEvent.turn === 0 || lastEvent.type === 'system') {
+      return false;
+    }
+    
+    // Open turn = last event has finality 'none' or no finality
+    // Since only messages can have turn/conversation finality, and traces/system must have 'none',
+    // we only need to check the finality value
+    return !lastEvent.finality || lastEvent.finality === 'none';
   }
 
   private getLastEventAgent(snapshot: any): string | null {

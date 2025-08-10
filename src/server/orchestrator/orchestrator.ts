@@ -210,7 +210,7 @@ export class OrchestratorService {
   }
 
   // Abort turn - adds marker and returns turn to use
-  abortTurn(conversationId: number, agentId: string): { turn: number } {
+  clearTurn(conversationId: number, agentId: string): { turn: number } {
     const head = this.storage.events.getHead(conversationId);
     
     // Check if there is an open turn and last event is by this agent
@@ -227,7 +227,7 @@ export class OrchestratorService {
               lastEvent.payload && 
               typeof lastEvent.payload === 'object' && 
               'type' in lastEvent.payload &&
-              lastEvent.payload.type === 'turn_aborted') {
+              lastEvent.payload.type === 'turn_cleared') {
             // Already aborted, don't write another
             return { turn: head.lastTurn };
           }
@@ -238,7 +238,7 @@ export class OrchestratorService {
             turn: head.lastTurn,
             type: 'trace',
             payload: {
-              type: 'turn_aborted',
+              type: 'turn_cleared',
               abortedBy: agentId,
               timestamp: new Date().toISOString(),
               reason: 'agent_restart'

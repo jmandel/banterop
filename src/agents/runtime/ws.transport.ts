@@ -71,8 +71,8 @@ export class WsTransport implements IAgentTransport {
     return snapshot;
   }
   
-  async abortTurn(conversationId: number, agentId: string): Promise<{ turn: number }> {
-    return await this.call<{ turn: number }>('abortTurn', {
+  async clearTurn(conversationId: number, agentId: string): Promise<{ turn: number }> {
+    return await this.call<{ turn: number }>('clearTurn', {
       conversationId,
       agentId
     });

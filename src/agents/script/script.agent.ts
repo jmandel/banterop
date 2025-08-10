@@ -62,6 +62,11 @@ export class ScriptAgent extends BaseAgent {
     
     // Execute the steps for this turn
     for (const step of turnSteps) {
+      // Check if stopped
+      if (!this.running) {
+        logLine(agentId, 'warn', 'Agent stopped during script execution');
+        return;
+      }
       await this.executeStep(ctx, step);
     }
     

@@ -135,8 +135,8 @@ describe('ScenarioDrivenAgent', () => {
       };
     });
     
-    // Mock abortTurn
-    mockTransport.abortTurn.mockResolvedValue({ turn: 2 });
+    // Mock clearTurn
+    mockTransport.clearTurn.mockResolvedValue({ turn: 2 });
     
     // Setup default mock responses
     mockTransport.getSnapshot.mockResolvedValue({

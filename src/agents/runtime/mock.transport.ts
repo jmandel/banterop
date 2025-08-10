@@ -14,7 +14,7 @@ export class MockTransport implements IAgentTransport {
     };
   });
 
-  abortTurn = mock(async (_conversationId: number, _agentId: string): Promise<{ turn: number }> => {
+  clearTurn = mock(async (_conversationId: number, _agentId: string): Promise<{ turn: number }> => {
     return { turn: 1 };
   });
 

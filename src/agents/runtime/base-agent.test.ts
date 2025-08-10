@@ -8,7 +8,7 @@ class MockTransport implements IAgentTransport {
   getSnapshot = vi.fn();
   postMessage = vi.fn();
   postTrace = vi.fn();
-  abortTurn = vi.fn();
+  clearTurn = vi.fn();
   createEventStream = vi.fn();
   now = vi.fn().mockReturnValue(Date.now());
 }
@@ -53,7 +53,7 @@ describe('BaseAgent reconcile-first pattern', () => {
     };
     
     transport.createEventStream.mockReturnValue(mockEventStream);
-    transport.abortTurn.mockResolvedValue({ turn: 1 });
+    transport.clearTurn.mockResolvedValue({ turn: 1 });
   });
 
   const createSnapshot = (events: any[] = [], status = 'active', lastClosedSeq = 0) => ({
@@ -96,7 +96,7 @@ describe('BaseAgent reconcile-first pattern', () => {
       
       // Should still only have one turn call (ignored the second guidance)
       expect(agent.takeTurnCalls).toHaveLength(1);
-      expect(transport.abortTurn).not.toHaveBeenCalled();
+      expect(transport.clearTurn).not.toHaveBeenCalled();
     });
   });
 
@@ -115,7 +115,7 @@ describe('BaseAgent reconcile-first pattern', () => {
       // Should resume without abort
       await new Promise(resolve => setTimeout(resolve, 20));
       expect(agent.takeTurnCalls).toHaveLength(1);
-      expect(transport.abortTurn).not.toHaveBeenCalled();
+      expect(transport.clearTurn).not.toHaveBeenCalled();
     });
 
     it('should restart open turn with restart mode', async () => {
@@ -131,7 +131,7 @@ describe('BaseAgent reconcile-first pattern', () => {
       
       // Should abort then start fresh
       await new Promise(resolve => setTimeout(resolve, 20));
-      expect(transport.abortTurn).toHaveBeenCalledWith(1, 'test-agent');
+      expect(transport.clearTurn).toHaveBeenCalledWith(1, 'test-agent');
       expect(agent.takeTurnCalls).toHaveLength(1);
     });
 
@@ -149,7 +149,7 @@ describe('BaseAgent reconcile-first pattern', () => {
       // Should not take turn
       await new Promise(resolve => setTimeout(resolve, 20));
       expect(agent.takeTurnCalls).toHaveLength(0);
-      expect(transport.abortTurn).not.toHaveBeenCalled();
+      expect(transport.clearTurn).not.toHaveBeenCalled();
     });
   });
 
@@ -242,7 +242,7 @@ describe('BaseAgent reconcile-first pattern', () => {
       await new Promise(resolve => setTimeout(resolve, 20));
       
       // Should abort and restart
-      expect(transport.abortTurn).toHaveBeenCalledWith(1, 'test-agent');
+      expect(transport.clearTurn).toHaveBeenCalledWith(1, 'test-agent');
       expect(agent.takeTurnCalls).toHaveLength(1);
     });
   });

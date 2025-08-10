@@ -107,7 +107,7 @@ describe('AssistantAgent', () => {
       lastClosedSeq: 0
     });
     
-    mockTransport.abortTurn.mockResolvedValue({ turn: 2 });
+    mockTransport.clearTurn.mockResolvedValue({ turn: 2 });
   });
 
   it('creates agent with LLM provider', () => {

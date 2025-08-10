@@ -44,23 +44,30 @@ async function wsRpcCall<T>(method: string, params?: any): Promise<T> {
   });
 }
 
-// Color palette
-const AGENT_COLORS = [
-  "bg-blue-50",
-  "bg-green-50",
-  "bg-purple-50",
-  "bg-pink-50",
-  "bg-yellow-50",
-  "bg-orange-50",
+// Color palette (colorblind‑friendly variety with distinct accents)
+type PaletteColor = { bg: string; left: string; dot: string; text: string };
+const AGENT_PALETTE: PaletteColor[] = [
+  { bg: 'bg-sky-50', left: 'border-sky-600', dot: 'bg-sky-700', text: 'text-sky-800' },
+  { bg: 'bg-amber-50', left: 'border-amber-600', dot: 'bg-amber-700', text: 'text-amber-800' },
+  { bg: 'bg-emerald-50', left: 'border-emerald-600', dot: 'bg-emerald-700', text: 'text-emerald-800' },
+  { bg: 'bg-blue-50', left: 'border-blue-700', dot: 'bg-blue-800', text: 'text-blue-800' },
+  { bg: 'bg-fuchsia-50', left: 'border-fuchsia-600', dot: 'bg-fuchsia-700', text: 'text-fuchsia-800' },
+  { bg: 'bg-orange-50', left: 'border-orange-600', dot: 'bg-orange-700', text: 'text-orange-800' },
+  { bg: 'bg-lime-50', left: 'border-lime-600', dot: 'bg-lime-700', text: 'text-lime-800' },
+  { bg: 'bg-rose-50', left: 'border-rose-600', dot: 'bg-rose-700', text: 'text-rose-800' },
+  { bg: 'bg-teal-50', left: 'border-teal-600', dot: 'bg-teal-700', text: 'text-teal-800' },
+  { bg: 'bg-violet-50', left: 'border-violet-600', dot: 'bg-violet-700', text: 'text-violet-800' },
+  { bg: 'bg-cyan-50', left: 'border-cyan-600', dot: 'bg-cyan-700', text: 'text-cyan-800' },
+  { bg: 'bg-yellow-50', left: 'border-yellow-500', dot: 'bg-yellow-600', text: 'text-yellow-800' },
 ];
-function colorForAgent(agentId?: string) {
-  const id = agentId ?? "";
+function colorForAgent(agentId?: string): PaletteColor {
+  const id = agentId ?? '';
   let hash = 0;
   for (let i = 0; i < id.length; i++) {
     hash = id.charCodeAt(i) + ((hash << 5) - hash);
   }
-  const idx = Math.abs(hash) % AGENT_COLORS.length;
-  return AGENT_COLORS[idx];
+  const idx = Math.abs(hash) % AGENT_PALETTE.length;
+  return AGENT_PALETTE[idx]!;
 }
 
 interface TurnView {
@@ -71,6 +78,7 @@ interface TurnView {
   messages: UnifiedEvent[];
   traces: UnifiedEvent[];
   systems: UnifiedEvent[];
+  abortSeq?: number;
 }
 
 type ConnState = "idle" | "connecting" | "open" | "reconnecting" | "closed";
@@ -134,7 +142,12 @@ function ConversationList({ onSelect, selectedId = null, focusRef, requestFocusK
     if (scenarioIds.length) {
       const scenarioMapLocal: Record<string, any> = {};
       for (const id of scenarioIds) {
-        scenarioMapLocal[id] = { name: id, config: {} };
+        try {
+          const item = await wsRpcCall<any>('getScenario', { scenarioId: id });
+          scenarioMapLocal[id] = item ?? { name: id, config: {} };
+        } catch {
+          scenarioMapLocal[id] = { name: id, config: {} };
+        }
       }
       setScenarioMap(scenarioMapLocal);
     }
@@ -354,7 +367,7 @@ function ConversationList({ onSelect, selectedId = null, focusRef, requestFocusK
                     {c.title || "(untitled)"}
                   </span>
                 </td>
-                <td className="p-1">{c.scenarioId}</td>
+                <td className="p-1">{c.metadata?.scenarioId || ''}</td>
                 <td className="p-1">{tags.join(", ")}</td>
                 <td className="p-1">{c.status}</td>
                 <td className="p-1">{dayjs(c.updatedAt).fromNow()}</td>
@@ -393,7 +406,9 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
   const wsRef = useRef<WsEventStream | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
   const containerRef = focusRef ?? useRef<HTMLDivElement>(null);
+  const programmaticScrollRef = useRef(false);
   const gPendingRef = useRef(false);
   const ggTimerRef = useRef<number | null>(null);
 
@@ -482,7 +497,12 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
 
   useEffect(() => {
     if (autoScroll && bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: "smooth" });
+      try {
+        programmaticScrollRef.current = true;
+        bottomRef.current.scrollIntoView({ behavior: "auto" });
+      } finally {
+        setTimeout(() => { programmaticScrollRef.current = false; }, 0);
+      }
     }
   }, [events, autoScroll]);
 
@@ -516,11 +536,11 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
     } else if (e.key === "j") {
       // Scroll down a notch (like ArrowDown)
       e.preventDefault();
-      scrollRef.current?.scrollBy({ top: 50, behavior: 'smooth' });
+      scrollRef.current?.scrollBy({ top: 50, behavior: 'auto' });
     } else if (e.key === "k") {
       // Scroll up a notch (like ArrowUp)
       e.preventDefault();
-      scrollRef.current?.scrollBy({ top: -50, behavior: 'smooth' });
+      scrollRef.current?.scrollBy({ top: -50, behavior: 'auto' });
     } else if (e.key === 'g' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
       // Vim-style gg: press g twice quickly to jump to top
       e.preventDefault();
@@ -530,7 +550,7 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
           window.clearTimeout(ggTimerRef.current);
           ggTimerRef.current = null;
         }
-        scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+        scrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
       } else {
         gPendingRef.current = true;
         ggTimerRef.current = window.setTimeout(() => {
@@ -542,7 +562,39 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
       // Vim-style G: jump to bottom
       e.preventDefault();
       const el = scrollRef.current;
-      if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'auto' });
+    } else if (e.key === ' ' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      // Space: jump to next event block and align it to top
+      e.preventDefault();
+      const sc = scrollRef.current;
+      if (!sc) return;
+      const headerH = headerRef.current?.getBoundingClientRect().height ?? 0;
+      const scRect = sc.getBoundingClientRect();
+      const visibleTop = sc.scrollTop + headerH;
+      const topMargin = 6; // keep a little gap below header
+      const blocks = Array.from(sc.querySelectorAll<HTMLElement>('[data-block]'));
+      const next = blocks.find((el) => (el.getBoundingClientRect().top - scRect.top + sc.scrollTop) > (visibleTop + topMargin + 1));
+      if (next) {
+        const elTop = next.getBoundingClientRect().top - scRect.top + sc.scrollTop;
+        sc.scrollTo({ top: Math.max(0, elTop - headerH - topMargin), behavior: 'auto' });
+      }
+    } else if (e.key === ' ' && e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      // Shift+Space: jump to previous event block and align to top
+      e.preventDefault();
+      const sc = scrollRef.current;
+      if (!sc) return;
+      const headerH = headerRef.current?.getBoundingClientRect().height ?? 0;
+      const scRect = sc.getBoundingClientRect();
+      const visibleTop = sc.scrollTop + headerH;
+      const blocks = Array.from(sc.querySelectorAll<HTMLElement>('[data-block]'));
+      for (let i = blocks.length - 1; i >= 0; i--) {
+        const el = blocks[i]!;
+        const elTop = el.getBoundingClientRect().top - scRect.top + sc.scrollTop;
+        if (elTop < visibleTop - 2) {
+          sc.scrollTo({ top: Math.max(0, elTop - headerH - 6), behavior: 'auto' });
+          break;
+        }
+      }
     }
   };
 
@@ -564,7 +616,15 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
       else if (e.type === "trace") byTurn[e.turn]?.traces.push(e);
       else if (e.type === "system") byTurn[e.turn]?.systems.push(e);
     }
-    return Object.values(byTurn).sort((a, b) => a.turn - b.turn);
+    const list = Object.values(byTurn).sort((a, b) => a.turn - b.turn);
+    for (const t of list) {
+      const abort = t.traces.find((tr) => {
+        const p = tr.payload as any;
+        return typeof p === 'object' && (p?.type === 'turn_cleared' || p?.type === 'turn_aborted');
+      });
+      if (abort) t.abortSeq = abort.seq;
+    }
+    return list;
   }, [events]);
 
   const isThinking = useMemo(() => {
@@ -576,42 +636,65 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
 
   return (
     <div
-      className="p-4 flex flex-col h-full outline-none"
+      className="p-2 flex flex-col h-full outline-none"
       ref={containerRef as any}
       tabIndex={0}
       onKeyDown={onKeyDown}
     >
-      <div className="flex items-center justify-between mb-2">
-        <div className="text-sm text-gray-600">
-          {meta && (
-            <>
-              <span className="mr-3"><strong>Scenario:</strong> {meta.scenarioId}</span>
-              {meta.metadata?.tags && (
-                <span><strong>Tags:</strong> {meta.metadata.tags.join(", ")}</span>
-              )}
-            </>
-          )}
+      {/* Compact header minimized; meta and legend moved to top bar */}
+      <div
+        className="flex-1 overflow-y-auto space-y-4"
+        ref={scrollRef}
+        data-scroll="detail"
+        onScroll={(e) => {
+          if (programmaticScrollRef.current) return;
+          const el = e.currentTarget;
+          const atBottom = Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight;
+          if (atBottom) {
+            if (!autoScroll) setAutoScroll(true);
+          } else {
+            if (autoScroll) setAutoScroll(false);
+          }
+        }}
+      >
+        {/* Sticky conversation header (1–2 lines) */}
+        <div ref={headerRef} className="sticky top-0 z-10 bg-gray-50/95 backdrop-blur supports-[backdrop-filter]:bg-gray-50/80 border-b">
+          <div className="px-1 py-1">
+            <div className="flex items-center justify-between gap-2 text-[12px] text-gray-700">
+              <div className="truncate">
+                <span className="font-semibold">{meta?.metadata?.title || `Conversation #${id}`}</span>
+                {meta?.scenarioId && (
+                  <span className="ml-2 text-gray-500">Scenario: {meta.scenarioId}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                {(() => {
+                  const ids = new Set<string>();
+                  meta?.metadata?.agents?.forEach?.((a: any) => ids.add(a.id));
+                  turns.forEach((t) => { if (t.agentId) ids.add(t.agentId); });
+                  return Array.from(ids).map((aid) => {
+                    const c = colorForAgent(aid);
+                    return (
+                      <span key={aid} className="inline-flex items-center gap-1 px-1 py-0.5 border rounded bg-white">
+                        <span className={`inline-block w-2.5 h-2.5 rounded-full ${c.dot}`} aria-hidden />
+                        <span className="font-mono text-[11px] text-gray-700">{aid}</span>
+                      </span>
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+          </div>
         </div>
-        {/* Connection badge moved to top header */}
-      </div>
-      {meta && (
-        <div className="mb-2 text-xs text-gray-500">Conversation #{id}</div>
-      )}
-      <div className="flex gap-4 mb-4 text-sm">
-        <label className="inline-flex items-center gap-1">
-          <input type="checkbox" checked={showTraces} onChange={(e) => setShowTraces(e.target.checked)} /> Show Traces
-        </label>
-        <label className="inline-flex items-center gap-1">
-          <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} /> Auto‑scroll
-        </label>
-      </div>
-      <div className="flex-1 overflow-y-auto space-y-4" ref={scrollRef} data-scroll="detail">
         {turns.map((t, i) => {
-          const colorClass = colorForAgent(t.agentId);
+          const color = colorForAgent(t.agentId);
           return (
-            <div key={`turn-${typeof t.turn === 'number' ? t.turn : i}`} className={`border rounded-lg p-2 ${colorClass}`}>
-              <div className="flex justify-between text-xs font-semibold mb-1">
-                <span>Turn {t.turn} — {t.agentId || 'system'}</span>
+            <div key={`turn-${typeof t.turn === 'number' ? t.turn : i}`} className={`border rounded-lg p-2 border-l-4 ${color.bg} ${color.left}`}>
+              <div className={`flex justify-between text-xs font-semibold mb-1`}>
+                <span className="flex items-center gap-1">
+                  <span className={`inline-block w-2.5 h-2.5 rounded-full ${color.dot}`} aria-hidden />
+                  <span>Turn {t.turn} — {t.agentId || 'system'}</span>
+                </span>
                 <span>{dayjs(t.startedAt).format("HH:mm:ss")}</span>
               </div>
               {showTraces && t.traces.length > 0 && (
@@ -619,6 +702,7 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
                   {t.traces.map((tr) => {
                     const p = tr.payload as any;
                     const label = (typeof p === 'object' && p?.type ? String(p.type) : 'trace').toUpperCase();
+                    const isAbortedSegment = typeof t.abortSeq === 'number' && tr.seq <= (t.abortSeq as number);
 
                     // Special rendering for TOOL_RESULT with markdown content
                     const isToolResult = label === 'TOOL_RESULT';
@@ -640,7 +724,7 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
                       const indentCols = contentIdx >= 0 ? contentIdx + 1 : (lastLine.match(/^\s*/)?.[0].length ?? 0);
                       const html = marked.parse(p.result.content as string) as string;
                       return (
-                        <div key={tr.seq} className="bg-yellow-50/70 border border-yellow-200 text-gray-800 px-2 py-2 rounded shadow-[0_0_0_1px_rgba(0,0,0,0.02)]">
+                        <div key={tr.seq} data-block className={`bg-yellow-50/70 border border-yellow-200 text-gray-800 px-2 py-2 rounded shadow-[0_0_0_1px_rgba(0,0,0,0.02)] ${isAbortedSegment ? 'opacity-50' : ''}`}>
                           <div className="uppercase tracking-wide text-[0.7rem] font-semibold text-yellow-700 mb-1">{label}</div>
                           <pre className="text-xs font-mono whitespace-pre-wrap break-words leading-snug">{before}</pre>
                           <div className="my-1">
@@ -670,7 +754,7 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
                       let prettyInner = '';
                       try { prettyInner = JSON.stringify(JSON.parse(p.result.content as string), null, 2); } catch { prettyInner = p.result.content as string; }
                       return (
-                        <div key={tr.seq} className="bg-yellow-50/70 border border-yellow-200 text-gray-800 px-2 py-2 rounded shadow-[0_0_0_1px_rgba(0,0,0,0.02)]">
+                        <div key={tr.seq} data-block className={`bg-yellow-50/70 border border-yellow-200 text-gray-800 px-2 py-2 rounded shadow-[0_0_0_1px_rgba(0,0,0,0.02)] ${isAbortedSegment ? 'opacity-50' : ''}`}>
                           <div className="uppercase tracking-wide text-[0.7rem] font-semibold text-yellow-700 mb-1">{label}</div>
                           <pre className="text-xs font-mono whitespace-pre-wrap break-words leading-snug">{before}</pre>
                           <div className="my-1">
@@ -693,7 +777,7 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
                       pretty = typeof tr.payload === 'string' ? tr.payload : JSON.stringify(tr.payload, null, 2);
                     }
                     return (
-                      <div key={tr.seq} className="bg-yellow-50/70 border border-yellow-200 text-gray-800 px-2 py-2 rounded shadow-[0_0_0_1px_rgba(0,0,0,0.02)]">
+                      <div key={tr.seq} data-block className={`bg-yellow-50/70 border border-yellow-200 text-gray-800 px-2 py-2 rounded shadow-[0_0_0_1px_rgba(0,0,0,0.02)] ${isAbortedSegment ? 'opacity-50' : ''}`}>
                         <div className="uppercase tracking-wide text-[0.7rem] font-semibold text-yellow-700 mb-1">{label}</div>
                         <pre className="text-xs font-mono whitespace-pre-wrap break-words leading-snug">{pretty}</pre>
                       </div>
@@ -704,6 +788,7 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
               {t.messages.map((m) => {
                 const text = (m.payload as any)?.text;
                 const html = typeof text === 'string' ? marked.parse(text) : undefined;
+                const isAbortedSegment = typeof t.abortSeq === 'number' && m.seq <= (t.abortSeq as number);
                 const atts: Array<{ id?: string; name: string; contentType: string; docId?: string }> | undefined = (m.payload as any)?.attachments;
 
                 const openAttachment = async (att: { id?: string; name: string; contentType: string }) => {
@@ -720,7 +805,7 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
                   }
                 };
                 return (
-                  <div key={m.seq} data-block className="bg-white rounded px-3 py-2 mb-1 shadow-sm">
+                  <div key={m.seq} data-block className={`bg-white rounded px-3 py-2 mb-1 shadow-sm ${isAbortedSegment ? 'opacity-50' : ''}`}>
                     <div className="text-gray-500 text-[0.7rem] mb-1">{m.type}/{m.finality}</div>
                     {html ? (
                       <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: html as string }} />
@@ -753,6 +838,23 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
           </div>
         )}
         <div ref={bottomRef} />
+      </div>
+      {/* Floating controls */}
+      <div className="pointer-events-none relative">
+        <div className="absolute right-2 bottom-2 pointer-events-auto opacity-60 hover:opacity-100 transition">
+          <div className="inline-flex items-center gap-1 bg-white/90 border rounded shadow px-2 py-1">
+            <button
+              className={`text-xs px-1 py-0.5 rounded ${showTraces ? 'bg-gray-200' : ''}`}
+              title="Toggle traces (t)"
+              onClick={() => setShowTraces(v => !v)}
+            >Trace</button>
+            <button
+              className={`text-xs px-1 py-0.5 rounded ${autoScroll ? 'bg-gray-200' : ''}`}
+              title="Toggle autoscroll (a)"
+              onClick={() => setAutoScroll(v => !v)}
+            >Auto</button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -796,6 +898,7 @@ function SplitLayout() {
   const [connState, setConnState] = useState<ConnState>('idle');
   const listRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
+  const [legendAgents, setLegendAgents] = useState<string[]>([]);
 
   const onSelect = useCallback((id: number) => {
     navigate(`/conversation/${id}`);
@@ -845,6 +948,21 @@ function SplitLayout() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Fetch agent legend + info for selected conversation
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!selectedId) { setLegendAgents([]); return; }
+      try {
+        const snap = await wsRpcCall<any>('getConversation', { conversationId: selectedId, includeScenario: true });
+        if (cancelled) return;
+        const ids: string[] = Array.isArray(snap?.metadata?.agents) ? snap.metadata.agents.map((a: any) => a.id).filter(Boolean) : [];
+        setLegendAgents(ids);
+      } catch { if (!cancelled) setLegendAgents([]); }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedId]);
+
   // initial focus on list
   useEffect(() => {
     setListFocusKey((k) => k + 1);
@@ -865,33 +983,25 @@ function SplitLayout() {
 
   return (
     <div className="font-sans text-gray-900 bg-gray-50 h-screen overflow-hidden flex flex-col">
-      <header className="flex items-center justify-between px-3 py-2 border-b bg-white">
-        <div className="font-semibold">Watch</div>
-        <div className="flex items-center gap-4 text-xs">
+      <header className="flex items-center justify-between px-3 py-1.5 border-b bg-white text-[13px]">
+        <div className="font-semibold tracking-tight">Watch</div>
+        <div className="relative flex items-center gap-2">
           {(() => {
-            // Collapse API + live into one status
+            // Single dot status with tooltip
             let color = 'bg-gray-400';
             let label = 'idle';
-            if (health === false) {
-              color = 'bg-red-500';
-              label = 'api down';
-            } else if (health === true) {
+            if (health === false) { color = 'bg-red-500'; label = 'api down'; }
+            else if (health === true) {
               if (connState === 'open') { color = 'bg-green-500'; label = 'live'; }
               else if (connState === 'connecting' || connState === 'reconnecting') { color = 'bg-yellow-500'; label = connState; }
               else if (connState === 'closed') { color = 'bg-gray-400'; label = 'disconnected'; }
               else { color = 'bg-gray-400'; label = 'ready'; }
-            } else {
-              color = 'bg-gray-400';
-              label = 'checking';
-            }
+            } else { color = 'bg-gray-400'; label = 'checking'; }
             return (
-              <div className="flex items-center gap-2 text-gray-600">
-                <span className={`inline-block w-2 h-2 rounded-full ${color}`} />
-                <span className="capitalize">{label}</span>
-              </div>
+              <span className={`inline-block w-2.5 h-2.5 rounded-full ${color}`} title={`Status: ${label}`} aria-label={`Status: ${label}`} />
             );
           })()}
-          <div className="text-gray-500">Shortcuts: ?</div>
+          {/* Legend and info moved into sticky header inside detail pane */}
         </div>
       </header>
       <div className="flex-1 flex min-h-0">
@@ -945,6 +1055,8 @@ function HelpModal({ onClose }: { onClose: () => void }) {
           <Shortcut label="a" desc="Toggle autoscroll (details)" />
           <Shortcut label="gg" desc="Jump to top (details)" />
           <Shortcut label="G" desc="Jump to bottom (details)" />
+          <Shortcut label="Space" desc="Next event block (details)" />
+          <Shortcut label="Shift+Space" desc="Previous event block (details)" />
           <Shortcut label="?" desc="Toggle this help" />
         </div>
       </div>

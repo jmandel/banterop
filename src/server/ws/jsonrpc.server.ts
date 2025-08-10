@@ -188,10 +188,10 @@ async function handleRpc(
     return;
   }
 
-  if (method === 'abortTurn') {
+  if (method === 'clearTurn') {
     const { conversationId, agentId } = params as { conversationId: number; agentId: string };
     try {
-      const res = orchestrator.abortTurn(conversationId, agentId);
+      const res = orchestrator.clearTurn(conversationId, agentId);
       ws.send(JSON.stringify(ok(id, res)));
     } catch (e) {
       const { code, message } = mapError(e);

@@ -475,10 +475,84 @@ function ConversationView({ id }: { id: number }) {
   const [messages, setMessages] = useState<UnifiedEvent[]>([]);
   const agentsRef = useRef<Map<string, ScenarioDrivenAgent>>(new Map());
   const eventWsRef = useRef<WebSocket | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const programmaticScrollRef = useRef(false);
+  const [autoScroll, setAutoScroll] = useState(true);
   
   // Check if we should auto-start agents
   const urlParams = new URLSearchParams(window.location.search);
   const shouldAutoStart = urlParams.get('autostart') === 'true';
+
+  // Subscribe to events (separate from agent lifecycle)
+  const subscribeToEvents = () => {
+    if (eventWsRef.current) return; // Already subscribed
+    
+    const wsUrl = API_BASE.startsWith('http')
+      ? API_BASE.replace(/^http/, 'ws') + '/ws'
+      : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${API_BASE}/ws`;
+    
+    const eventWs = new WebSocket(wsUrl);
+    eventWsRef.current = eventWs;
+    
+    eventWs.addEventListener('open', () => {
+      // Subscribe and also get all events since the beginning
+      eventWs.send(JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'subscribe',
+        params: { conversationId: id, sinceSeq: 0 },
+        id: 'sub-1'
+      }));
+    });
+    
+    eventWs.addEventListener('message', (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        
+        // Skip RPC responses (they have an id field for the request)
+        if (msg.id === 'sub-1') {
+          console.log('Subscription confirmed:', msg);
+          return;
+        }
+        
+        // Handle both RPC notification format and direct event format
+        let evt: UnifiedEvent | null = null;
+        
+        if (msg.method === 'event' && msg.params) {
+          // RPC notification format: { method: 'event', params: {...} }
+          evt = msg.params as UnifiedEvent;
+          console.log('Received event (RPC format):', evt?.type, evt);
+        } else if (msg.type && msg.conversation === id) {
+          // Direct event format: { type: 'message', conversation: 5, ... }
+          evt = msg as UnifiedEvent;
+          console.log('Received event (direct format):', evt?.type, evt);
+        } else {
+          console.log('Unknown message format:', msg);
+        }
+        
+        if (evt && evt.type === 'message') {
+          console.log('Processing message event:', evt);
+          setMessages(prev => {
+            // Check if we already have this message (by seq)
+            const exists = prev.some(m => m.seq === evt.seq);
+            if (exists) {
+              console.log('Message already exists, skipping:', evt.seq);
+              return prev;
+            }
+            console.log('Adding new message:', evt.seq);
+            return [...prev, evt].sort((a, b) => a.seq - b.seq);
+          });
+        } else if (evt) {
+          console.log('Skipping non-message event:', evt.type);
+        }
+      } catch (e) {
+        console.error('Failed to parse event:', e);
+      }
+    });
+    
+    eventWs.addEventListener('close', () => {
+      eventWsRef.current = null;
+    });
+  };
 
   const startAgents = async () => {
     if (!conversation || agentsRunning) return;
@@ -504,18 +578,20 @@ function ConversationView({ id }: { id: number }) {
         serverUrl: serverUrl
       });
       
-      // Create and start agents
-      const agents = new Map<string, ScenarioDrivenAgent>();
+      // Clear any existing agents first
+      agentsRef.current.clear();
       
+      // Create and start agents
       for (const agentMeta of conversation.metadata?.agents || []) {
         try {
           console.log(`Creating agent: ${agentMeta.id} for conversation ${id}...`);
           const transport = new WsTransport(wsUrl);
           const agent = new ScenarioDrivenAgent(transport, {
             agentId: agentMeta.id,
-            providerManager
+            providerManager,
+            turnRecoveryMode: 'restart'  // Scenario agents should restart for consistency
           });
-          agents.set(agentMeta.id, agent);
+          agentsRef.current.set(agentMeta.id, agent);
           
           console.log(`Starting agent: ${agentMeta.id} for conversation ${id}...`);
           await agent.start(id, agentMeta.id);
@@ -528,35 +604,6 @@ function ConversationView({ id }: { id: number }) {
       // All agents are connected
       console.log('All agents started successfully');
       
-      agentsRef.current = agents;
-      
-      // Subscribe to events
-      const eventWs = new WebSocket(wsUrl);
-      eventWsRef.current = eventWs;
-      
-      eventWs.addEventListener('open', () => {
-        eventWs.send(JSON.stringify({
-          jsonrpc: '2.0',
-          method: 'subscribe',
-          params: { conversationId: id },
-          id: 'sub-1'
-        }));
-      });
-      
-      eventWs.addEventListener('message', (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.method === 'event' && msg.params) {
-            const evt = msg.params as UnifiedEvent;
-            if (evt.type === 'message') {
-              setMessages(prev => [...prev, evt]);
-            }
-          }
-        } catch (e) {
-          console.error('Failed to parse event:', e);
-        }
-      });
-      
     } catch (err) {
       console.error('Failed to start agents:', err);
       setAgentsRunning(false);
@@ -565,21 +612,34 @@ function ConversationView({ id }: { id: number }) {
   
   const stopAgents = async () => {
     // Stop all agents
-    for (const agent of agentsRef.current.values()) {
-      await agent.stop();
+    console.log('Stopping agents...', agentsRef.current.size, 'agents to stop');
+    for (const [agentId, agent] of agentsRef.current.entries()) {
+      console.log(`Stopping agent: ${agentId}`);
+      agent.stop();
     }
     agentsRef.current.clear();
+    console.log('All agents stopped');
     
-    // Close event WebSocket
+    // Keep event WebSocket open - we still want to see messages
+    setAgentsRunning(false);
+  };
+  
+  useEffect(() => {
+    // Stop any running agents when conversation changes
+    if (agentsRef.current.size > 0) {
+      console.log('Conversation changed, stopping existing agents...');
+      stopAgents();
+    }
+    
+    // Close existing event subscription when conversation changes
     if (eventWsRef.current) {
       eventWsRef.current.close();
       eventWsRef.current = null;
     }
     
-    setAgentsRunning(false);
-  };
-  
-  useEffect(() => {
+    // Clear messages when switching conversations
+    setMessages([]);
+    
     const loadConversation = async () => {
       try {
         setLoading(true);
@@ -588,6 +648,16 @@ function ConversationView({ id }: { id: number }) {
           includeScenario: false
         });
         setConversation(result);
+        
+        // Load existing events from the conversation
+        if (result.events && Array.isArray(result.events)) {
+          const messageEvents = result.events.filter((e: UnifiedEvent) => e.type === 'message');
+          console.log('Loaded existing messages:', messageEvents.length);
+          setMessages(messageEvents);
+        }
+        
+        // Subscribe to events immediately (for new messages)
+        subscribeToEvents();
         
         // Auto-start agents if requested and this is a fresh conversation
         if (shouldAutoStart && !agentsRunning) {
@@ -608,6 +678,10 @@ function ConversationView({ id }: { id: number }) {
     // Cleanup on unmount
     return () => {
       stopAgents();
+      if (eventWsRef.current) {
+        eventWsRef.current.close();
+        eventWsRef.current = null;
+      }
     };
   }, [id]);
   
@@ -623,6 +697,20 @@ function ConversationView({ id }: { id: number }) {
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [agentsRunning]);
+
+  // Auto-scroll to bottom on new messages when enabled (instant for snappy UX)
+  useEffect(() => {
+    if (!autoScroll) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    try {
+      programmaticScrollRef.current = true;
+      el.scrollTo({ top: el.scrollHeight, behavior: 'auto' });
+    } finally {
+      // Clear the programmatic flag on next tick to avoid swallowing real scrolls
+      setTimeout(() => { programmaticScrollRef.current = false; }, 0);
+    }
+  }, [messages, autoScroll]);
 
   if (loading) {
     return (
@@ -663,25 +751,24 @@ function ConversationView({ id }: { id: number }) {
             </div>
           </div>
           
-          {!agentsRunning ? (
-            <div className="p-4 border border-blue-200 bg-blue-50 rounded-lg">
-              <div className="text-sm text-blue-800 mb-3">
-                <strong>Conversation created!</strong> The agents need to be started to begin the dialogue.
+          <div className="space-y-4">
+            {!agentsRunning ? (
+              <div className="p-4 border border-blue-200 bg-blue-50 rounded-lg">
+                <div className="text-sm text-blue-800 mb-3">
+                  <strong>Agents not running.</strong> Start agents to continue the conversation.
+                </div>
+                <button
+                  onClick={startAgents}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                >
+                  Start Agents
+                </button>
               </div>
-              <button
-                onClick={startAgents}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-              >
-                Start Agents
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-4">
+            ) : (
               <div className="p-4 border border-green-200 bg-green-50 rounded-lg">
                 <div className="text-sm text-green-800 flex items-center justify-between">
                   <div>
                     <strong>Agents are running!</strong> The conversation is in progress.
-                    <span className="ml-2 text-xs">({messages.length} messages)</span>
                   </div>
                   <button
                     onClick={stopAgents}
@@ -691,31 +778,45 @@ function ConversationView({ id }: { id: number }) {
                   </button>
                 </div>
               </div>
-              
-              <div className="p-4 border border-gray-200 rounded-lg max-h-96 overflow-y-auto">
-                <div className="text-sm font-semibold mb-2">Recent Messages:</div>
-                <div className="space-y-2">
-                  {messages.length === 0 ? (
-                    <div className="text-gray-500 text-sm">Waiting for messages...</div>
-                  ) : (
-                    messages.slice(-10).map((msg, idx) => (
-                      <div key={idx} className="p-2 bg-gray-50 rounded text-sm">
+            )}
+            
+            <div
+              className="p-4 border border-gray-200 rounded-lg max-h-96 overflow-y-auto"
+              ref={scrollRef}
+              onScroll={() => {
+                const el = scrollRef.current;
+                if (!el) return;
+                if (programmaticScrollRef.current) return;
+                const atBottom = Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight;
+                if (atBottom) setAutoScroll(true);
+                else setAutoScroll(false);
+              }}
+            >
+              <div className="text-sm font-semibold mb-2">Messages ({messages.length} total):</div>
+              <div className="space-y-2">
+                {messages.length === 0 ? (
+                  <div className="text-gray-500 text-sm">No messages yet...</div>
+                ) : (
+                  messages.map((msg, idx) => (
+                    <div key={`${msg.seq}-${idx}`} className="p-2 bg-gray-50 rounded text-sm">
+                      <div className="flex items-center gap-2">
                         <div className="font-medium text-blue-600">[{msg.agentId}]</div>
-                        <div className="text-gray-700">{(msg.payload as any)?.text || JSON.stringify(msg.payload)}</div>
+                        <div className="text-xs text-gray-400">seq: {msg.seq}</div>
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
-              
-              <div className="p-4 border border-yellow-200 bg-yellow-50 rounded-lg">
-                <div className="text-sm text-yellow-800">
-                  <strong>Monitor in Watch App:</strong> For a better viewing experience,
-                  open the <a href={`/watch#/conversation/${id}`} className="underline hover:text-yellow-900">Watch app</a> in a new tab.
-                </div>
+                      <div className="text-gray-700">{(msg.payload as any)?.text || JSON.stringify(msg.payload)}</div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
-          )}
+            
+            <div className="p-4 border border-yellow-200 bg-yellow-50 rounded-lg">
+              <div className="text-sm text-yellow-800">
+                <strong>Monitor in Watch App:</strong> For a better viewing experience,
+                open the <a href={`/watch#/conversation/${id}`} className="underline hover:text-yellow-900">Watch app</a> in a new tab.
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

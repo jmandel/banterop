@@ -19,13 +19,13 @@ describe('Abort Turn Mechanism', () => {
     await app.shutdown();
   });
 
-  describe('abortTurn', () => {
+  describe('clearTurn', () => {
     it('should add abort marker for open turn owned by agent', () => {
       // Agent A starts a turn
       orchestrator.sendMessage(conversationId, 'agent-a', { text: 'Hello' }, 'none');
       
       // Agent A aborts
-      const result = orchestrator.abortTurn(conversationId, 'agent-a');
+      const result = orchestrator.clearTurn(conversationId, 'agent-a');
       
       // Should return same turn
       expect(result.turn).toBe(1);
@@ -35,18 +35,18 @@ describe('Abort Turn Mechanism', () => {
       const lastEvent = events[events.length - 1];
       expect(lastEvent?.type).toBe('trace');
       expect(lastEvent?.agentId).toBe('agent-a');
-      expect((lastEvent?.payload as any)?.type).toBe('turn_aborted');
+      expect((lastEvent?.payload as any)?.type).toBe('turn_cleared');
     });
 
     it('should be idempotent - not write another abort if already aborted', () => {
       // Agent A starts and aborts
       orchestrator.sendMessage(conversationId, 'agent-a', { text: 'Hello' }, 'none');
-      orchestrator.abortTurn(conversationId, 'agent-a');
+      orchestrator.clearTurn(conversationId, 'agent-a');
       
       const eventCount = orchestrator.getConversationSnapshot(conversationId).events.length;
       
       // Abort again
-      const result = orchestrator.abortTurn(conversationId, 'agent-a');
+      const result = orchestrator.clearTurn(conversationId, 'agent-a');
       
       // Should return same turn
       expect(result.turn).toBe(1);
@@ -61,7 +61,7 @@ describe('Abort Turn Mechanism', () => {
       orchestrator.sendMessage(conversationId, 'agent-a', { text: 'Hello' }, 'turn');
       
       // Agent A tries to abort (turn is closed)
-      const result = orchestrator.abortTurn(conversationId, 'agent-a');
+      const result = orchestrator.clearTurn(conversationId, 'agent-a');
       
       // Should return next turn
       expect(result.turn).toBe(2);
@@ -69,7 +69,7 @@ describe('Abort Turn Mechanism', () => {
       // No abort marker should be added
       const events = orchestrator.getConversationSnapshot(conversationId).events;
       const hasAbort = events.some(e => 
-        e.type === 'trace' && (e.payload as any).type === 'turn_aborted'
+        e.type === 'trace' && (e.payload as any).type === 'turn_cleared'
       );
       expect(hasAbort).toBe(false);
     });
@@ -79,7 +79,7 @@ describe('Abort Turn Mechanism', () => {
       orchestrator.sendMessage(conversationId, 'agent-a', { text: 'Hello' }, 'none');
       
       // Agent B tries to abort (wrong agent)
-      const result = orchestrator.abortTurn(conversationId, 'agent-b');
+      const result = orchestrator.clearTurn(conversationId, 'agent-b');
       
       // Should return next turn
       expect(result.turn).toBe(2);
@@ -87,7 +87,7 @@ describe('Abort Turn Mechanism', () => {
       // No abort marker should be added
       const events = orchestrator.getConversationSnapshot(conversationId).events;
       const hasAbort = events.some(e => 
-        e.type === 'trace' && (e.payload as any).type === 'turn_aborted'
+        e.type === 'trace' && (e.payload as any).type === 'turn_cleared'
       );
       expect(hasAbort).toBe(false);
     });
@@ -95,7 +95,7 @@ describe('Abort Turn Mechanism', () => {
     it('should allow continuing after abort', () => {
       // Agent A starts, aborts, and continues
       orchestrator.sendMessage(conversationId, 'agent-a', { text: 'First try' }, 'none');
-      const { turn } = orchestrator.abortTurn(conversationId, 'agent-a');
+      const { turn } = orchestrator.clearTurn(conversationId, 'agent-a');
       
       // Continue work on same turn
       const result = orchestrator.sendMessage(

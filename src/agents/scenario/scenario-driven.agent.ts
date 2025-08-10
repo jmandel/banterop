@@ -12,6 +12,14 @@ import { ToolSynthesisService } from '$src/agents/services/tool-synthesis.servic
 import { logLine } from '$src/lib/utils/logger';
 import { ParsedResponse, parseToolsFromResponse } from '$src/lib/utils/tool-parser';
 
+// Custom error type for agent stopped
+class AgentStoppedError extends Error {
+  constructor(public readonly location: string) {
+    super(`Agent stopped at ${location}`);
+    this.name = 'AgentStoppedError';
+  }
+}
+
 export interface ScenarioDrivenAgentConfig {
   agentId: string;
   providerManager: LLMProviderManager;
@@ -115,6 +123,12 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
     await this._processAndRespondToTurn(ctx);
   }
 
+  private ensureNotStopped(location: string): void {
+    if (!this.running) {
+      throw new AgentStoppedError(location);
+    }
+  }
+
   private async _processAndRespondToTurn(ctx: TurnContext<ConversationSnapshot>): Promise<void> {
     if (this.processingTurn) return;
     
@@ -125,6 +139,8 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
       let stepCount = 0;
       
       while (stepCount++ < this.MAX_STEPS) {
+        this.ensureNotStopped('step start');
+        
         logLine(ctx.agentId, 'info', `Processing step ${stepCount} of ${this.MAX_STEPS}`);
         
         const historyString = this.buildConversationHistory(ctx.snapshot.events, ctx.agentId);
@@ -143,13 +159,17 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
 
         logLine(ctx.agentId, 'info', `Prompting LLM with ${prompt.length} characters`);
         
+        this.ensureNotStopped('before LLM call');
+        
         let result: ParsedResponse;
         try {
           result = await this.extractToolCallsFromLLMResponse(prompt);
           logLine(ctx.agentId, 'info', `LLM response received: ${result.message}`);
-        } catch (llmError: any) {
-          logLine(ctx.agentId, 'error', `LLM request failed: ${llmError.message}`);
-          await this.addThought(ctx, `LLM request failed: ${llmError.message}. I'll try to recover gracefully.`);
+        } catch (llmError) {
+          this.ensureNotStopped('LLM error');
+          const errorMessage = llmError instanceof Error ? llmError.message : String(llmError);
+          logLine(ctx.agentId, 'error', `LLM request failed: ${errorMessage}`);
+          await this.addThought(ctx, `LLM request failed: ${errorMessage}. I'll try to recover gracefully.`);
           await this.completeTurn(ctx, "I apologize, but I encountered a technical issue. Please try again later.", timeToConcludeConversation);
           break;
         }
@@ -172,10 +192,14 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
 
         await this.addThought(ctx, result.message);
 
+        this.ensureNotStopped('before tool execution');
+
         const stepResult = await this.executeSingleToolCallWithReasoning(ctx, result, timeToConcludeConversation);
         if (stepResult.completedTurn) {
           break;
         }
+
+        this.ensureNotStopped('after tool execution');
 
         if (timeToConcludeConversation) {
           await this.completeTurn(ctx, "I was supposed to conclude this conversation but I didn't send a message. Ending conversation with error.", true);
@@ -193,18 +217,27 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
         logLine(ctx.agentId, 'error', "MAX STEPS reached, completing turn with error message");
         try {
           await this.completeTurn(ctx, "Error: Max steps reached without sending a message", timeToConcludeConversation);
-        } catch (error: any) {
-          logLine(ctx.agentId, 'error', `Failed to complete turn after max steps: ${error.message}`);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logLine(ctx.agentId, 'error', `Failed to complete turn after max steps: ${errorMessage}`);
           throw error;
         }
       }
-    } catch (error: any) {
-      logLine(ctx.agentId, 'error', `Error in _processAndRespondToTurn: ${error.message}`);
-      try {
-        await this.completeTurn(ctx, "I encountered an unexpected error and need to end this turn.", timeToConcludeConversation);
-      } catch (completeError: any) {
-        logLine(ctx.agentId, 'error', `Failed to complete turn after error: ${completeError.message}`);
-        throw completeError;
+    } catch (error) {
+      // Check if this is an agent stopped error
+      if (error instanceof AgentStoppedError) {
+        logLine(ctx.agentId, 'info', `Agent stopped at ${error.location}`);
+        // Don't rethrow or try to complete turn - just exit gracefully
+      } else {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logLine(ctx.agentId, 'error', `Error in _processAndRespondToTurn: ${errorMessage}`);
+        try {
+          await this.completeTurn(ctx, "I encountered an unexpected error and need to end this turn.", timeToConcludeConversation);
+        } catch (completeError) {
+          const completeErrorMessage = completeError instanceof Error ? completeError.message : String(completeError);
+          logLine(ctx.agentId, 'error', `Failed to complete turn after error: ${completeErrorMessage}`);
+          throw completeError;
+        }
       }
     } finally {
       this.processingTurn = false;
@@ -422,6 +455,12 @@ Your response MUST follow this EXACT format:
     
     const request: LLMRequest = { messages };
 
+    // Check if stopped before making LLM call
+    if (!this.running) {
+      console.log('Agent stopped before LLM call');
+      return { tools: [], message: 'Agent stopped' };
+    }
+
     const response = await this.llmProvider!.complete(request);
     
     // Add 100ms delay after LLM generation
@@ -436,6 +475,12 @@ Your response MUST follow this EXACT format:
     result: ParsedResponse,
     timeToConcludeConversation = false
   ): Promise<{ completedTurn: boolean; isTerminal?: boolean }> {
+    // Check if stopped
+    if (!this.running) {
+      logLine(ctx.agentId, 'warn', 'Agent stopped during tool execution');
+      return { completedTurn: true };  // Signal completion to exit loop
+    }
+    
     const { tools } = result;
     
     // Handle case where no tool call was made
@@ -510,8 +555,9 @@ Your response MUST follow this EXACT format:
             };
             
             attachmentPayloads.push(payload);
-          } catch (error: any) {
-            logLine(ctx.agentId, 'error', `Failed to process attachment ${docId}: ${error.message}`);
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logLine(ctx.agentId, 'error', `Failed to process attachment ${docId}: ${errorMessage}`);
           }
         }
       }
@@ -600,13 +646,14 @@ Your response MUST follow this EXACT format:
           });
           
           toolOutput = synthesisResult.output;
-        } catch (toolError: any) {
-          logLine(ctx.agentId, 'error', `Tool synthesis failed for ${toolCall.name}: ${toolError.message}`);
+        } catch (toolError) {
+          const errorMessage = toolError instanceof Error ? toolError.message : String(toolError);
+          logLine(ctx.agentId, 'error', `Tool synthesis failed for ${toolCall.name}: ${errorMessage}`);
           toolOutput = {
-            error: `Tool execution failed: ${toolError.message}`,
+            error: `Tool execution failed: ${errorMessage}`,
             success: false
           };
-          await this.addToolResult(ctx, toolCallId, toolOutput, toolError.message);
+          await this.addToolResult(ctx, toolCallId, toolOutput, errorMessage);
           return { completedTurn: false };
         }
       }
@@ -640,10 +687,11 @@ Your response MUST follow this EXACT format:
       } 
 
       return { completedTurn: false };
-    } catch (error: any) {
-      await this.addToolResult(ctx, toolCallId, null, error.message);
-      await this.completeTurn(ctx, `I encountered an error: ${error.message}`, timeToConcludeConversation);
-      logLine(ctx.agentId, 'error', `Error: ${error.message}`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await this.addToolResult(ctx, toolCallId, null, errorMessage);
+      await this.completeTurn(ctx, `I encountered an error: ${errorMessage}`, timeToConcludeConversation);
+      logLine(ctx.agentId, 'error', `Error: ${errorMessage}`);
       return { completedTurn: true };
     }
   }
