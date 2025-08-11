@@ -4,8 +4,10 @@
 // begin_chat_thread will create a conversation from the provided meta and start internal agents
 // (based on agentClass). The startingAgentId will be the initiator.
 //
-// send_message_to_chat_thread and wait_for_reply remain the same behaviorally, but now derive
-// the bridgedAgentId from meta.startingAgentId (or fallback rules).
+// Tools: begin_chat_thread, send_message_to_chat_thread, get_updates
+// - bare-key zod schemas for MCP TS SDK compatibility
+// - conversationId is a string on the wire (numeric ids serialized as strings)
+// - get_updates returns message events only; attachments expanded inline
 //
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -49,75 +51,74 @@ export class McpBridgeServer {
   }
 
   private timeoutMs(): number {
-    return this.deps.replyTimeoutMs ?? 15000;
+    // Default 1500ms per design doc
+    return this.deps.replyTimeoutMs ?? 1500;
   }
 
   private async buildServerWithContext(convMeta: ConvConversationMeta): Promise<McpServer> {
     const s = new McpServer({ name: 'lfi-mcp-bridge', version: '1.0.0' });
 
-    s.registerTool(
-      'begin_chat_thread',
-      {
-        title: 'Begin Chat Thread',
-        description:
-          'Create a new conversation from the provided meta (scenario/title/agents). Internal agents will be started. The startingAgentId (external) should initiate.',
-        inputSchema: {},
-      },
-      async () => {
-        const conversationId = await this.beginChatThread(convMeta);
-        return { content: [{ type: 'text', text: JSON.stringify({ conversationId }) }] };
-      }
-    );
+    // begin_chat_thread: no idempotency; returns { conversationId: string, nextSeq: number }
+    s.registerTool('begin_chat_thread', { inputSchema: {} }, async () => {
+      const conversationId = await this.beginChatThread(convMeta);
+      const nextSeq = this.getNextSeq(conversationId);
+      return { content: [{ type: 'text', text: JSON.stringify({ conversationId: String(conversationId), nextSeq }) }] };
+    });
 
+    // send_message_to_chat_thread: post message and opportunistically return reply events
     s.registerTool(
       'send_message_to_chat_thread',
       {
-        title: 'Send Message to Chat Thread',
-        description:
-          'Send a message as the starting (external) agent specified by startingAgentId and wait for a reply from an internal counterparty (timeout returns stillWorking).',
         inputSchema: {
-          conversationId: z.number(),
+          conversationId: z.string(),
           message: z.string(),
-          attachments: z.array(z.object({
-            name: z.string(),
-            contentType: z.string(),
-            content: z.string(),
-            summary: z.string().optional(),
-            docId: z.string().optional(),
-          })).optional(),
-        },
-      },
-      async (params: any) => {
-        const meta = parseConversationMetaFromConfig64(this.config64); // stateless re-parse
-        const startingId = getStartingAgentId(meta);
-        const result = await this.sendAndWait({
-          conversationId: Number(params?.conversationId),
-          agentId: startingId,
-          text: String(params?.message ?? ''),
-          attachments: Array.isArray(params?.attachments) ? params.attachments : undefined,
-        });
-        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
-      }
-    );
-
-    s.registerTool(
-      'wait_for_reply',
-      {
-        title: 'Wait for Reply',
-        description:
-          'Wait for the next reply from an internal counterparty without sending a new message (timeout returns stillWorking).',
-        inputSchema: {
-          conversationId: z.number(),
-        },
+          attachments: z.array(
+            z.object({
+              name: z.string(),
+              contentType: z.string(),
+              content: z.string(),
+              summary: z.string().optional(),
+              docId: z.string().optional(),
+            })
+          ).optional(),
+        }
       },
       async (params: any) => {
         const meta = parseConversationMetaFromConfig64(this.config64);
         const startingId = getStartingAgentId(meta);
-        const result = await this.waitForReply({
-          conversationId: Number(params?.conversationId),
-          bridgedAgentId: startingId,
-        });
-        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        const conversationId = Number(params?.conversationId);
+        const text = String(params?.message ?? '');
+        const attachments = Array.isArray(params?.attachments) ? params.attachments : undefined;
+
+        // Send message
+        this.deps.orchestrator.sendMessage(
+          conversationId,
+          startingId,
+          { text, ...(attachments ? { attachments } : {}) },
+          'turn'
+        );
+
+        // Opportunistic wait for a reply from counterparty and return events
+        const startSeq = this.getNextSeq(conversationId);
+        const events = await this.waitForNewMessageEvents({ conversationId, sinceSeq: startSeq, excludeAgentId: startingId });
+        const nextSeq = this.getNextSeq(conversationId);
+        return { content: [{ type: 'text', text: JSON.stringify({ events, nextSeq, stillWorking: events.length === 0 }) }] };
+      }
+    );
+
+    // get_updates: messages-only; expand attachments inline
+    s.registerTool(
+      'get_updates',
+      { inputSchema: { conversationId: z.string(), sinceSeq: z.number().default(0), max: z.number().default(200), waitMs: z.number().default(0) } },
+      async (params: any) => {
+        const conversationId = Number(params?.conversationId);
+        const sinceSeq = Number(params?.sinceSeq ?? 0);
+        const max = Number(params?.max ?? 200);
+        const waitMs = Number(params?.waitMs ?? 0);
+
+        const events = await this.getMessageEvents({ conversationId, sinceSeq, max, waitMs });
+        const nextSeq = this.getNextSeq(conversationId);
+        return { content: [{ type: 'text', text: JSON.stringify({ events, nextSeq }) }] };
       }
     );
 
@@ -169,77 +170,30 @@ export class McpBridgeServer {
     return conversationId;
   }
 
-  private async sendAndWait(params: {
-    conversationId: number;
-    agentId: string;
-    text: string;
-    attachments?: Array<{ name: string; contentType: string; content: string; summary?: string; docId?: string }>;
-  }): Promise<
-    | { reply: string; attachments?: Array<{ name: string; contentType: string; content: string }> }
-    | { stillWorking: true; followUp: string; status: { message: string } }
-  > {
-    const { orchestrator } = this.deps;
-
-    orchestrator.sendMessage(
-      params.conversationId,
-      params.agentId,
-      { text: params.text, ...(params.attachments !== undefined ? { attachments: params.attachments } : {}) },
-      'turn'
-    );
-
-    const result = await this.waitForReply({
-      conversationId: params.conversationId,
-      bridgedAgentId: params.agentId,
-    });
-
-    return result;
+  private getNextSeq(conversationId: number): number {
+    const events = this.deps.orchestrator.getEventsPage(conversationId, undefined, 1_000_000);
+    return events.length ? events[events.length - 1]!.seq : 0;
   }
 
-  private async waitForReply(params: {
-    conversationId: number;
-    bridgedAgentId: string;
-  }): Promise<
-    | { reply: string; attachments?: Array<{ name: string; contentType: string; content: string }> }
-    | { stillWorking: true; followUp: string; status: { message: string } }
-  > {
+  private async waitForNewMessageEvents(opts: { conversationId: number; sinceSeq: number; excludeAgentId?: string }): Promise<UnifiedEvent[]> {
     const { orchestrator } = this.deps;
     const timeout = this.timeoutMs();
-
     let resolved = false;
     let timer: any;
     let subId: string | undefined;
 
-    const reply = await new Promise<
-      | { reply: string; attachments?: Array<{ name: string; contentType: string; content: string }> }
-      | null
-    >((resolve) => {
+    const reply = await new Promise<boolean>((resolve) => {
       subId = orchestrator.subscribe(
-        params.conversationId,
+        opts.conversationId,
         (e: UnifiedEvent) => {
           try {
             if (e.type !== 'message') return;
-            if (e.agentId === params.bridgedAgentId) return; // ignore initiator echoes
-            const payload = (e.payload || {}) as { text?: string; attachments?: Array<{ id: string; name: string; contentType: string }> };
-            const text = payload.text ?? '';
-            if (!text) return;
-
-            const fetchAttachments = async () => {
-              if (!Array.isArray(payload.attachments) || payload.attachments.length === 0) return undefined;
-              const full: Array<{ name: string; contentType: string; content: string }> = [];
-              for (const a of payload.attachments) {
-                if (!a?.id) continue;
-                const att = orchestrator.getAttachment(a.id);
-                if (att) full.push({ name: att.name, contentType: att.contentType, content: att.content });
-              }
-              return full.length ? full : undefined;
-            };
-
-            void fetchAttachments().then((atts) => {
-              if (timer) clearTimeout(timer);
-              resolved = true;
-              if (subId) orchestrator.unsubscribe(subId);
-              resolve({ reply: text, ...(atts !== undefined ? { attachments: atts } : {}) });
-            });
+            if (opts.excludeAgentId && e.agentId === opts.excludeAgentId) return;
+            if (e.seq <= opts.sinceSeq) return;
+            if (timer) clearTimeout(timer);
+            resolved = true;
+            if (subId) orchestrator.unsubscribe(subId);
+            resolve(true);
           } catch {
             // ignore
           }
@@ -251,16 +205,66 @@ export class McpBridgeServer {
         if (resolved) return;
         resolved = true;
         if (subId) orchestrator.unsubscribe(subId);
-        resolve(null);
+        resolve(false);
       }, timeout);
     });
 
-    if (reply) return reply;
+    if (!reply) return [];
+    const all = orchestrator.getEventsSince(opts.conversationId, opts.sinceSeq);
+    const messages = all.filter((e) => e.type === 'message' && (!opts.excludeAgentId || e.agentId !== opts.excludeAgentId));
+    return await this.expandAttachmentsInline(messages);
+  }
 
-    return {
-      stillWorking: true,
-      followUp: 'Please call wait_for_reply again shortly.',
-      status: { message: 'The other agent is still preparing a response.' },
-    };
+  private async getMessageEvents(params: { conversationId: number; sinceSeq: number; max: number; waitMs: number }): Promise<UnifiedEvent[]> {
+    const { orchestrator } = this.deps;
+    const { conversationId, sinceSeq, max, waitMs } = params;
+    const fetchNow = () => orchestrator.getEventsPage(conversationId, sinceSeq, max).filter((e) => e.type === 'message');
+    if (waitMs > 0) {
+      // Long-poll for any new message event
+      let subId: string | undefined;
+      let timer: any;
+      const got = await new Promise<boolean>((resolve) => {
+        subId = orchestrator.subscribe(
+          conversationId,
+          (e: UnifiedEvent) => {
+            if (e.type !== 'message') return;
+            if (e.seq <= sinceSeq) return;
+            if (timer) clearTimeout(timer);
+            if (subId) orchestrator.unsubscribe(subId);
+            resolve(true);
+          },
+          false
+        );
+        timer = setTimeout(() => {
+          if (subId) orchestrator.unsubscribe(subId);
+          resolve(false);
+        }, waitMs);
+      });
+      if (!got) return [];
+    }
+    const msgs = fetchNow();
+    return await this.expandAttachmentsInline(msgs);
+  }
+
+  private async expandAttachmentsInline(events: UnifiedEvent[]): Promise<UnifiedEvent[]> {
+    const { orchestrator } = this.deps;
+    const expanded: UnifiedEvent[] = [];
+    for (const e of events) {
+      const payload = (e.payload || {}) as any;
+      if (Array.isArray(payload.attachments) && payload.attachments.length > 0) {
+        const atts = [] as any[];
+        for (const a of payload.attachments) {
+          if (!a?.id) continue;
+          const att = orchestrator.getAttachment(a.id);
+          if (att) {
+            atts.push({ id: att.id, name: att.name, contentType: att.contentType, content: att.content, ...(att.summary ? { summary: att.summary } : {}), ...(att.docId ? { docId: att.docId } : {}) });
+          }
+        }
+        expanded.push({ ...e, payload: { ...payload, attachments: atts } });
+      } else {
+        expanded.push(e);
+      }
+    }
+    return expanded;
   }
 }

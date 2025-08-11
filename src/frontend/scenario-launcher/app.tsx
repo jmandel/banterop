@@ -474,6 +474,8 @@ function ConversationView({ id }: { id: number }) {
   const [loading, setLoading] = useState(true);
   const [agentsRunning, setAgentsRunning] = useState(false);
   const [messages, setMessages] = useState<UnifiedEvent[]>([]);
+  const [starting, setStarting] = useState(false);
+  const startingRef = useRef(false);
   const agentsRef = useRef<Map<string, ScenarioDrivenAgent>>(new Map());
   const eventWsRef = useRef<WebSocket | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -558,8 +560,9 @@ function ConversationView({ id }: { id: number }) {
   };
 
   const startAgents = async () => {
-    if (!conversation || agentsRunning) return;
-    
+    if (!conversation || agentsRunning || startingRef.current) return;
+    startingRef.current = true;
+    setStarting(true);
     try {
       setAgentsRunning(true);
       
@@ -610,6 +613,9 @@ function ConversationView({ id }: { id: number }) {
     } catch (err) {
       console.error('Failed to start agents:', err);
       setAgentsRunning(false);
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
     }
   };
   
@@ -670,12 +676,13 @@ function ConversationView({ id }: { id: number }) {
           } else {
             // server-managed ensure
             try {
+              setStarting(true);
               const agentIds = (result.metadata?.agents || []).map((a: any) => a.id);
-              await wsRpcCall('ensureAgentsRunning', { conversationId: id, agentIds });
+              await wsRpcCall('ensureAgentsRunningOnServer', { conversationId: id, agentIds });
               setAgentsRunning(true);
             } catch (e) {
               console.error('Failed to ensure server agents:', e);
-            }
+            } finally { setStarting(false); }
           }
         }
       } catch (err) {
@@ -771,23 +778,35 @@ function ConversationView({ id }: { id: number }) {
                 </div>
                 <button
                   onClick={async () => {
+                    if (starting || agentsRunning) return;
+                    setStarting(true);
                     if (runMode === 'client') {
-                      await startAgents();
+                      try {
+                        await startAgents();
+                      } finally {
+                        // startAgents sets agentsRunning appropriately
+                        setStarting(false);
+                      }
                     } else {
                       // Ensure agents on the server
                       try {
                         const agentIds = (conversation?.metadata?.agents || []).map((a: any) => a.id);
-                        await wsRpcCall('ensureAgentsRunning', { conversationId: id, agentIds });
+                        // Optimistically mark as running to reflect intent immediately
                         setAgentsRunning(true);
+                        await wsRpcCall('ensureAgentsRunningOnServer', { conversationId: id, agentIds });
                       } catch (e) {
                         console.error('Failed to ensure server agents:', e);
+                        setAgentsRunning(false);
                         alert(`Failed to ensure server agents: ${e}`);
+                      } finally {
+                        setStarting(false);
                       }
                     }
                   }}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                  disabled={starting || agentsRunning}
+                  className={`px-4 py-2 rounded-md transition-colors ${starting || agentsRunning ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
                 >
-                  {runMode === 'client' ? 'Start Agents (Browser)' : 'Ensure Agents (Server)'}
+                  {starting ? 'Starting…' : (runMode === 'client' ? 'Start Agents (Browser)' : 'Ensure Agents (Server)')}
                 </button>
               </div>
             ) : (

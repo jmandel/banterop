@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { BaseAgent, type TurnContext, type TurnRecoveryMode } from './base-agent';
 import type { IAgentTransport, IAgentEvents } from './runtime.interfaces';

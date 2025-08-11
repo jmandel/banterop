@@ -40,11 +40,21 @@ export class WsControl implements OrchestratorControl {
     return this.call<import('$src/types/orchestrator.types').ConversationSnapshot>('getConversation', { conversationId, includeScenario: !!opts?.includeScenario });
   }
 
-  async ensureAgentsRunning(conversationId: number, agentIds?: string[]) {
-    return this.call<{ ensured: Array<{ id: string; class?: string }> }>('ensureAgentsRunning', { conversationId, agentIds });
+  async ensureAgentsRunningOnServer(conversationId: number, agentIds?: string[]) {
+    return this.call<{ ensured: Array<{ id: string; class?: string }> }>('ensureAgentsRunningOnServer', { conversationId, agentIds });
   }
 
-  async stopAgents(conversationId: number) { 
-    await this.call('stopAgents', { conversationId });
+  async stopAgentsOnServer(conversationId: number, agentIds?: string[]) { 
+    await this.call('stopAgentsOnServer', { conversationId, agentIds });
+  }
+
+
+  // Back-compat: satisfy OrchestratorControl interface
+  async ensureAgentsRunning(conversationId: number, agentIds?: string[]) {
+    return this.ensureAgentsRunningOnServer(conversationId, agentIds);
+  }
+
+  async stopAgents(conversationId: number) {
+    return this.stopAgentsOnServer(conversationId);
   }
 }

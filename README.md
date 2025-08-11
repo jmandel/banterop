@@ -71,7 +71,7 @@ This codebase cleanly separates how agents are managed (control plane) from how 
 - Control plane: start/stop and inspect agents and conversations
   - In-process: `InProcessControl` (server only)
   - WebSocket: `WsControl` (stateless, one-shot calls)
-  - Methods: `createConversation`, `getConversation`, `ensureAgentsRunning`, `stopAgents`
+  - Methods: `createConversation`, `getConversation`, `ensureAgentsRunningOnServer`, `stopAgentsOnServer`
 
 - Data plane: agents exchange events through the orchestrator
   - In-process transport: `InProcessTransport`
@@ -79,7 +79,7 @@ This codebase cleanly separates how agents are managed (control plane) from how 
   - Unified entry point for execution: `startAgents({ transport, providerManager, turnRecoveryMode: 'restart' })`
 
 Minimal WS JSON-RPC (under `/api/ws`):
-- Control: `createConversation`, `getConversation`, `ensureAgentsRunning`, `stopAgents`, `clearTurn`
+- Control: `createConversation`, `getConversation`, `ensureAgentsRunningOnServer`, `stopAgentsOnServer`, `clearTurn`
 - Data: `sendMessage`, `sendTrace`, `subscribe`, `unsubscribe`, `getEventsPage`
 
 Scenario CRUD is HTTP-only under `/api/scenarios`; conversations list is HTTP under `/api/conversations`.
@@ -87,7 +87,7 @@ Scenario CRUD is HTTP-only under `/api/scenarios`; conversations list is HTTP un
 ## 🚦 Launch Recipes
 
 - Server-managed:
-  - Control: `createConversation(meta)`, `ensureAgentsRunning(conversationId)`
+  - Control: `createConversation(meta)`, `ensureAgentsRunningOnServer(conversationId)`
   - Observe: `subscribe` with optional `sinceSeq`, or poll `getEventsPage`
   - Resume: server persists `autoRun` in conversation metadata and re-ensures on boot
 
@@ -309,11 +309,26 @@ Optional:
 - `bun run clean` — remove local SQLite artifacts (`data.db*`)
 
 Environment (.env; keys optional unless using non‑mock providers):
-- `DB_PATH`, `PORT`, `IDLE_TURN_MS`
-- `GOOGLE_API_KEY`, `OPENROUTER_API_KEY`
-- Default LLM provider is `mock` (no key required)
+- `DB_PATH` — default `dbs/data.db` (auto-created directory)
+- `PORT`, `IDLE_TURN_MS`
+- `DEFAULT_LLM_MODEL` — e.g., `gemini-2.5-flash` or `openai/gpt-oss-120b:nitro`
+- `DEFAULT_LLM_PROVIDER` — `google | openrouter | mock` (optional; defaults to `mock`)
+- `GEMINI_API_KEY` (Google Gemini) and/or `OPENROUTER_API_KEY`
+- Note: `DEFAULT_LLM_MODEL` alone works — provider is auto‑detected from the model name; if unknown, specify `DEFAULT_LLM_PROVIDER` explicitly.
 
-Data lives in `data.db` (gitignored).
+Data defaults to `dbs/data.db` (gitignored) and the `dbs/` folder is created automatically when the DB opens.
+
+Quick examples:
+```bash
+# Use a custom DB file under ./dbs
+DB_PATH=dbs/my-run.db bun run dev
+
+# Set default model only (provider auto-detected from model)
+DEFAULT_LLM_MODEL=gemini-2.5-flash GEMINI_API_KEY=... bun run dev
+
+# Explicit provider + model via OpenRouter
+DEFAULT_LLM_PROVIDER=openrouter DEFAULT_LLM_MODEL=openai/gpt-oss-120b:nitro OPENROUTER_API_KEY=... bun run dev
+```
 
 ### CLI Demos (working examples)
 
@@ -432,6 +447,9 @@ CAS: When opening a new turn, internal clients include a CAS precondition (`last
 
 - Bridge endpoint: `/api/bridge/:config64/mcp` where `config64` is base64url‑encoded ConversationMeta.
 - Diagnostic: `/api/bridge/:config64/mcp/diag` echoes parsed meta.
+- Tools: `begin_chat_thread`, `send_message_to_chat_thread`, `get_updates`.
+  - conversationId is string on the wire.
+  - get_updates returns messages only; attachments are inlined with content.
 
 ## 📝 TODO / Future Improvements
 

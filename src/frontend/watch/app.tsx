@@ -148,7 +148,7 @@ function ConversationList({ onSelect, selectedId = null, focusRef, requestFocusK
     );
     if (scenarioIds.length) {
       const scenarioMapLocal: Record<string, any> = {};
-      for (const id of scenarioIds) {
+      for (const id of scenarioIds as string[]) {
         try {
           // Use HTTP scenario GET
           const surl = API_BASE.startsWith('http')

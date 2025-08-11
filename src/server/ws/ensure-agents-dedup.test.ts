@@ -24,7 +24,7 @@ function wsCall<T = any>(ws: WebSocket, method: string, params?: any): Promise<T
   });
 }
 
-describe('ensureAgentsRunning leads to progress', () => {
+describe('ensureAgentsRunning is idempotent per conversation', () => {
   let app: App;
   let server: any;
   let wsUrl: string;
@@ -42,14 +42,14 @@ describe('ensureAgentsRunning leads to progress', () => {
     await app.shutdown();
   });
 
-  it('server-managed assistant posts a message after ensure', async () => {
+  it('two concurrent ensure calls should not start duplicate agents', async () => {
     const ws = new WebSocket(wsUrl);
     await new Promise<void>((resolve, reject) => {
       ws.onopen = () => resolve();
       ws.onerror = (e) => reject(e as any);
     });
 
-    // 1) Subscribe to conversation creations first
+    // Subscribe to conversations to learn ID
     const convSubId = crypto.randomUUID();
     await new Promise<void>((resolve) => {
       const onMsg = (evt: MessageEvent) => {
@@ -65,7 +65,7 @@ describe('ensureAgentsRunning leads to progress', () => {
       ws.send(JSON.stringify({ jsonrpc: '2.0', id: convSubId, method: 'subscribeConversations' }));
     });
 
-    // Prepare to capture conversationId and subscribe to its events (includeGuidance)
+    // Capture conversationId and subscribe to its events
     let conversationId = 0;
     const subscribedToConversation = new Promise<void>((resolve) => {
       const onConv = (evt: MessageEvent) => {
@@ -74,7 +74,6 @@ describe('ensureAgentsRunning leads to progress', () => {
           if (msg.method === 'conversation' && msg.params?.conversationId) {
             conversationId = Number(msg.params.conversationId);
             ws.removeEventListener('message', onConv);
-
             const subId = crypto.randomUUID();
             const onSub = (evt2: MessageEvent) => {
               try {
@@ -93,42 +92,43 @@ describe('ensureAgentsRunning leads to progress', () => {
       ws.addEventListener('message', onConv);
     });
 
-    // 2) Now create the conversation
+    // Create conversation with an Assistant agent that speaks on ensure
     await wsCall<{ conversationId: number }>(ws, 'createConversation', {
       meta: {
-        title: 'Server-side run test',
+        title: 'Dedup ensure test',
         startingAgentId: 'alpha',
         agents: [
           { id: 'alpha', agentClass: 'AssistantAgent', displayName: 'Alpha' },
-          { id: 'beta', agentClass: 'EchoAgent', displayName: 'Beta' },
         ],
       },
     });
     await subscribedToConversation;
     expect(conversationId).toBeGreaterThan(0);
 
-    // 3) Prepare message listener BEFORE ensure to avoid races
-    const gotMessage = new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => resolve(false), 5000);
-      ws.addEventListener('message', (evt) => {
-        try {
-          const msg = JSON.parse(String(evt.data));
-          if (msg.method === 'event' && msg.params?.type === 'message' && msg.params?.agentId === 'alpha') {
-            clearTimeout(timer);
-            resolve(true);
-          }
-        } catch {}
-      });
-    });
+    // Count message events from alpha over a small window
+    let alphaMessages = 0;
+    const onMsg = (evt: MessageEvent) => {
+      try {
+        const msg = JSON.parse(String(evt.data));
+        if (msg.method === 'event' && msg.params?.type === 'message' && msg.params?.agentId === 'alpha') {
+          alphaMessages += 1;
+        }
+      } catch {}
+    };
+    ws.addEventListener('message', onMsg);
 
-    // 4) Ensure alpha runs on server
-    const ensured = await wsCall<{ ensured: Array<{ id: string }> }>(ws, 'ensureAgentsRunningOnServer', { conversationId, agentIds: ['alpha'] });
-    console.error('ensured from server:', ensured);
-    expect(Array.isArray(ensured.ensured)).toBe(true);
-    expect(ensured.ensured.some(e => e.id === 'alpha')).toBe(true);
+    // Fire two ensures concurrently
+    await Promise.all([
+      wsCall(ws, 'ensureAgentsRunningOnServer', { conversationId, agentIds: ['alpha'] }),
+      wsCall(ws, 'ensureAgentsRunningOnServer', { conversationId, agentIds: ['alpha'] }),
+    ]);
 
-    // 5) Await pushed message from alpha (event-driven)
-    expect(await gotMessage).toBe(true);
+    // Wait briefly for any events to arrive
+    await new Promise((r) => setTimeout(r, 1500));
+    ws.removeEventListener('message', onMsg);
+
+    // Only one assistant instance should have spoken
+    expect(alphaMessages).toBe(1);
     ws.close();
   });
 });

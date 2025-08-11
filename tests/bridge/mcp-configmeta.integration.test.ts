@@ -17,7 +17,7 @@ describe('MCP Bridge with ConversationMeta config (Phase 2)', () => {
   beforeAll(() => {
     app = new App({ dbPath: ':memory:' });
     const hono = new Hono();
-    hono.route('/bridge', createBridgeRoutes(app.orchestrator, app.llmProviderManager, 200)); // short timeout
+    hono.route('/api/bridge', createBridgeRoutes(app.orchestrator, app.llmProviderManager, 200)); // short timeout
     server = Bun.serve({ port: 0, fetch: hono.fetch, websocket });
     baseUrl = `http://localhost:${server.port}`;
   });
@@ -37,7 +37,7 @@ describe('MCP Bridge with ConversationMeta config (Phase 2)', () => {
     };
     const config64 = toBase64Url(configMeta);
 
-    const res = await fetch(`${baseUrl}/bridge/${config64}/mcp/diag`);
+    const res = await fetch(`${baseUrl}/api/bridge/${config64}/mcp/diag`);
     expect(res.status).toBe(200);
     
     const json = await res.json();
@@ -57,7 +57,7 @@ describe('MCP Bridge with ConversationMeta config (Phase 2)', () => {
     };
     const config64 = toBase64Url(configMeta);
 
-    const res = await fetch(`${baseUrl}/bridge/${config64}/mcp`, {
+    const res = await fetch(`${baseUrl}/api/bridge/${config64}/mcp`, {
       method: 'POST',
       headers: { 
         'content-type': 'application/json', 
@@ -67,14 +67,16 @@ describe('MCP Bridge with ConversationMeta config (Phase 2)', () => {
     });
 
     expect(res.status).toBe(200);
-    const json = await res.json();
+    const text1 = await res.text();
+    const json = JSON.parse(text1);
     expect(json.jsonrpc).toBe('2.0');
-    
-    const result = JSON.parse(json.result.content[0].text);
-    expect(typeof result.conversationId).toBe('number');
-    
-    // The conversation ID should be a valid number
-    expect(result.conversationId).toBeGreaterThan(0);
+    const contentText = json.result?.content?.[0]?.text ?? json.content?.[0]?.text;
+    expect(typeof contentText).toBe('string');
+    const result = JSON.parse(contentText);
+    expect(typeof result.conversationId).toBe('string');
+    expect(typeof result.nextSeq).toBe('number');
+    // The conversation ID should be a numeric string
+    expect(Number(result.conversationId)).toBeGreaterThan(0);
     // The agents are started internally, which we can verify by the logs showing "START INTERNAL" for echo and assistant
   });
 
@@ -91,7 +93,7 @@ describe('MCP Bridge with ConversationMeta config (Phase 2)', () => {
     };
     const config64 = toBase64Url(configMeta);
 
-    const res = await fetch(`${baseUrl}/bridge/${config64}/mcp`, {
+    const res = await fetch(`${baseUrl}/api/bridge/${config64}/mcp`, {
       method: 'POST',
       headers: { 
         'content-type': 'application/json', 
@@ -113,7 +115,65 @@ describe('MCP Bridge with ConversationMeta config (Phase 2)', () => {
     }
     
     const result = JSON.parse(json.result.content[0].text);
-    expect(typeof result.conversationId).toBe('number');
+    expect(typeof result.conversationId).toBe('string');
+    expect(typeof result.nextSeq).toBe('number');
+    expect(Number(result.conversationId)).toBeGreaterThan(0);
+  });
+
+  it('send_message_to_chat_thread and get_updates return message events', async () => {
+    const configMeta = {
+      title: 'Echo Test',
+      startingAgentId: 'user',
+      agents: [
+        { id: 'user', kind: 'external' },
+        { id: 'echo', kind: 'internal', agentClass: 'EchoAgent' },
+      ],
+    };
+    const config64 = toBase64Url(configMeta);
+
+    // Begin
+    const beginRes = await fetch(`${baseUrl}/api/bridge/${config64}/mcp`, {
+      method: 'POST',
+      headers: { 
+        'content-type': 'application/json', 
+        'accept': 'application/json, text/event-stream' 
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 'b', method: 'tools/call', params: { name: 'begin_chat_thread', arguments: {} } }),
+    });
+    const beginJson = await beginRes.json();
+    const begin = JSON.parse(beginJson.result.content[0].text);
+
+    // Send (with an attachment)
+    const sendRes = await fetch(`${baseUrl}/api/bridge/${config64}/mcp`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'accept': 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 's', method: 'tools/call', params: { name: 'send_message_to_chat_thread', arguments: { conversationId: begin.conversationId, message: 'hello', attachments: [{ name: 'note.txt', contentType: 'text/plain', content: 'hello doc' }] } } })
+    });
+    const sendJson = await sendRes.json();
+    if (sendJson.error) throw new Error(`send_message_to_chat_thread error: ${JSON.stringify(sendJson.error)}`);
+    const send = JSON.parse(sendJson.result.content[0].text);
+    expect(typeof send.nextSeq).toBe('number');
+
+    // Long-poll for updates since send
+    const updRes = await fetch(`${baseUrl}/api/bridge/${config64}/mcp`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'accept': 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 'u', method: 'tools/call', params: { name: 'get_updates', arguments: { conversationId: begin.conversationId, sinceSeq: send.nextSeq, waitMs: 2000 } } })
+    });
+    const updJson = await updRes.json();
+    if (updJson.error) throw new Error(`get_updates error: ${JSON.stringify(updJson.error)}`);
+    const upd = JSON.parse(updJson.result.content[0].text);
+    expect(Array.isArray(upd.events)).toBe(true);
+    // Inline attachment should be present on our own message event
+    const anyOwn = upd.events.find((e: any) => e.type === 'message' && e.agentId === 'user');
+    if (anyOwn) {
+      const atts = anyOwn.payload?.attachments;
+      if (Array.isArray(atts) && atts.length > 0) {
+        expect(atts[0].name).toBe('note.txt');
+        expect(atts[0].contentType).toBe('text/plain');
+        expect(atts[0].content).toBe('hello doc');
+      }
+    }
   });
 });
 

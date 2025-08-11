@@ -22,7 +22,8 @@ export class HonoIncomingMessage extends Readable {
     super();
     this.headers = Object.fromEntries(ctx.req.raw.headers.entries());
     this.method = ctx.req.method;
-    this.url = ctx.req.path;
+    // Use full URL for better fidelity with Node IncomingMessage expectations
+    this.url = ctx.req.url;
     
     // Push body and signal end
     if (body) {
