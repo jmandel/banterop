@@ -5,6 +5,7 @@ export class RunnerRegistry {
   constructor(private db: Database, private host: AgentHost) {}
 
   async ensureAgentsRunningOnServer(conversationId: number, agentIds: string[]): Promise<{ ensured: Array<{ id: string; class?: string }> }> {
+    console.log('[RunnerRegistry] ensureAgentsRunningOnServer', { conversationId, agentIds });
     const stmt = this.db.prepare(
       `INSERT OR IGNORE INTO runner_registry (conversation_id, agent_id) VALUES (?, ?)`
     );
@@ -15,6 +16,7 @@ export class RunnerRegistry {
     // Start and wait for handle registration so list() reflects state
     await this.host.ensure(conversationId, { agentIds });
     const ensured = this.host.list(conversationId);
+    console.log('[RunnerRegistry] ensured agents', { conversationId, ensured });
     return { ensured };
   }
 

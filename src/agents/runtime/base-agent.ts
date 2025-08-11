@@ -156,7 +156,7 @@ export abstract class BaseAgent<TSnap = any> {
     const weOwnOpenTurn = hasOpenTurn && lastEventAgent === agentId;
     
     logLine(agentId, 'reconcile', `hasOpenTurn=${hasOpenTurn}, lastEventAgent=${lastEventAgent}, weOwn=${weOwnOpenTurn}`);
-
+    let tookAction = false;
     if (hasOpenTurn && weOwnOpenTurn) {
       // We own the open turn - decide based on recovery mode
       const mode = typeof this.turnRecoveryMode === 'function' 
@@ -170,19 +170,22 @@ export abstract class BaseAgent<TSnap = any> {
         const { turn } = await this.transport.clearTurn(conversationId, agentId);
         logLine(agentId, 'abort', `Aborted turn ${turn} per restart policy`);
         await this.startTurn(conversationId, agentId, guidance);
+        tookAction = true;
       } else {
         // Resume the open turn
         logLine(agentId, 'reconcile', `Resuming open turn`);
         await this.startTurn(conversationId, agentId, guidance);
+        tookAction = true;
       }
     } else if (hasOpenTurn && !weOwnOpenTurn) {
       // Someone else owns the open turn - do nothing
       logLine(agentId, 'reconcile', `Open turn owned by ${lastEventAgent}, waiting`);
     } else {
       // No open turn - check if it's our turn to start
-      if (guidance && guidance.nextAgentId === agentId) {
+      if (guidance?.nextAgentId === agentId || (!guidance &&  lastEventAgent !== agentId)) {
         logLine(agentId, 'reconcile', `No open turn and guidance targets us, starting turn`);
         await this.startTurn(conversationId, agentId, guidance);
+        tookAction = true;
       } else {
         // Parsimonious bootstrap: if no messages yet and startingAgentId is us, start without guidance
         const hasAnyMessages = Array.isArray(snap.events) && snap.events.some((e: any) => e.type === 'message');
@@ -190,6 +193,7 @@ export abstract class BaseAgent<TSnap = any> {
         if (!hasAnyMessages && startingAgentId === agentId) {
           logLine(agentId, 'reconcile', `Bootstrap start: no messages yet and startingAgentId is us`);
           await this.startTurn(conversationId, agentId, null);
+          tookAction = true;
           // fall through to update lastProcessedClosedSeq below
         } else {
           logLine(agentId, 'reconcile', `No open turn, no guidance for us`);
@@ -198,7 +202,7 @@ export abstract class BaseAgent<TSnap = any> {
     }
 
     // Update lastProcessedClosedSeq only if we took action
-    if ((hasOpenTurn && weOwnOpenTurn) || (!hasOpenTurn && ((guidance && guidance.nextAgentId === agentId) || ((!Array.isArray(snap.events) || !snap.events.some((e: any) => e.type === 'message')) && snap?.metadata?.startingAgentId === agentId)))) {
+    if (tookAction) {
       logLine(agentId, 'reconcile', `Updating lastProcessedClosedSeq from ${this.lastProcessedClosedSeq} to ${currentClosedSeq}`);
       this.lastProcessedClosedSeq = currentClosedSeq;
     } else {
@@ -251,6 +255,7 @@ export abstract class BaseAgent<TSnap = any> {
     // Open turn = last event has finality 'none' or no finality
     // Since only messages can have turn/conversation finality, and traces/system must have 'none',
     // we only need to check the finality value
+    // console.log("has open turn", snapshot, lastEvent)
     return !lastEvent.finality || lastEvent.finality === 'none';
   }
 

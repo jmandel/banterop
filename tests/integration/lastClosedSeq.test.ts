@@ -62,8 +62,8 @@ describe('lastClosedSeq per-conversation isolation', () => {
     const snapshot1 = orchestrator.getConversationSnapshot(conv1);
     expect(snapshot1.lastClosedSeq).toBe(result1.seq);
     
-    // They should be different (unless by pure chance they're both seq 1, which won't happen with autoincrement)
-    expect(snapshot1.lastClosedSeq).not.toBe(snapshot2After.lastClosedSeq);
+    // Each conversation tracks its own lastClosedSeq (per-conversation seq)
+    // Values may be the same across conversations (e.g., both 1) and that's expected.
   });
 
   test('multiple conversations should track lastClosedSeq independently', async () => {

@@ -213,11 +213,14 @@ async function handleRpc(
   if (method === 'ensureAgentsRunningOnServer') {
     const { conversationId, agentIds = [] } = params as { conversationId: number; agentIds?: string[] };
     try {
+      console.log('[ws] ensureAgentsRunningOnServer called', { conversationId, agentIdsCount: agentIds.length, agentIds });
       const snapshot = orchestrator.getConversationSnapshot(conversationId);
       if (!snapshot) throw new Error(`Conversation ${conversationId} not found`);
       const res = await registry.ensureAgentsRunningOnServer(conversationId, agentIds);
+      console.log('[ws] ensureAgentsRunningOnServer success', { conversationId, ensured: res.ensured.map(e => e.id) });
       ws.send(JSON.stringify(ok(id, res)));
     } catch (e) {
+      console.error('[ws] ensureAgentsRunningOnServer error', e);
       const { code, message } = mapError(e);
       ws.send(JSON.stringify(errResp(id, code, message)));
     }

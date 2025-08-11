@@ -9,17 +9,23 @@ export class AgentHost {
   constructor(private orch: OrchestratorService, private providers: LLMProviderManager) {}
 
   async ensure(conversationId: number, opts?: { agentIds?: string[] }) {
+    console.log('[AgentHost] ensure called', { conversationId, agentIds: opts?.agentIds });
     // If already started, do nothing
-    if (this.byConversation.has(conversationId)) return;
+    if (this.byConversation.has(conversationId)) {
+      console.log('[AgentHost] already running', { conversationId });
+      return;
+    }
     // If a start is in-flight, await it
     const pending = this.pending.get(conversationId);
     if (pending) {
+      console.log('[AgentHost] pending start exists, awaiting', { conversationId });
       await pending;
       return;
     }
 
     // Start and record the pending promise to dedupe concurrent ensures
     const startPromise = (async (): Promise<AgentHandle> => {
+      console.log('[AgentHost] starting agents', { conversationId, agentIds: opts?.agentIds });
       const handle = await startAgents({
         conversationId,
         transport: new InProcessTransport(this.orch),
@@ -28,6 +34,7 @@ export class AgentHost {
         turnRecoveryMode: 'restart',
       });
       this.byConversation.set(conversationId, handle);
+      console.log('[AgentHost] started', { conversationId, started: handle.agents.map(a => (a as any).id) });
       return handle;
     })();
 
