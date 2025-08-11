@@ -57,9 +57,10 @@ export class McpBridgeServer {
 
   private async buildServerWithContext(convMeta: ConvConversationMeta): Promise<McpServer> {
     const s = new McpServer({ name: 'lfi-mcp-bridge', version: '1.0.0' });
+    const toolDoc = this.buildToolDescription(convMeta);
 
     // begin_chat_thread: no idempotency; returns { conversationId: string, nextSeq: number }
-    s.registerTool('begin_chat_thread', { inputSchema: {} }, async () => {
+    s.registerTool('begin_chat_thread', { inputSchema: {}, description: toolDoc.begin }, async () => {
       const conversationId = await this.beginChatThread(convMeta);
       const nextSeq = this.getNextSeq(conversationId);
       return { content: [{ type: 'text', text: JSON.stringify({ conversationId: String(conversationId), nextSeq }) }] };
@@ -81,7 +82,8 @@ export class McpBridgeServer {
               docId: z.string().optional(),
             })
           ).optional(),
-        }
+        },
+        description: toolDoc.send
       },
       async (params: any) => {
         const meta = parseConversationMetaFromConfig64(this.config64);
@@ -109,7 +111,7 @@ export class McpBridgeServer {
     // get_updates: messages-only; expand attachments inline
     s.registerTool(
       'get_updates',
-      { inputSchema: { conversationId: z.string(), sinceSeq: z.number().default(0), max: z.number().default(200), waitMs: z.number().default(0) } },
+      { inputSchema: { conversationId: z.string(), sinceSeq: z.number().default(0), max: z.number().default(200), waitMs: z.number().default(0) }, description: toolDoc.updates },
       async (params: any) => {
         const conversationId = Number(params?.conversationId);
         const sinceSeq = Number(params?.sinceSeq ?? 0);
@@ -118,11 +120,83 @@ export class McpBridgeServer {
 
         const events = await this.getMessageEvents({ conversationId, sinceSeq, max, waitMs });
         const nextSeq = this.getNextSeq(conversationId);
-        return { content: [{ type: 'text', text: JSON.stringify({ events, nextSeq }) }] };
+
+        // Guidance and status computation
+        const snapshot = this.deps.orchestrator.getConversationSnapshot(conversationId, { includeScenario: false });
+        const convMeta = parseConversationMetaFromConfig64(this.config64);
+        const externalId = getStartingAgentId(convMeta);
+        const msgs = (snapshot.events || []).filter((e: any) => e.type === 'message');
+        const last = msgs.length ? msgs[msgs.length - 1] : null;
+        const ended = snapshot.status === 'completed' || (last && last.finality === 'conversation');
+
+        let status: 'input_required' | 'waiting' = 'waiting';
+        let guidance = '';
+        if (ended) {
+          guidance = 'Conversation ended. No further input is expected.';
+        } else if (!last) {
+          // No messages yet: whoever is starting should speak
+          if (externalId) {
+            status = 'input_required';
+            guidance = `It\'s your turn to begin as ${externalId}.`;
+          } else {
+            guidance = 'Waiting for the first message.';
+          }
+        } else if (last.finality === 'turn') {
+          // A turn just completed; if the last speaker was not the external client, it is the client\'s turn
+          if (last.agentId !== externalId) {
+            status = 'input_required';
+            guidance = 'Counterparty finished a turn. It\'s your turn to respond.';
+          } else {
+            guidance = 'You finished a turn. Waiting for the counterparty to respond.';
+          }
+        } else {
+          // Turn in progress – wait
+          if (last.agentId === externalId) {
+            guidance = 'You have an in‑progress turn. Finish or wait for reply.';
+          } else {
+            guidance = 'Counterparty is composing. Waiting for the other party to finish.';
+          }
+        }
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ events, nextSeq, guidance, status, conversation_ended: ended })
+          }]
+        };
       }
     );
 
     return s;
+  }
+
+  private buildToolDescription(meta: ConvConversationMeta): { begin: string; send: string; updates: string } {
+    const { orchestrator } = this.deps;
+    const scId = meta.scenarioId;
+    let title = meta.title || '';
+    let agentSummaries: string[] = [];
+    try {
+      if (scId) {
+        const sc = orchestrator.storage.scenarios.findScenarioById(scId);
+        if (sc) {
+          title = title || sc.config?.metadata?.title || sc.name || sc.id;
+          agentSummaries = (sc.config?.agents || []).map((a: any) => {
+            const n = a?.principal?.name || a?.agentId || '';
+            return `${a.agentId}${n && n !== a.agentId ? ` (${n})` : ''}`;
+          });
+        }
+      }
+    } catch {}
+    if (agentSummaries.length === 0) {
+      agentSummaries = (meta.agents || []).map((a) => `${a.id}${a.displayName ? ` (${a.displayName})` : ''}${a.role ? ` – ${a.role}` : ''}`);
+    }
+    const roleLine = `Agents: ${agentSummaries.join(', ')}`;
+    const scenarioLine = `Scenario: ${title || scId || 'unknown'}`;
+    const external = meta.startingAgentId || (meta.agents?.[0]?.id ?? '');
+    const begin = `Begin a new chat thread for ${scenarioLine}. ${roleLine}. External client will speak as: ${external}.`;
+    const send = `Send a message into an existing thread as the external client (${external}). ${roleLine}.`;
+    const updates = `Fetch message updates for a thread (messages only). ${scenarioLine}.`;
+    return { begin, send, updates };
   }
 
   /**
@@ -131,6 +205,8 @@ export class McpBridgeServer {
    */
   private async beginChatThread(meta: ConvConversationMeta): Promise<number> {
     const { orchestrator, providerManager } = this.deps;
+    // Stable template-derived hash for matching: base64url(sha256(config64))
+    const bridgeConfig64Hash = await this.sha256Base64Url(this.config64);
 
     // Create conversation directly from meta (aligned with CreateConversationRequest)
     // Build agents array with proper optional handling
@@ -156,18 +232,33 @@ export class McpBridgeServer {
         custom: {
           ...(meta.custom ?? {}),
           bridgeSession: this.sessionId,
+          bridgeConfig64Hash,
         },
       },
     });
 
-    // Start agents using unified factory
+    // Start internal agents only (exclude the external/MCP agent)
+    const startingId = getStartingAgentId(meta);
+    const internalIds = agents.map(a => a.id).filter(id => id !== startingId);
     await startAgents({
       conversationId,
       transport: new InProcessTransport(orchestrator),
-      providerManager
+      providerManager,
+      agentIds: internalIds,
     });
 
     return conversationId;
+  }
+
+  // Compute sha-256 over input and return base64url without padding
+  private async sha256Base64Url(input: string): Promise<string> {
+    const data = new TextEncoder().encode(input);
+    const digest = await crypto.subtle.digest('SHA-256', data);
+    const bytes = new Uint8Array(digest);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
+    const b64 = btoa(bin);
+    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
   private getNextSeq(conversationId: number): number {

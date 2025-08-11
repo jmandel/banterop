@@ -622,6 +622,16 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
       else if (e.type === "system") byTurn[e.turn]?.systems.push(e);
     }
     const list = Object.values(byTurn).sort((a, b) => a.turn - b.turn);
+    // Derive finality from the last message in each turn if present; otherwise from last event across all types
+    for (const t of list) {
+      if (t.messages.length > 0) {
+        const lastMsg = t.messages[t.messages.length - 1]!;
+        t.finality = lastMsg.finality;
+      } else {
+        const lastEvent = [...t.traces, ...t.systems].sort((a, b) => a.seq - b.seq).at(-1);
+        if (lastEvent) t.finality = lastEvent.finality;
+      }
+    }
     for (const t of list) {
       const abort = t.traces.find((tr) => {
         const p = tr.payload as any;
@@ -634,10 +644,11 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
 
   const isThinking = useMemo(() => {
     if (!turns.length) return false;
+    if (meta?.status === 'completed') return false;
     const last = turns[turns.length - 1]!;
     // Finality 'none' means the turn is still open/streaming
     return last.finality === 'none';
-  }, [turns]);
+  }, [turns, meta?.status]);
 
   return (
     <div

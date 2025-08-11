@@ -242,7 +242,7 @@ export class EventStore {
         `SELECT conversation, turn, event, type, payload, finality, ts, agent_id as agentId, seq
          FROM conversation_events
          WHERE conversation = ?
-         ${sinceSeq ? 'AND seq > ?' : ''}
+         ${sinceSeq !== undefined ? 'AND seq > ?' : ''}
          ORDER BY seq ASC`
       )
       .all(
@@ -277,7 +277,7 @@ export class EventStore {
         `SELECT conversation, turn, event, type, payload, finality, ts, agent_id as agentId, seq
          FROM conversation_events
          WHERE conversation = ?
-         ${afterSeq ? 'AND seq > ?' : ''}
+         ${afterSeq !== undefined ? 'AND seq > ?' : ''}
          ORDER BY seq ASC
          LIMIT ?`
       )
