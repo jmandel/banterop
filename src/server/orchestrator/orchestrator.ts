@@ -184,7 +184,7 @@ export class OrchestratorService {
     // No precondition checking - rely on turn validation in sendMessage/sendTrace
     const res = this.storage.events.appendEvent(input);
     // Fanout the exact event we wrote (robust to ordering)
-    const persisted = this.storage.events.getEventBySeq(res.seq);
+    const persisted = this.storage.events.getEventBySeq(res.conversation, res.seq);
     if (persisted) {
       this.bus.publish(persisted);
     }
@@ -538,7 +538,7 @@ export class OrchestratorService {
         agentId: 'system-orchestrator',
       });
       // Publish exactly what we wrote
-      const persisted = this.storage.events.getEventBySeq(res.seq);
+      const persisted = this.storage.events.getEventBySeq(res.conversation, res.seq);
       if (persisted) this.bus.publish(persisted);
     } catch (err) {
       // System events are advisory, so we can silently skip on errors

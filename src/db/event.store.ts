@@ -77,9 +77,9 @@ export class EventStore {
           const existing = this.db
             .prepare(
               `SELECT conversation, turn, event, ts, seq
-               FROM conversation_events WHERE seq = ?`
+               FROM conversation_events WHERE conversation = ? AND seq = ?`
             )
-            .get(existingSeq) as AppendEventResult | undefined;
+            .get(input.conversation, existingSeq) as AppendEventResult | undefined;
           if (existing) {
             this.db.exec('COMMIT;');
             return existing;
@@ -98,16 +98,23 @@ export class EventStore {
         payloadToStore = tempPayload;
       }
 
+      // Allocate per-conversation seq
+      const nextSeqRow = this.db
+        .prepare(`SELECT COALESCE(MAX(seq), 0) + 1 AS nextSeq FROM conversation_events WHERE conversation = ?`)
+        .get(input.conversation) as { nextSeq: number };
+      const seq = nextSeqRow?.nextSeq || 1;
+
       // Insert event row (ts will use the default from schema with millisecond precision)
       const insert = this.db.prepare(
         `INSERT INTO conversation_events
-         (conversation, turn, event, type, payload, finality, agent_id)
-         VALUES (?,?,?,?,?,?,?)`
+         (conversation, turn, event, seq, type, payload, finality, agent_id)
+         VALUES (?,?,?,?,?,?,?,?)`
       );
       insert.run(
         input.conversation,
         turn,
         eventId,
+        seq,
         input.type,
         JSON.stringify(payloadToStore),
         input.finality,
@@ -169,14 +176,14 @@ export class EventStore {
     }
   }
 
-  getEventBySeq(seq: number): UnifiedEvent | null {
+  getEventBySeq(conversation: number, seq: number): UnifiedEvent | null {
     const row = this.db
       .prepare(
         `SELECT conversation, turn, event, type, payload, finality, ts, agent_id as agentId, seq
          FROM conversation_events
-         WHERE seq = ?`
+         WHERE conversation = ? AND seq = ?`
       )
-      .get(seq) as
+      .get(conversation, seq) as
         | {
             conversation: number;
             turn: number;
