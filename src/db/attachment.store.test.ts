@@ -17,8 +17,8 @@ describe('AttachmentStore', () => {
       .run();
     sqlite.raw
       .prepare(
-        `INSERT INTO conversation_events (conversation, turn, event, type, payload, finality, agent_id)
-         VALUES (1,1,1,'message','{}','none','tester')`
+        `INSERT INTO conversation_events (conversation, turn, event, seq, type, payload, finality, agent_id)
+         VALUES (1,1,1,1,'message','{}','none','tester')`
       )
       .run();
   });

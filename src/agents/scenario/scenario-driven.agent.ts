@@ -164,6 +164,8 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
         let result: ParsedResponse;
         try {
           result = await this.extractToolCallsFromLLMResponse(prompt);
+          console.log("REQ", prompt)
+          console.log("RES", result);
           logLine(ctx.agentId, 'info', `LLM response received: ${result.message}`);
         } catch (llmError) {
           this.ensureNotStopped('LLM error');
@@ -800,83 +802,56 @@ Your response MUST follow this EXACT format:
   }
 
   private formatCurrentProcess(currentTurnTrace: TraceEntry[]): string {
-    // Deduplicate traces before formatting
-    const dedupedTraces = this.deduplicateTraces(currentTurnTrace);
-    
-    if (dedupedTraces.length === 0) {
+    // Linear progression: do not deduplicate; render entries in order
+    if (!currentTurnTrace || currentTurnTrace.length === 0) {
       return `<!-- No actions taken yet in this turn -->
 ***=>>YOU ARE HERE<<=***`;
     }
 
     const steps: string[] = [];
     let i = 0;
-    
-    while (i < dedupedTraces.length) {
-      const trace = dedupedTraces[i];
-      if (!trace) continue;
-      
-      if (trace.type === 'thought') {
-        // Collect all consecutive thoughts
+
+    while (i < currentTurnTrace.length) {
+      const entry = currentTurnTrace[i];
+
+      if (entry?.type === 'thought') {
         const thoughts: string[] = [];
-        while (i < dedupedTraces.length) {
-          const currentTrace = dedupedTraces[i];
-          if (!currentTrace || currentTrace.type !== 'thought') break;
-          thoughts.push(currentTrace.content || '');
+        while (i < currentTurnTrace.length && currentTurnTrace[i]?.type === 'thought') {
+          thoughts.push(currentTurnTrace[i]?.content || '');
           i++;
         }
-        
-        // Check if there's a tool call following
-        if (i < dedupedTraces.length) {
-          const nextTrace = dedupedTraces[i];
-          if (nextTrace && nextTrace.type === 'tool_call') {
-            const toolCall = nextTrace;
-            const toolCallJson = JSON.stringify({ name: toolCall.toolName, args: toolCall.parameters }, null, 2);
-          
-          // Format as a complete LLM response
-          steps.push(`<scratchpad>
+        steps.push(`<scratchpad>
 ${thoughts.join('\n')}
-</scratchpad>
+</scratchpad>`);
+        continue;
+      }
 
-\`\`\`json
+      if (entry?.type === 'tool_call') {
+        const toolCallJson = JSON.stringify({ name: entry.toolName, args: entry.parameters }, null, 2);
+        steps.push(`\`\`\`json
 ${toolCallJson}
 \`\`\``);
-          
-          i++; // Move past the tool call
-          
-          // Check for tool result
-          if (i < dedupedTraces.length) {
-            const resultTrace = dedupedTraces[i];
-            if (resultTrace && resultTrace.type === 'tool_result') {
-              const toolResult = resultTrace;
-              const resultJson = toolResult.error 
-                ? JSON.stringify({ error: toolResult.error }, null, 2)
-                : JSON.stringify(toolResult.result, null, 2);
-              steps.push(`→ Tool returned:
+        i++;
+        continue;
+      }
+
+      if (entry?.type === 'tool_result') {
+        const resultJson = entry.error
+          ? JSON.stringify({ error: entry.error }, null, 2)
+          : JSON.stringify(entry.result, null, 2);
+        steps.push(`→ Tool returned:
 \`\`\`json
 ${resultJson}
 \`\`\``);
-              i++;
-            }
-          }
-          } else {
-            // Just thoughts with no tool call yet
-            steps.push(`<scratchpad>
-${thoughts.join('\n')}
-</scratchpad>`);
-          }
-        }
-      } else {
-        // Skip non-thought entries that weren't paired
         i++;
+        continue;
       }
-    }
-    
-    // Format the final output
-    const processContent = steps.length > 0 
-      ? steps.join('\n\n') + '\n\n***=>>YOU ARE HERE<<=***'
-      : '***=>>YOU ARE HERE<<=***';
 
-    return processContent;
+      // Fallback: skip unknown entry
+      i++;
+    }
+
+    return (steps.join('\n\n') || '') + (steps.length ? '\n\n' : '') + '***=>>YOU ARE HERE<<=***';
   }
 
   private deduplicateTraces(traces: TraceEntry[]): TraceEntry[] {

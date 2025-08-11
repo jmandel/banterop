@@ -26,6 +26,7 @@ export class OpenRouterLLMProvider extends LLMProvider {
       description: 'OpenRouter AI Gateway',
       models: [
         'openai/gpt-oss-120b:nitro',
+        'qwen/qwen3-235b-a22b-2507:nitro'
       ],
       defaultModel: 'openai/gpt-oss-120b:nitro',
     };
@@ -45,6 +46,8 @@ export class OpenRouterLLMProvider extends LLMProvider {
     if (!choice?.message?.content) {
       throw new Error('No response from OpenRouter');
     }
+
+    console.log(request, choice);
     
     return {
       content: choice.message.content,

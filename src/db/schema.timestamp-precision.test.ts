@@ -66,8 +66,8 @@ describe("DB timestamp precision", () => {
     // Setup: create conversation and event
     sqlite.raw.prepare(`INSERT INTO conversations (status) VALUES ('active')`).run();
     sqlite.raw.prepare(`
-      INSERT INTO conversation_events (conversation, turn, event, type, payload, finality, agent_id)
-      VALUES (1, 1, 1, 'message', '{}', 'none', 'test')
+      INSERT INTO conversation_events (conversation, turn, event, seq, type, payload, finality, agent_id)
+      VALUES (1, 1, 1, 1, 'message', '{}', 'none', 'test')
     `).run();
 
     // Insert attachment

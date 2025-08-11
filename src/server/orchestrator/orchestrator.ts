@@ -21,159 +21,26 @@ export class OrchestratorService {
   private bus: SubscriptionBus;
   private policy: SchedulePolicy;
   private isShuttingDown = false;
-  private guidanceHeartbeatTimer?: Timer;
-  private lastGuidanceSeq = new Map<number, number>(); // Track last guidance seq per conversation
-  private pendingGuidanceCheck: Promise<void> | null = null; // Track pending guidance check
-  private heartbeatEnabled = true;
+  // Heartbeat removed; guidance is event-driven (on create and on turn completion)
 
   constructor(storage: Storage, bus?: SubscriptionBus, policy?: SchedulePolicy, _cfg?: OrchestratorConfig) {
     this.storage = storage;
     this.bus = bus ?? new SubscriptionBus();
     this.policy = policy ?? new StrictAlternationPolicy();
     
-    // Determine if heartbeat should be enabled (disable in tests or when configured)
-    const isTestEnv = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
-    this.heartbeatEnabled = !(_cfg?.disableHeartbeat || isTestEnv);
-
-    // Start guidance heartbeat (every 2 seconds) when enabled
-    if (this.heartbeatEnabled) {
-      this.startGuidanceHeartbeat();
-    }
+    // Heartbeat disabled: guidance is event-driven (on create and on turn completion)
   }
 
   // Graceful shutdown
   async shutdown(): Promise<void> {
     this.isShuttingDown = true;
     
-    // Stop guidance heartbeat immediately
-    if (this.guidanceHeartbeatTimer) {
-      clearInterval(this.guidanceHeartbeatTimer);
-      this.guidanceHeartbeatTimer = undefined;
-    }
-    
-    // Wait for any pending guidance check to complete
-    if (this.pendingGuidanceCheck) {
-      try {
-        await this.pendingGuidanceCheck;
-      } catch {
-        // Ignore errors during shutdown
-      }
-    }
-    
+    // No heartbeat timers to stop (event-driven only)
+
     // Clear subscriptions
     this.bus = new SubscriptionBus();
   }
   
-  private startGuidanceHeartbeat(): void {
-    // Clear any existing timer first
-    if (this.guidanceHeartbeatTimer) {
-      clearInterval(this.guidanceHeartbeatTimer);
-    }
-    
-    this.guidanceHeartbeatTimer = setInterval(() => {
-      if (this.isShuttingDown) return;
-      
-      // Track the pending operation
-      this.pendingGuidanceCheck = this.checkAndBroadcastGuidance()
-        .catch(error => {
-          // Log error but don't crash
-          if (!this.isShuttingDown) {
-            console.error('[OrchestratorService] Error in guidance check:', error);
-          }
-        })
-        .finally(() => {
-          this.pendingGuidanceCheck = null;
-        });
-    }, 2000); // Check every 2 seconds
-  }
-  
-  private async checkAndBroadcastGuidance(): Promise<void> {
-    // Don't access database if shutting down
-    if (this.isShuttingDown || !this.heartbeatEnabled) return;
-    
-    try {
-      // Get all active conversations
-      const activeConversations = this.storage.conversations.list({ status: 'active' });
-    
-    for (const convo of activeConversations) {
-      const events = this.storage.events.getEvents(convo.conversation);
-      const metadata = convo.metadata;
-      
-      // Determine who should go next
-      let nextAgentId: string | null = null;
-      let guidanceSeq = 0.1; // Default for initial guidance
-      
-      // Check if conversation has started
-      const messages = events.filter(e => e.type === 'message');
-      
-      if (messages.length === 0) {
-        // No messages yet - use startingAgentId if available
-        if (metadata?.startingAgentId) {
-          nextAgentId = metadata.startingAgentId;
-          logLine('orchestrator', 'heartbeat-check', 
-            `Conversation ${convo.conversation} has no messages, startingAgentId=${nextAgentId}`);
-        }
-      } else {
-        // Has messages - check if last turn is complete
-        const lastMessage = messages[messages.length - 1];
-        
-        // Only send guidance if the last message finalized a turn (not still in progress)
-        if (lastMessage && lastMessage.finality === 'turn') {
-          const snapshot = this.getConversationSnapshot(convo.conversation);
-          const decision = this.policy.decide({ snapshot, lastEvent: lastMessage });
-          
-          if (decision.kind === 'agent') {
-            nextAgentId = decision.agentId;
-            guidanceSeq = lastMessage.seq + 0.1;
-          }
-        } else if (lastMessage && lastMessage.finality === 'none') {
-          // Turn is still in progress, don't send guidance
-          logLine('orchestrator', 'heartbeat-skip', 
-            `Conversation ${convo.conversation} has turn in progress, skipping guidance`);
-          nextAgentId = null;
-        }
-      }
-      
-      // If we determined we need guidance (either no messages yet, or last message ended a turn)
-      // then keep sending it until someone takes the turn
-      if (nextAgentId) {
-        // Check if someone already started working on this turn
-        // (any trace or message with seq > guidanceSeq means someone is working)
-        const turnInProgress = events.some(e => 
-          (e.type === 'trace' || e.type === 'message') && 
-          e.seq > guidanceSeq
-        );
-        
-        if (!turnInProgress) {
-          const agent = metadata?.agents?.find(a => a.id === nextAgentId);
-          
-          if (agent) {
-            const guidanceEvent: GuidanceEvent = {
-              type: 'guidance',
-              conversation: convo.conversation,
-              seq: guidanceSeq,
-              nextAgentId,
-              deadlineMs: Date.now() + 30000,
-            };
-            
-            logLine('orchestrator', 'guidance-heartbeat', 
-              `Broadcasting guidance for ${nextAgentId} in conversation ${convo.conversation} (seq ${guidanceSeq})`);
-            
-            this.bus.publishGuidance(guidanceEvent);
-          }
-        } else {
-          logLine('orchestrator', 'heartbeat-skip', 
-            `Turn in progress for conversation ${convo.conversation} (events after seq ${guidanceSeq}), skipping guidance`);
-        }
-      }
-    }
-    } catch (error) {
-      // Re-throw if not shutting down
-      if (!this.isShuttingDown) {
-        throw error;
-      }
-    }
-  }
 
   // Writes with fanout and post-write orchestration hooks
   appendEvent<T = unknown>(input: AppendEventInput<T>): AppendEventResult {
@@ -388,9 +255,8 @@ export class OrchestratorService {
             deadlineMs: Date.now() + 30000,
           };
           
-          // Publish guidance immediately
+          // Publish guidance immediately (event-driven only)
           this.bus.publishGuidance(guidanceEvent);
-          // Don't set lastGuidanceSeq - let heartbeat keep sending until claimed
           
           logLine('orchestrator', 'guidance', 
             `Emitted initial guidance for ${startingAgent.id} on conversation ${conversationId}`);
@@ -430,8 +296,7 @@ export class OrchestratorService {
   subscribe(conversation: number, listener: ((e: UnifiedEvent | GuidanceEvent) => void) | ((e: UnifiedEvent) => void), includeGuidance = false): string {
     const subId = this.bus.subscribe({ conversation }, listener as EventListener, includeGuidance);
     
-    // The guidance heartbeat will handle sending guidance at regular intervals
-    // No need for special initial guidance logic here
+    // Subscriptions deliver real-time events; guidance is emitted on create/turn-complete
     
     return subId;
   }

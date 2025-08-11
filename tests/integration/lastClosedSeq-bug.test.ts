@@ -120,10 +120,7 @@ describe('lastClosedSeq bug reproduction', () => {
     expect(finalHead2.lastClosedSeq).toBe(result2.seq);
     expect(finalHead3.lastClosedSeq).toBe(result3b.seq); // The second message in conv3
     
-    // They should all be different (global autoincrement)
-    expect(finalHead1.lastClosedSeq).not.toBe(finalHead2.lastClosedSeq);
-    expect(finalHead2.lastClosedSeq).not.toBe(finalHead3.lastClosedSeq);
-    expect(finalHead1.lastClosedSeq).not.toBe(finalHead3.lastClosedSeq);
+    // Per-conversation seq: values are scoped; equality across conversations is fine
     
     db.close();
   });
