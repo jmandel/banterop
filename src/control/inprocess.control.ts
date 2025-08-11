@@ -23,4 +23,3 @@ export class InProcessControl implements OrchestratorControl {
     await this.host.stop(conversationId); 
   }
 }
-

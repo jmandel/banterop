@@ -5,30 +5,41 @@ import type { LLMProviderManager } from '$src/llm/provider-manager';
 
 export class AgentHost {
   private byConversation = new Map<number, AgentHandle>();
+  private pending = new Map<number, Promise<AgentHandle>>();
   constructor(private orch: OrchestratorService, private providers: LLMProviderManager) {}
 
   async ensure(conversationId: number, opts?: { agentIds?: string[] }) {
+    // If already started, do nothing
     if (this.byConversation.has(conversationId)) return;
-
-    const handle = await startAgents({
-      conversationId,
-      transport: new InProcessTransport(this.orch),
-      providerManager: this.providers,
-      agentIds: opts?.agentIds,
-      turnRecoveryMode: 'restart',
-    });
-    this.byConversation.set(conversationId, handle);
-
-    // Persist autoRun metadata (and optional agent subset)
-    const convo = this.orch.getConversationWithMetadata(conversationId);
-    if (convo) {
-      const custom: any = { ...(convo.metadata.custom || {}) };
-      custom.autoRun = true;
-      if (opts?.agentIds && opts.agentIds.length > 0) {
-        custom.autoRunAgents = Array.from(new Set(opts.agentIds));
-      }
-      this.orch.storage.conversations.updateMeta(conversationId, { ...convo.metadata, custom });
+    // If a start is in-flight, await it
+    const pending = this.pending.get(conversationId);
+    if (pending) {
+      await pending;
+      return;
     }
+
+    // Start and record the pending promise to dedupe concurrent ensures
+    const startPromise = (async (): Promise<AgentHandle> => {
+      const handle = await startAgents({
+        conversationId,
+        transport: new InProcessTransport(this.orch),
+        providerManager: this.providers,
+        agentIds: opts?.agentIds,
+        turnRecoveryMode: 'restart',
+      });
+      this.byConversation.set(conversationId, handle);
+      return handle;
+    })();
+
+    this.pending.set(conversationId, startPromise);
+    try {
+      await startPromise;
+    } finally {
+      this.pending.delete(conversationId);
+    }
+
+    // Proactively nudge guidance for no-message conversations with startingAgentId
+    try { (this.orch as any).pokeGuidance?.(conversationId); } catch {}
   }
 
   list(conversationId: number): Array<{ id: string; class?: string }> {
@@ -49,4 +60,3 @@ export class AgentHost {
     await Promise.all(ids.map(id => this.stop(id)));
   }
 }
-

@@ -3,7 +3,7 @@ import { z } from 'zod';
 // Configuration schema with validation
 const ConfigSchema = z.object({
   // Database
-  dbPath: z.string().default('data.db'),
+  dbPath: z.string().default('dbs/data.db'),
   
   // Server
   port: z.number().int().positive().default(3000),

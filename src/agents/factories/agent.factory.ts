@@ -62,6 +62,9 @@ export async function startAgents(options: StartAgentsOptions): Promise<AgentHan
 
     // Create the agent with appropriate implementation
     const agent = createAgent(agentMeta, transport, providerManager, conversationId, scenario, options.turnRecoveryMode);
+    // Attach runtime metadata for introspection (used by agentHost.list())
+    (agent as any).id = agentId;
+    (agent as any).agentClass = agentMeta.agentClass || 'default';
     
     // Start the agent
     await agent.start(conversationId, agentId);

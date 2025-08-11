@@ -466,6 +466,30 @@ export class OrchestratorService {
     this.bus.unsubscribe(subId);
   }
 
+  // Proactively emit guidance for a conversation, primarily to kick off a starting agent
+  // when agents are (re)ensured after creation. This mirrors the initial-guidance path
+  // in createConversation for the no‑messages case.
+  pokeGuidance(conversationId: number): void {
+    try {
+      const convoWithMeta = this.getConversationSnapshot(conversationId, { includeScenario: true });
+      if (!convoWithMeta) return;
+      const hasMessages = (convoWithMeta.events || []).some(e => e.type === 'message');
+      if (hasMessages) return;
+      const starting = convoWithMeta.metadata.startingAgentId;
+      if (!starting) return;
+      const guidanceEvent: import('$src/types/orchestrator.types').GuidanceEvent = {
+        type: 'guidance',
+        conversation: conversationId,
+        nextAgentId: starting,
+        seq: 0.1,
+        deadlineMs: Date.now() + 30000,
+      };
+      this.bus.publishGuidance(guidanceEvent);
+    } catch {
+      // best-effort
+    }
+  }
+
   // Internals
 
   private onEventAppended(e: UnifiedEvent) {

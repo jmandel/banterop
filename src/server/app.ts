@@ -5,7 +5,7 @@ import { LLMProviderManager } from '$src/llm/provider-manager';
 import type { SchedulePolicy } from '$src/types/orchestrator.types';
 import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
 import { AgentHost } from './agent-host';
-import { resumeActiveConversations } from './agent-host-resume';
+import { RunnerRegistry } from './runner-registry';
 import kneeMriScenario from '$src/db/fixtures/knee-mri-scenario.json';
 import visionScreeningScenario from '$src/db/fixtures/vision-screening-scenario.json';
 
@@ -20,6 +20,7 @@ export class App {
   readonly orchestrator: OrchestratorService;
   readonly llmProviderManager: LLMProviderManager;
   readonly agentHost: AgentHost;
+  readonly runnerRegistry: RunnerRegistry;
 
   constructor(options?: AppOptions) {
     const { policy, skipAutoRun, ...configOverrides } = options || {};
@@ -39,17 +40,19 @@ export class App {
       this.configManager.orchestratorConfig
     );
     this.agentHost = new AgentHost(this.orchestrator, this.llmProviderManager);
+    this.runnerRegistry = new RunnerRegistry(this.storage.db, this.agentHost);
     
     // Seed default scenarios on startup (no-op if already present)
     this.seedDefaultScenarios();
     
-    // Resume any autoRun conversations post-restart
+    // Resume any server-local ensured agents post-restart
     const shouldSkipAutoRun = skipAutoRun ?? (this.configManager.get().nodeEnv === 'test');
     if (!shouldSkipAutoRun) {
-      // Fire and forget; resume ensures idempotency
-      resumeActiveConversations(this.orchestrator, this.agentHost).catch(err => {
-        console.error('[App] Failed to resume active conversations', err);
-      });
+      try {
+        void this.runnerRegistry.resumeAgentsFromLocalRegistryOnServer();
+      } catch (err) {
+        console.error('[App] Failed to resume runner registry', err);
+      }
     }
   }
 

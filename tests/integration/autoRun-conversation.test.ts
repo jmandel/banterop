@@ -80,8 +80,8 @@ async function rpcCall<T = any>(wsUrl: string, method: string, params?: any): Pr
   });
 }
 
-describe("AutoRun conversation feature", () => {
-  it("sets and clears autoRun flag correctly", async () => {
+describe("Server runner registry + ensure", () => {
+  it("persists ensure intent in runner_registry and allows stop", async () => {
     // === 1. Boot orchestrator ===
     const { app, server, wsUrl } = await startServer();
 
@@ -103,31 +103,21 @@ describe("AutoRun conversation feature", () => {
       }
     });
 
-    // === 4. Trigger auto-run ===
-    // Ensure agents on server – sets autoRun in metadata
-    const ensured = await rpcCall<{ ensured: Array<{ id: string }> }>(wsUrl, "ensureAgentsRunning", { conversationId });
+    // === 4. Ensure agents on server – persists in runner_registry
+    const ensured = await rpcCall<{ ensured: Array<{ id: string }> }>(wsUrl, "ensureAgentsRunningOnServer", { conversationId, agentIds: ['alpha','beta'] });
     expect(ensured.ensured.length).toBeGreaterThan(0);
 
-    // === 5. Verify autoRun flag is set ===
-    let convoMeta = app.orchestrator.getConversationWithMetadata(conversationId);
-    expect(convoMeta?.metadata.custom?.autoRun).toBe(true);
-
-    // === 6. Complete the conversation ===
-    await rpcCall(wsUrl, "sendMessage", {
-      conversationId,
-      agentId: "system",
-      messagePayload: { text: "Conversation ended" },
-      finality: "conversation"
-    });
-
-    // === 7. Verify autoRun flag is cleared after completion ===
-    convoMeta = app.orchestrator.getConversationWithMetadata(conversationId);
-    expect(convoMeta?.metadata.custom?.autoRun).toBeFalsy();
+    // === 5. Stop and verify host stopped
+    await rpcCall(wsUrl, "stopAgentsOnServer", { conversationId });
+    const rowAfter = app.storage.db
+      .prepare(`SELECT COUNT(1) as n FROM runner_registry WHERE conversation_id = ?`)
+      .get(conversationId) as { n: number };
+    expect(rowAfter.n).toBe(0);
 
     await stopServer(server, app);
   });
 
-  it("resumes active autoRun conversations on restart", async () => {
+  it("resumes ensured agents on restart", async () => {
     // Use a temporary file for the database
     const tempDbPath = `/tmp/test-autorun-${Date.now()}.db`;
     
@@ -147,11 +137,7 @@ describe("AutoRun conversation feature", () => {
     });
 
     // Mark for autoRun by ensuring server-managed agents
-    await rpcCall(wsUrl, "ensureAgentsRunning", { conversationId });
-
-    // Verify flag is set
-    let convoMeta = app.orchestrator.getConversationWithMetadata(conversationId);
-    expect(convoMeta?.metadata.custom?.autoRun).toBe(true);
+    await rpcCall(wsUrl, "ensureAgentsRunningOnServer", { conversationId, agentIds: ['alpha','beta'] });
 
     // === 2. Shutdown ===
     await stopServer(server, app);
@@ -160,14 +146,15 @@ describe("AutoRun conversation feature", () => {
     ({ app, server, wsUrl } = await startServer(tempDbPath, false));
 
     // Give it a moment to process resume logic
-    await Bun.sleep(100);
+    await Bun.sleep(300);
 
-    // === 4. Flag should still be set for active conversation ===
-    convoMeta = app.orchestrator.getConversationWithMetadata(conversationId);
-    expect(convoMeta?.metadata.custom?.autoRun).toBe(true);
+    // === 4. AgentHost should list running agents for that conversation
+    const running = app.agentHost.list(conversationId);
+    expect(Array.isArray(running)).toBe(true);
+    expect(running.length).toBeGreaterThan(0);
 
     await stopServer(server, app);
   });
 
-  // Note: Stale autoRun clearing behavior removed in new design (simpler resume).
+// Note: autoRun flags removed in new design; runner_registry persists ensure intent server-locally.
 });

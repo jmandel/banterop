@@ -83,6 +83,14 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
   PRIMARY KEY (conversation, agent_id, client_request_id)
 );
 
+-- Runner registry (server-local ensure state)
+CREATE TABLE IF NOT EXISTS runner_registry (
+  conversation_id INTEGER NOT NULL,
+  agent_id        TEXT NOT NULL,
+  created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  PRIMARY KEY (conversation_id, agent_id)
+);
+
 
 -- Triggers to keep conversations.updated_at fresh
 CREATE TRIGGER IF NOT EXISTS trg_conversations_touch AFTER UPDATE ON conversations
