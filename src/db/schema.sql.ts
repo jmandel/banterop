@@ -30,16 +30,18 @@ CREATE TABLE IF NOT EXISTS scenarios (
 CREATE INDEX IF NOT EXISTS idx_scenarios_name ON scenarios (name);
 
 -- Unified event log (append-only)
+-- seq is per-conversation (starts at 1 for each conversation)
 CREATE TABLE IF NOT EXISTS conversation_events (
   conversation  INTEGER NOT NULL,
   turn          INTEGER NOT NULL,
   event         INTEGER NOT NULL,
+  seq           INTEGER NOT NULL,  -- per-conversation sequence, starts at 1 per conversation
   type          TEXT NOT NULL CHECK (type IN ('message','trace','system')),
   payload       TEXT NOT NULL,                 -- JSON string
   finality      TEXT NOT NULL CHECK (finality IN ('none','turn','conversation')),
   ts            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   agent_id      TEXT NOT NULL,
-  seq           INTEGER PRIMARY KEY AUTOINCREMENT, -- global total order
+  PRIMARY KEY(conversation, seq),
   FOREIGN KEY(conversation) REFERENCES conversations(conversation)
 );
 
