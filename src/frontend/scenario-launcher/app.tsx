@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { HashRouter as Router, Routes, Route, useNavigate, useParams } from "react-router-dom";
+import { HashRouter as Router, Routes, Route, useNavigate, useParams, Link } from "react-router-dom";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { ScenarioDrivenAgent } from "$src/agents/scenario/scenario-driven.agent";
@@ -59,11 +59,12 @@ interface LaunchConfig {
   agents: Array<{
     id: string;
     displayName: string;
-    llmProvider: string;
     model: string;
   }>;
   startingAgentId: string;
 }
+
+type LaunchType = 'watch' | 'plugin';
 
 function useHealthPing(intervalMs = 8000) {
   const [ok, setOk] = useState<boolean | null>(null);
@@ -100,6 +101,9 @@ function ScenarioList() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [runMode, setRunMode] = useState<'client'|'server'>(() => {
     try { return (localStorage.getItem('scenarioLauncher.runMode') as 'client'|'server') || 'client'; } catch { return 'client'; }
+  });
+  const [launchType, setLaunchType] = useState<LaunchType>(() => {
+    try { return (localStorage.getItem('scenarioLauncher.launchType') as LaunchType) || 'watch'; } catch { return 'watch'; }
   });
 
   const loadScenarios = async () => {
@@ -214,6 +218,7 @@ function ScenarioList() {
     }
   }, [availableModels]);
 
+
   const handleSelectScenario = (scenario: ScenarioItem) => {
     setSelectedScenario(scenario);
     
@@ -245,6 +250,13 @@ function ScenarioList() {
     
     try {
       setLaunching(true);
+      if (launchType === 'plugin') {
+        // Build bridge meta template and navigate to pre-launch page
+        const config64 = await buildBridgeConfig64(launchConfig);
+        try { localStorage.setItem('scenarioLauncher.launchType', launchType); } catch {}
+        navigate(`/plugin/${config64}`);
+        return;
+      }
       
       // Create conversation with scenario - exactly like CLI demo
       console.log('Creating conversation with startingAgentId:', launchConfig.startingAgentId);
@@ -328,23 +340,50 @@ function ScenarioList() {
         </div>
 
         {/* Launch Configuration */}
-        {selectedScenario && launchConfig && (
+        {selectedScenario && launchConfig && (<>
           <div className="space-y-4">
             <h2 className="text-lg font-semibold">Launch Configuration</h2>
             
             <div className="p-4 border border-gray-200 rounded-lg space-y-4">
-              {/* Run Mode */}
+              {/* Launch Type */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Run Mode</label>
-                <select
-                  value={runMode}
-                  onChange={(e) => setRunMode(e.target.value as 'client'|'server')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                >
-                  <option value="client">Run agents in browser (client-managed)</option>
-                  <option value="server">Run agents on server (server-managed)</option>
-                </select>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Choose an action</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setLaunchType('watch'); try { localStorage.setItem('scenarioLauncher.launchType', 'watch'); } catch {} }}
+                    className={`px-3 py-2 rounded border ${launchType === 'watch' ? 'bg-blue-600 text-white border-blue-700' : 'bg-white hover:bg-gray-50'}`}
+                  >
+                    Watch Simulated Conversation
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setLaunchType('plugin'); try { localStorage.setItem('scenarioLauncher.launchType', 'plugin'); } catch {} }}
+                    className={`px-3 py-2 rounded border ${launchType === 'plugin' ? 'bg-purple-600 text-white border-purple-700' : 'bg-white hover:bg-gray-50'}`}
+                  >
+                    Plug Into Simulated Conversation
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  {launchType === 'plugin'
+                    ? 'Generate an MCP URL and connect your MCP client as the selected role.'
+                    : 'Create a new conversation and watch it here; agents can run in browser or on server.'}
+                </p>
               </div>
+              {/* Run Mode (watch only) */}
+              {launchType === 'watch' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Run Mode</label>
+                  <select
+                    value={runMode}
+                    onChange={(e) => setRunMode(e.target.value as 'client'|'server')}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  >
+                    <option value="client">Run agents in browser (client-managed)</option>
+                    <option value="server">Run agents on server (server-managed)</option>
+                  </select>
+                </div>
+              )}
 
               {/* Title */}
               <div>
@@ -359,22 +398,31 @@ function ScenarioList() {
                 />
               </div>
 
-              {/* Starting Agent */}
+              {/* Starting / Plug-in Agent */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Starting Agent
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {launchType === 'plugin' ? 'External Agent (MCP client)' : 'Starting Agent'}
                 </label>
-                <select
-                  value={launchConfig.startingAgentId}
-                  onChange={(e) => setLaunchConfig({ ...launchConfig, startingAgentId: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                >
+                <div className="space-y-1">
                   {launchConfig.agents.map((agent) => (
-                    <option key={agent.id} value={agent.id}>
-                      {agent.displayName}
-                    </option>
+                    <label key={agent.id} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="radio"
+                        name="startingAgentId"
+                        value={agent.id}
+                        checked={launchConfig.startingAgentId === agent.id}
+                        onChange={() => setLaunchConfig({ ...launchConfig, startingAgentId: agent.id })}
+                      />
+                      <span>{agent.displayName}</span>
+                      <span className="text-xs text-gray-500">({agent.id})</span>
+                    </label>
                   ))}
-                </select>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  {launchType === 'plugin'
+                    ? 'Your MCP client will speak as this agent id.'
+                    : 'This agent sends the first message in the simulation.'}
+                </p>
               </div>
 
               {/* Agent Configurations */}
@@ -416,18 +464,28 @@ function ScenarioList() {
                 </div>
               </div>
 
-              {/* Launch Button */}
-              <button
-                onClick={handleLaunch}
-                disabled={launching}
-                className={`w-full py-2 px-4 rounded-md font-medium transition-colors ${
-                  launching
-                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                    : "bg-blue-600 text-white hover:bg-blue-700"
-                }`}
-              >
-                {launching ? "Launching..." : "Launch Scenario"}
-              </button>
+              {/* Primary Action */}
+              {launchType === 'watch' ? (
+                <button
+                  onClick={handleLaunch}
+                  disabled={launching}
+                  className={`w-full py-2 px-4 rounded-md font-medium transition-colors ${
+                    launching ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-blue-600 text-white hover:bg-blue-700"
+                  }`}
+                >
+                  {launching ? 'Launching…' : 'Launch Scenario'}
+                </button>
+              ) : (
+                <button
+                  onClick={handleLaunch}
+                  disabled={launching}
+                  className={`w-full py-2 px-4 rounded-md font-medium transition-colors ${
+                    launching ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-purple-600 text-white hover:bg-purple-700"
+                  }`}
+                >
+                  {launching ? 'Preparing…' : 'Open MCP Pre‑Launch'}
+                </button>
+              )}
             </div>
 
             {/* Scenario Details */}
@@ -455,7 +513,9 @@ function ScenarioList() {
               </div>
             </div>
           </div>
-        )}
+
+          {/* No inline Plug-In panel: use dedicated pre-launch screen */}
+        </>)}
       </div>
     </div>
   );
@@ -868,6 +928,175 @@ function ConversationView({ id }: { id: number }) {
   );
 }
 
+// Utilities for Plug-In bridge
+async function sha256Base64Url(input: string): Promise<string> {
+  const enc = new TextEncoder();
+  const digest = await crypto.subtle.digest('SHA-256', enc.encode(input));
+  const bytes = new Uint8Array(digest);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
+  const b64 = btoa(bin);
+  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64UrlEncodeJson(obj: any): string {
+  const json = JSON.stringify(obj);
+  // UTF-8 safe base64url
+  const utf8 = new TextEncoder().encode(json);
+  let bin = '';
+  for (let i = 0; i < utf8.length; i++) bin += String.fromCharCode(utf8[i]!);
+  const b64 = btoa(bin);
+  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64UrlDecodeJson<T = any>(b64url: string): T {
+  const normalized = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const pad = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
+  const base64 = normalized + pad;
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const json = new TextDecoder().decode(bytes);
+  return JSON.parse(json);
+}
+
+async function buildBridgeConfig64(cfg: LaunchConfig): Promise<string> {
+  // Build a ConvConversationMeta-like payload for the bridge
+  const meta = {
+    title: cfg.title,
+    scenarioId: cfg.scenarioId,
+    agents: cfg.agents.map(a => ({ id: a.id, displayName: a.displayName, config: { model: a.model } })),
+    startingAgentId: cfg.startingAgentId,
+  };
+  return base64UrlEncodeJson(meta);
+}
+
+function useCopy(text: string): [boolean, () => void] {
+  const [ok, setOk] = useState(false);
+  const onCopy = useCallback(() => {
+    navigator.clipboard.writeText(text).then(() => {
+      setOk(true);
+      setTimeout(() => setOk(false), 1000);
+    }).catch(() => {});
+  }, [text]);
+  return [ok, onCopy];
+}
+
+// (InlineMcpUrl and InlineMcpExamples removed: dedicated pre-launch screen handles MCP details)
+
+function McpPreLaunch() {
+  const { config64 = '' } = useParams<{ config64: string }>();
+  const [hash, setHash] = useState<string>('');
+  const [matches, setMatches] = useState<number[]>([]);
+  const [subState, setSubState] = useState<'idle'|'connecting'|'open'|'closed'>('idle');
+  const [meta, setMeta] = useState<any>(null);
+
+  const mcpUrl = API_BASE.startsWith('http')
+    ? `${API_BASE}/bridge/${config64}/mcp`
+    : `${location.protocol}//${location.host}${API_BASE}/bridge/${config64}/mcp`;
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const h = await sha256Base64Url(config64);
+      if (!cancelled) setHash(h);
+      try {
+        const m = base64UrlDecodeJson(config64);
+        if (!cancelled) setMeta(m);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [config64]);
+
+  useEffect(() => {
+    if (!hash) return;
+    const wsUrl = API_BASE.startsWith('http')
+      ? API_BASE.replace(/^http/, 'ws') + '/ws'
+      : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${API_BASE}/ws`;
+    const ws = new WebSocket(wsUrl);
+    setSubState('connecting');
+    ws.onopen = () => {
+      setSubState('open');
+      ws.send(JSON.stringify({ jsonrpc: '2.0', id: crypto.randomUUID(), method: 'subscribeConversations' }));
+    };
+    ws.onmessage = async (evt) => {
+      try {
+        const msg = JSON.parse(String(evt.data));
+        if (msg.method === 'conversation' && msg.params?.conversationId) {
+          const cid = Number(msg.params.conversationId);
+          try {
+            const conv = await wsRpcCall<any>('getConversation', { conversationId: cid, includeScenario: false });
+            const h = conv?.metadata?.custom?.bridgeConfig64Hash;
+            if (h && h === hash) {
+              setMatches((prev) => prev.includes(cid) ? prev : [...prev, cid]);
+            }
+          } catch (e) {
+            // ignore fetch errors
+          }
+        }
+      } catch {}
+    };
+    ws.onclose = () => setSubState('closed');
+    return () => { try { ws.close(); } catch {} };
+  }, [hash]);
+
+  const [copiedUrl, copyUrl] = useCopy(mcpUrl);
+  const prettyMeta = meta ? JSON.stringify(meta, null, 2) : '';
+
+  return (
+    <div className="p-6 max-w-4xl mx-auto space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">MCP Pre‑Launch</h1>
+        <Link to="/" className="px-3 py-1 border rounded hover:bg-gray-50 text-sm">Back</Link>
+      </div>
+
+      <div className="p-4 border rounded">
+        <div className="text-sm text-gray-600 mb-2">Plug‑In Settings</div>
+        <div className="text-sm"><span className="text-gray-500">Scenario:</span> <span className="font-mono">{meta?.scenarioId || '(none)'}</span></div>
+        <div className="text-sm"><span className="text-gray-500">Plug‑in as:</span> <span className="font-mono">{meta?.startingAgentId || '(unset)'}</span></div>
+      </div>
+
+      <div className="p-4 border rounded">
+        <div className="text-sm text-gray-600 mb-2">MCP Server URL</div>
+        <div className="font-mono break-all p-2 bg-gray-50 rounded border">{mcpUrl}</div>
+        <div className="mt-2">
+          <button onClick={copyUrl} className="px-2 py-1 text-xs border rounded hover:bg-gray-50">{copiedUrl ? 'Copied!' : 'Copy URL'}</button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="p-4 border rounded">
+          <div className="text-sm text-gray-600 mb-2">Template Hash</div>
+          <div className="font-mono break-all p-2 bg-gray-50 rounded border">{hash || 'computing…'}</div>
+          <div className="text-xs text-gray-500 mt-2">Discovery listens for conversations stamped with this hash.</div>
+        </div>
+        <div className="p-4 border rounded">
+          <div className="text-sm text-gray-600 mb-2">Discovery</div>
+          <div className="text-xs text-gray-500">Subscription: {subState}</div>
+          {matches.length === 0 ? (
+            <div className="text-sm text-gray-600 mt-2">Waiting for matching conversations…</div>
+          ) : (
+            <div className="mt-2 space-y-1">
+              {matches.map((cid) => (
+                <div key={cid} className="flex items-center gap-2 text-sm">
+                  <span>Conversation #{cid}</span>
+                  <Link to={`/conversation/${cid}`} className="text-blue-600 hover:underline">Open here</Link>
+                  <a href={`http://localhost:3001/#/conversation/${cid}`} target="_blank" className="text-blue-600 hover:underline">Open in Watch</a>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="p-4 border rounded space-y-2">
+        <div className="text-sm font-semibold">Template (decoded)</div>
+        <pre className="text-xs bg-gray-50 p-2 rounded border overflow-auto">{prettyMeta}</pre>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const health = useHealthPing();
   
@@ -890,6 +1119,7 @@ function App() {
           <Route path="/" element={<ScenarioList />} />
           <Route path="/scenario/:scenarioId" element={<ScenarioList />} />
           <Route path="/conversation/:id" element={<ConversationViewWrapper />} />
+          <Route path="/plugin/:config64" element={<McpPreLaunch />} />
         </Routes>
       </Router>
     </div>
