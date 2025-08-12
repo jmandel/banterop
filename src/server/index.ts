@@ -36,7 +36,7 @@ server.route('/api', createAttachmentRoutes(appInstance.orchestrator));
 server.route('/api', createLLMRoutes(appInstance.llmProviderManager));
 
 // Optional: MCP bridge under /api/bridge/:config64/mcp
-server.route('/api/bridge', createBridgeRoutes(appInstance.orchestrator, appInstance.llmProviderManager));
+server.route('/api/bridge', createBridgeRoutes(appInstance.orchestrator, appInstance.llmProviderManager, appInstance.runnerRegistry));
 
 // Debug API (read-only) under /api/debug
 server.route('/api/debug', createDebugRoutes(appInstance.orchestrator));

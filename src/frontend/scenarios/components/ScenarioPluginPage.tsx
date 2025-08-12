@@ -117,6 +117,35 @@ export function ScenarioPluginPage() {
     return () => { try { ws.close(); } catch {} };
   }, [hash]);
 
+  // Fetch existing matching conversations on load (historical discovery)
+  useEffect(() => {
+    if (!hash) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const url = `${API_BASE}/debug/conversations`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const list: any[] = await res.json();
+        const found: number[] = [];
+        for (const item of list) {
+          const marker = item?.metadata?.custom?.bridgeConfig64Hash;
+          if (marker && marker === hash) {
+            found.push(Number(item.conversation));
+          }
+        }
+        if (!cancelled && found.length) {
+          setMatches((prev) => {
+            const s = new Set(prev);
+            for (const id of found) s.add(id);
+            return Array.from(s);
+          });
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [hash]);
+
   const mcpUrl = useMemo(() => (
     `${API_BASE}/bridge/${config64}/mcp`
   ), [config64]);
@@ -159,7 +188,7 @@ export function ScenarioPluginPage() {
           <div className="text-xs text-slate-500 mt-2">Discovery listens for conversations stamped with this hash.</div>
         </div>
         <div className="p-4 border rounded">
-          <div className="text-sm text-slate-600 mb-2">Discovery</div>
+          <div className="text-sm text-slate-600 mb-2">Conversations</div>
           <div className="text-xs text-slate-500">Subscription: {subState}</div>
           {matches.length === 0 ? (
             <div className="text-sm text-slate-600 mt-2">Waiting for matching conversations…</div>
@@ -179,6 +208,29 @@ export function ScenarioPluginPage() {
       <div className="p-4 border rounded space-y-2">
         <div className="text-sm font-semibold">Template (decoded)</div>
         <pre className="text-xs bg-slate-50 p-2 rounded border overflow-auto">{prettyMeta}</pre>
+      </div>
+
+      <div className="p-4 border rounded space-y-2">
+        <div className="text-sm font-semibold">How To Use (MCP)</div>
+        <ul className="text-sm text-slate-700 space-y-1" style={{ listStyleType: 'disc', paddingLeft: 20 }}>
+          <li><span className="font-medium">begin_chat_thread</span>: starts a new conversation from this template.</li>
+          <li><span className="font-medium">send_message_to_chat_thread</span>: input — <code>conversationId</code>, <code>message</code>, optional <code>attachments[]</code>; output — <code>{`{ ok: true, guidance, status: 'waiting' }`}</code>.</li>
+          <li>
+            <span className="font-medium">check_replies</span>: input — <code>conversationId</code>, optional <code>waitMs</code> (default 10000); output includes:
+            <ul className="mt-1 space-y-1" style={{ listStyleType: 'disc', paddingLeft: 20 }}>
+              <li>
+                <code>messages</code>: array of objects with keys:
+                <span className="ml-1"><code>from</code>, <code>at</code> (ISO), <code>text</code>,</span>
+                <span className="ml-1"><code>attachments</code> (array of objects: <code>name</code>, <code>contentType</code>, <code>summary?</code>, <code>docId?</code>)</span>
+                — only replies since your last message.
+              </li>
+              <li><code>guidance</code>: short hint (e.g., “Your turn to respond.”).</li>
+              <li><code>status</code>: <code>input_required</code> | <code>waiting</code>.</li>
+              <li><code>conversation_ended</code>: boolean.</li>
+            </ul>
+          </li>
+        </ul>
+        <div className="text-xs text-slate-500">External client speaks as: <span className="font-mono">{meta?.startingAgentId || '(unset)'}</span></div>
       </div>
     </div>
   );

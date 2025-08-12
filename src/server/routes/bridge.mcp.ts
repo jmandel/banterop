@@ -7,11 +7,12 @@
 import { Hono } from 'hono';
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
 import type { LLMProviderManager } from '$src/llm/provider-manager';
+import type { RunnerRegistry } from '$src/server/runner-registry';
 import { McpBridgeServer } from '$src/server/bridge/mcp-server';
 import { HonoIncomingMessage, HonoServerResponse } from '$src/server/bridge/hono-node-adapters';
 import { parseConversationMetaFromConfig64 } from '$src/server/bridge/conv-config.types';
 
-export function createBridgeRoutes(orchestrator: OrchestratorService, providerManager: LLMProviderManager, replyTimeoutMs?: number) {
+export function createBridgeRoutes(orchestrator: OrchestratorService, providerManager: LLMProviderManager, runnerRegistry: RunnerRegistry, replyTimeoutMs?: number) {
   const app = new Hono();
 
   app.all('/:config64/mcp', async (c) => {
@@ -27,7 +28,7 @@ export function createBridgeRoutes(orchestrator: OrchestratorService, providerMa
       }
 
       const bridge = new McpBridgeServer(
-        { orchestrator, providerManager, ...(replyTimeoutMs !== undefined ? { replyTimeoutMs } : {}) },
+        { orchestrator, providerManager, runnerRegistry, ...(replyTimeoutMs !== undefined ? { replyTimeoutMs } : {}) },
         config64,
         `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
       );
