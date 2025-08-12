@@ -25,7 +25,7 @@ EXPOSE 3000
 # Volume for SQLite persistence
 VOLUME ["/data"]
 
-# Start API+WS server
-CMD ["bun", "src/server/index.ts"]
+# Start full-stack server (frontend + API under /api)
+CMD ["bun", "src/dev/index.ts"]
 
 
