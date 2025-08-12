@@ -142,71 +142,69 @@ export abstract class BaseAgent<TSnap = any> {
       return;
     }
 
-    // Check if lastClosedSeq has advanced (avoid duplicate work)
-    const currentClosedSeq = snap.lastClosedSeq || 0;
-    logLine(agentId, 'reconcile', `currentClosedSeq=${currentClosedSeq}, lastProcessedClosedSeq=${this.lastProcessedClosedSeq}`);
-    if (guidance && this.lastProcessedClosedSeq > 0 && currentClosedSeq === this.lastProcessedClosedSeq) {
-      logLine(agentId, 'reconcile', `No new closed turns since seq ${this.lastProcessedClosedSeq}, skipping`);
+    // Compute current turn state (open/owner) for safe recovery
+    const { hasOpenTurn, ownerAgentId } = this.getCurrentTurnState(snap);
+    logLine(agentId, 'reconcile', `hasOpenTurn=${hasOpenTurn}, owner=${ownerAgentId}`);
+
+    // Startup reconciliation: if no guidance but we own an open turn, act per recovery policy
+    if (!guidance) {
+      if (hasOpenTurn && ownerAgentId === agentId) {
+        const mode = typeof this.turnRecoveryMode === 'function' ? this.turnRecoveryMode(snapshot) : this.turnRecoveryMode;
+        if (mode === 'restart') {
+          const { turn } = await this.transport.clearTurn(conversationId, agentId);
+          logLine(agentId, 'abort', `Aborted turn ${turn} per restart policy (startup)`);
+        }
+        await this.startTurn(conversationId, agentId, null);
+      } else {
+        logLine(agentId, 'reconcile', 'No guidance and not owning open turn; idle');
+      }
       return;
     }
 
-    // Determine if there's an open turn and who owns it
-    const hasOpenTurn = this.hasOpenTurn(snap);
-    const lastEventAgent = this.getLastEventAgent(snap);
-    const weOwnOpenTurn = hasOpenTurn && lastEventAgent === agentId;
-    
-    logLine(agentId, 'reconcile', `hasOpenTurn=${hasOpenTurn}, lastEventAgent=${lastEventAgent}, weOwn=${weOwnOpenTurn}`);
-    let tookAction = false;
-    if (hasOpenTurn && weOwnOpenTurn) {
-      // We own the open turn - decide based on recovery mode
-      const mode = typeof this.turnRecoveryMode === 'function' 
-        ? this.turnRecoveryMode(snapshot)
-        : this.turnRecoveryMode;
-      
-      logLine(agentId, 'reconcile', `We own open turn, recovery mode: ${mode}`);
-      
-      if (mode === 'restart') {
-        // Abort the turn and start fresh
-        const { turn } = await this.transport.clearTurn(conversationId, agentId);
-        logLine(agentId, 'abort', `Aborted turn ${turn} per restart policy`);
-        await this.startTurn(conversationId, agentId, guidance);
-        tookAction = true;
-      } else {
-        // Resume the open turn
-        logLine(agentId, 'reconcile', `Resuming open turn`);
-        await this.startTurn(conversationId, agentId, guidance);
-        tookAction = true;
-      }
-    } else if (hasOpenTurn && !weOwnOpenTurn) {
-      // Someone else owns the open turn - do nothing
-      logLine(agentId, 'reconcile', `Open turn owned by ${lastEventAgent}, waiting`);
-    } else {
-      // No open turn - check if it's our turn to start
-      if (guidance?.nextAgentId === agentId || (!guidance &&  lastEventAgent !== agentId)) {
-        logLine(agentId, 'reconcile', `No open turn and guidance targets us, starting turn`);
-        await this.startTurn(conversationId, agentId, guidance);
-        tookAction = true;
-      } else {
-        // Parsimonious bootstrap: if no messages yet and startingAgentId is us, start without guidance
-        const hasAnyMessages = Array.isArray(snap.events) && snap.events.some((e: any) => e.type === 'message');
-        const startingAgentId = snap?.metadata?.startingAgentId;
-        if (!hasAnyMessages && startingAgentId === agentId) {
-          logLine(agentId, 'reconcile', `Bootstrap start: no messages yet and startingAgentId is us`);
-          await this.startTurn(conversationId, agentId, null);
-          tookAction = true;
-          // fall through to update lastProcessedClosedSeq below
-        } else {
-          logLine(agentId, 'reconcile', `No open turn, no guidance for us`);
-        }
-      }
+    // Default guidance.kind if absent (back-compat)
+    const effectiveKind: GuidanceEvent['kind'] = (guidance as any).kind ?? (hasOpenTurn ? 'continue_turn' : 'start_turn');
+
+    // Guard against duplicate guidance when lastClosedSeq hasn't advanced
+    const currentClosed = (snap?.lastClosedSeq ?? 0) as number;
+    if (this.lastProcessedClosedSeq !== 0 && currentClosed === this.lastProcessedClosedSeq) {
+      logLine(agentId, 'reconcile', `Ignoring guidance (lastClosedSeq unchanged at ${currentClosed})`);
+      return;
     }
 
-    // Update lastProcessedClosedSeq only if we took action
-    if (tookAction) {
-      logLine(agentId, 'reconcile', `Updating lastProcessedClosedSeq from ${this.lastProcessedClosedSeq} to ${currentClosedSeq}`);
-      this.lastProcessedClosedSeq = currentClosedSeq;
-    } else {
-      logLine(agentId, 'reconcile', `Not updating lastProcessedClosedSeq (no action taken)`);
+    if (effectiveKind === 'continue_turn') {
+      if (hasOpenTurn && ownerAgentId === agentId) {
+        const mode = typeof this.turnRecoveryMode === 'function' ? this.turnRecoveryMode(snapshot) : this.turnRecoveryMode;
+        if (mode === 'restart') {
+          const { turn } = await this.transport.clearTurn(conversationId, agentId);
+          logLine(agentId, 'abort', `Aborted turn ${turn} per restart policy`);
+        }
+        this.lastProcessedClosedSeq = currentClosed;
+        await this.startTurn(conversationId, agentId, guidance);
+      } else if (hasOpenTurn && ownerAgentId && ownerAgentId !== agentId) {
+        logLine(agentId, 'reconcile', `Guided to continue but open turn owned by ${ownerAgentId}; waiting`);
+      } else {
+        // No open turn visible (post-reboot) — start fresh per guidance
+        this.lastProcessedClosedSeq = currentClosed;
+        await this.startTurn(conversationId, agentId, guidance);
+      }
+      return;
+    }
+
+    if (effectiveKind === 'start_turn') {
+      if (hasOpenTurn) {
+        if (ownerAgentId === agentId) {
+          const { turn } = await this.transport.clearTurn(conversationId, agentId);
+          logLine(agentId, 'abort', `Cleared open turn ${turn} before starting next`);
+          this.lastProcessedClosedSeq = currentClosed;
+          await this.startTurn(conversationId, agentId, guidance);
+        } else {
+          logLine(agentId, 'reconcile', `Open turn owned by ${ownerAgentId}; waiting`);
+        }
+      } else {
+        this.lastProcessedClosedSeq = currentClosed;
+        await this.startTurn(conversationId, agentId, guidance);
+      }
+      return;
     }
   }
 
@@ -241,31 +239,37 @@ export abstract class BaseAgent<TSnap = any> {
     }
   }
 
-  private hasOpenTurn(snapshot: any): boolean {
-    if (!snapshot.events || snapshot.events.length === 0) {
-      return false;
+  private getCurrentTurnState(snapshot: any): { hasOpenTurn: boolean; ownerAgentId: string | null } {
+    if (!snapshot?.events?.length) return { hasOpenTurn: false, ownerAgentId: null };
+    // Highest non-system turn
+    let currentTurn = 0;
+    for (const e of snapshot.events) {
+      if (e.type !== 'system' && e.turn > currentTurn) currentTurn = e.turn;
     }
-    
-    const lastEvent = snapshot.events[snapshot.events.length - 1];
-    // System events (turn 0) don't count as open turns - they're metadata
-    if (lastEvent.turn === 0 || lastEvent.type === 'system') {
-      return false;
+    if (currentTurn === 0) {
+      // Fallback: some tests/snapshots omit 'turn'; infer from last event
+      const last = snapshot.events[snapshot.events.length - 1];
+      if (last && last.type === 'message' && last.finality && last.finality !== 'none') {
+        return { hasOpenTurn: false, ownerAgentId: null };
+      }
+      if (last && last.type !== 'system') {
+        return { hasOpenTurn: true, ownerAgentId: last.agentId || null };
+      }
+      return { hasOpenTurn: false, ownerAgentId: null };
     }
-    
-    // Open turn = last event has finality 'none' or no finality
-    // Since only messages can have turn/conversation finality, and traces/system must have 'none',
-    // we only need to check the finality value
-    // console.log("has open turn", snapshot, lastEvent)
-    return !lastEvent.finality || lastEvent.finality === 'none';
-  }
-
-  private getLastEventAgent(snapshot: any): string | null {
-    if (!snapshot.events || snapshot.events.length === 0) {
-      return null;
+    // Closed if any message in currentTurn has finality != 'none'
+    let closed = false;
+    for (const e of snapshot.events) {
+      if (e.turn !== currentTurn) continue;
+      if (e.type === 'message' && e.finality && e.finality !== 'none') { closed = true; break; }
     }
-    
-    const lastEvent = snapshot.events[snapshot.events.length - 1];
-    return lastEvent.agentId || null;
+    if (closed) return { hasOpenTurn: false, ownerAgentId: null };
+    // Owner = last non-system event in currentTurn
+    for (let i = snapshot.events.length - 1; i >= 0; i--) {
+      const e = snapshot.events[i];
+      if (e.turn === currentTurn && e.type !== 'system') return { hasOpenTurn: true, ownerAgentId: e.agentId || null };
+    }
+    return { hasOpenTurn: true, ownerAgentId: null };
   }
 
   private applyEvent(snap: any, ev: StreamEvent) {

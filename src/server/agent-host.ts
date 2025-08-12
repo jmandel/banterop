@@ -51,8 +51,15 @@ export class AgentHost {
 
   list(conversationId: number): Array<{ id: string; class?: string }> {
     const h = this.byConversation.get(conversationId);
-    if (!h) return [];
-    return h.agents.map(a => ({ id: (a as any).id, class: (a as any).agentClass }));
+    if (h) return h.agents.map(a => ({ id: (a as any).id, class: (a as any).agentClass }));
+    // Fallback: if startup resume is in-flight, expose intended agents from runner_registry
+    try {
+      const rows = this.orch.storage.db
+        .prepare(`SELECT agent_id as id FROM runner_registry WHERE conversation_id = ?`)
+        .all(conversationId) as Array<{ id: string }>; 
+      if (rows.length) return rows.map(r => ({ id: r.id }));
+    } catch {}
+    return [];
   }
 
   async stop(conversationId: number) {

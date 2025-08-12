@@ -94,6 +94,7 @@ describe('InProcessEventStream', () => {
       conversation: 1,
       seq: 1.1,
       nextAgentId: 'agent-a',
+      kind: 'start_turn',
       deadlineMs: 30000,
     };
     listener(guidanceEvent);
@@ -312,6 +313,7 @@ describe('WsEventStream', () => {
       conversation: 1,
       seq: 1.1,
       nextAgentId: 'agent-a',
+      kind: 'start_turn',
     };
     
     mockWebSocket.onmessage({

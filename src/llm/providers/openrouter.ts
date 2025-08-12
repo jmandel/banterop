@@ -26,7 +26,8 @@ export class OpenRouterLLMProvider extends LLMProvider {
       description: 'OpenRouter AI Gateway',
       models: [
         'openai/gpt-oss-120b:nitro',
-        'qwen/qwen3-235b-a22b-2507:nitro'
+        'qwen/qwen3-235b-a22b-2507:nitro',
+        'openai/gpt-5'
       ],
       defaultModel: 'openai/gpt-oss-120b:nitro',
     };

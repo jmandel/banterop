@@ -1040,6 +1040,37 @@ function McpPreLaunch() {
     return () => { try { ws.close(); } catch {} };
   }, [hash]);
 
+  // On first load (or when hash changes), fetch existing conversations and match immediately
+  useEffect(() => {
+    if (!hash) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const url = API_BASE.startsWith('http')
+          ? `${API_BASE}/debug/conversations`
+          : `${location.protocol}//${location.host}${API_BASE}/debug/conversations`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const list: any[] = await res.json();
+        const found: number[] = [];
+        for (const item of list) {
+          const marker = item?.metadata?.custom?.bridgeConfig64Hash;
+          if (marker && marker === hash) {
+            found.push(Number(item.conversation));
+          }
+        }
+        if (!cancelled && found.length) {
+          setMatches((prev) => {
+            const s = new Set(prev);
+            for (const id of found) s.add(id);
+            return Array.from(s);
+          });
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [hash]);
+
   const [copiedUrl, copyUrl] = useCopy(mcpUrl);
   const prettyMeta = meta ? JSON.stringify(meta, null, 2) : '';
 

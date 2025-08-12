@@ -274,6 +274,7 @@ function App() {
           <Route path="/scenarios/:scenarioId/run" element={<ScenarioRunPage />} />
           <Route path="/scenarios/:scenarioId/plug-in/:config64" element={<ScenarioPluginPage />} />
           <Route path="/scenarios/configured/:config64" element={<ScenarioConfiguredPage />} />
+          <Route path="/scenarios/created/:conversationId" element={<ScenarioConfiguredPage />} />
         </Routes>
       </AppLayout>
     </Router>

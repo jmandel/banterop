@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 import { api } from '../utils/api';
 
 function encodeBase64Url(obj: unknown): string {
@@ -98,11 +98,16 @@ export function ScenarioRunPage() {
     };
   };
 
-  const continueInternal = () => {
+  const continueInternal = async () => {
     const meta = buildMeta();
-    const config64 = encodeBase64Url({ meta });
     try { localStorage.setItem('scenarioLauncher.runMode', 'client'); } catch {}
-    navigate(`/scenarios/configured/${config64}`);
+    // Create the conversation immediately so the next page references it by id
+    try {
+      const res = await apiCallCreateConversation({ meta });
+      navigate(`/scenarios/created/${res.conversationId}`);
+    } catch (e) {
+      alert(`Failed to start conversation: ${e}`);
+    }
   };
 
   const continuePlugin = () => {
@@ -118,6 +123,13 @@ export function ScenarioRunPage() {
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-6">
       <div>
+        <nav className="text-sm text-slate-600 mb-1">
+          <Link to="/scenarios" className="hover:underline">Scenarios</Link>
+          <span className="mx-1">/</span>
+          <Link to={`/scenarios/${encodeURIComponent(scenarioId!)}`} className="hover:underline">{scenario.config?.metadata?.title || scenario.name}</Link>
+          <span className="mx-1">/</span>
+          <span className="text-slate-500">Run</span>
+        </nav>
         <h1 className="text-2xl font-semibold">{scenario.config?.metadata?.title || scenario.name}</h1>
         <div className="text-sm text-slate-500">{scenario.config?.metadata?.id}</div>
       </div>
@@ -145,7 +157,7 @@ export function ScenarioRunPage() {
         </div>
 
         <div>
-          <label className="block text-sm text-slate-700 mb-1">Starting Agent</label>
+          <label className="block text-sm text-slate-700 mb-1">{runMode === 'plugin' ? 'External Agent (MCP client)' : 'Starting Agent'}</label>
           <select className="w-full border rounded px-3 py-2" value={startingAgentId} onChange={(e) => setStartingAgentId(e.target.value)}>
             {agentOptions.map((id: string) => (<option key={id} value={id}>{id}</option>))}
           </select>
@@ -156,20 +168,22 @@ export function ScenarioRunPage() {
           <div className="space-y-2">
             <div className="text-sm font-medium">Agent Models</div>
             <div className="space-y-2">
-              {(scenario?.config?.agents || []).map((a: any) => (
-                <div key={a.agentId} className="flex items-center gap-2">
-                  <div className="w-40 text-sm text-slate-700">{a.agentId}</div>
-                  <select
-                    className="flex-1 border rounded px-2 py-1 text-sm"
-                    value={agentModels[a.agentId] || modelOptions[0] || ''}
-                    onChange={(e) => setAgentModels((m) => ({ ...m, [a.agentId]: e.target.value }))}
-                  >
-                    {providers.map((p) => (
-                      <optgroup key={p.name} label={p.name}>
-                        {p.models.map((m) => (<option key={`${p.name}:${m}`} value={m}>{m}</option>))}
-                      </optgroup>
-                    ))}
-                  </select>
+              {(scenario?.config?.agents || []).filter((a: any) => !(runMode === 'plugin' && a.agentId === startingAgentId)).map((a: any) => (
+                <div key={a.agentId} className="grid grid-cols-3 items-center gap-2">
+                  <div className="col-span-1 text-sm text-slate-700 break-all">{a.agentId}</div>
+                  <div className="col-span-2">
+                    <select
+                      className="w-full border rounded px-2 py-1 text-sm"
+                      value={agentModels[a.agentId] || modelOptions[0] || ''}
+                      onChange={(e) => setAgentModels((m) => ({ ...m, [a.agentId]: e.target.value }))}
+                    >
+                      {providers.map((p) => (
+                        <optgroup key={p.name} label={p.name}>
+                          {p.models.map((m) => (<option key={`${p.name}:${m}`} value={m}>{m}</option>))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               ))}
             </div>
@@ -177,18 +191,20 @@ export function ScenarioRunPage() {
         )}
 
         {/* Autostart behavior akin to scenario launcher */}
-        <div>
-          <label className="block text-sm text-slate-700 mb-1">Autostart Agents</label>
-          <select className="w-full border rounded px-3 py-2" value={autostart} onChange={(e) => setAutostart(e.target.value as any)}>
-            <option value="none">Do not autostart</option>
-            <option value="client">Autostart in browser</option>
-            <option value="server">Autostart on server</option>
-          </select>
-        </div>
+        {runMode === 'internal' && (
+          <div>
+            <label className="block text-sm text-slate-700 mb-1">Autostart Agents</label>
+            <select className="w-full border rounded px-3 py-2" value={autostart} onChange={(e) => setAutostart(e.target.value as any)}>
+              <option value="none">Do not autostart</option>
+              <option value="client">Autostart in browser</option>
+              <option value="server">Autostart on server</option>
+            </select>
+          </div>
+        )}
 
         <div className="pt-2">
           {runMode === 'internal' ? (
-            <button className="w-full bg-blue-600 text-white rounded px-3 py-2 hover:bg-blue-700" onClick={continueInternal}>Continue to Run Configuration</button>
+            <button className="w-full bg-blue-600 text-white rounded px-3 py-2 hover:bg-blue-700" onClick={continueInternal}>Start Conversation</button>
           ) : (
             <button className="w-full bg-blue-600 text-white rounded px-3 py-2 hover:bg-blue-700" onClick={continuePlugin}>Continue to Plugin Configuration</button>
           )}
@@ -196,4 +212,25 @@ export function ScenarioRunPage() {
       </div>
     </div>
   );
+}
+
+// Lightweight helper using the same WS JSON-RPC pattern as elsewhere in this app
+async function apiCallCreateConversation(params: any): Promise<{ conversationId: number }> {
+  return new Promise((resolve, reject) => {
+    const API_BASE: string =
+      (typeof window !== 'undefined' && (window as any).__APP_CONFIG__?.API_BASE) ||
+      'http://localhost:3000/api';
+    const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws';
+    const ws = new WebSocket(wsUrl);
+    const id = crypto.randomUUID();
+    ws.onopen = () => ws.send(JSON.stringify({ jsonrpc: '2.0', id, method: 'createConversation', params }));
+    ws.onmessage = (evt) => {
+      const msg = JSON.parse(String(evt.data));
+      if (msg.id !== id) return;
+      ws.close();
+      if (msg.error) reject(new Error(msg.error.message));
+      else resolve(msg.result as { conversationId: number });
+    };
+    ws.onerror = (e) => reject(e);
+  });
 }

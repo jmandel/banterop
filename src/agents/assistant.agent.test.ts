@@ -22,6 +22,7 @@ describe('AssistantAgent', () => {
       conversation: conversationId,
       seq,
       nextAgentId: agentId,
+      kind: 'start_turn',
       deadlineMs: 30000
     };
     

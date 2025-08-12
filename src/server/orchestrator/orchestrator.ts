@@ -21,12 +21,14 @@ export class OrchestratorService {
   private bus: SubscriptionBus;
   private policy: SchedulePolicy;
   private isShuttingDown = false;
+  private maxTurnsDefault: number;
   // Heartbeat removed; guidance is event-driven (on create and on turn completion)
 
   constructor(storage: Storage, bus?: SubscriptionBus, policy?: SchedulePolicy, _cfg?: OrchestratorConfig) {
     this.storage = storage;
     this.bus = bus ?? new SubscriptionBus();
     this.policy = policy ?? new StrictAlternationPolicy();
+    this.maxTurnsDefault = _cfg?.maxTurnsDefault ?? 40;
     
     // Heartbeat disabled: guidance is event-driven (on create and on turn completion)
   }
@@ -252,6 +254,7 @@ export class OrchestratorService {
             conversation: conversationId,
             seq: 0.1, // Initial guidance gets a fractional seq
             nextAgentId: startingAgent.id,
+            kind: 'start_turn',
             deadlineMs: Date.now() + 30000,
           };
           
@@ -347,6 +350,7 @@ export class OrchestratorService {
         conversation: conversationId,
         nextAgentId: starting,
         seq: 0.1,
+        kind: 'start_turn',
         deadlineMs: Date.now() + 30000,
       };
       this.bus.publishGuidance(guidanceEvent);
@@ -360,6 +364,37 @@ export class OrchestratorService {
   private onEventAppended(e: UnifiedEvent) {
     // Only react to message finality changes
     if (e.type === 'message' && (e.finality === 'turn' || e.finality === 'conversation')) {
+      // Enforce max turns after a turn is closed
+      if (e.finality === 'turn' && e.turn > 0) {
+        try {
+          const convo = this.storage.conversations.getWithMetadata(e.conversation);
+          const meta = convo?.metadata as any;
+          let maxTurns: number | undefined = undefined;
+          const conf = meta?.config;
+          if (conf && typeof conf === 'object' && conf.maxTurns !== undefined) {
+            const v = Number(conf.maxTurns);
+            if (Number.isFinite(v) && v > 0) maxTurns = Math.floor(v);
+          }
+          if (!maxTurns) maxTurns = this.maxTurnsDefault;
+          if (maxTurns && e.turn >= maxTurns) {
+            // Append a system-authored message to close the conversation
+            this.appendEvent<import('$src/types/event.types').MessagePayload>({
+              conversation: e.conversation,
+              type: 'message',
+              payload: {
+                text: `Auto-closed: reached maxTurns=${maxTurns}.`,
+                outcome: { status: 'neutral', reason: 'max_turns' },
+              },
+              finality: 'conversation',
+              agentId: 'system-orchestrator',
+            });
+            return; // no further scheduling once conversation is closed
+          }
+        } catch (err) {
+          // Best-effort; don't derail normal flow if this fails
+          console.error('[orchestrator] maxTurns enforcement error', err);
+        }
+      }
       // Get policy decision
       const decision = this.policy.decide({
         snapshot: this.getConversationSnapshot(e.conversation),
@@ -377,6 +412,7 @@ export class OrchestratorService {
               conversation: e.conversation,
               seq: e.seq + 0.1, // Fractional seq for ordering
               nextAgentId,
+              kind: 'start_turn',
               deadlineMs: 30000,
             };
             this.bus.publishGuidance(guidanceEvent);

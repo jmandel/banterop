@@ -25,6 +25,8 @@ export interface OrchestratorConfig {
   idleTurnMs?: number; // optional watchdog for open turns
   // When true, disables the guidance heartbeat timer (useful in tests)
   disableHeartbeat?: boolean;
+  // Max turns per conversation if not overridden in metadata.config.maxTurns
+  maxTurnsDefault?: number;
 }
 
 export interface SchedulePolicyInput {
@@ -46,5 +48,9 @@ export interface GuidanceEvent {
   conversation: number;
   seq: number; // Monotone cursor (can be fractional)
   nextAgentId: string;
+  // start_turn: begin the next turn (no open turn currently)
+  // continue_turn: continue the currently open turn (owned by nextAgentId)
+  kind: 'start_turn' | 'continue_turn';
   deadlineMs?: number;
+  turn?: number; // optional, current or next turn number
 }
