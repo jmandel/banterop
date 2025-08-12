@@ -116,7 +116,7 @@ See `src/cli/demo-browserside-scenario.ts` for a client-managed example.
 - **Scenario**: Playbook for a simulated world with roles & goals.
 - **Tool Synthesis**: Oracle‑driven plausible action results.
 - **Immutable Event Log**: Replayable record of all events.
-- **Guidance Scheduling**: Orchestrator emits guidance(nextAgentId); CAS preconditions ensure safe turn opens.
+- **Guidance Scheduling**: Orchestrator evaluates policy and emits guidance with kind: `start_turn` or `continue_turn`. Agents act only on guidance; no local alternation.
 - **Attachment Handling**: Store/reuse large or structured artifacts.
 - **Pluggable Scheduling**: Choose who speaks next.
 - **CLI Demos**: Watch or run simulations locally.
@@ -161,9 +161,12 @@ Simulates tool/API calls:
 ### 4. Orchestrator
 
 Keeps order:
-- Emits `guidance` naming next agent.
-- Agents open new turns by posting a `message` or `trace`; when opening, clients should respect a CAS precondition (`lastClosedSeq`) to avoid races.
-- Policies choose the next agent; guidance may be emitted after a turn-ending message.
+- Evaluates scheduling policy (default: strict alternation) and emits `guidance` with a `kind`:
+  - `start_turn`: begin the next turn (no open turn exists)
+  - `continue_turn`: continue the currently open turn (owned by the target agent)
+- Pushes guidance when it matters (conversation creation with starter, or when a `message` closes a turn).
+- On subscribe with `includeGuidance=true`, pushes a one-shot guidance snapshot so agents know what to do immediately.
+- Agents open or continue turns by posting a `message` or `trace`. Only `message` can close a turn (finality=`turn` or `conversation`).
 
 ---
 
@@ -184,7 +187,20 @@ Store large or structured content once, reference via `docId`.
 
 ### 7. Guidance & Turn Safety
 
-The orchestrator coordinates turns by emitting `guidance` events that name the suggested next agent. Turn validation happens server‑side; clients do not need client‑side CAS. For resilience, agents use restart recovery: if they rejoin mid‑turn, they first send `clearTurn`, then proceed as if starting the turn fresh.
+The orchestrator is the single source of truth for scheduling. Guidance is policy output; agents do not infer policy.
+
+- Guidance kinds:
+  - `start_turn`: “Begin the next turn.” Emitted when there is no open turn (e.g., after a turn‑closing message or at conversation creation for the starter).
+  - `continue_turn`: “Continue the open turn you own.” Emitted when a turn is open and owned by the target agent (e.g., on subscribe/reconnect).
+- Push and pull:
+  - Push: guidance is emitted at conversation creation (if `startingAgentId`) and when a message closes a turn.
+  - Pull: `subscribe(..., includeGuidance=true)` yields a one‑shot guidance snapshot so agents can act immediately on startup/reconnect.
+- Turn semantics:
+  - Traces can open and continue a turn; only messages can close a turn.
+  - Exactly one open non‑system turn exists at a time.
+- Agent contract:
+  - Act only on guidance (no local alternation). If `continue_turn` is received after a restart, agents may resume or explicitly `clearTurn` then start, based on their `turnRecoveryMode`.
+  - Never act after finality=`conversation`.
 
 ---
 
@@ -303,6 +319,7 @@ bun run dev              # API + WS (PORT or 3000)
 ```
 
 Optional:
+- `bun run dev:fullstack` — serves HTML routes at `/` and API at `/api` on one port
 - `bun run dev:frontend` — serves watch UI at http://localhost:3001 (reads WS from 3000)
 - `bun test` / `bun run test:watch` — run tests
 - `bun run typecheck` — strict TypeScript checks
@@ -412,9 +429,9 @@ Methods (subset):
 
 Notifications:
 - `event` — unified event
-- `guidance` — transient scheduling hints
+- `guidance` — scheduling hints with `kind: 'start_turn' | 'continue_turn'`
 
-CAS: When opening a new turn, internal clients include a CAS precondition (`lastClosedSeq`). External clients can follow the same pattern using `getConversation` and `getEventsPage` to derive state.
+CAS: Turn validation is enforced server‑side. Clients typically do not need client‑side CAS beyond following guidance. Advanced clients may still use `lastClosedSeq` as a precaution when opening new turns.
 
 ## 🗂️ Data Model Notes
 

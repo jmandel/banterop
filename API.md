@@ -13,7 +13,7 @@ Control vs Data Plane
   - WS: `createConversation`, `getConversation`, `ensureAgentsRunningOnServer`, `stopAgentsOnServer`.
   - REST: `/api/conversations` (list), `/api/scenarios/*` (CRUD), `/api/attachments/*` (fetch).
 
-- Data Plane (agents talk): Append messages/traces and observe events. Used by transports (`WsTransport`, `InProcessTransport`). Strict alternation is enforced server‑side; agents use restart recovery (`clearTurn`) to safely rejoin mid‑turn.
+ - Data Plane (agents talk): Append messages/traces and observe events. Used by transports (`WsTransport`, `InProcessTransport`). The orchestrator evaluates scheduling policy and emits guidance with a `kind` (`start_turn` or `continue_turn`). Agents act only on guidance and may use `clearTurn` to restart an open turn they own when recovering.
   - WS: `sendMessage`, `sendTrace`, `subscribe`, `unsubscribe`, `getEventsPage`, and `clearTurn`.
 
 See README.md for more on recovery semantics and launch recipes.
@@ -101,7 +101,11 @@ WebSocket JSON‑RPC API (`/api/ws`)
   - `subscribe`
     - Params: `{ conversationId: number, includeGuidance?: boolean, filters?: { types?: Array<'message'|'trace'|'system'>, agents?: string[] }, sinceSeq?: number }`
     - Result: `{ subId: string }`
-    - Behavior: Emits `'event'` and `'guidance'` notifications; if `sinceSeq` provided, replays backlog since that cursor (filtered).
+    - Behavior: Emits `'event'` and `'guidance'` notifications; if `sinceSeq` provided, replays backlog since that cursor (filtered). If `includeGuidance=true`, the server also emits a one‑shot initial guidance snapshot:
+      - If there’s an open turn → `continue_turn` for the current owner.
+      - Else if no messages but `startingAgentId` → `start_turn` to the starter.
+      - Else if the last message closed a turn → `start_turn` to the next agent per policy.
+      - Else (conversation completed) → no guidance.
 
   - `unsubscribe`
     - Params: `{ subId: string }`
@@ -136,7 +140,7 @@ WebSocket JSON‑RPC API (`/api/ws`)
 
 - Notifications (push)
   - `event`: `UnifiedEvent`
-  - `guidance`: `GuidanceEvent`
+  - `guidance`: `GuidanceEvent` (see shape below)
   - `conversation`: `{ conversationId: number }`
 
 - Error mapping
@@ -151,7 +155,17 @@ Types (key shapes)
 - `UnifiedEvent`
   - `{ conversation, turn, event, type: 'message'|'trace'|'system', payload, finality, ts, agentId, seq }`
 - `GuidanceEvent`
-  - `{ type: 'guidance', conversation, seq, nextAgentId, deadlineMs? }`
+  - `{ type: 'guidance', conversation, seq, nextAgentId, kind: 'start_turn'|'continue_turn', turn?: number, deadlineMs? }`
+
+Guidance semantics
+- Push:
+  - On conversation creation with `startingAgentId`: emit `start_turn` for the starter.
+  - On `message` with `finality='turn'`: emit `start_turn` for the next agent per policy.
+- Pull (subscribe):
+  - With `includeGuidance=true`, emit a one‑shot guidance snapshot as described above so clients can act immediately.
+- Turn rules:
+  - Traces can open and continue a turn.
+  - Only messages can close a turn (`finality in {'turn','conversation'}`).
 - `ConversationMeta` / `CreateConversationRequest`
   - `{ meta: { title?, description?, scenarioId?, agents: AgentMeta[], startingAgentId?, config?, custom?, metaVersion? } }`
 - `ConversationSnapshot`

@@ -7,6 +7,7 @@ import { createConversationRoutes } from './routes/conversations.http';
 import { createAttachmentRoutes } from './routes/attachments.http';
 import { createLLMRoutes } from './routes/llm.http';
 import { createBridgeRoutes } from './routes/bridge.mcp';
+import { createDebugRoutes } from './routes/debug/index';
 
 // Create singleton app instance
 const appInstance = new App();
@@ -36,6 +37,9 @@ server.route('/api', createLLMRoutes(appInstance.llmProviderManager));
 
 // Optional: MCP bridge under /api/bridge/:config64/mcp
 server.route('/api/bridge', createBridgeRoutes(appInstance.orchestrator, appInstance.llmProviderManager));
+
+// Debug API (read-only) under /api/debug
+server.route('/api/debug', createDebugRoutes(appInstance.orchestrator));
 
 // WS: JSON-RPC under /api/ws (already configured in createWebSocketServer)
 server.route('/', createWebSocketServer(appInstance.orchestrator, appInstance.agentHost));

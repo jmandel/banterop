@@ -40,8 +40,11 @@ export const api = {
   },
 
   async updateScenarioConfig(id: string, config: any) {
-    const item = await http<any>(`/scenarios/${encodeURIComponent(id)}/config`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config)
+    // Server supports PUT /scenarios/:id with { name?, config? }
+    const item = await http<any>(`/scenarios/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config })
     });
     return { success: true, data: item };
   },
@@ -63,4 +66,3 @@ export const api = {
     return { success: true, data: { providers } };
   }
 };
-

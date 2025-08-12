@@ -26,6 +26,7 @@ describe('ScenarioDrivenAgent', () => {
       conversation: conversationId,
       seq,
       nextAgentId: agentId,
+      kind: 'start_turn',
       deadlineMs: 30000
     };
     
@@ -355,6 +356,7 @@ describe('ScenarioDrivenAgent', () => {
       conversation: 1,
       seq: 1.1,
       nextAgentId: 'unknown-agent',
+      kind: 'start_turn',
       deadlineMs: 30000
     };
     

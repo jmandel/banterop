@@ -10,6 +10,7 @@ const ConfigSchema = z.object({
   
   // Orchestrator
   idleTurnMs: z.number().int().positive().default(120_000),
+  maxTurnsDefault: z.number().int().positive().default(40),
   
   // LLM Providers
   googleApiKey: z.string().optional(),
@@ -40,6 +41,7 @@ export class ConfigManager {
       
       // Orchestrator
       idleTurnMs: process.env.IDLE_TURN_MS ? Number(process.env.IDLE_TURN_MS) : undefined,
+      maxTurnsDefault: process.env.MAX_TURNS_DEFAULT ? Number(process.env.MAX_TURNS_DEFAULT) : undefined,
       
       // LLM Providers
       googleApiKey: process.env.GEMINI_API_KEY,
@@ -94,6 +96,7 @@ export class ConfigManager {
   get orchestratorConfig() {
     return {
       idleTurnMs: this.config.idleTurnMs,
+      maxTurnsDefault: this.config.maxTurnsDefault,
       // Disable heartbeat in tests to avoid timer/teardown races
       disableHeartbeat: this.config.nodeEnv === 'test',
     };
