@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { LLMProviderManager } from '$src/llm/provider-manager';
 import type { LLMRequest, LLMResponse, SupportedProvider } from '$src/types/llm.types';
+import { existsSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 const LLMMessageSchema = z.object({
   role: z.enum(['system', 'user', 'assistant']),
@@ -63,7 +65,30 @@ export function createLLMRoutes(pm: LLMProviderManager) {
         ...(input.tools ? { tools: input.tools } : {}),
       };
 
+      // Optional debug logging of request/response to files
+      const debugFlag = (process.env.DEBUG_LLM_REQUESTS || '').toString().trim();
+      const debugEnabled = debugFlag && !/^0|false|off$/i.test(debugFlag);
+      let basePath: string | null = null;
+      if (debugEnabled) {
+        const debugDir = process.env.LLM_DEBUG_DIR || '/data/llm-debug';
+        if (!existsSync(debugDir)) {
+          try { mkdirSync(debugDir, { recursive: true }); } catch {}
+        }
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const rand = Math.random().toString(36).slice(2, 8);
+        basePath = join(debugDir, `${stamp}-${rand}`);
+        const reqText = (input.messages || [])
+          .map((m) => `${m.role}:\n${m.content}`)
+          .join('\n\n');
+        try { await Bun.write(`${basePath}.request.txt`, reqText); } catch {}
+      }
+
       const result: LLMResponse = await provider.complete(req);
+
+      if (debugEnabled && basePath) {
+        const resText = (result?.content ?? '').toString();
+        try { await Bun.write(`${basePath}.response.txt`, resText); } catch {}
+      }
       return c.json(result, 200);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Provider error';
