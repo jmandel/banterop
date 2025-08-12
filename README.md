@@ -464,9 +464,12 @@ CAS: Turn validation is enforced server‑side. Clients typically do not need cl
 
 - Bridge endpoint: `/api/bridge/:config64/mcp` where `config64` is base64url‑encoded ConversationMeta.
 - Diagnostic: `/api/bridge/:config64/mcp/diag` echoes parsed meta.
-- Tools: `begin_chat_thread`, `send_message_to_chat_thread`, `get_updates`.
-  - conversationId is string on the wire.
-  - get_updates returns messages only; attachments are inlined with content.
+- Tools (server‑mode):
+  - `begin_chat_thread`: Creates a local conversation from the template and ensures internal agents on the server via the runner registry (survives restarts). Returns `{ conversationId: string }`.
+  - `send_message_to_chat_thread`: Send‑only. Inputs `{ conversationId, message, attachments? }`. Returns `{ ok: true, guidance, status: 'waiting' }` — guidance instructs to call `check_replies` (e.g., `waitMs=10000`).
+  - `check_replies`: Long‑polling replies since your last external message. Inputs `{ conversationId, waitMs=10000 }`. Returns `{ messages, guidance, status, conversation_ended }`.
+- Discovery: conversations created by the bridge are stamped with `metadata.custom.bridgeConfig64Hash = base64url(sha256(config64))` so UIs can match existing and new conversations to a template.
+- Wire types: `conversationId` is a string on the wire.
 
 ## 📝 TODO / Future Improvements
 

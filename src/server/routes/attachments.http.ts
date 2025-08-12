@@ -15,7 +15,10 @@ export function createAttachmentRoutes(orchestrator: OrchestratorService) {
     const id = c.req.param('id');
     const attachment = orchestrator.getAttachment(id);
     if (!attachment) return c.json({ error: 'Attachment not found' }, 404);
-    c.header('Content-Type', attachment.contentType);
+    // For now, always serve attachment content as plain text since content is modeled as plaintext
+    // Preserve the original declared content type for diagnostics
+    c.header('Content-Type', 'text/plain; charset=utf-8');
+    c.header('X-Original-Content-Type', attachment.contentType);
     c.header('Content-Disposition', `inline; filename="${attachment.name}"`);
     return c.body(attachment.content);
   });

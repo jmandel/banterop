@@ -15,6 +15,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod';
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
 import type { LLMProviderManager } from '$src/llm/provider-manager';
+import type { RunnerRegistry } from '$src/server/runner-registry';
 import type { UnifiedEvent } from '$src/types/event.types';
 import type { AgentMeta } from '$src/types/conversation.meta';
 import {
@@ -29,6 +30,7 @@ export interface McpBridgeDeps {
   orchestrator: OrchestratorService;
   providerManager: LLMProviderManager;
   replyTimeoutMs?: number;
+  runnerRegistry: RunnerRegistry;
 }
 
 export class McpBridgeServer {
@@ -59,11 +61,10 @@ export class McpBridgeServer {
     const s = new McpServer({ name: 'lfi-mcp-bridge', version: '1.0.0' });
     const toolDoc = this.buildToolDescription(convMeta);
 
-    // begin_chat_thread: no idempotency; returns { conversationId: string, nextSeq: number }
+    // begin_chat_thread: no idempotency; returns { conversationId: string }
     s.registerTool('begin_chat_thread', { inputSchema: {}, description: toolDoc.begin }, async () => {
       const conversationId = await this.beginChatThread(convMeta);
-      const nextSeq = this.getNextSeq(conversationId);
-      return { content: [{ type: 'text', text: JSON.stringify({ conversationId: String(conversationId), nextSeq }) }] };
+      return { content: [{ type: 'text', text: JSON.stringify({ conversationId: String(conversationId) }) }] };
     });
 
     // send_message_to_chat_thread: post message and opportunistically return reply events
@@ -100,31 +101,33 @@ export class McpBridgeServer {
           'turn'
         );
 
-        // Opportunistic wait for a reply from counterparty and return events
-        const startSeq = this.getNextSeq(conversationId);
-        const events = await this.waitForNewMessageEvents({ conversationId, sinceSeq: startSeq, excludeAgentId: startingId });
-        const nextSeq = this.getNextSeq(conversationId);
-        return { content: [{ type: 'text', text: JSON.stringify({ events, nextSeq, stillWorking: events.length === 0 }) }] };
+        // Send-only: no polling here; advise caller to check for replies next
+        const guidance = 'Message sent. Check for replies by calling check_replies (waitMs=10000 recommended).';
+        const status: 'waiting' = 'waiting';
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: true, guidance, status }) }] };
       }
     );
 
     // get_updates: messages-only; expand attachments inline
+    // Removed get_updates: callers should use check_replies for a simplified view
+
+    // Convenience: check_replies returns only simplified messages since the last external message
     s.registerTool(
-      'get_updates',
-      { inputSchema: { conversationId: z.string(), sinceSeq: z.number().default(0), max: z.number().default(200), waitMs: z.number().default(0) }, description: toolDoc.updates },
+      'check_replies',
+      { inputSchema: { conversationId: z.string(), waitMs: z.number().default(10000), max: z.number().default(200) }, description: 'Return simplified replies since the last external message.' },
       async (params: any) => {
         const conversationId = Number(params?.conversationId);
-        const sinceSeq = Number(params?.sinceSeq ?? 0);
+        const waitMs = Number(params?.waitMs ?? 10000);
         const max = Number(params?.max ?? 200);
-        const waitMs = Number(params?.waitMs ?? 0);
 
-        const events = await this.getMessageEvents({ conversationId, sinceSeq, max, waitMs });
-        const nextSeq = this.getNextSeq(conversationId);
-
-        // Guidance and status computation
-        const snapshot = this.deps.orchestrator.getConversationSnapshot(conversationId, { includeScenario: false });
         const convMeta = parseConversationMetaFromConfig64(this.config64);
-        const externalId = getStartingAgentId(convMeta);
+        const external = getStartingAgentId(convMeta);
+        const boundarySeq = this.getLastExternalMessageSeq(conversationId, external);
+        const events = await this.getMessageEvents({ conversationId, sinceSeq: boundarySeq, max, waitMs });
+        const filtered = events.filter(e => e.agentId !== external);
+        const simplified = await this.simplifyMessages(conversationId, filtered, external);
+        // Guidance / status / ended
+        const snapshot = this.deps.orchestrator.getConversationSnapshot(conversationId, { includeScenario: false });
         const msgs = (snapshot.events || []).filter((e: any) => e.type === 'message');
         const last = msgs.length ? msgs[msgs.length - 1] : null;
         const ended = snapshot.status === 'completed' || (last && last.finality === 'conversation');
@@ -134,36 +137,38 @@ export class McpBridgeServer {
         if (ended) {
           guidance = 'Conversation ended. No further input is expected.';
         } else if (!last) {
-          // No messages yet: whoever is starting should speak
-          if (externalId) {
-            status = 'input_required';
-            guidance = `It\'s your turn to begin as ${externalId}.`;
-          } else {
-            guidance = 'Waiting for the first message.';
-          }
+          status = 'input_required';
+          guidance = `It\'s your turn to begin as ${external}.`;
         } else if (last.finality === 'turn') {
-          // A turn just completed; if the last speaker was not the external client, it is the client\'s turn
-          if (last.agentId !== externalId) {
+          if (last.agentId !== external) {
             status = 'input_required';
-            guidance = 'Counterparty finished a turn. It\'s your turn to respond.';
+            guidance = `Agent ${last.agentId} finished a turn. It\'s your turn to respond.`;
           } else {
-            guidance = 'You finished a turn. Waiting for the counterparty to respond.';
+            const others = (convMeta.agents || []).map(a => a.id).filter(id => id !== external);
+            const target = others.length === 1 ? `agent ${others[0]}` : `agents ${others.join(', ')}`;
+            guidance = `You finished a turn. Waiting for ${target} to respond.`;
           }
         } else {
-          // Turn in progress – wait
-          if (last.agentId === externalId) {
+          if (last.agentId === external) {
             guidance = 'You have an in‑progress turn. Finish or wait for reply.';
           } else {
-            guidance = 'Counterparty is composing. Waiting for the other party to finish.';
+            guidance = `Agent ${last.agentId} is composing. Waiting for them to finish.`;
           }
         }
 
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({ events, nextSeq, guidance, status, conversation_ended: ended })
-          }]
-        };
+        // Add an explicit instruction for polling when we are waiting
+        if (!ended && status === 'waiting') {
+          guidance += ' Keep checking for replies (call check_replies again).';
+        }
+
+        // Return only messages + guidance/status/ended per spec (no threadText/nextSeq)
+        // Avoid confusing states: if no new replies detected, report waiting
+        if (!ended && simplified.messages.length === 0) {
+          status = 'waiting';
+          guidance = 'No new replies yet. Keep checking for replies (call check_replies again).';
+        }
+
+        return { content: [{ type: 'text', text: JSON.stringify({ messages: simplified.messages, guidance, status, conversation_ended: ended }) }] };
       }
     );
 
@@ -204,7 +209,7 @@ export class McpBridgeServer {
    * The external agent (startingAgentId) will kick off by sending the first message.
    */
   private async beginChatThread(meta: ConvConversationMeta): Promise<number> {
-    const { orchestrator, providerManager } = this.deps;
+    const { orchestrator } = this.deps;
     // Stable template-derived hash for matching: base64url(sha256(config64))
     const bridgeConfig64Hash = await this.sha256Base64Url(this.config64);
 
@@ -237,15 +242,12 @@ export class McpBridgeServer {
       },
     });
 
-    // Start internal agents only (exclude the external/MCP agent)
+    // Start internal agents only (exclude the external/MCP agent) and PERSIST in runner registry
     const startingId = getStartingAgentId(meta);
     const internalIds = agents.map(a => a.id).filter(id => id !== startingId);
-    await startAgents({
-      conversationId,
-      transport: new InProcessTransport(orchestrator),
-      providerManager,
-      agentIds: internalIds,
-    });
+    if (internalIds.length > 0) {
+      await this.deps.runnerRegistry.ensureAgentsRunningOnServer(conversationId, internalIds);
+    }
 
     return conversationId;
   }
@@ -310,6 +312,13 @@ export class McpBridgeServer {
     const { orchestrator } = this.deps;
     const { conversationId, sinceSeq, max, waitMs } = params;
     const fetchNow = () => orchestrator.getEventsPage(conversationId, sinceSeq, max).filter((e) => e.type === 'message');
+
+    // If there are already messages since sinceSeq, return immediately (no wait)
+    const existing = fetchNow();
+    if (existing.length > 0) {
+      return await this.expandAttachmentsInline(existing);
+    }
+
     if (waitMs > 0) {
       // Long-poll for any new message event
       let subId: string | undefined;
@@ -331,10 +340,61 @@ export class McpBridgeServer {
           resolve(false);
         }, waitMs);
       });
-      if (!got) return [];
+      if (!got) {
+        // No new events during wait; return any that might have arrived and were missed in the quick check
+        const afterWait = fetchNow();
+        return await this.expandAttachmentsInline(afterWait);
+      }
     }
     const msgs = fetchNow();
     return await this.expandAttachmentsInline(msgs);
+  }
+
+  // Compute the sequence number of the last message authored by the external (bridged) agent
+  private getLastExternalMessageSeq(conversationId: number, externalAgentId: string): number {
+    const all = this.deps.orchestrator.getEventsPage(conversationId, undefined, 1_000_000);
+    let last = 0;
+    for (const e of all) {
+      if (e.type === 'message' && e.agentId === externalAgentId) last = e.seq;
+    }
+    return last;
+  }
+
+  // Produce a simplified representation of messages and an email-like aggregate text
+  private async simplifyMessages(conversationId: number, events: UnifiedEvent[], externalAgentId: string): Promise<{ messages: Array<{ from: string; at: string; text: string; attachments?: Array<{ name: string; contentType: string; summary?: string; docId?: string }> }>; threadText: string }>{
+    // Expand attachments inline (content is not included in simplified list to keep it concise)
+    const expanded = await this.expandAttachmentsInline(events);
+    const messages = expanded
+      .filter(e => e.type === 'message')
+      .map(e => {
+        const payload: any = e.payload || {};
+        const atts = Array.isArray(payload.attachments) ? payload.attachments : [];
+        return {
+          from: e.agentId,
+          at: e.ts,
+          text: String(payload.text ?? ''),
+          attachments: atts.map((a: any) => ({ name: a.name, contentType: a.contentType, ...(a.summary ? { summary: a.summary } : {}), ...(a.docId ? { docId: a.docId } : {} ) }))
+        };
+      });
+    const parts: string[] = [];
+    for (const m of messages) {
+      parts.push(`From: ${m.from}`);
+      parts.push(`Time: ${m.at}`);
+      parts.push('');
+      parts.push(m.text);
+      if (m.attachments && m.attachments.length) {
+        parts.push('');
+        parts.push('Attachments:');
+        for (const att of m.attachments) {
+          const bits = [att.name, `(${att.contentType})`];
+          if (att.summary) bits.push(`- ${att.summary}`);
+          parts.push(`- ${bits.join(' ')}`);
+        }
+      }
+      parts.push('\n---');
+    }
+    const threadText = parts.join('\n');
+    return { messages, threadText };
   }
 
   private async expandAttachmentsInline(events: UnifiedEvent[]): Promise<UnifiedEvent[]> {

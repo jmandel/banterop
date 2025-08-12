@@ -67,12 +67,25 @@ REST API
 
 - MCP Bridge (HTTP JSON‑RPC under REST base)
   - ALL `/api/bridge/:config64/mcp`
-    - Purpose: MCP‑compatible bridge endpoint; routes MCP tools into a conversation orchestrated locally.
-    - `:config64` is a base64url‑encoded ConversationMeta; see `src/server/bridge/conv-config.types.ts` for structure.
-    - Tools: `begin_chat_thread`, `send_message_to_chat_thread`, `get_updates` (see `src/server/bridge/mcp-server.ts`).
-      - Wire types: `conversationId` is a string on the wire (numeric id serialized to string).
-      - Envelopes: JSON‑RPC result contains `content[0].text` with a JSON string payload.
-      - `get_updates`: returns messages only (not traces/system) with inline attachments `{ id, name, contentType, content, summary?, docId? }`.
+    - Purpose: MCP‑compatible bridge endpoint using base64url ConversationMeta templates.
+    - `:config64` is a base64url‑encoded ConversationMeta; see `src/server/bridge/conv-config.types.ts`.
+    - Tools (server mode):
+      - `begin_chat_thread`
+        - Action: Creates a local conversation from the template.
+        - Persistence: Ensures internal agents on the server via the runner registry so they survive restarts.
+        - Result: `{ conversationId: string }` (string id on the wire).
+      - `send_message_to_chat_thread`
+        - Input: `{ conversationId: string, message: string, attachments?: Array<{ name, contentType, content, summary?, docId? }> }`
+        - Action: Posts a message as the external client.
+        - Result: `{ ok: true, guidance: string, status: 'waiting' }` — return advises to call `check_replies` (e.g., with `waitMs=10000`).
+      - `check_replies`
+        - Input: `{ conversationId: string, waitMs?: number (default 10000), max?: number (default 200) }`
+        - Action: Returns replies since your last external message (messages‑only view).
+        - Result: `{ messages: Array<{ from: string; at: ISOString; text: string; attachments?: Array<{ name: string; contentType: string; summary?: string; docId?: string }> }>, guidance: string, status: 'input_required'|'waiting', conversation_ended: boolean }`
+    - Notes:
+      - Wire type: `conversationId` is a string on the wire (numeric id serialized as string).
+      - Envelope: JSON‑RPC results place payload in `result.content[0].text` as JSON string.
+      - Discovery: conversations created by the bridge are stamped with `metadata.custom.bridgeConfig64Hash = base64url(sha256(config64))` for matching in UIs.
   - GET `/api/bridge/:config64/mcp/diag`
     - Purpose: Decode and inspect `config64` (diagnostics).
 

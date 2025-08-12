@@ -17,7 +17,7 @@ describe('MCP Bridge with ConversationMeta config (Phase 2)', () => {
   beforeAll(() => {
     app = new App({ dbPath: ':memory:' });
     const hono = new Hono();
-    hono.route('/api/bridge', createBridgeRoutes(app.orchestrator, app.llmProviderManager, 200)); // short timeout
+    hono.route('/api/bridge', createBridgeRoutes(app.orchestrator, app.llmProviderManager, app.runnerRegistry, 200)); // short timeout
     server = Bun.serve({ port: 0, fetch: hono.fetch, websocket });
     baseUrl = `http://localhost:${server.port}`;
   });
@@ -74,7 +74,7 @@ describe('MCP Bridge with ConversationMeta config (Phase 2)', () => {
     expect(typeof contentText).toBe('string');
     const result = JSON.parse(contentText);
     expect(typeof result.conversationId).toBe('string');
-    expect(typeof result.nextSeq).toBe('number');
+    // nextSeq removed from begin response; only conversationId is returned
     // The conversation ID should be a numeric string
     expect(Number(result.conversationId)).toBeGreaterThan(0);
     // The agents are started internally, which we can verify by the logs showing "START INTERNAL" for echo and assistant
@@ -116,11 +116,11 @@ describe('MCP Bridge with ConversationMeta config (Phase 2)', () => {
     
     const result = JSON.parse(json.result.content[0].text);
     expect(typeof result.conversationId).toBe('string');
-    expect(typeof result.nextSeq).toBe('number');
+    // nextSeq removed from begin response
     expect(Number(result.conversationId)).toBeGreaterThan(0);
   });
 
-  it('send_message_to_chat_thread and get_updates return message events', async () => {
+  it('send_message_to_chat_thread and check_replies return simplified messages', async () => {
     const configMeta = {
       title: 'Echo Test',
       startingAgentId: 'user',
@@ -152,27 +152,31 @@ describe('MCP Bridge with ConversationMeta config (Phase 2)', () => {
     const sendJson = await sendRes.json();
     if (sendJson.error) throw new Error(`send_message_to_chat_thread error: ${JSON.stringify(sendJson.error)}`);
     const send = JSON.parse(sendJson.result.content[0].text);
-    expect(typeof send.nextSeq).toBe('number');
+    expect(send.ok).toBe(true);
 
-    // Long-poll for updates since send
+    // Long-poll for replies since the last external message
     const updRes = await fetch(`${baseUrl}/api/bridge/${config64}/mcp`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'accept': 'application/json, text/event-stream' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 'u', method: 'tools/call', params: { name: 'get_updates', arguments: { conversationId: begin.conversationId, sinceSeq: send.nextSeq, waitMs: 2000 } } })
+      body: JSON.stringify({ jsonrpc: '2.0', id: 'u', method: 'tools/call', params: { name: 'check_replies', arguments: { conversationId: begin.conversationId, waitMs: 2000 } } })
     });
     const updJson = await updRes.json();
-    if (updJson.error) throw new Error(`get_updates error: ${JSON.stringify(updJson.error)}`);
+    if (updJson.error) throw new Error(`check_replies error: ${JSON.stringify(updJson.error)}`);
     const upd = JSON.parse(updJson.result.content[0].text);
-    expect(Array.isArray(upd.events)).toBe(true);
-    // Inline attachment should be present on our own message event
-    const anyOwn = upd.events.find((e: any) => e.type === 'message' && e.agentId === 'user');
-    if (anyOwn) {
-      const atts = anyOwn.payload?.attachments;
-      if (Array.isArray(atts) && atts.length > 0) {
-        expect(atts[0].name).toBe('note.txt');
-        expect(atts[0].contentType).toBe('text/plain');
-        expect(atts[0].content).toBe('hello doc');
+    expect(Array.isArray(upd.messages)).toBe(true);
+    // Simplified messages omit attachment content; ensure structure exists
+    if (upd.messages.length > 0) {
+      const m = upd.messages[0];
+      expect(typeof m.from).toBe('string');
+      expect(typeof m.at).toBe('string');
+      expect(typeof m.text).toBe('string');
+      if (Array.isArray(m.attachments) && m.attachments.length > 0) {
+        expect(typeof m.attachments[0].name).toBe('string');
+        expect(typeof m.attachments[0].contentType).toBe('string');
       }
+      expect(['input_required','waiting']).toContain(upd.status);
+      expect(typeof upd.guidance).toBe('string');
+      expect(typeof upd.conversation_ended).toBe('boolean');
     }
   });
 });
