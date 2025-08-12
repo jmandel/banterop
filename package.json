@@ -12,7 +12,9 @@
     "test": "bun test",
     "test:watch": "bun test --watch",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf data.db data.db-shm data.db-wal"
+    "clean": "rm -rf data.db data.db-shm data.db-wal public",
+    "build:frontend": "bun scripts/build-frontend.ts",
+    "start:prod": "bun src/prod/index.ts"
   },
   "dependencies": {
     "@google/genai": "^1.13.0",

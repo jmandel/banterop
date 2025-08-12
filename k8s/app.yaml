@@ -23,6 +23,8 @@ data:
   PORT: "3000"
   DB_PATH: "/data/data.db"
   DEFAULT_LLM_PROVIDER: "mock"
+    # Public config exported into built frontends at container startup
+    PUBLIC_API_BASE_URL: "https://chitchat.fhir.me/api"
   # DEFAULT_LLM_MODEL: "gemini-2.5-flash"  # optional
 ---
 apiVersion: v1

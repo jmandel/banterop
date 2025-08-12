@@ -9,6 +9,7 @@ RUN bun install --ci
 # Copy source
 COPY src ./src
 COPY tests ./tests
+COPY scripts ./scripts
 
 # Create non-root user (UID 10001) and switch
 # Create non-root user (Debian-compatible invocation)
@@ -25,7 +26,8 @@ EXPOSE 3000
 # Volume for SQLite persistence
 VOLUME ["/data"]
 
-# Start full-stack server (frontend + API under /api)
-CMD ["bun", "src/dev/index.ts"]
+# Build frontends and start prod server (static + API under /api)
+# Build frontends at container startup using env (PUBLIC_*), then start prod server
+CMD ["bun", "src/prod/index.ts"]
 
 
