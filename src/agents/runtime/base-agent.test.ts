@@ -75,31 +75,8 @@ describe('BaseAgent reconcile-first pattern', () => {
     eventListeners.forEach(listener => listener(guidance));
   };
 
-  describe('guidance handling during turn execution', () => {
-    it('should ignore guidance while actively executing a turn (inTurn=true)', async () => {
-      agent = new TestAgent(transport);
-      
-      // Setup initial snapshot
-      const snapshot = createSnapshot();
-      transport.getSnapshot.mockResolvedValue(snapshot);
-      
-      await agent.start(1, 'test-agent');
-      
-      // First guidance triggers turn
-      emitGuidance('test-agent', 1);
-      await new Promise(resolve => setTimeout(resolve, 5));
-      
-      expect(agent.takeTurnCalls).toHaveLength(1);
-      
-      // While turn is running, emit another guidance
-      emitGuidance('test-agent', 2);
-      await new Promise(resolve => setTimeout(resolve, 5));
-      
-      // Should still only have one turn call (ignored the second guidance)
-      expect(agent.takeTurnCalls).toHaveLength(1);
-      expect(transport.clearTurn).not.toHaveBeenCalled();
-    });
-  });
+  // Removed: orchestrator does not emit guidance mid-turn; base agent keeps only a single
+  // pending guidance slot and drops it if it just closed its own turn.
 
   describe('turn recovery modes', () => {
     it('should resume open turn with resume mode', async () => {

@@ -298,9 +298,19 @@ export class OrchestratorService {
 
   subscribe(conversation: number, listener: ((e: UnifiedEvent | GuidanceEvent) => void) | ((e: UnifiedEvent) => void), includeGuidance = false): string {
     const subId = this.bus.subscribe({ conversation }, listener as EventListener, includeGuidance);
-    
-    // Subscriptions deliver real-time events; guidance is emitted on create/turn-complete
-    
+
+    // If caller asked for guidance, emit a one-shot authoritative snapshot now
+    if (includeGuidance) {
+      try {
+        const g = this.getGuidanceSnapshot(conversation);
+        if (g) {
+          (listener as (e: UnifiedEvent | GuidanceEvent) => void)(g);
+        }
+      } catch {
+        // best-effort only
+      }
+    }
+
     return subId;
   }
 
@@ -310,11 +320,25 @@ export class OrchestratorService {
     listener: ((e: UnifiedEvent | GuidanceEvent) => void),
     includeGuidance = false
   ): string {
-    return this.bus.subscribe(
+    const subId = this.bus.subscribe(
       filter,
       listener as EventListener,
       includeGuidance
     );
+
+    // Emit one-shot guidance snapshot immediately if requested
+    if (includeGuidance && typeof filter.conversation === 'number' && filter.conversation >= 0) {
+      try {
+        const g = this.getGuidanceSnapshot(filter.conversation);
+        if (g) {
+          listener(g);
+        }
+      } catch {
+        // best-effort only
+      }
+    }
+
+    return subId;
   }
 
   // Optional: subscribe to all conversations (wildcard)
@@ -360,6 +384,83 @@ export class OrchestratorService {
   }
 
   // Internals
+
+  /**
+   * Compute the authoritative guidance snapshot for the given conversation
+   * at this instant. Returns null if completed or no guidance is applicable.
+   */
+  getGuidanceSnapshot(conversationId: number): GuidanceEvent | null {
+    const snap = this.getConversationSnapshot(conversationId, { includeScenario: true });
+    if (!snap || snap.status === 'completed') return null;
+
+    const events = snap.events || [];
+    const messages = events.filter((e) => e.type === 'message');
+
+    // No messages yet: if startingAgentId, kick off start_turn for turn 1
+    if (messages.length === 0) {
+      const startId = (snap.metadata as any)?.startingAgentId as string | undefined;
+      if (startId) {
+        return {
+          type: 'guidance',
+          conversation: conversationId,
+          nextAgentId: startId,
+          seq: 0.1,
+          kind: 'start_turn',
+          deadlineMs: Date.now() + 30000,
+          turn: 1,
+        };
+      }
+      return null;
+    }
+
+    // There are messages; look at the last one
+    const lastMsg = messages[messages.length - 1]!;
+
+    // If the last message closed a turn, ask policy who should start next
+    if (lastMsg.finality === 'turn') {
+      try {
+        const decision = this.policy.decide({ snapshot: snap, lastEvent: lastMsg });
+        if (decision.kind === 'agent' && decision.agentId) {
+          return {
+            type: 'guidance',
+            conversation: conversationId,
+            nextAgentId: decision.agentId,
+            seq: (lastMsg.seq ?? 0) + 0.1,
+            kind: 'start_turn',
+            deadlineMs: Date.now() + 30000,
+            turn: (lastMsg.turn ?? 0) + 1,
+          };
+        }
+      } catch {
+        // fall through
+      }
+      return null;
+    }
+
+    // Otherwise, the current turn is open; find the owner and emit continue_turn
+    let owner: string | undefined;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const ev = events[i];
+      if (!ev) continue;
+      if (ev.turn === lastMsg.turn && ev.type !== 'system') {
+        owner = ev.agentId;
+        break;
+      }
+    }
+    if (owner) {
+      return {
+        type: 'guidance',
+        conversation: conversationId,
+        nextAgentId: owner,
+        seq: (lastMsg.seq ?? 0) + 0.1,
+        kind: 'continue_turn',
+        deadlineMs: Date.now() + 30000,
+        turn: lastMsg.turn,
+      };
+    }
+
+    return null;
+  }
 
   private onEventAppended(e: UnifiedEvent) {
     // Only react to message finality changes

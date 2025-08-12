@@ -36,16 +36,10 @@ export class ScriptAgent extends BaseAgent {
       await sleep(script.defaultDelay);
     }
     
-    // Check if we've exceeded max turns
+    // Determine planned turns; do not auto-close conversation when script ends.
     const maxTurns = script.maxTurns ?? script.turns.length;
     if (this.turnCount > maxTurns) {
-      logLine(agentId, 'info', `Turn ${this.turnCount} exceeds max ${maxTurns}, ending conversation`);
-      await ctx.transport.postMessage({
-        conversationId: ctx.conversationId,
-        agentId,
-        text: 'Thank you for the conversation.',
-        finality: 'conversation'
-      });
+      logLine(agentId, 'info', `Turn ${this.turnCount} exceeds max ${maxTurns}, no actions (no auto-close)`);
       return;
     }
     
@@ -70,19 +64,7 @@ export class ScriptAgent extends BaseAgent {
       await this.executeStep(ctx, step);
     }
     
-    // If this is the last planned turn, end the conversation
-    if (this.turnCount === maxTurns && turnSteps.length > 0) {
-      const lastStep = turnSteps[turnSteps.length - 1];
-      if (lastStep && lastStep.kind === 'post' && lastStep.finality !== 'conversation') {
-        // Override finality to end conversation
-        await ctx.transport.postMessage({
-          conversationId: ctx.conversationId,
-          agentId,
-          text: 'Thank you for the discussion.',
-          finality: 'conversation'
-        });
-      }
-    }
+    // Do not auto-close on the last planned turn; rely on explicit script steps.
   }
   
   private async executeSimpleScript(ctx: TurnContext, script: AgentScript): Promise<void> {

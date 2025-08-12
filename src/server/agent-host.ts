@@ -34,7 +34,11 @@ export class AgentHost {
         turnRecoveryMode: 'restart',
       });
       this.byConversation.set(conversationId, handle);
-      console.log('[AgentHost] started', { conversationId, started: handle.agents.map(a => (a as any).id) });
+      console.log('[AgentHost] started', { conversationId, started: handle.agentsInfo.map(a => a.id) });
+
+      // Proactively nudge guidance for no-message conversations with startingAgentId
+      // Do this only once per actual start (not for concurrent ensure callers that awaited pending)
+      try { this.orch.pokeGuidance(conversationId); } catch {}
       return handle;
     })();
 
@@ -45,13 +49,12 @@ export class AgentHost {
       this.pending.delete(conversationId);
     }
 
-    // Proactively nudge guidance for no-message conversations with startingAgentId
-    try { (this.orch as any).pokeGuidance?.(conversationId); } catch {}
+    // Nudge already performed inside the single startPromise path
   }
 
   list(conversationId: number): Array<{ id: string; class?: string }> {
     const h = this.byConversation.get(conversationId);
-    if (h) return h.agents.map(a => ({ id: (a as any).id, class: (a as any).agentClass }));
+    if (h) return h.agentsInfo.map(a => ({ id: a.id, class: a.class }));
     // Fallback: if startup resume is in-flight, expose intended agents from runner_registry
     try {
       const rows = this.orch.storage.db

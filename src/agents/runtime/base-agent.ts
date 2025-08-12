@@ -24,6 +24,8 @@ export abstract class BaseAgent<TSnap = any> {
   private events: IAgentEvents | undefined;
   private inTurn = false;
   private lastProcessedClosedSeq = 0;
+  // Keep base agent simple: hold at most one pending guidance while in a turn
+  private pendingGuidance: GuidanceEvent | null = null;
   
   protected turnRecoveryMode: TurnRecoveryMode = 'resume';
 
@@ -98,11 +100,13 @@ export abstract class BaseAgent<TSnap = any> {
 
         // If we're currently in a turn, ignore guidance (we're already working)
         if (this.inTurn) {
-          logLine(agentId, 'debug', `Ignoring guidance - already in turn`);
+          // Save the latest guidance for after this turn completes
+          logLine(agentId, 'debug', `Saving guidance seq=${g.seq} to apply after turn`);
+          this.pendingGuidance = g;
           return;
         }
 
-        // Reconcile and maybe act
+        // Reconcile and maybe act now
         await this.reconcileAndMaybeAct(conversationId, agentId, g);
       }
     });
@@ -146,7 +150,7 @@ export abstract class BaseAgent<TSnap = any> {
     const { hasOpenTurn, ownerAgentId } = this.getCurrentTurnState(snap);
     logLine(agentId, 'reconcile', `hasOpenTurn=${hasOpenTurn}, owner=${ownerAgentId}`);
 
-    // Startup reconciliation: if no guidance but we own an open turn, act per recovery policy
+    // If no explicit guidance: only act if we own an open turn (startup recovery)
     if (!guidance) {
       if (hasOpenTurn && ownerAgentId === agentId) {
         const mode = typeof this.turnRecoveryMode === 'function' ? this.turnRecoveryMode(snapshot) : this.turnRecoveryMode;
@@ -208,6 +212,8 @@ export abstract class BaseAgent<TSnap = any> {
     }
   }
 
+  // No enqueue; base agent keeps reconciliation simple and synchronous
+
   private async startTurn(conversationId: number, agentId: string, guidance: GuidanceEvent | null): Promise<void> {
     logLine(agentId, 'startTurn', `Called with guidance seq: ${guidance?.seq || 'none'}, inTurn=${this.inTurn}`);
     if (this.inTurn) {
@@ -216,6 +222,7 @@ export abstract class BaseAgent<TSnap = any> {
     }
 
     this.inTurn = true;
+    const beforeClosed = ((this.liveSnapshot as any)?.lastClosedSeq ?? 0) as number;
     try {
       // Create turn context
       const ctx: TurnContext<TSnap> = {
@@ -236,6 +243,25 @@ export abstract class BaseAgent<TSnap = any> {
     } finally {
       this.inTurn = false;
       logLine(agentId, 'turn', 'Turn execution completed');
+      // If we received guidance for us while in the turn, act on it now
+      if (this.running && this.pendingGuidance) {
+        // If we just closed our own turn, drop stale mid-turn guidance for ourselves
+        const snap: any = this.liveSnapshot as any;
+        const msgs = (snap?.events || []).filter((e: any) => e.type === 'message');
+        const last = msgs.length ? msgs[msgs.length - 1] : null;
+        const shouldDrop = !!(last && last.agentId === agentId && last.finality === 'turn');
+        const g = this.pendingGuidance;
+        this.pendingGuidance = null;
+        if (!shouldDrop) {
+          try {
+            await this.reconcileAndMaybeAct(conversationId, agentId, g);
+          } catch (err) {
+            logLine(agentId, 'error', `Post-turn guidance reconcile error: ${err}`);
+          }
+        } else {
+          logLine(agentId, 'debug', 'Dropping pending mid-turn guidance as stale after closing our turn');
+        }
+      }
     }
   }
 
