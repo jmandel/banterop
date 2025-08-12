@@ -78,6 +78,10 @@ describe('BaseAgent reconcile-first pattern', () => {
   // Removed: orchestrator does not emit guidance mid-turn; base agent keeps only a single
   // pending guidance slot and drops it if it just closed its own turn.
 
+  // Note: We intentionally do not test mid-turn guidance behavior, since the orchestrator
+  // never emits guidance while a turn is in progress, and any pending guidance is best-effort
+  // timing-dependent. Deterministic guidance semantics are exercised in other tests.
+
   describe('turn recovery modes', () => {
     it('should resume open turn with resume mode', async () => {
       agent = new TestAgent(transport, { turnRecoveryMode: 'resume' });
