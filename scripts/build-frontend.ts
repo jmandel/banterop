@@ -95,7 +95,15 @@ export async function buildAllFrontends(apiBase: string) {
   // Copy a simple home landing page
   await ensureDir('public');
   const home = await Bun.file('src/dev/home.html').text();
-  await Bun.write('public/index.html', home.replace('Dev Home', 'Home').replace('Static frontends at "/" and API at "/api".', 'Static frontends at "/" and API at "/api".'));
+  const siteOrigin = apiBase.startsWith('http') ? apiBase.replace(/\/?api$/, '') : '';
+  const landing = home
+    .replace('Dev Home', 'Home')
+    .replace('Static frontends at "/" and API at "/api".', 'Static frontends at "/" and API at "/api".')
+    .replace(/href="\/scenarios"/g, `href="${siteOrigin}/scenarios/"`)
+    .replace(/href="\/watch"/g, `href="${siteOrigin}/watch/"`)
+    .replace(/href="\/launcher"/g, `href="${siteOrigin}/scenario-launcher/"`)
+    .replace(/href="\/frontends\/debug"/g, `href="${siteOrigin}/frontends/debug/"`);
+  await Bun.write('public/index.html', landing);
 
   for (const app of apps) {
     console.log('Building', app.outPath);

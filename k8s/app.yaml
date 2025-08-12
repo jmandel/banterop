@@ -23,8 +23,8 @@ data:
   PORT: "3000"
   DB_PATH: "/data/data.db"
   DEFAULT_LLM_PROVIDER: "mock"
-    # Public config exported into built frontends at container startup
-    PUBLIC_API_BASE_URL: "https://chitchat.fhir.me/api"
+  # Public config exported into built frontends at container startup
+  PUBLIC_API_BASE_URL: "https://chitchat.fhir.me/api"
   # DEFAULT_LLM_MODEL: "gemini-2.5-flash"  # optional
 ---
 apiVersion: v1
@@ -67,11 +67,21 @@ spec:
           ports:
             - containerPort: 3000
               name: http
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: public
+              mountPath: /app/public
           envFrom:
             - configMapRef:
                 name: app-config
             - secretRef:
                 name: app-secrets
+          env:
+            - name: DEBUG_LLM_REQUESTS
+              value: "0" # set to "1" or "true" to enable plain-text LLM request/response logs
+            - name: LLM_DEBUG_DIR
+              value: "/data/llm-debug"
           readinessProbe:
             httpGet:
               path: /api/health
@@ -84,13 +94,12 @@ spec:
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
-          volumeMounts:
-            - name: data
-              mountPath: /data
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: convo-db
+        - name: public
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

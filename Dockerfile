@@ -13,7 +13,9 @@ COPY scripts ./scripts
 
 # Create non-root user (UID 10001) and switch
 # Create non-root user (Debian-compatible invocation)
-RUN useradd -u 10001 -m appuser || adduser --disabled-password --gecos "" --uid 10001 appuser
+RUN useradd -u 10001 -m appuser || adduser --disabled-password --gecos "" --uid 10001 appuser \
+    && mkdir -p /app/public \
+    && chown -R 10001:10001 /app
 USER appuser
 
 # Default env
