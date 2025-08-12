@@ -1,0 +1,129 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: interop
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: convo-db
+  namespace: interop
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: interop
+data:
+  PORT: "3000"
+  DB_PATH: "/data/data.db"
+  DEFAULT_LLM_PROVIDER: "mock"
+  # DEFAULT_LLM_MODEL: "gemini-2.5-flash"  # optional
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+  namespace: interop
+type: Opaque
+stringData:
+  # Set if you use real providers; otherwise leave empty
+  GEMINI_API_KEY: ""
+  OPENROUTER_API_KEY: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: interop-api
+  namespace: interop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: interop-api
+  template:
+    metadata:
+      labels:
+        app: interop-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: api
+          # TODO: set to a public registry image you push (e.g., docker.io/<user>/interop-api:<tag>)
+          image: your-dockerhub-username/interop-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secrets
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: convo-db
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: interop-api
+  namespace: interop
+spec:
+  selector:
+    app: interop-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: interop-api
+  namespace: interop
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+spec:
+  tls:
+    - hosts:
+        - chitchat.fhir.me
+      secretName: chitchat-fhir-me-tls
+  rules:
+    - host: chitchat.fhir.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: interop-api
+                port:
+                  number: 80
+

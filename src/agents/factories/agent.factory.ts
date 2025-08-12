@@ -17,6 +17,7 @@ import { ScriptAgent } from '$src/agents/script/script.agent';
 import type { TurnBasedScript } from '$src/agents/script/script.types';
 import { InProcessTransport } from '$src/agents/runtime/inprocess.transport';
 import { logLine } from '$src/lib/utils/logger';
+import { McpProxyAgent, type McpProxyConfig } from '$src/agents/proxy/mcp-proxy.agent';
 
 export interface StartAgentsOptions {
   conversationId: number;
@@ -26,8 +27,11 @@ export interface StartAgentsOptions {
   turnRecoveryMode?: TurnRecoveryMode;  // Optional override for all agents
 }
 
+export interface AgentRuntimeInfo { id: string; class?: string }
+
 export interface AgentHandle {
   agents: BaseAgent[];
+  agentsInfo: AgentRuntimeInfo[];
   stop(): Promise<void>;
 }
 
@@ -40,11 +44,14 @@ export async function startAgents(options: StartAgentsOptions): Promise<AgentHan
   const agents: BaseAgent[] = [];
 
   // Get conversation metadata and scenario
-  const snapshot = await transport.getSnapshot(conversationId, { includeScenario: true });
-  const hydrated = snapshot as any; // Type assertion for hydrated snapshot
-  const scenario = hydrated?.scenario ?? null;
+  const snapshot = await transport.getSnapshot(conversationId, { includeScenario: true }) as unknown as {
+    scenario?: ScenarioConfiguration | null;
+    runtimeMeta?: { agents?: AgentMeta[] };
+    metadata?: { agents?: AgentMeta[] };
+  };
+  const scenario = snapshot?.scenario ?? null;
   // Try both runtimeMeta (hydrated) and metadata (regular snapshot)
-  const runtimeAgents: AgentMeta[] = hydrated?.runtimeMeta?.agents || hydrated?.metadata?.agents || [];
+  const runtimeAgents: AgentMeta[] = snapshot?.runtimeMeta?.agents || snapshot?.metadata?.agents || [];
 
   // Filter to requested agents
   const candidates = agentIds?.length
@@ -55,6 +62,8 @@ export async function startAgents(options: StartAgentsOptions): Promise<AgentHan
   console.log(`[startAgents] Runtime agents:`, runtimeAgents.map(a => ({ id: a.id, class: a.agentClass })));
   console.log(`[startAgents] Candidates:`, candidates.map(a => ({ id: a.id, class: a.agentClass })));
 
+  const agentsInfo: AgentRuntimeInfo[] = [];
+
   for (const agentMeta of candidates) {
     // No filtering by kind - location is a runtime decision
     const agentId = agentMeta.id;
@@ -62,9 +71,8 @@ export async function startAgents(options: StartAgentsOptions): Promise<AgentHan
 
     // Create the agent with appropriate implementation
     const agent = createAgent(agentMeta, transport, providerManager, conversationId, scenario, options.turnRecoveryMode);
-    // Attach runtime metadata for introspection (used by agentHost.list())
-    (agent as any).id = agentId;
-    (agent as any).agentClass = agentMeta.agentClass || 'default';
+    // Track runtime metadata for introspection (used by agentHost.list())
+    agentsInfo.push({ id: agentId, class: agentMeta.agentClass || 'default' });
     
     // Start the agent
     await agent.start(conversationId, agentId);
@@ -73,6 +81,7 @@ export async function startAgents(options: StartAgentsOptions): Promise<AgentHan
 
   return {
     agents,
+    agentsInfo,
     stop: async () => {
       console.log(`[startAgents] Stopping ${agents.length} agents`);
       for (const agent of agents) {
@@ -131,6 +140,22 @@ export function createAgent(
       }
       logLine(agentMeta.id, 'factory', `Creating ScriptAgent with ${script.turns?.length || 0} turns`);
       return new ScriptAgent(transport, script, { turnRecoveryMode });
+
+    case 'mcpproxy':
+    case 'mcp-proxy': {
+      const cfg = (agentMeta.config || {}) as Partial<McpProxyConfig>;
+      if (!cfg.remoteBaseUrl || !cfg.bridgedAgentId || !cfg.counterpartyAgentId) {
+        logLine(agentMeta.id, 'factory', `Missing required mcp-proxy config: remoteBaseUrl, bridgedAgentId, counterpartyAgentId`);
+      }
+      return new McpProxyAgent(transport, {
+        remoteBaseUrl: String(cfg.remoteBaseUrl || ''),
+        bridgedAgentId: String(cfg.bridgedAgentId || agentMeta.id),
+        counterpartyAgentId: String(cfg.counterpartyAgentId || agentMeta.id),
+        headers: cfg.headers as Record<string, string> | undefined,
+        remoteConversationId: cfg.remoteConversationId,
+        waitMs: cfg.waitMs ?? 1000,
+      });
+    }
     
     case 'scenariodrivenagent':
     case 'scenario':

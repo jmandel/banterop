@@ -139,43 +139,14 @@ async function handleRpc(
         ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: ev }));
       }
     }
-    // Emit initial guidance snapshot (event-driven guidance with better pull semantics)
+    // Emit initial guidance snapshot (use orchestrator's authoritative helper)
     if (includeGuidance) {
       try {
-        const snap = orchestrator.getConversationSnapshot(conversationId);
-        if (snap?.status !== 'completed') {
-          const msgs = (snap?.events || []).filter((e) => e.type === 'message');
-          if (msgs.length === 0) {
-            const startId = (snap as any)?.metadata?.startingAgentId as string | undefined;
-            if (startId) {
-              const g = { type: 'guidance', conversation: conversationId, nextAgentId: startId, seq: 0.1, kind: 'start_turn' as const, deadlineMs: Date.now() + 30000, turn: 1 };
-              ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'guidance', params: g }));
-            }
-          } else {
-            const last = msgs[msgs.length - 1]!;
-            if (last.finality === 'turn') {
-              const ids = ((snap as any)?.metadata?.agents || []).map((a: any) => a.id) as string[];
-              const idx = ids.indexOf(last.agentId ?? '');
-              const nextId = ids.length > 0 ? ids[(idx + 1 + ids.length) % ids.length] : undefined;
-              if (nextId && nextId !== last.agentId) {
-                const g = { type: 'guidance', conversation: conversationId, nextAgentId: nextId, seq: (last.seq ?? 0) + 0.1, kind: 'start_turn' as const, deadlineMs: Date.now() + 30000, turn: (last.turn ?? 0) + 1 };
-                ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'guidance', params: g }));
-              }
-            } else {
-              // Last message did not close a turn; assume current turn open, owned by last non-system event's agent
-              let owner: string | undefined;
-              for (let i = (snap.events || []).length - 1; i >= 0; i--) {
-                const e = (snap.events as any[])[i];
-                if (e.turn === last.turn && e.type !== 'system') { owner = e.agentId; break; }
-              }
-              if (owner) {
-                const g = { type: 'guidance', conversation: conversationId, nextAgentId: owner, seq: (last.seq ?? 0) + 0.1, kind: 'continue_turn' as const, deadlineMs: Date.now() + 30000, turn: last.turn };
-                ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'guidance', params: g }));
-              }
-            }
-          }
+        const g = orchestrator.getGuidanceSnapshot(conversationId);
+        if (g) {
+          ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'guidance', params: g }));
         }
-      } catch (e) {
+      } catch {
         // best-effort; ignore errors
       }
     }
