@@ -31,4 +31,5 @@ Thumbs.db
 dist
 dashboard/dist
 dashboard/public
-debug
+# Ignore top-level debug folder, but keep source debug routes
+/debug

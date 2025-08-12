@@ -56,9 +56,8 @@ spec:
         runAsUser: 10001
       containers:
         - name: api
-          # TODO: set to a public registry image you push (e.g., docker.io/<user>/interop-api:<tag>)
-          image: your-dockerhub-username/interop-api:latest
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/jmandel/conversational-interop:main
+          imagePullPolicy: Always
           ports:
             - containerPort: 3000
               name: http
