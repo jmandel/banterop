@@ -43,6 +43,8 @@ metadata:
   namespace: interop
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: interop-api
@@ -54,6 +56,8 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: api
           image: ghcr.io/jmandel/conversational-interop:main
@@ -110,6 +114,7 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
 spec:
+  # Match working namespaces: rely on kubernetes.io/ingress.class annotation
   tls:
     - hosts:
         - chitchat.fhir.me
@@ -125,4 +130,19 @@ spec:
                 name: interop-api
                 port:
                   number: 80
+---
+# Explicit Certificate to trigger issuance
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: chitchat-fhir-me
+  namespace: interop
+spec:
+  secretName: chitchat-fhir-me-tls
+  commonName: chitchat.fhir.me
+  dnsNames:
+    - chitchat.fhir.me
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod
 
