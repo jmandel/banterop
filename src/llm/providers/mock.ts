@@ -1,6 +1,7 @@
 import { LLMProvider, type LLMProviderConfig, type LLMProviderMetadata, type LLMRequest, type LLMResponse } from '$src/types/llm.types';
 
 export class MockLLMProvider extends LLMProvider {
+  static isAvailable(): boolean { return true; }
   constructor(config: LLMProviderConfig) {
     super(config);
   }

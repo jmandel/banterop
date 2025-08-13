@@ -522,7 +522,7 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
     if (e.key === "t") {
       e.preventDefault();
       setShowTraces((v) => !v);
-    } else if (e.key === "a") {
+    } else if (e.key === "f") {
       e.preventDefault();
       setAutoScroll((v) => !v);
     } else if (e.key === "r") {
@@ -857,18 +857,26 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
       </div>
       {/* Floating controls */}
       <div className="pointer-events-none relative">
-        <div className="absolute right-2 bottom-2 pointer-events-auto opacity-60 hover:opacity-100 transition">
-          <div className="inline-flex items-center gap-1 bg-white/90 border rounded shadow px-2 py-1">
-            <button
-              className={`text-xs px-1 py-0.5 rounded ${showTraces ? 'bg-gray-200' : ''}`}
-              title="Toggle traces (t)"
-              onClick={() => setShowTraces(v => !v)}
-            >Trace</button>
-            <button
-              className={`text-xs px-1 py-0.5 rounded ${autoScroll ? 'bg-gray-200' : ''}`}
-              title="Toggle autoscroll (a)"
-              onClick={() => setAutoScroll(v => !v)}
-            >Auto</button>
+        <div className="absolute right-2 bottom-2 pointer-events-auto">
+          <div className="inline-flex items-center gap-3 bg-white/95 border rounded shadow px-3 py-2">
+            <label className="flex items-center gap-1 text-xs">
+              <input
+                type="checkbox"
+                checked={showTraces}
+                onChange={() => setShowTraces((v) => !v)}
+                aria-label="Toggle traces"
+              />
+              <span title="Toggle traces (t)"><span className="underline">t</span>races</span>
+            </label>
+            <label className="flex items-center gap-1 text-xs">
+              <input
+                type="checkbox"
+                checked={autoScroll}
+                onChange={() => setAutoScroll((v) => !v)}
+                aria-label="Toggle follow"
+              />
+              <span title="Toggle follow (f)"><span className="underline">f</span>ollow</span>
+            </label>
           </div>
         </div>
       </div>
@@ -1068,7 +1076,7 @@ function HelpModal({ onClose }: { onClose: () => void }) {
           <Shortcut label="Home / End" desc="Jump to start / end (list)" />
           <Shortcut label="r" desc="Refresh list / reconnect details" />
           <Shortcut label="t" desc="Toggle traces (details)" />
-          <Shortcut label="a" desc="Toggle autoscroll (details)" />
+          <Shortcut label="f" desc="Toggle follow (details)" />
           <Shortcut label="gg" desc="Jump to top (details)" />
           <Shortcut label="G" desc="Jump to bottom (details)" />
           <Shortcut label="Space" desc="Next event block (details)" />

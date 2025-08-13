@@ -3,6 +3,9 @@ import { LLMProvider, type LLMProviderConfig, type LLMProviderMetadata, type LLM
 
 export class OpenRouterLLMProvider extends LLMProvider {
   private client: OpenAI;
+  static isAvailable(env?: { openRouterApiKey?: string }): boolean {
+    return Boolean(env?.openRouterApiKey);
+  }
   
   constructor(config: LLMProviderConfig) {
     super(config);
