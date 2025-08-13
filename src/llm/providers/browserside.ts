@@ -1,6 +1,7 @@
 import { LLMProvider, type LLMProviderConfig, type LLMProviderMetadata, type LLMRequest, type LLMResponse } from '$src/types/llm.types';
 
 export class BrowsersideLLMProvider extends LLMProvider {
+  static isAvailable(): boolean { return true; }
   private serverUrl: string;
   private cachedModels: string[] | null = null;
   private cachedDefaultModel: string | null = null;

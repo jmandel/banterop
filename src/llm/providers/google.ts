@@ -2,6 +2,9 @@ import { GoogleGenAI } from '@google/genai';
 import { LLMProvider, type LLMProviderConfig, type LLMProviderMetadata, type LLMRequest, type LLMResponse, type LLMMessage } from '$src/types/llm.types';
 
 export class GoogleLLMProvider extends LLMProvider {
+  static isAvailable(env?: { googleApiKey?: string }): boolean {
+    return Boolean(env?.googleApiKey);
+  }
   private client: GoogleGenAI | null = null;
   
   constructor(config: LLMProviderConfig) {

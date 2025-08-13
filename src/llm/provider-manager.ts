@@ -136,9 +136,13 @@ export class LLMProviderManager {
   /**
    * Returns metadata for all configured providers.
    */
-  getAvailableProviders(): LLMProviderMetadata[] {
-    return Object.entries(PROVIDER_MAP).map(([_, ProviderClass]) => {
-      return ProviderClass.getMetadata();
+  getAvailableProviders(): (LLMProviderMetadata & { available: boolean })[] {
+    return Object.entries(PROVIDER_MAP).map(([name, ProviderClass]) => {
+      const available = (ProviderClass as any).isAvailable?.({
+        googleApiKey: this.config.googleApiKey,
+        openRouterApiKey: this.config.openRouterApiKey,
+      }) ?? true;
+      return { ...ProviderClass.getMetadata(), available } as LLMProviderMetadata & { available: boolean };
     });
   }
 }
