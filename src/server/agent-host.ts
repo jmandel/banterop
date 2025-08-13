@@ -2,8 +2,9 @@ import { startAgents, type AgentHandle } from '$src/agents/factories/agent.facto
 import { InProcessTransport } from '$src/agents/runtime/inprocess.transport';
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
 import type { LLMProviderManager } from '$src/llm/provider-manager';
+import type { IAgentHost } from '$src/control/agent-lifecycle.interfaces';
 
-export class AgentHost {
+export class AgentHost implements IAgentHost {
   private byConversation = new Map<number, AgentHandle>();
   private pending = new Map<number, Promise<AgentHandle>>();
   constructor(private orch: OrchestratorService, private providers: LLMProviderManager) {}

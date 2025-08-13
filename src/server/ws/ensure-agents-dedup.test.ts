@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { Hono } from 'hono';
 import { App } from '$src/server/app';
 import { createWebSocketServer, websocket } from '$src/server/ws/jsonrpc.server';
+import { WsControl } from '$src/control/ws.control';
 
 // Helper to call a WS JSON-RPC method and resolve with result
 function wsCall<T = any>(ws: WebSocket, method: string, params?: any): Promise<T> {
@@ -32,7 +33,7 @@ describe('ensureAgentsRunning is idempotent per conversation', () => {
   beforeEach(async () => {
     app = new App({ dbPath: ':memory:' });
     const hono = new Hono();
-    hono.route('/', createWebSocketServer(app.orchestrator, app.agentHost));
+    hono.route('/', createWebSocketServer(app.orchestrator, app.agentHost, app.lifecycleManager));
     server = Bun.serve({ port: 0, fetch: hono.fetch, websocket });
     wsUrl = `ws://localhost:${server.port}/api/ws`;
   });
@@ -118,9 +119,10 @@ describe('ensureAgentsRunning is idempotent per conversation', () => {
     ws.addEventListener('message', onMsg);
 
     // Fire two ensures concurrently
+    const control = new WsControl(wsUrl);
     await Promise.all([
-      wsCall(ws, 'ensureAgentsRunningOnServer', { conversationId, agentIds: ['alpha'] }),
-      wsCall(ws, 'ensureAgentsRunningOnServer', { conversationId, agentIds: ['alpha'] }),
+      control.ensureAgentsRunningOnServer(conversationId, ['alpha']),
+      control.ensureAgentsRunningOnServer(conversationId, ['alpha']),
     ]);
 
     // Wait briefly for any events to arrive

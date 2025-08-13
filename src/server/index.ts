@@ -36,13 +36,14 @@ server.route('/api', createAttachmentRoutes(appInstance.orchestrator));
 server.route('/api', createLLMRoutes(appInstance.llmProviderManager));
 
 // Optional: MCP bridge under /api/bridge/:config64/mcp
-server.route('/api/bridge', createBridgeRoutes(appInstance.orchestrator, appInstance.llmProviderManager, appInstance.runnerRegistry));
+server.route('/api/bridge', createBridgeRoutes(appInstance.orchestrator, appInstance.llmProviderManager, appInstance.lifecycleManager));
 
 // Debug API (read-only) under /api/debug
 server.route('/api/debug', createDebugRoutes(appInstance.orchestrator));
 
+
 // WS: JSON-RPC under /api/ws (already configured in createWebSocketServer)
-server.route('/', createWebSocketServer(appInstance.orchestrator, appInstance.agentHost));
+server.route('/', createWebSocketServer(appInstance.orchestrator, appInstance.agentHost, appInstance.lifecycleManager));
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {

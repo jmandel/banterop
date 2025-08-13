@@ -2,9 +2,10 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { HashRouter as Router, Routes, Route, useNavigate, useParams, Link } from "react-router-dom";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
-import { ScenarioDrivenAgent } from "$src/agents/scenario/scenario-driven.agent";
-import { WsTransport } from "$src/agents/runtime/ws.transport";
-import { LLMProviderManager } from "$src/llm/provider-manager";
+import { BrowserAgentRegistry } from '$src/agents/clients/browser-agent-registry';
+import { BrowserAgentHost } from '$src/agents/clients/browser-agent-host';
+import { BrowserAgentLifecycleManager } from '$src/agents/clients/browser-agent-lifecycle';
+import { WsControl } from '$src/control/ws.control';
 import type { UnifiedEvent } from "$src/types/event.types";
 
 dayjs.extend(relativeTime);
@@ -105,6 +106,7 @@ function ScenarioList() {
   const [launchType, setLaunchType] = useState<LaunchType>(() => {
     try { return (localStorage.getItem('scenarioLauncher.launchType') as LaunchType) || 'watch'; } catch { return 'watch'; }
   });
+  const serverControlRef = useRef<WsControl | null>(null);
 
   const loadScenarios = async () => {
     try {
@@ -121,6 +123,8 @@ function ScenarioList() {
       setLoading(false);
     }
   };
+
+  // Client-side lifecycle manager is used in ConversationView
 
   const loadAvailableModels = async () => {
     try {
@@ -536,7 +540,8 @@ function ConversationView({ id }: { id: number }) {
   const [messages, setMessages] = useState<UnifiedEvent[]>([]);
   const [starting, setStarting] = useState(false);
   const startingRef = useRef(false);
-  const agentsRef = useRef<Map<string, ScenarioDrivenAgent>>(new Map());
+  const managerRef = useRef<BrowserAgentLifecycleManager | null>(null);
+  const serverControlRef = useRef<WsControl | null>(null);
   const eventWsRef = useRef<WebSocket | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const programmaticScrollRef = useRef(false);
@@ -619,57 +624,23 @@ function ConversationView({ id }: { id: number }) {
     });
   };
 
-  const startAgents = async () => {
+  // start/stop helpers are implemented by startAgentsManaged/stopAgentsManaged
+  const startAgentsManaged = async () => {
     if (!conversation || agentsRunning || startingRef.current) return;
     startingRef.current = true;
     setStarting(true);
     try {
-      setAgentsRunning(true);
-      
-      // Extract server URL for browserside provider
       const wsUrl = API_BASE.startsWith('http')
         ? API_BASE.replace(/^http/, 'ws') + '/ws'
         : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${API_BASE}/ws`;
-      const serverUrl = API_BASE.replace('/api', '');
-      
-      // Don't call ensureAgentsRunning - we're running agents in the browser
-      const agentIds = conversation.metadata?.agents?.map((a: any) => a.id) || [];
-      console.log('Agent IDs to start in browser:', agentIds);
-      console.log('Full agent metadata:', conversation.metadata?.agents);
-      
-      // Create LLM provider manager
-      const providerManager = new LLMProviderManager({
-        defaultLlmProvider: 'browserside',
-        defaultLlmModel: conversation.metadata?.agents?.[0]?.config?.model || 'gemini-2.5-flash',
-        serverUrl: serverUrl
-      });
-      
-      // Clear any existing agents first
-      agentsRef.current.clear();
-      
-      // Create and start agents
-      for (const agentMeta of conversation.metadata?.agents || []) {
-        try {
-          console.log(`Creating agent: ${agentMeta.id} for conversation ${id}...`);
-          const transport = new WsTransport(wsUrl);
-          const agent = new ScenarioDrivenAgent(transport, {
-            agentId: agentMeta.id,
-            providerManager,
-            turnRecoveryMode: 'restart'  // Scenario agents should restart for consistency
-          });
-          agentsRef.current.set(agentMeta.id, agent);
-          
-          console.log(`Starting agent: ${agentMeta.id} for conversation ${id}...`);
-          await agent.start(id, agentMeta.id);
-          console.log(`✓ Started agent: ${agentMeta.id} for conversation ${id}`);
-        } catch (err) {
-          console.error(`Failed to start agent ${agentMeta.id}:`, err);
-        }
+      if (!managerRef.current) {
+        const reg = new BrowserAgentRegistry();
+        const host = new BrowserAgentHost(wsUrl);
+        managerRef.current = new BrowserAgentLifecycleManager(reg, host);
       }
-      
-      // All agents are connected
-      console.log('All agents started successfully');
-      
+      const agentIds = conversation.metadata?.agents?.map((a: any) => a.id) || [];
+      await managerRef.current.ensure(id, agentIds);
+      setAgentsRunning(true);
     } catch (err) {
       console.error('Failed to start agents:', err);
       setAgentsRunning(false);
@@ -678,27 +649,18 @@ function ConversationView({ id }: { id: number }) {
       setStarting(false);
     }
   };
-  
-  const stopAgents = async () => {
-    // Stop all agents
-    console.log('Stopping agents...', agentsRef.current.size, 'agents to stop');
-    for (const [agentId, agent] of agentsRef.current.entries()) {
-      console.log(`Stopping agent: ${agentId}`);
-      agent.stop();
+
+  const stopAgentsManaged = async () => {
+    try {
+      if (managerRef.current) await managerRef.current.stop(id);
+    } finally {
+      setAgentsRunning(false);
     }
-    agentsRef.current.clear();
-    console.log('All agents stopped');
-    
-    // Keep event WebSocket open - we still want to see messages
-    setAgentsRunning(false);
   };
   
   useEffect(() => {
-    // Stop any running agents when conversation changes
-    if (agentsRef.current.size > 0) {
-      console.log('Conversation changed, stopping existing agents...');
-      stopAgents();
-    }
+    // Stop any running agents when conversation changes (client manager)
+    stopAgentsManaged();
     
     // Close existing event subscription when conversation changes
     if (eventWsRef.current) {
@@ -732,13 +694,14 @@ function ConversationView({ id }: { id: number }) {
         if (shouldAutoStart && !agentsRunning) {
           window.history.replaceState(null, '', `#/conversation/${id}`);
           if (runMode === 'client') {
-            startAgents();
+            startAgentsManaged();
           } else {
             // server-managed ensure
             try {
               setStarting(true);
               const agentIds = (result.metadata?.agents || []).map((a: any) => a.id);
-              await wsRpcCall('ensureAgentsRunningOnServer', { conversationId: id, agentIds });
+              if (!serverControlRef.current) serverControlRef.current = new WsControl(API_BASE.replace(/^http/, 'ws') + '/ws');
+              await serverControlRef.current.ensureAgentsRunningOnServer(id as unknown as number, agentIds);
               setAgentsRunning(true);
             } catch (e) {
               console.error('Failed to ensure server agents:', e);
@@ -756,7 +719,7 @@ function ConversationView({ id }: { id: number }) {
     
     // Cleanup on unmount
     return () => {
-      stopAgents();
+      stopAgentsManaged();
       if (eventWsRef.current) {
         eventWsRef.current.close();
         eventWsRef.current = null;
@@ -842,7 +805,7 @@ function ConversationView({ id }: { id: number }) {
                     setStarting(true);
                     if (runMode === 'client') {
                       try {
-                        await startAgents();
+                        await startAgentsManaged();
                       } finally {
                         // startAgents sets agentsRunning appropriately
                         setStarting(false);
@@ -853,7 +816,8 @@ function ConversationView({ id }: { id: number }) {
                         const agentIds = (conversation?.metadata?.agents || []).map((a: any) => a.id);
                         // Optimistically mark as running to reflect intent immediately
                         setAgentsRunning(true);
-                        await wsRpcCall('ensureAgentsRunningOnServer', { conversationId: id, agentIds });
+                        if (!serverControlRef.current) serverControlRef.current = new WsControl(API_BASE.replace(/^http/, 'ws') + '/ws');
+                        await serverControlRef.current.ensureAgentsRunningOnServer(id as unknown as number, agentIds);
                       } catch (e) {
                         console.error('Failed to ensure server agents:', e);
                         setAgentsRunning(false);
@@ -873,13 +837,13 @@ function ConversationView({ id }: { id: number }) {
               <div className="p-4 border border-green-200 bg-green-50 rounded-lg">
                 <div className="text-sm text-green-800 flex items-center justify-between">
                   <div>
-                    <strong>Agents are running!</strong> The conversation is in progress. Mode: <em>{agentsRef.current.size > 0 ? 'client' : 'server'}</em>
+                    <strong>Agents are running!</strong> The conversation is in progress. Mode: <em>{runMode}</em>
                   </div>
                   <button
-                    onClick={stopAgents}
+                    onClick={stopAgentsManaged}
                     className="px-3 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-700"
                   >
-                    {agentsRef.current.size > 0 ? 'Stop Agents (Browser)' : 'Stop Agents (Server)'}
+                    {runMode === 'client' ? 'Stop Agents (Browser)' : 'Stop Agents (Server)'}
                   </button>
                 </div>
               </div>

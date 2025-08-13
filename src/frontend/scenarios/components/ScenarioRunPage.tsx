@@ -23,7 +23,7 @@ export function ScenarioRunPage() {
   const [providers, setProviders] = useState<Array<{ name: string; models: string[] }>>([]);
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [agentModels, setAgentModels] = useState<Record<string, string>>({});
-  const [autostart, setAutostart] = useState<'none'|'client'|'server'>('none');
+  // Autostart selection removed; we now start agents from the Created page per‑agent
 
   useEffect(() => {
     (async () => {
@@ -94,7 +94,7 @@ export function ScenarioRunPage() {
       scenarioId: cfg?.metadata?.id || scenarioId,
       agents,
       startingAgentId,
-      custom: autostart !== 'none' ? { autoRun: true, autostartMode: autostart } : undefined,
+      // No implicit autoRun/autostart here; selection happens on the Created page per agent
     };
   };
 
@@ -190,17 +190,7 @@ export function ScenarioRunPage() {
           </div>
         )}
 
-        {/* Autostart behavior akin to scenario launcher */}
-        {runMode === 'internal' && (
-          <div>
-            <label className="block text-sm text-slate-700 mb-1">Autostart Agents</label>
-            <select className="w-full border rounded px-3 py-2" value={autostart} onChange={(e) => setAutostart(e.target.value as any)}>
-              <option value="none">Do not autostart</option>
-              <option value="client">Autostart in browser</option>
-              <option value="server">Autostart on server</option>
-            </select>
-          </div>
-        )}
+        {/* Autostart selection removed */}
 
         <div className="pt-2">
           {runMode === 'internal' ? (

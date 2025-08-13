@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { Hono } from 'hono';
 import { App } from '$src/server/app';
 import { createWebSocketServer, websocket } from '$src/server/ws/jsonrpc.server';
+import { WsControl } from '$src/control/ws.control';
 
 // Helper to call a WS JSON-RPC method and resolve with result
 function wsCall<T = any>(ws: WebSocket, method: string, params?: any): Promise<T> {
@@ -32,7 +33,7 @@ describe('ensureAgentsRunning leads to progress', () => {
   beforeEach(async () => {
     app = new App({ dbPath: ':memory:' });
     const hono = new Hono();
-    hono.route('/', createWebSocketServer(app.orchestrator, app.agentHost));
+    hono.route('/', createWebSocketServer(app.orchestrator, app.agentHost, app.lifecycleManager));
     server = Bun.serve({ port: 0, fetch: hono.fetch, websocket });
     wsUrl = `ws://localhost:${server.port}/api/ws`;
   });
@@ -122,7 +123,8 @@ describe('ensureAgentsRunning leads to progress', () => {
     });
 
     // 4) Ensure alpha runs on server
-    const ensured = await wsCall<{ ensured: Array<{ id: string }> }>(ws, 'ensureAgentsRunningOnServer', { conversationId, agentIds: ['alpha'] });
+    const control = new WsControl(wsUrl);
+    const ensured = await control.ensureAgentsRunningOnServer(conversationId, ['alpha']);
     console.error('ensured from server:', ensured);
     expect(Array.isArray(ensured.ensured)).toBe(true);
     expect(ensured.ensured.some(e => e.id === 'alpha')).toBe(true);

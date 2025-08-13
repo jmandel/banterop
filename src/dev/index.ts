@@ -18,8 +18,14 @@ const server = serve({
   routes: {
     '/': home,
     '/scenarios': scenarios,
+    '/scenarios/': scenarios,
     '/watch': watch,
+    '/watch/': watch,
     '/launcher': launcher,
+    '/scenario-launcher': launcher,
+    '/scenario-launcher/': launcher,
+    '/frontends/debug': debugUi,
+    '/frontends/debug/': debugUi,
     '/debug': debugUi,
   },
   async fetch(req, srv) {

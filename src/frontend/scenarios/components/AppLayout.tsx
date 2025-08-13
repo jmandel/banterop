@@ -19,10 +19,11 @@ export function AppLayout({ children }: AppLayoutProps) {
         return null; // Don't show breadcrumbs on landing page
       }
       
-      crumbs.push({ label: 'All Scenarios', path: '/scenarios' });
+      crumbs.push({ label: 'All', path: '/scenarios' });
       
       if (scenarioId) {
-        crumbs.push({ label: 'Scenario', path: null });
+        // Show scenario id as the crumb label; pages further append their action
+        crumbs.push({ label: decodeURIComponent(scenarioId), path: `/scenarios/${encodeURIComponent(scenarioId)}` });
         
         if (pathSegments.includes('edit')) {
           crumbs.push({ label: 'Edit', path: null });
@@ -32,6 +33,28 @@ export function AppLayout({ children }: AppLayoutProps) {
           crumbs.push({ label: 'Run', path: null });
         } else if (pathSegments.includes('plug-in')) {
           crumbs.push({ label: 'Plugin', path: null });
+        }
+      } else if (pathSegments[1] === 'created' && pathSegments[2]) {
+        // Attempt to hydrate breadcrumbs for created/:conversationId using localStorage metadata
+        const convId = pathSegments[2];
+        try {
+          const raw = localStorage.getItem(`convoMeta:${convId}`);
+          if (raw) {
+            const meta = JSON.parse(raw);
+            const scenId = meta?.scenarioId as string | undefined;
+            const scenTitle = meta?.title as string | undefined;
+            if (scenId) {
+              crumbs.push({ label: scenTitle || scenId, path: `/scenarios/${encodeURIComponent(scenId)}` });
+              crumbs.push({ label: 'Run', path: null });
+            } else {
+              crumbs.push({ label: `Conversation #${convId}`, path: null });
+            }
+          } else {
+            crumbs.push({ label: `Conversation #${convId}`, path: null });
+          }
+        } catch {
+          const convIdFallback = pathSegments[2];
+          crumbs.push({ label: `Conversation #${convIdFallback}`, path: null });
         }
       }
     }

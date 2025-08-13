@@ -7,13 +7,12 @@ import type { GuidanceEvent } from '$src/types/orchestrator.types';
 import type { JsonRpcRequest, JsonRpcResponse, SendMessageRequest, SendTraceRequest } from '$src/types/api.types';
 import type { CreateConversationRequest } from '$src/types/conversation.meta';
 import { AgentHost } from '$src/server/agent-host';
-import { RunnerRegistry } from '$src/server/runner-registry';
+import type { ServerAgentLifecycleManager } from '$src/server/control/server-agent-lifecycle';
 
 const { upgradeWebSocket, websocket } = createBunWebSocket();
 
-export function createWebSocketServer(orchestrator: OrchestratorService, agentHost: AgentHost) {
+export function createWebSocketServer(orchestrator: OrchestratorService, agentHost: AgentHost, lifecycle: ServerAgentLifecycleManager) {
   const app = new Hono();
-  const registry = new RunnerRegistry(orchestrator.storage.db, agentHost);
 
   const connectionSubs = new WeakMap<WSContext, Set<string>>();
 
@@ -27,7 +26,7 @@ export function createWebSocketServer(orchestrator: OrchestratorService, agentHo
       async onMessage(evt, ws) {
         try {
           const req = JSON.parse(evt.data.toString()) as JsonRpcRequest;
-          await handleRpc(orchestrator, agentHost, registry, ws, req, connectionSubs.get(ws) || new Set());
+          await handleRpc(orchestrator, agentHost, lifecycle, ws, req, connectionSubs.get(ws) || new Set());
         } catch {
           ws.send(JSON.stringify(errResp(null, -32700, 'Parse error')));
         }
@@ -66,7 +65,7 @@ function mapError(e: unknown): { code: number; message: string } {
 async function handleRpc(
   orchestrator: OrchestratorService,
   agentHost: AgentHost,
-  registry: RunnerRegistry,
+  lifecycle: ServerAgentLifecycleManager,
   ws: { send: (data: string) => void },
   req: JsonRpcRequest,
   activeSubs: Set<string>
@@ -96,6 +95,8 @@ async function handleRpc(
     ws.send(JSON.stringify(ok(id, snap)));
     return;
   }
+
+  // Removed getRunners; callers should rely on ensure/stop flows or local state
 
   if (method === 'getEventsPage') {
     const { conversationId, afterSeq, limit } = params as { conversationId: number; afterSeq?: number; limit?: number };
@@ -221,13 +222,34 @@ async function handleRpc(
     return;
   }
 
+  if (method === 'getEnsuredAgentsOnServer') {
+    const { conversationId } = params as { conversationId: number };
+    try {
+      // Prefer live host list, but union with registry for persisted ensures
+      const live = agentHost.list(conversationId) || [];
+      let ensured = live.map((e) => ({ id: e.id }));
+      try {
+        const rows = orchestrator.storage.db
+          .prepare(`SELECT agent_id as id FROM runner_registry WHERE conversation_id = ?`)
+          .all(conversationId) as Array<{ id: string }>; 
+        const set = new Set(ensured.map((e) => e.id));
+        for (const r of rows) if (!set.has(r.id)) ensured.push({ id: r.id });
+      } catch {}
+      ws.send(JSON.stringify(ok(id, { ensured })));
+    } catch (e) {
+      const { code, message } = mapError(e);
+      ws.send(JSON.stringify(errResp(id, code, message)));
+    }
+    return;
+  }
+
   if (method === 'ensureAgentsRunningOnServer') {
     const { conversationId, agentIds = [] } = params as { conversationId: number; agentIds?: string[] };
     try {
       console.log('[ws] ensureAgentsRunningOnServer called', { conversationId, agentIdsCount: agentIds.length, agentIds });
       const snapshot = orchestrator.getConversationSnapshot(conversationId);
       if (!snapshot) throw new Error(`Conversation ${conversationId} not found`);
-      const res = await registry.ensureAgentsRunningOnServer(conversationId, agentIds);
+      const res = await lifecycle.ensure(conversationId, agentIds);
       console.log('[ws] ensureAgentsRunningOnServer success', { conversationId, ensured: res.ensured.map(e => e.id) });
       ws.send(JSON.stringify(ok(id, res)));
     } catch (e) {
@@ -241,8 +263,8 @@ async function handleRpc(
   if (method === 'stopAgentsOnServer') {
     const { conversationId, agentIds } = params as { conversationId: number; agentIds?: string[] };
     try {
-      const res = await registry.stopAgentsOnServer(conversationId, agentIds);
-      ws.send(JSON.stringify(ok(id, res)));
+      await lifecycle.stop(conversationId, agentIds);
+      ws.send(JSON.stringify(ok(id, { ok: true })));
     } catch (e) {
       const { code, message } = mapError(e);
       ws.send(JSON.stringify(errResp(id, code, message)));

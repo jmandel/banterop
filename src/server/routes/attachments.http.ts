@@ -15,11 +15,23 @@ export function createAttachmentRoutes(orchestrator: OrchestratorService) {
     const id = c.req.param('id');
     const attachment = orchestrator.getAttachment(id);
     if (!attachment) return c.json({ error: 'Attachment not found' }, 404);
-    // For now, always serve attachment content as plain text since content is modeled as plaintext
-    // Preserve the original declared content type for diagnostics
-    c.header('Content-Type', 'text/plain; charset=utf-8');
-    c.header('X-Original-Content-Type', attachment.contentType);
-    c.header('Content-Disposition', `inline; filename="${attachment.name}"`);
+    // Use original content type; default to text/plain when absent
+    const contentType = attachment.contentType || 'text/plain; charset=utf-8';
+    c.header('Content-Type', contentType);
+
+    // Build a safe Content-Disposition value:
+    // - ASCII-only fallback filename (replace non-ASCII/quotes with underscore)
+    // - RFC 5987 filename* with UTF-8 percent-encoding for full fidelity
+    const rawName = attachment.name || 'attachment';
+    const asciiFallback = rawName
+      .replace(/[\r\n]/g, ' ')
+      .replace(/"/g, "'")
+      .replace(/[^\x20-\x7E]/g, '_');
+    const encodedExt = encodeURIComponent(rawName)
+      .replace(/\*/g, '%2A')
+      .replace(/%20/g, '%20');
+    const cd = `inline; filename="${asciiFallback}"; filename*=UTF-8''${encodedExt}`;
+    c.header('Content-Disposition', cd);
     return c.body(attachment.content);
   });
 
