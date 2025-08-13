@@ -1,5 +1,5 @@
 import type { IAgentTransport, IAgentEvents } from './runtime.interfaces';
-import type { MessagePayload, TracePayload } from '$src/types/event.types';
+import type { MessagePayload, TracePayload, AttachmentRow } from '$src/types/event.types';
 import type { ConversationSnapshot } from '$src/types/orchestrator.types';
 import { WsEvents } from './ws.events';
 
@@ -145,5 +145,18 @@ export class WsTransport implements IAgentTransport {
       this.ws.close();
     }
     this.ws = undefined;
+  }
+
+  async getAttachmentByDocId(params: { conversationId: number; docId: string }): Promise<AttachmentRow | null> {
+    try {
+      const row = await this.call<AttachmentRow>('getAttachmentByDocId', {
+        conversationId: params.conversationId,
+        docId: params.docId,
+      });
+      return row ?? null;
+    } catch (e) {
+      // 404 or other errors -> null
+      return null;
+    }
   }
 }

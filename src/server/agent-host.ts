@@ -1,61 +1,59 @@
-import { startAgents, type AgentHandle } from '$src/agents/factories/agent.factory';
+import { startAgents, type AgentHandle, type AgentRuntimeInfo } from '$src/agents/factories/agent.factory';
 import { InProcessTransport } from '$src/agents/runtime/inprocess.transport';
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
 import type { LLMProviderManager } from '$src/llm/provider-manager';
 import type { IAgentHost } from '$src/control/agent-lifecycle.interfaces';
 
 export class AgentHost implements IAgentHost {
-  private byConversation = new Map<number, AgentHandle>();
-  private pending = new Map<number, Promise<AgentHandle>>();
+  // Maintain composite handles per conversation to allow incremental starts
+  private byConversation = new Map<
+    number,
+    { handles: AgentHandle[]; info: Map<string, AgentRuntimeInfo> }
+  >();
+  private pending = new Map<number, Promise<void>>();
   constructor(private orch: OrchestratorService, private providers: LLMProviderManager) {}
 
   async ensure(conversationId: number, opts?: { agentIds?: string[] }) {
     console.log('[AgentHost] ensure called', { conversationId, agentIds: opts?.agentIds });
-    // If already started, do nothing
-    if (this.byConversation.has(conversationId)) {
-      console.log('[AgentHost] already running', { conversationId });
-      return;
-    }
-    // If a start is in-flight, await it
-    const pending = this.pending.get(conversationId);
-    if (pending) {
-      console.log('[AgentHost] pending start exists, awaiting', { conversationId });
-      await pending;
-      return;
-    }
+    const inflight = this.pending.get(conversationId);
+    if (inflight) { console.log('[AgentHost] pending ensure exists, awaiting', { conversationId }); await inflight; return; }
 
-    // Start and record the pending promise to dedupe concurrent ensures
-    const startPromise = (async (): Promise<AgentHandle> => {
-      console.log('[AgentHost] starting agents', { conversationId, agentIds: opts?.agentIds });
+    const bucket = this.byConversation.get(conversationId);
+    const alreadyRunning = new Set(bucket ? Array.from(bucket.info.keys()) : []);
+    const requested = opts?.agentIds && opts.agentIds.length > 0 ? opts.agentIds : undefined;
+    const toStart = requested ? requested.filter((id) => !alreadyRunning.has(id)) : undefined;
+
+    // If we have some runtime and nothing new requested, we're done
+    if (bucket && (!toStart || toStart.length === 0)) return;
+
+    const p = (async () => {
+      console.log('[AgentHost] starting agents', { conversationId, agentIds: toStart ?? requested });
       const handle = await startAgents({
         conversationId,
         transport: new InProcessTransport(this.orch),
         providerManager: this.providers,
-        agentIds: opts?.agentIds,
+        agentIds: toStart ?? requested, // if undefined, start all from config
         turnRecoveryMode: 'restart',
       });
-      this.byConversation.set(conversationId, handle);
+
+      const bin = this.byConversation.get(conversationId) ?? { handles: [], info: new Map<string, AgentRuntimeInfo>() };
+      bin.handles.push(handle);
+      for (const info of handle.agentsInfo) bin.info.set(info.id, info);
+      this.byConversation.set(conversationId, bin);
+
       console.log('[AgentHost] started', { conversationId, started: handle.agentsInfo.map(a => a.id) });
 
       // Proactively nudge guidance for no-message conversations with startingAgentId
-      // Do this only once per actual start (not for concurrent ensure callers that awaited pending)
       try { this.orch.pokeGuidance(conversationId); } catch {}
-      return handle;
     })();
 
-    this.pending.set(conversationId, startPromise);
-    try {
-      await startPromise;
-    } finally {
-      this.pending.delete(conversationId);
-    }
-
-    // Nudge already performed inside the single startPromise path
+    this.pending.set(conversationId, p);
+    try { await p; } finally { this.pending.delete(conversationId); }
   }
 
   list(conversationId: number): Array<{ id: string; class?: string }> {
-    const h = this.byConversation.get(conversationId);
-    if (h) return h.agentsInfo.map(a => ({ id: a.id, class: a.class }));
+    const bucket = this.byConversation.get(conversationId);
+    if (bucket) return Array.from(bucket.info.values()).map(a => ({ id: a.id, class: a.class }));
     // Fallback: if startup resume is in-flight, expose intended agents from runner_registry
     try {
       const rows = this.orch.storage.db
@@ -67,9 +65,12 @@ export class AgentHost implements IAgentHost {
   }
 
   async stop(conversationId: number) {
-    const h = this.byConversation.get(conversationId);
-    if (!h) return;
-    await h.stop();
+    const bucket = this.byConversation.get(conversationId);
+    if (!bucket) return;
+    const handles = bucket.handles.splice(0, bucket.handles.length);
+    for (const h of handles) {
+      try { await h.stop(); } catch {}
+    }
     this.byConversation.delete(conversationId);
   }
 

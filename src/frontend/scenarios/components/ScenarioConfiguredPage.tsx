@@ -43,10 +43,14 @@ export function ScenarioConfiguredPage() {
   const [startingByAgent, setStartingByAgent] = useState<Record<string, boolean>>({});
   const [serverRunning, setServerRunning] = useState<Record<string, boolean>>({});
   const [browserRunning, setBrowserRunning] = useState<Record<string, boolean>>({});
+  const [canceling, setCanceling] = useState<boolean>(false);
 
   // Inline thread state
   const [messages, setMessages] = useState<UnifiedEvent[]>([]);
   const [convSnap, setConvSnap] = useState<any | null>(null);
+  const [isCompleted, setIsCompleted] = useState<boolean>(false);
+  const [finalStatus, setFinalStatus] = useState<'completed'|'canceled'|'errored'|''>('');
+  const [finalReason, setFinalReason] = useState<string>('');
   const eventWsRef = useRef<WebSocket | null>(null);
   const startingRef = useRef<boolean>(false);
   const managerRef = useRef<BrowserAgentLifecycleManager | null>(null);
@@ -99,8 +103,21 @@ export function ScenarioConfiguredPage() {
       // Also fetch a one-shot snapshot (with scenario/meta) for UI details and breadcrumbs
       wsRpcCall<any>('getConversation', { conversationId, includeScenario: true }).then((snap) => {
         setConvSnap(snap);
+        setIsCompleted(snap?.status === 'completed');
         const msgs: UnifiedEvent[] = (snap.events || []).filter((e: UnifiedEvent) => e.type === 'message');
         setMessages(msgs);
+        if (snap?.status === 'completed') {
+          // Try to derive terminal reason from the last conversation-final message
+          const lastMsg = [...msgs].reverse().find((m: any) => m.finality === 'conversation');
+          if (lastMsg) {
+            const payload = (lastMsg as any).payload || {};
+            const outcome = payload.outcome || {};
+            const status = outcome.status || 'completed';
+            const reason = outcome.reason || payload.text || '';
+            setFinalStatus(status as any);
+            setFinalReason(String(reason || '').trim());
+          }
+        }
         try {
           const meta = snap?.metadata || {};
           const store = {
@@ -125,6 +142,25 @@ export function ScenarioConfiguredPage() {
             const next = [...prev, ev!].sort((a, b) => a.seq - b.seq);
             return next;
           });
+          // Handle conversation completion
+          if ((ev as any).finality === 'conversation') {
+            setIsCompleted(true);
+            // Capture reason from this closing event
+            try {
+              const payload = (ev as any).payload || {};
+              const outcome = payload.outcome || {};
+              const status = outcome.status || 'completed';
+              const reason = outcome.reason || payload.text || '';
+              setFinalStatus(status as any);
+              setFinalReason(String(reason || '').trim());
+            } catch {}
+            // Proactively stop local browser agents and clear UI state
+            if (managerRef.current && conversationId) {
+              managerRef.current.stop(conversationId).catch(() => {});
+            }
+            setBrowserRunning({});
+            setServerRunning({});
+          }
         }
       } catch (e) {
         console.error('[Configured] WS parse error', e);
@@ -192,8 +228,8 @@ export function ScenarioConfiguredPage() {
     if (!serverControlRef.current) serverControlRef.current = new WsControl(API_BASE.replace(/^http/, 'ws') + '/ws');
     (async () => {
       try {
-        const ensured = await serverControlRef.current!.getEnsuredAgentsOnServer(conversationId);
-        const running = (ensured?.ensured || []).map((e) => e.id);
+        const ensured = await serverControlRef.current!.lifecycleGetEnsured(conversationId);
+        const running = (ensured.ensured || []).map((e) => e.id);
         console.debug('[Configured] ensured (server)', running);
         setServerRunning((prev) => {
           const next: Record<string, boolean> = { ...prev };
@@ -206,13 +242,14 @@ export function ScenarioConfiguredPage() {
   }, [conversationId]);
 
   async function startServerAgent(agentId: string) {
+    if (isCompleted) { setActionMsg('Conversation is completed; cannot start agents.'); return; }
     if (!conversationId) return;
     // mark just this agent as starting
     setStartingByAgent((m) => ({ ...m, [agentId]: true }));
     setActionMsg(`Ensuring ${agentId} on server…`);
     try {
       if (!serverControlRef.current) serverControlRef.current = new WsControl(API_BASE.replace(/^http/, 'ws') + '/ws');
-      await serverControlRef.current.ensureAgentsRunningOnServer(conversationId, [agentId]);
+      await serverControlRef.current.lifecycleEnsure(conversationId, [agentId]);
       setServerRunning((m) => ({ ...m, [agentId]: true }));
       setActionMsg(`${agentId} running on server.`);
     } catch (e: any) {
@@ -224,6 +261,7 @@ export function ScenarioConfiguredPage() {
   }
 
   async function startBrowserAgent(agentId: string) {
+    if (isCompleted) { setActionMsg('Conversation is completed; cannot start agents.'); return; }
     if (!conversationId || startingRef.current) return;
     startingRef.current = true;
     setStartingByAgent((m) => ({ ...m, [agentId]: true }));
@@ -259,7 +297,7 @@ export function ScenarioConfiguredPage() {
       }
       if (wasServer && conversationId) {
         if (!serverControlRef.current) serverControlRef.current = new WsControl(API_BASE.replace(/^http/, 'ws') + '/ws');
-        await serverControlRef.current.stopAgentsOnServer(conversationId, [agentId]);
+        await serverControlRef.current.lifecycleStop(conversationId, [agentId]);
         setServerRunning((m) => ({ ...m, [agentId]: false }));
       }
       setActionMsg(`Stopped ${agentId}.`);
@@ -270,15 +308,71 @@ export function ScenarioConfiguredPage() {
     }
   }
 
+  async function cancelConversation() {
+    if (!conversationId || isCompleted || canceling) return;
+    const ok = window.confirm('Cancel this conversation? This will finalize it and stop agents.');
+    if (!ok) return;
+    setCanceling(true);
+    setActionMsg('Canceling conversation…');
+    try {
+      await wsRpcCall('sendMessage', {
+        conversationId,
+        agentId: 'system-orchestrator',
+        messagePayload: {
+          text: 'Canceled by user',
+          outcome: { status: 'canceled', reason: 'user_canceled' },
+        },
+        finality: 'conversation',
+      });
+      setActionMsg('Conversation canceled.');
+    } catch (e: any) {
+      console.error('[Configured] Failed to cancel conversation', e);
+      setActionMsg(`Failed to cancel: ${e?.message || String(e)}`);
+    } finally {
+      setCanceling(false);
+    }
+  }
+
   return (
     <div className="space-y-2">
       {error && <div className="text-rose-700">Error: {error}</div>}
       {conversationId ? (
         <div className="border rounded bg-white p-3 space-y-3">
           <div className="flex items-center justify-between">
-            <div className="font-medium">Conversation #{conversationId}</div>
-            <a className="px-3 py-1 text-sm bg-indigo-600 text-white rounded" href={`/watch#/conversation/${conversationId}`} target="_blank" rel="noreferrer">Open in Watch</a>
+            <div className="font-medium flex items-center gap-2">
+              <span>Conversation #{conversationId}</span>
+              {isCompleted && (
+                <span className={`text-xs px-2 py-0.5 rounded-full border ${finalStatus==='canceled' ? 'bg-amber-100 text-amber-800 border-amber-200' : finalStatus==='errored' ? 'bg-rose-100 text-rose-800 border-rose-200' : 'bg-emerald-100 text-emerald-700 border-emerald-200'}`}>
+                  {finalStatus ? finalStatus[0].toUpperCase() + finalStatus.slice(1) : 'Completed'}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {!isCompleted && (
+                <button
+                  disabled={canceling}
+                  onClick={cancelConversation}
+                  className="px-3 py-1 text-sm bg-amber-600 text-white rounded disabled:opacity-50"
+                  title="Finalize this conversation and stop agents"
+                >Cancel</button>
+              )}
+              <a className="px-3 py-1 text-sm bg-indigo-600 text-white rounded" href={`/watch#/conversation/${conversationId}`} target="_blank" rel="noreferrer">Open in Watch</a>
+            </div>
           </div>
+
+          {isCompleted && (
+            <div className={`${finalStatus==='canceled' ? 'bg-amber-50 border-amber-200 text-amber-900' : finalStatus==='errored' ? 'bg-rose-50 border-rose-200 text-rose-900' : 'bg-emerald-50 border-emerald-200 text-emerald-800'} text-sm border rounded p-2`}>
+              <div>This conversation is completed. Agents are stopped and cannot be restarted.</div>
+              {(finalReason || finalStatus) && (
+                <div className="mt-1">
+                  {(finalStatus) && (<span className="font-medium">{finalStatus[0].toUpperCase() + finalStatus.slice(1)}</span>)}
+                  {finalReason && (
+                    <span> — Reason: <span className="font-medium">{finalReason}</span></span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="text-xs text-slate-600 min-h-[1.25rem]">{actionMsg}</div>
 
@@ -296,7 +390,7 @@ export function ScenarioConfiguredPage() {
                   : isStarting
                   ? 'Starting…'
                   : 'Idle';
-                const disableStart = isRunning || isStarting;
+                const disableStart = isRunning || isStarting || isCompleted;
                 const disableStop = !isRunning || isStarting;
                 return (
                   <div

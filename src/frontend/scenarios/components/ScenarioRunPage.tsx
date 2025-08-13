@@ -23,6 +23,8 @@ export function ScenarioRunPage() {
   const [providers, setProviders] = useState<Array<{ name: string; models: string[] }>>([]);
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [agentModels, setAgentModels] = useState<Record<string, string>>({});
+  const [agentSystemExtra, setAgentSystemExtra] = useState<Record<string, string>>({});
+  const [agentInitiatingExtra, setAgentInitiatingExtra] = useState<Record<string, string>>({});
   // Autostart selection removed; we now start agents from the Created page per‑agent
 
   useEffect(() => {
@@ -83,11 +85,20 @@ export function ScenarioRunPage() {
   const buildMeta = () => {
     const cfg = scenario.config;
     const humanize = (id: string) => id.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-    const agents = (cfg.agents || []).map((a: any) => ({
-      id: a.agentId,
-      displayName: a.principal?.name || humanize(a.agentId),
-      config: modelOptions.length ? { model: agentModels[a.agentId] || modelOptions[0] || '' } : undefined,
-    }));
+    const agents = (cfg.agents || []).map((a: any) => {
+      const model = modelOptions.length ? (agentModels[a.agentId] || modelOptions[0] || '') : undefined;
+      const systemPromptExtra = (agentSystemExtra[a.agentId] || '').trim();
+      const initiatingMessageExtra = (agentInitiatingExtra[a.agentId] || '').trim();
+      const config: Record<string, unknown> = {};
+      if (model) config.model = model;
+      if (systemPromptExtra) config.systemPromptExtra = systemPromptExtra;
+      if (initiatingMessageExtra) config.initiatingMessageExtra = initiatingMessageExtra;
+      return {
+        id: a.agentId,
+        displayName: a.principal?.name || humanize(a.agentId),
+        ...(Object.keys(config).length ? { config } : {}),
+      };
+    });
     return {
       title,
       description,
@@ -166,23 +177,50 @@ export function ScenarioRunPage() {
         {/* Agent model configuration (from Scenario Launcher) */}
         {modelOptions.length > 0 && (
           <div className="space-y-2">
-            <div className="text-sm font-medium">Agent Models</div>
-            <div className="space-y-2">
+            <div className="text-sm font-medium">Agent Configuration</div>
+            <div className="space-y-4">
               {(scenario?.config?.agents || []).filter((a: any) => !(runMode === 'plugin' && a.agentId === startingAgentId)).map((a: any) => (
-                <div key={a.agentId} className="grid grid-cols-3 items-center gap-2">
-                  <div className="col-span-1 text-sm text-slate-700 break-all">{a.agentId}</div>
-                  <div className="col-span-2">
-                    <select
-                      className="w-full border rounded px-2 py-1 text-sm"
-                      value={agentModels[a.agentId] || modelOptions[0] || ''}
-                      onChange={(e) => setAgentModels((m) => ({ ...m, [a.agentId]: e.target.value }))}
-                    >
-                      {providers.map((p) => (
-                        <optgroup key={p.name} label={p.name}>
-                          {p.models.map((m) => (<option key={`${p.name}:${m}`} value={m}>{m}</option>))}
-                        </optgroup>
-                      ))}
-                    </select>
+                <div key={a.agentId} className="border rounded p-2 space-y-2">
+                  <div className="text-sm font-medium text-slate-700 break-all">{a.agentId}</div>
+                  <div className="grid grid-cols-3 items-center gap-2">
+                    <div className="col-span-1 text-xs text-slate-600">Model</div>
+                    <div className="col-span-2">
+                      <select
+                        className="w-full border rounded px-2 py-1 text-sm"
+                        value={agentModels[a.agentId] || modelOptions[0] || ''}
+                        onChange={(e) => setAgentModels((m) => ({ ...m, [a.agentId]: e.target.value }))}
+                      >
+                        {providers.map((p) => (
+                          <optgroup key={p.name} label={p.name}>
+                            {p.models.map((m) => (<option key={`${p.name}:${m}`} value={m}>{m}</option>))}
+                          </optgroup>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 items-start gap-2">
+                    <label className="col-span-1 text-xs text-slate-600">Additional system prompt</label>
+                    <div className="col-span-2">
+                      <textarea
+                        className="w-full border rounded px-2 py-1 text-xs"
+                        rows={2}
+                        placeholder="Optional text appended to this agent's system prompt"
+                        value={agentSystemExtra[a.agentId] || ''}
+                        onChange={(e) => setAgentSystemExtra((m) => ({ ...m, [a.agentId]: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 items-start gap-2">
+                    <label className="col-span-1 text-xs text-slate-600">Initiating message extra</label>
+                    <div className="col-span-2">
+                      <textarea
+                        className="w-full border rounded px-2 py-1 text-xs"
+                        rows={2}
+                        placeholder="Optional text appended to the initiating message for this agent"
+                        value={agentInitiatingExtra[a.agentId] || ''}
+                        onChange={(e) => setAgentInitiatingExtra((m) => ({ ...m, [a.agentId]: e.target.value }))}
+                      />
+                    </div>
                   </div>
                 </div>
               ))}

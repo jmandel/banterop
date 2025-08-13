@@ -13,18 +13,18 @@ export class InProcessControl implements OrchestratorControl {
     return this.orch.getConversationSnapshot(id, opts); 
   }
 
-  async getEnsuredAgentsOnServer(conversationId: number) {
+  async lifecycleGetEnsured(conversationId: number) {
     const ensured = this.host.list(conversationId).map(a => ({ id: a.id, class: a.class }));
     return { ensured };
   }
 
-  async ensureAgentsRunningOnServer(conversationId: number, agentIds?: string[]) {
+  async lifecycleEnsure(conversationId: number, agentIds?: string[]) {
     await this.host.ensure(conversationId, { agentIds });
     const ensured = this.host.list(conversationId).map(a => ({ id: a.id, class: a.class }));
     return { ensured };
   }
 
-  async stopAgentsOnServer(conversationId: number, _agentIds?: string[]) { 
+  async lifecycleStop(conversationId: number, _agentIds?: string[]) { 
     await this.host.stop(conversationId); 
   }
 }

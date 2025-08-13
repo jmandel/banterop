@@ -121,8 +121,8 @@ describe('ensureAgentsRunning is idempotent per conversation', () => {
     // Fire two ensures concurrently
     const control = new WsControl(wsUrl);
     await Promise.all([
-      control.ensureAgentsRunningOnServer(conversationId, ['alpha']),
-      control.ensureAgentsRunningOnServer(conversationId, ['alpha']),
+      control.lifecycleEnsure(conversationId, ['alpha']),
+      control.lifecycleEnsure(conversationId, ['alpha']),
     ]);
 
     // Wait briefly for any events to arrive

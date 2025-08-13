@@ -23,10 +23,12 @@ export interface MessagePayload {
     content?: string;
     summary?: string;
   }>;
-  outcome?: { 
-    status: 'success' | 'failure' | 'neutral'; 
-    reason?: string; 
-    codes?: string[] 
+  outcome?: {
+    // Extended to include terminal classifications used by UIs
+    // 'success' | 'failure' | 'neutral' remain valid for non-terminal outcomes
+    status: 'success' | 'failure' | 'neutral' | 'completed' | 'canceled' | 'errored';
+    reason?: string;
+    codes?: string[];
   };
   clientRequestId?: string;
 }

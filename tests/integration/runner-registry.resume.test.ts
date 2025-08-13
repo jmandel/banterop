@@ -49,7 +49,7 @@ describe('Runner registry resume', () => {
     const conversationId = create.conversationId;
 
     // Ensure alpha and beta
-    const ensured = await rpcCall<{ ensured: Array<{ id: string }> }>(wsUrl, 'ensureAgentsRunningOnServer', { conversationId, agentIds: ['alpha', 'beta'] });
+    const ensured = await rpcCall<{ ensured: Array<{ id: string }> }>(wsUrl, 'lifecycle.ensure', { conversationId, agentIds: ['alpha', 'beta'] });
     expect(ensured.ensured.length).toBeGreaterThan(0);
 
     // Stop server only (keeps DB)

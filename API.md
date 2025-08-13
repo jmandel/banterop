@@ -10,7 +10,7 @@ Note: The server defaults to `PORT=3000` when running `bun run dev`.
 
 Control vs Data Plane
 - Control Plane (launch/inspect/ensure/stop): Thin, explicit surface to create/list conversations and manage server‑managed agents. Typically used via `WsControl` in the browser or in‑process on the server. See README “Control vs Data Plane” for an overview.
-  - WS: `createConversation`, `getConversation`, `ensureAgentsRunningOnServer`, `stopAgentsOnServer`.
+  - WS: `createConversation`, `getConversation`, `lifecycle.getEnsured`, `lifecycle.ensure`, `lifecycle.stop`.
   - REST: `/api/conversations` (list), `/api/scenarios/*` (CRUD), `/api/attachments/*` (fetch).
 
  - Data Plane (agents talk): Append messages/traces and observe events. Used by transports (`WsTransport`, `InProcessTransport`). The orchestrator evaluates scheduling policy and emits guidance with a `kind` (`start_turn` or `continue_turn`). Agents act only on guidance and may use `clearTurn` to restart an open turn they own when recovering.
@@ -142,17 +142,17 @@ WebSocket JSON‑RPC API (`/api/ws`)
     - Result: `{ turn: number }`
     - Behavior: Appends an abort marker (idempotent) if this agent owns the open turn; returns the turn that should be used next.
 
-  - `getEnsuredAgentsOnServer`
+  - `lifecycle.getEnsured`
     - Params: `{ conversationId: number }`
     - Result: `{ ensured: Array<{ id: string; class?: string }> }`
     - Behavior: Returns the union of live server‑hosted agents and persisted ensures from the registry.
 
-  - `ensureAgentsRunningOnServer`
+  - `lifecycle.ensure`
     - Params: `{ conversationId: number, agentIds?: string[] }`
     - Result: `{ ensured: Array<{ id: string; class?: string }> }`
     - Behavior: Idempotently ensures agents are running for a conversation. If `agentIds` is omitted, ensures all agents from metadata; if provided, ensures only that subset (incremental).
 
-  - `stopAgentsOnServer`
+  - `lifecycle.stop`
     - Params: `{ conversationId: number, agentIds?: string[] }`
     - Result: `{ ok: true }`
     - Behavior: Stops ensured agents. Note: current host implementation stops all agents for the conversation; subset stop is not yet supported server‑side.

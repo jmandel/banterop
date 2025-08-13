@@ -5,7 +5,8 @@ export interface OrchestratorControl {
   createConversation(meta: ConversationMeta): Promise<number>;
   getConversation(conversationId: number, opts?: { includeScenario?: boolean }): Promise<ConversationSnapshot>;
 
-  getEnsuredAgentsOnServer(conversationId: number): Promise<{ ensured: Array<{ id: string; class?: string }> }>;
-  ensureAgentsRunningOnServer(conversationId: number, agentIds?: string[]): Promise<{ ensured: Array<{ id: string; class?: string }> }>;
-  stopAgentsOnServer(conversationId: number, agentIds?: string[]): Promise<void>;
+  // Lifecycle (server) mirrored to RPC
+  lifecycleGetEnsured(conversationId: number): Promise<{ ensured: Array<{ id: string; class?: string }> }>;
+  lifecycleEnsure(conversationId: number, agentIds?: string[]): Promise<{ ensured: Array<{ id: string; class?: string }> }>;
+  lifecycleStop(conversationId: number, agentIds?: string[]): Promise<void>;
 }

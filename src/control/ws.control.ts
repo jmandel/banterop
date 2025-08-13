@@ -40,16 +40,16 @@ export class WsControl implements OrchestratorControl {
     return this.call<import('$src/types/orchestrator.types').ConversationSnapshot>('getConversation', { conversationId, includeScenario: !!opts?.includeScenario });
   }
 
-  async getEnsuredAgentsOnServer(conversationId: number) {
-    return this.call<{ ensured: Array<{ id: string; class?: string }> }>('getEnsuredAgentsOnServer', { conversationId });
+  async lifecycleGetEnsured(conversationId: number) {
+    return this.call<{ ensured: Array<{ id: string; class?: string }> }>('lifecycle.getEnsured', { conversationId });
   }
 
-  async ensureAgentsRunningOnServer(conversationId: number, agentIds?: string[]) {
-    return this.call<{ ensured: Array<{ id: string; class?: string }> }>('ensureAgentsRunningOnServer', { conversationId, agentIds });
+  async lifecycleEnsure(conversationId: number, agentIds?: string[]) {
+    return this.call<{ ensured: Array<{ id: string; class?: string }> }>('lifecycle.ensure', { conversationId, agentIds });
   }
 
-  async stopAgentsOnServer(conversationId: number, agentIds?: string[]) { 
-    await this.call('stopAgentsOnServer', { conversationId, agentIds });
+  async lifecycleStop(conversationId: number, agentIds?: string[]) { 
+    await this.call('lifecycle.stop', { conversationId, agentIds });
   }
 
   

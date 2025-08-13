@@ -187,7 +187,8 @@ export class ToolSynthesisService {
     // Document guidance
     const documentGuidance = `
 DOCUMENT OUTPUT FORMATS:
-1) Direct Document Output (Preferred when the tool's output is a report/document):
+
+1) Document Output (Preferred when the tool's output is a report/document):
 {
   "docId": "unique-document-id",
   "contentType": "text/markdown",
@@ -195,17 +196,24 @@ DOCUMENT OUTPUT FORMATS:
   "name": "Optional display name",
   "summary": "Optional short summary"
 }
-2) Document Reference (when pointing to a resolvable reference only):
+
+2) JSON Object Output (when the tool's output is naturally a JSON object):
 {
-  "refToDocId": "unique-logical-identifier",
-  "name": "Document name",
-  "type": "Document type",
-  "contentType": "text/markdown",
-  "summary": "Brief summary",
-  "details": { ...context for future resolution... }
-}
-- If your output is not a document, it's OK. The system may wrap it later.
-`;
+  // Idiomatic fields for the tool's output
+  // If you need to embed a document, use the Document Output format (at any nested level)
+}`;
+
+// 3) Document Reference (when pointing to a resolvable reference only):
+// {
+//   "refToDocId": "unique-logical-identifier",
+//   "name": "Document name",
+//   "type": "Document type",
+//   "contentType": "text/markdown",
+//   "summary": "Brief summary",
+//   "details": { ...context for future resolution... }
+// }
+
+// `;
 
     // Interop constraints
     const interopConstraints = `

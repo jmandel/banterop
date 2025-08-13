@@ -71,7 +71,7 @@ This codebase cleanly separates how agents are managed (control plane) from how 
 - Control plane: start/stop and inspect agents and conversations
   - In-process: `InProcessControl` (server only)
   - WebSocket: `WsControl` (stateless, one-shot calls)
-  - Methods: `createConversation`, `getConversation`, `getEnsuredAgentsOnServer`, `ensureAgentsRunningOnServer`, `stopAgentsOnServer`
+  - Methods: `createConversation`, `getConversation`, `lifecycle.getEnsured`, `lifecycle.ensure`, `lifecycle.stop`
 
 - Data plane: agents exchange events through the orchestrator
   - In-process transport: `InProcessTransport`
@@ -79,7 +79,7 @@ This codebase cleanly separates how agents are managed (control plane) from how 
   - Unified entry point for execution: `startAgents({ transport, providerManager, agentIds?, turnRecoveryMode: 'restart' })`
 
 Minimal WS JSON-RPC (under `/api/ws`):
-- Control: `createConversation`, `getConversation`, `getEnsuredAgentsOnServer`, `ensureAgentsRunningOnServer`, `stopAgentsOnServer`, `clearTurn`
+- Control: `createConversation`, `getConversation`, `lifecycle.getEnsured`, `lifecycle.ensure`, `lifecycle.stop`, `clearTurn`
 - Data: `sendMessage`, `sendTrace`, `subscribe`, `unsubscribe`, `getEventsPage`
 
 Scenario CRUD is HTTP-only under `/api/scenarios`; conversations list is HTTP under `/api/conversations`.
@@ -87,8 +87,8 @@ Scenario CRUD is HTTP-only under `/api/scenarios`; conversations list is HTTP un
 ## 🚦 Launch Recipes
 
 - Server-managed:
-  - Control: `createConversation(meta)`, per-agent or bulk `ensureAgentsRunningOnServer(conversationId, agentIds?)`
-  - Inspect: `getEnsuredAgentsOnServer(conversationId)` returns union of live host and persisted ensures
+  - Control: `createConversation(meta)`, per-agent or bulk `lifecycleEnsure(conversationId, agentIds?)`
+  - Inspect: `lifecycleGetEnsured(conversationId)` returns union of live host and persisted ensures
   - Observe: `subscribe` with optional `sinceSeq`, or poll `getEventsPage`
   - Resume: server persists ensures and re-ensures on boot
 
@@ -429,7 +429,7 @@ Methods (subset):
 - Subscriptions: `subscribe` (supports `filters.types`/`filters.agents` and `sinceSeq` backlog), `unsubscribe`, `subscribeAll`
 - Scenarios: `listScenarios`, `getScenario`, `createScenario`, `updateScenario`, `deleteScenario`
 - Orchestration helper: `runConversationToCompletion`
- - Lifecycle helpers (server): `getEnsuredAgentsOnServer`, `ensureAgentsRunningOnServer`, `stopAgentsOnServer`
+ - Lifecycle helpers (server): `lifecycle.getEnsured`, `lifecycle.ensure`, `lifecycle.stop`
 
 Notifications:
 - `event` — unified event
@@ -518,5 +518,5 @@ Browser specifics
 - Page resumes on load and syncs button state; clears other conversations for this tab
 
 Server specifics
-- Registry in SQLite; WS methods: `getEnsuredAgentsOnServer`, `ensureAgentsRunningOnServer`, `stopAgentsOnServer`
+- Registry in SQLite; WS methods: `lifecycle.getEnsured`, `lifecycle.ensure`, `lifecycle.stop`
 - Per‑agent stop on server currently stops all for the conversation (subset stop not yet supported)

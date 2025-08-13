@@ -16,6 +16,17 @@ export function createWebSocketServer(orchestrator: OrchestratorService, agentHo
 
   const connectionSubs = new WeakMap<WSContext, Set<string>>();
 
+  // Global cleanup hook: when a conversation is finalized, stop and de‑ensure agents
+  orchestrator.subscribeAll((e: UnifiedEvent | GuidanceEvent) => {
+    if ('type' in e && e.type === 'message') {
+      const m = e as UnifiedEvent;
+      if (m.finality === 'conversation') {
+        // Best-effort; ignore errors to avoid disrupting bus
+        lifecycle.stop(m.conversation).catch(() => {});
+      }
+    }
+  }, false);
+
   app.get(
     '/api/ws',
     upgradeWebSocket(() => ({
@@ -93,6 +104,23 @@ async function handleRpc(
     const { conversationId, includeScenario } = params as { conversationId: number; includeScenario?: boolean };
     const snap = orchestrator.getConversationSnapshot(conversationId, { includeScenario: includeScenario ?? true });
     ws.send(JSON.stringify(ok(id, snap)));
+    return;
+  }
+
+  if (method === 'getAttachmentByDocId') {
+    try {
+      const { conversationId, docId } = params as { conversationId: number; docId: string };
+      if (!docId || typeof docId !== 'string') throw new Error('docId is required');
+      const row = orchestrator.getAttachmentByDocId(conversationId, docId);
+      if (!row) {
+        ws.send(JSON.stringify(errResp(id, 404, 'Attachment not found')));
+        return;
+      }
+      ws.send(JSON.stringify(ok(id, row)));
+    } catch (e) {
+      const { code, message } = mapError(e);
+      ws.send(JSON.stringify(errResp(id, code, message)));
+    }
     return;
   }
 
@@ -222,7 +250,7 @@ async function handleRpc(
     return;
   }
 
-  if (method === 'getEnsuredAgentsOnServer') {
+  if (method === 'lifecycle.getEnsured') {
     const { conversationId } = params as { conversationId: number };
     try {
       // Prefer live host list, but union with registry for persisted ensures
@@ -243,7 +271,7 @@ async function handleRpc(
     return;
   }
 
-  if (method === 'ensureAgentsRunningOnServer') {
+  if (method === 'lifecycle.ensure') {
     const { conversationId, agentIds = [] } = params as { conversationId: number; agentIds?: string[] };
     try {
       console.log('[ws] ensureAgentsRunningOnServer called', { conversationId, agentIdsCount: agentIds.length, agentIds });
@@ -260,7 +288,7 @@ async function handleRpc(
     return;
   }
 
-  if (method === 'stopAgentsOnServer') {
+  if (method === 'lifecycle.stop') {
     const { conversationId, agentIds } = params as { conversationId: number; agentIds?: string[] };
     try {
       await lifecycle.stop(conversationId, agentIds);

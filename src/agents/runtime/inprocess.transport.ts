@@ -1,6 +1,6 @@
 import type { IAgentTransport, IAgentEvents } from './runtime.interfaces';
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
-import type { MessagePayload, TracePayload } from '$src/types/event.types';
+import type { MessagePayload, TracePayload, AttachmentRow } from '$src/types/event.types';
 import type { ConversationSnapshot } from '$src/types/orchestrator.types';
 import { InProcessEvents } from './inprocess.events';
 
@@ -66,4 +66,8 @@ export class InProcessTransport implements IAgentTransport {
   createEventStream(conversationId: number, includeGuidance: boolean): IAgentEvents {
     return new InProcessEvents(this.orchestrator, conversationId, includeGuidance);
   }
+
+   async getAttachmentByDocId(params: { conversationId: number; docId: string }): Promise<AttachmentRow | null> {
+     return this.orchestrator.getAttachmentByDocId(params.conversationId, params.docId);
+   }
 }

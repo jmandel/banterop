@@ -701,7 +701,7 @@ function ConversationView({ id }: { id: number }) {
               setStarting(true);
               const agentIds = (result.metadata?.agents || []).map((a: any) => a.id);
               if (!serverControlRef.current) serverControlRef.current = new WsControl(API_BASE.replace(/^http/, 'ws') + '/ws');
-              await serverControlRef.current.ensureAgentsRunningOnServer(id as unknown as number, agentIds);
+              await serverControlRef.current.lifecycleEnsure(id as unknown as number, agentIds);
               setAgentsRunning(true);
             } catch (e) {
               console.error('Failed to ensure server agents:', e);
@@ -817,7 +817,7 @@ function ConversationView({ id }: { id: number }) {
                         // Optimistically mark as running to reflect intent immediately
                         setAgentsRunning(true);
                         if (!serverControlRef.current) serverControlRef.current = new WsControl(API_BASE.replace(/^http/, 'ws') + '/ws');
-                        await serverControlRef.current.ensureAgentsRunningOnServer(id as unknown as number, agentIds);
+                        await serverControlRef.current.lifecycleEnsure(id as unknown as number, agentIds);
                       } catch (e) {
                         console.error('Failed to ensure server agents:', e);
                         setAgentsRunning(false);
