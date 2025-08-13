@@ -519,10 +519,10 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
    // keyboard controls for detail pane
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!id) return;
-    if (e.key === "t") {
+    if (e.key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       setShowTraces((v) => !v);
-    } else if (e.key === "f") {
+    } else if (e.key === "f" && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       setAutoScroll((v) => !v);
     } else if (e.key === "r") {
@@ -807,19 +807,7 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
                 const isAbortedSegment = typeof t.abortSeq === 'number' && m.seq <= (t.abortSeq as number);
                 const atts: Array<{ id?: string; name: string; contentType: string; docId?: string }> | undefined = (m.payload as any)?.attachments;
 
-                const openAttachment = async (att: { id?: string; name: string; contentType: string }) => {
-                  try {
-                    if (!att.id) return;
-                    const res = await fetch(`${API_BASE}/attachments/${att.id}/content`);
-                    if (!res.ok) throw new Error(`Failed to fetch attachment ${att.id}`);
-                    const blob = await res.blob();
-                    const url = URL.createObjectURL(blob);
-                    window.open(url, '_blank', 'noopener');
-                  } catch (e) {
-                    console.error('openAttachment error', e);
-                    alert('Unable to open attachment');
-                  }
-                };
+                // Attachments open via direct links so browser affordances (open in new tab, copy link) work.
                 return (
                   <div key={m.seq} data-block className={`bg-white rounded px-3 py-2 mb-1 shadow-sm ${isAbortedSegment ? 'opacity-50' : ''}`}>
                     <div className="text-gray-500 text-[0.7rem] mb-1">{m.type}/{m.finality}</div>
@@ -832,14 +820,24 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
                     )}
                     {Array.isArray(atts) && atts.length > 0 && (
                       <div className="mt-2 space-y-1">
-                        {atts.map((a, idx) => (
-                          <div key={`${m.seq}-att-${a.id ?? a.docId ?? idx}`} className="text-xs text-blue-700 hover:underline cursor-pointer flex items-center gap-1"
-                               onClick={(e) => { e.preventDefault(); openAttachment(a as any); }}
-                               title={a.contentType}>
-                            <span aria-hidden>📎</span>
-                            <span>{a.name || 'attachment'}</span>
-                          </div>
-                        ))}
+                        {atts.map((a, idx) => {
+                          const id = (a as any).id as string | undefined;
+                          const href = id ? `${API_BASE}/attachments/${id}/content` : undefined;
+                          return (
+                            <a
+                              key={`${m.seq}-att-${id ?? a.docId ?? idx}`}
+                              className="text-xs text-blue-700 hover:underline flex items-center gap-1"
+                              href={href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={a.contentType}
+                              onClick={(e) => { if (!href) e.preventDefault(); }}
+                            >
+                              <span aria-hidden>📎</span>
+                              <span>{a.name || 'attachment'}</span>
+                            </a>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

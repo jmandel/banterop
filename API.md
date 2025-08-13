@@ -142,14 +142,20 @@ WebSocket JSON‑RPC API (`/api/ws`)
     - Result: `{ turn: number }`
     - Behavior: Appends an abort marker (idempotent) if this agent owns the open turn; returns the turn that should be used next.
 
+  - `getEnsuredAgentsOnServer`
+    - Params: `{ conversationId: number }`
+    - Result: `{ ensured: Array<{ id: string; class?: string }> }`
+    - Behavior: Returns the union of live server‑hosted agents and persisted ensures from the registry.
+
   - `ensureAgentsRunningOnServer`
     - Params: `{ conversationId: number, agentIds?: string[] }`
     - Result: `{ ensured: Array<{ id: string; class?: string }> }`
+    - Behavior: Idempotently ensures agents are running for a conversation. If `agentIds` is omitted, ensures all agents from metadata; if provided, ensures only that subset (incremental).
+
   - `stopAgentsOnServer`
     - Params: `{ conversationId: number, agentIds?: string[] }`
     - Result: `{ ok: true }`
-    - Result: `{ ensured: Array<{ id: string, class?: string }> }`
-    - Behavior: Idempotently ensures server‑managed agents are running for a conversation (AgentHost-based).
+    - Behavior: Stops ensured agents. Note: current host implementation stops all agents for the conversation; subset stop is not yet supported server‑side.
 
 - Notifications (push)
   - `event`: `UnifiedEvent`
