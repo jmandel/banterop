@@ -71,15 +71,15 @@ This codebase cleanly separates how agents are managed (control plane) from how 
 - Control plane: start/stop and inspect agents and conversations
   - In-process: `InProcessControl` (server only)
   - WebSocket: `WsControl` (stateless, one-shot calls)
-  - Methods: `createConversation`, `getConversation`, `ensureAgentsRunningOnServer`, `stopAgentsOnServer`
+  - Methods: `createConversation`, `getConversation`, `getEnsuredAgentsOnServer`, `ensureAgentsRunningOnServer`, `stopAgentsOnServer`
 
 - Data plane: agents exchange events through the orchestrator
   - In-process transport: `InProcessTransport`
   - WebSocket transport: `WsTransport`
-  - Unified entry point for execution: `startAgents({ transport, providerManager, turnRecoveryMode: 'restart' })`
+  - Unified entry point for execution: `startAgents({ transport, providerManager, agentIds?, turnRecoveryMode: 'restart' })`
 
 Minimal WS JSON-RPC (under `/api/ws`):
-- Control: `createConversation`, `getConversation`, `ensureAgentsRunningOnServer`, `stopAgentsOnServer`, `clearTurn`
+- Control: `createConversation`, `getConversation`, `getEnsuredAgentsOnServer`, `ensureAgentsRunningOnServer`, `stopAgentsOnServer`, `clearTurn`
 - Data: `sendMessage`, `sendTrace`, `subscribe`, `unsubscribe`, `getEventsPage`
 
 Scenario CRUD is HTTP-only under `/api/scenarios`; conversations list is HTTP under `/api/conversations`.
@@ -87,14 +87,17 @@ Scenario CRUD is HTTP-only under `/api/scenarios`; conversations list is HTTP un
 ## 🚦 Launch Recipes
 
 - Server-managed:
-  - Control: `createConversation(meta)`, `ensureAgentsRunningOnServer(conversationId)`
+  - Control: `createConversation(meta)`, per-agent or bulk `ensureAgentsRunningOnServer(conversationId, agentIds?)`
+  - Inspect: `getEnsuredAgentsOnServer(conversationId)` returns union of live host and persisted ensures
   - Observe: `subscribe` with optional `sinceSeq`, or poll `getEventsPage`
-  - Resume: server persists `autoRun` in conversation metadata and re-ensures on boot
+  - Resume: server persists ensures and re-ensures on boot
 
-- Client-managed:
-  - Control: `createConversation(meta)` via `WsControl`
-  - Data: `startAgents({ conversationId, transport: new WsTransport(wsUrl), turnRecoveryMode: 'restart' })`
-  - Resume: on reload, call `startAgents` again; strict alternation + restart recovery ensure safety
+- Client-managed (browser):
+  - Control: `createConversation(meta)` via WS
+  - Data: use `BrowserAgentLifecycleManager` with `BrowserAgentHost` (WS transport)
+  - Per-agent: `lifecycle.ensure(conversationId, [agentId])` to add agents incrementally
+  - Resume: `lifecycle.resumeAll()` restores previously registered agents from `localStorage`
+  - Isolation: `lifecycle.clearOthers(conversationId)` stops/unregisters browser agents for other conversations in this tab
 
 See `src/cli/demo-browserside-scenario.ts` for a client-managed example.
 
@@ -426,6 +429,7 @@ Methods (subset):
 - Subscriptions: `subscribe` (supports `filters.types`/`filters.agents` and `sinceSeq` backlog), `unsubscribe`, `subscribeAll`
 - Scenarios: `listScenarios`, `getScenario`, `createScenario`, `updateScenario`, `deleteScenario`
 - Orchestration helper: `runConversationToCompletion`
+ - Lifecycle helpers (server): `getEnsuredAgentsOnServer`, `ensureAgentsRunningOnServer`, `stopAgentsOnServer`
 
 Notifications:
 - `event` — unified event
@@ -484,3 +488,35 @@ CAS: Turn validation is enforced server‑side. Clients typically do not need cl
   - `src/agents/clients/ws.client.ts` (WsJsonRpcClient)  
   - `src/agents/runtime/ws.transport.ts` (WsTransport)
   - `src/agents/runtime/ws.events.ts` (WsEvents)
+
+---
+
+## 🧰 Agent Lifecycle Management (Interfaces)
+
+We expose a unified lifecycle API used by both server and browser implementations.
+
+- IAgentRegistry: persistent record of desired agents
+  - `register(conversationId, agentIds)`
+  - `unregister(conversationId, agentIds?)`
+  - `listRegistered()`
+
+- IAgentHost: live runtime within a process
+  - `ensure(conversationId, { agentIds? })` — idempotent; may add agents incrementally
+  - `stop(conversationId)` — stop all in this host for the conversation
+  - `list(conversationId)` — returns `AgentRuntimeInfo[]`
+  - `stopAll()`
+
+- IAgentLifecycleManager: coordinates registry + host
+  - `ensure(conversationId, agentIds)` — persist + start; returns ensured runtime info
+  - `stop(conversationId, agentIds?)` — remove intent; browser impl supports per‑agent (stop‑and‑re‑ensure remainder)
+  - `resumeAll()` — re‑ensure from registry (server or browser)
+  - `listRuntime(conversationId)` — live runtime info
+  - `clearOthers(keepConversationId)` — browser helper to stop & unregister other conversations in this tab
+
+Browser specifics
+- Registry in `localStorage` and runtime in‑tab; supports incremental adds
+- Page resumes on load and syncs button state; clears other conversations for this tab
+
+Server specifics
+- Registry in SQLite; WS methods: `getEnsuredAgentsOnServer`, `ensureAgentsRunningOnServer`, `stopAgentsOnServer`
+- Per‑agent stop on server currently stops all for the conversation (subset stop not yet supported)

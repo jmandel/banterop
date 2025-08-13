@@ -31,7 +31,7 @@ describe('Runner registry resume', () => {
     dbPath = `/tmp/test-runner-registry-${Date.now()}.db`;
     app = new App({ dbPath });
     const hono = new Hono();
-    hono.route('/', createWebSocketServer(app.orchestrator, app.agentHost));
+    hono.route('/', createWebSocketServer(app.orchestrator, app.agentHost, app.lifecycleManager));
     server = Bun.serve({ port: 0, fetch: hono.fetch, websocket });
     wsUrl = `ws://localhost:${server.port}/api/ws`;
   });
@@ -59,7 +59,7 @@ describe('Runner registry resume', () => {
     // Restart app with same DB; explicit resume call
     app = new App({ dbPath, skipAutoRun: false });
     // Call resume function explicitly (nodeEnv test usually skips auto resume)
-    await app.runnerRegistry.resumeAgentsFromLocalRegistryOnServer();
+    await app.lifecycleManager.resumeAll();
 
     // Registry rows should exist
     const rows = app.storage.db.prepare('SELECT COUNT(1) as n FROM runner_registry WHERE conversation_id = ?').get(conversationId) as { n: number };

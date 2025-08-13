@@ -25,8 +25,8 @@ describe('MCP Proxy loopback with ScriptAgents (6 turns, auto-close)', () => {
   beforeAll(() => {
     app = new App({ dbPath: ':memory:' });
     const hono = new Hono();
-    // Mount MCP bridge with runner registry persistence
-    hono.route('/api/bridge', createBridgeRoutes(app.orchestrator, app.llmProviderManager, app.runnerRegistry, 200));
+    // Mount MCP bridge with lifecycle manager persistence
+    hono.route('/api/bridge', createBridgeRoutes(app.orchestrator, app.llmProviderManager, app.lifecycleManager, 200));
     server = Bun.serve({ port: 0, fetch: hono.fetch, websocket });
     baseUrl = `http://localhost:${server.port}`;
   });
@@ -99,7 +99,7 @@ describe('MCP Proxy loopback with ScriptAgents (6 turns, auto-close)', () => {
     const conversationA = app.orchestrator.createConversation({ meta: localMeta as any });
 
     // Ensure local agents running (patient + proxy); AgentHost pokes guidance post-ensure
-    await app.runnerRegistry.ensureAgentsRunningOnServer(conversationA, ['patient', 'insurer-proxy']);
+    await app.lifecycleManager.ensure(conversationA, ['patient', 'insurer-proxy']);
 
     // Poll until conversation is completed or timeout
     let completed = false;

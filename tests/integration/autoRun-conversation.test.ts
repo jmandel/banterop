@@ -7,7 +7,7 @@ import { WsControl } from "$src/control/ws.control";
 
 async function startServer(dbPath: string = ":memory:", skipAutoRun?: boolean): Promise<{ app: App; server: any; wsUrl: string }> {
   const app = new App({ dbPath, skipAutoRun: skipAutoRun ?? false });
-  const hono = new Hono().route("/", createWebSocketServer(app.orchestrator, app.agentHost));
+  const hono = new Hono().route("/", createWebSocketServer(app.orchestrator, app.agentHost, app.lifecycleManager));
   const server = Bun.serve({ port: 0, fetch: hono.fetch, websocket });
   const wsUrl = `ws://localhost:${server.port}/api/ws`;
   return { app, server, wsUrl };
