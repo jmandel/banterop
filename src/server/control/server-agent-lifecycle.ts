@@ -11,8 +11,21 @@ export class ServerAgentLifecycleManager implements IAgentLifecycleManager {
 
   async stop(conversationId: number, agentIds?: string[]) {
     await this.registry.unregister(conversationId, agentIds);
-    // Current host.stop stops all for the conversation; subset stops are not supported by host.
+
+    if (!agentIds || agentIds.length === 0) {
+      // Stop everything
+      await this.host.stop(conversationId);
+      return;
+    }
+
+    // Per-agent stop semantics: stop current runtime, then re-ensure remaining from registry (if any)
+    const all = await this.registry.listRegistered();
+    const entry = all.find((e) => e.conversationId === conversationId);
+    const remaining = entry?.agentIds ?? [];
     await this.host.stop(conversationId);
+    if (remaining.length > 0) {
+      await this.host.ensure(conversationId, { agentIds: remaining });
+    }
   }
 
   async resumeAll(): Promise<void> {

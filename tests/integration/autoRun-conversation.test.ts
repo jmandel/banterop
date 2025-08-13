@@ -104,11 +104,11 @@ describe("Server runner registry + ensure", () => {
     });
 
     // === 4. Ensure agents on server – persists in runner_registry
-    const ensured = await rpcCall<{ ensured: Array<{ id: string }> }>(wsUrl, "ensureAgentsRunningOnServer", { conversationId, agentIds: ['alpha','beta'] });
+    const ensured = await rpcCall<{ ensured: Array<{ id: string }> }>(wsUrl, "lifecycle.ensure", { conversationId, agentIds: ['alpha','beta'] });
     expect(ensured.ensured.length).toBeGreaterThan(0);
 
     // === 5. Stop and verify host stopped
-    await rpcCall(wsUrl, "stopAgentsOnServer", { conversationId });
+    await rpcCall(wsUrl, "lifecycle.stop", { conversationId });
     const rowAfter = app.storage.db
       .prepare(`SELECT COUNT(1) as n FROM runner_registry WHERE conversation_id = ?`)
       .get(conversationId) as { n: number };
@@ -137,7 +137,7 @@ describe("Server runner registry + ensure", () => {
     });
 
     // Mark for autoRun by ensuring server-managed agents
-    await rpcCall(wsUrl, "ensureAgentsRunningOnServer", { conversationId, agentIds: ['alpha','beta'] });
+    await rpcCall(wsUrl, "lifecycle.ensure", { conversationId, agentIds: ['alpha','beta'] });
 
     // === 2. Shutdown ===
     await stopServer(server, app);

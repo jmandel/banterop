@@ -1,5 +1,5 @@
 import type { StreamEvent } from '$src/agents/clients/event-stream';
-import type { MessagePayload, TracePayload } from '$src/types/event.types';
+import type { MessagePayload, TracePayload, AttachmentRow } from '$src/types/event.types';
 import type { ConversationSnapshot } from '$src/types/orchestrator.types';
 
 export interface IAgentTransport {
@@ -29,6 +29,9 @@ export interface IAgentTransport {
   
   // NEW: Transport owns event stream creation
   createEventStream(conversationId: number, includeGuidance: boolean): IAgentEvents;
+
+  // Optional: fetch attachment content by logical docId within a conversation
+  getAttachmentByDocId?(params: { conversationId: number; docId: string }): Promise<AttachmentRow | null>;
 }
 
 export interface IAgentEvents {

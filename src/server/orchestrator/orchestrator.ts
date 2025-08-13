@@ -169,11 +169,25 @@ export class OrchestratorService {
     // Use provided turn, or continue open turn, or start new turn
     const targetTurn = turn ?? (head.hasOpenTurn ? head.lastTurn : undefined);
     
+    // If this is a terminal message, ensure outcome.status convention is set
+    let payloadToWrite: MessagePayload = payload;
+    if (finality === 'conversation') {
+      try {
+        const p: any = { ...(payload as any) };
+        const outcome = p.outcome && typeof p.outcome === 'object' ? { ...p.outcome } : {};
+        if (!outcome.status) outcome.status = 'completed';
+        p.outcome = outcome;
+        payloadToWrite = p as MessagePayload;
+      } catch {
+        // best-effort; ignore if shaping fails
+      }
+    }
+
     return this.appendEvent({
       conversation,
       ...(targetTurn !== undefined ? { turn: targetTurn } : {}),
       type: 'message',
-      payload,
+      payload: payloadToWrite,
       finality,
       agentId
     });
@@ -294,6 +308,10 @@ export class OrchestratorService {
 
   listAttachmentsByConversation(conversationId: number): AttachmentRow[] {
     return this.storage.attachments.listByConversation(conversationId);
+  }
+
+  getAttachmentByDocId(conversationId: number, docId: string): AttachmentRow | null {
+    return this.storage.attachments.getByDocId(conversationId, docId);
   }
 
   subscribe(conversation: number, listener: ((e: UnifiedEvent | GuidanceEvent) => void) | ((e: UnifiedEvent) => void), includeGuidance = false): string {
@@ -484,7 +502,7 @@ export class OrchestratorService {
               type: 'message',
               payload: {
                 text: `Auto-closed: reached maxTurns=${maxTurns}.`,
-                outcome: { status: 'neutral', reason: 'max_turns' },
+                outcome: { status: 'canceled', reason: 'max_turns' },
               },
               finality: 'conversation',
               agentId: 'system-orchestrator',

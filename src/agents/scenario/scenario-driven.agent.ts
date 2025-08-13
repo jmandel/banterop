@@ -58,6 +58,9 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
   private availableDocuments: Map<string, any> = new Map();
   private currentTurnTrace: TraceEntry[] = [];
   private MAX_STEPS = 10;
+  private systemPromptExtra?: string; // Conversation-level extra prompt from runtime config
+  private initiatingMessageExtra?: string; // Conversation-level extra initiating message text
+  private isFirstTurnOfConversation: boolean = false;
 
   constructor(
     transport: IAgentTransport,
@@ -104,6 +107,19 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
     }
     this.agentConfig = myAgent;
 
+    // Merge optional runtime extras (from ConversationMeta.agents[].config)
+    try {
+      const runtimeAgent = ctx.snapshot.runtimeMeta?.agents?.find((a: any) => a.id === ctx.agentId);
+      const cfg = (runtimeAgent?.config || {}) as Record<string, unknown>;
+      if (cfg && typeof cfg === 'object') {
+        // Capture conversation-level extras (persist across turns until changed)
+        const systemPromptExtra = typeof cfg['systemPromptExtra'] === 'string' ? String(cfg['systemPromptExtra']) : '';
+        if (systemPromptExtra) this.systemPromptExtra = systemPromptExtra;
+        const initiatingMessageExtra = typeof cfg['initiatingMessageExtra'] === 'string' ? String(cfg['initiatingMessageExtra']) : '';
+        if (initiatingMessageExtra) this.initiatingMessageExtra = initiatingMessageExtra;
+      }
+    } catch {}
+
     // Add built-in tools to agent config
     const builtInTools = this.getBuiltInTools();
     this.agentConfig.tools = [...builtInTools, ...(this.agentConfig.tools || [])];
@@ -116,8 +132,16 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
     this.availableDocuments.clear();
     this.extractDocumentsFromHistory(snapshot.events, agentId);
 
+    // Determine if this is the very first conversational turn (no non-system events yet)
+    try {
+      const hasAnyNonSystem = (snapshot.events || []).some(e => e && e.type !== 'system');
+      this.isFirstTurnOfConversation = !hasAnyNonSystem;
+    } catch { this.isFirstTurnOfConversation = false; }
+
     // Clear current turn trace
     this.currentTurnTrace = [];
+    // If this is the first step in this turn and firstTurnGuidance is present, seed a thought
+    // no per-turn seeding; firstTurnGuidance was merged into initiating message text above
 
     // Process the turn with multi-step loop
     await this._processAndRespondToTurn(ctx);
@@ -255,14 +279,23 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
   }): string {
     const { agentConfig, tools, conversationHistory, currentProcess, remainingSteps } = params;
 
+    // Look up runtime per-agent config for extras (systemPromptExtra)
+    let runtimeSystemExtra = '';
+    try {
+      // Best-effort: runtimeMeta may include this agent's config
+      const metaAgents: any[] = (this as any).scenario ? [] : [];
+      // We don't have snapshot here, but we can defer injection later if needed
+    } catch {}
+
     const separator = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
 
-    // Get scenario metadata from the snapshot
-    const scenarioMeta = this.scenario?.metadata;
-    const scenarioData = this.scenario?.scenario;
-    const scenarioInfo = scenarioMeta 
-      ? `\nScenario: ${scenarioMeta.title}\nDescription: ${scenarioMeta.description}\n${scenarioData?.background ? `Background: ${scenarioData.background}\n` : ''}`
-      : '';
+    // Omit all scenario-level metadata (no title/description/background in prompt)
+    const scenarioInfo = '';
+
+    // Merge in any runtime extras captured at takeTurn (no scenario-level meta)
+    const mergedSystemPrompt = [agentConfig.systemPrompt, this.systemPromptExtra]
+      .filter(Boolean)
+      .join('\n');
 
     const systemPromptSection = `<SYSTEM_PROMPT>
 You are an AI agent in a healthcare interoperability scenario.
@@ -273,7 +306,7 @@ Principal: ${agentConfig.principal.name}
 Role: ${agentConfig.agentId}
 Situation: ${agentConfig.situation}
 
-Instructions: ${agentConfig.systemPrompt}
+Instructions: ${mergedSystemPrompt}
 
 Goals:
 ${agentConfig.goals.map(g => `• ${g}`).join('\n')}
@@ -537,7 +570,7 @@ Your response MUST follow this EXACT format:
             const doc = this.availableDocuments.get(docId);
             
             if (!doc) {
-              logLine(ctx.agentId, 'error', `Could not find document with docId: ${docId}`);
+              logLine(ctx.agentId, 'error', `Could not find attachment document with docId: ${docId}`);
               continue;
             }
             
@@ -604,20 +637,49 @@ Your response MUST follow this EXACT format:
         
         if (existingDoc) {
           if (!existingDoc.content) {
-            throw new Error(`Document with docId ${toolCall.args.refToDocId} exists but has no content.`);
+            // Try backend fetch by conversation + docId
+            try {
+              const attachment = await (ctx.transport.getAttachmentByDocId?.({ conversationId: ctx.conversationId, docId: toolCall.args.refToDocId }) ?? Promise.resolve(null));
+              if (attachment && attachment.content) {
+                toolOutput = {
+                  docId: attachment.docId || toolCall.args.refToDocId,
+                  name: attachment.name,
+                  contentType: attachment.contentType,
+                  content: attachment.content,
+                  summary: attachment.summary,
+                  sourceAgentId: attachment.createdByAgentId,
+                };
+                // Cache hydrated doc
+                this.availableDocuments.set(toolOutput.docId, toolOutput);
+              } else {
+                logLine(ctx.agentId, 'warn', `resolve_document_reference: backend had no content for ${toolCall.args.refToDocId}; will fall back to synthesis`);
+              }
+            } catch (e) {
+              logLine(ctx.agentId, 'warn', `resolve_document_reference: fetch by docId failed: ${e instanceof Error ? e.message : String(e)}`);
+            }
+          } else {
+            toolOutput = {
+              docId: existingDoc.docId || toolCall.args.refToDocId,
+              name: existingDoc.name,
+              contentType: existingDoc.contentType,
+              content: existingDoc.content,
+              summary: existingDoc.summary,
+              ...(existingDoc.sourceAgentId ? { sourceAgentId: existingDoc.sourceAgentId } : {}),
+            };
           }
-          toolOutput = {
-            docId: existingDoc.docId || toolCall.args.refToDocId,
-            name: existingDoc.name,
-            contentType: existingDoc.contentType,
-            content: existingDoc.content,
-            summary: existingDoc.summary
-          };
         }
       }
       
-      // If we didn't find an existing document, call synthesis
+      // If we didn't find an existing document, call synthesis (with guard: do not synthesize other agent's attachments)
       if (!toolOutput) {
+        const refId = toolCall.args?.refToDocId as string | undefined;
+        if (refId) {
+          const stub = this.availableDocuments.get(refId);
+          const sourceAgentId = (stub && typeof stub === 'object') ? (stub as any).sourceAgentId : undefined;
+          if (sourceAgentId && sourceAgentId !== ctx.agentId) {
+            throw new Error(`Refusing to synthesize document '${refId}' that was authored by another agent (${sourceAgentId}).`);
+          }
+        }
         const historyString = this.buildConversationHistory(ctx.snapshot.events, ctx.agentId);
         const currentProcessString = this.formatCurrentProcess(this.currentTurnTrace);
         const fullHistory = historyString + (historyString ? '\n\n' : '') + 
@@ -682,7 +744,7 @@ Your response MUST follow this EXACT format:
       if (toolDef?.endsConversation) {
         await this.addThought(ctx, 
           `With this final tool result, I'm ready to conclude the conversation. ` +
-          `I'll attach this final result's docId via send_message_to_agent_conversation, explaining the outcome.`
+          `I'll attach this previous result .docId as an attachment in send_message_to_agent_conversation, explaining the outcome.`
         );
         
         return { completedTurn: false, isTerminal: true };
@@ -803,9 +865,20 @@ Your response MUST follow this EXACT format:
 
   private formatCurrentProcess(currentTurnTrace: TraceEntry[]): string {
     // Linear progression: do not deduplicate; render entries in order
-    if (!currentTurnTrace || currentTurnTrace.length === 0) {
-      return `<!-- No actions taken yet in this turn -->
-***=>>YOU ARE HERE<<=***`;
+    const isEmpty = !currentTurnTrace || currentTurnTrace.length === 0;
+    if (isEmpty) {
+      if (this.isFirstTurnOfConversation) {
+        // First step of the first turn overall — inject initiating hint once
+        let starter: string | undefined;
+        try { starter = this.agentConfig?.messageToUseWhenInitiatingConversation; } catch {}
+        const extra = this.initiatingMessageExtra || '';
+        const composed = [starter, extra].filter(s => !!s && String(s).trim().length > 0).join('\n\n');
+        const hint = composed
+          ? `<scratchpad>\nI should send my first message. Suggested content:\n\n${composed}\n</scratchpad>`
+          : '<!-- No actions taken yet in this turn -->';
+        return `${hint}\n***=>>YOU ARE HERE<<=***`;
+      }
+      return `<!-- No actions taken yet in this turn -->\n***=>>YOU ARE HERE<<=***`;
     }
 
     const steps: string[] = [];
@@ -912,6 +985,7 @@ ${resultJson}
 
   private extractDocumentsFromHistory(events: UnifiedEvent[], myAgentId: string): void {
     for (const event of events) {
+      // 1) Index this agent's prior tool_result documents (with full content when present)
       if (event.type === 'trace' && event.agentId === myAgentId) {
         const payload = event.payload as TracePayload;
         if (payload.type === 'tool_result') {
@@ -919,9 +993,36 @@ ${resultJson}
           if (result) {
             const documents = this.extractDocuments(result);
             for (const [docId, doc] of documents) {
-              this.availableDocuments.set(docId, doc);
+              const enriched: any = { ...doc };
+              if (enriched && typeof enriched === 'object' && !('sourceAgentId' in enriched)) {
+                enriched.sourceAgentId = event.agentId;
+              }
+              this.availableDocuments.set(docId, enriched);
+              console.log(`[${myAgentId}] extracted document ${docId} from its own tool_result`, enriched);
             }
           }
+        }
+      }
+
+      // 2) Also index message attachments from any agent (metadata only; content fetched/ synthesized later)
+      if (event.type === 'message') {
+        const p = event.payload as any;
+        const attachments = Array.isArray(p?.attachments) ? p.attachments : [];
+        for (const att of attachments) {
+          const docId: string | undefined = att?.docId || att?.id;
+          if (!docId || typeof docId !== 'string') continue;
+          // Preserve any existing richer entry (with content) over this metadata-only stub
+          if (this.availableDocuments.has(docId)) continue;
+          console.log(`[${myAgentId}] extracted document ${docId} from message attachments from ${event.agentId} tool`, event);
+          this.availableDocuments.set(docId, {
+            docId: att.docId || undefined,
+            name: att.name,
+            contentType: att.contentType || 'application/octet-stream',
+            summary: att.summary,
+            // Keep a reference to the backend attachment id for potential future fetches
+            attachmentId: att.id || undefined,
+            sourceAgentId: event.agentId,
+          });
         }
       }
     }

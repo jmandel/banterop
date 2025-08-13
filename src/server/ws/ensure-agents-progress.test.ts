@@ -124,7 +124,7 @@ describe('ensureAgentsRunning leads to progress', () => {
 
     // 4) Ensure alpha runs on server
     const control = new WsControl(wsUrl);
-    const ensured = await control.ensureAgentsRunningOnServer(conversationId, ['alpha']);
+    const ensured = await control.lifecycleEnsure(conversationId, ['alpha']);
     console.error('ensured from server:', ensured);
     expect(Array.isArray(ensured.ensured)).toBe(true);
     expect(ensured.ensured.some(e => e.id === 'alpha')).toBe(true);

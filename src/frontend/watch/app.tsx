@@ -405,6 +405,8 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
   });
   const [autoScroll, setAutoScroll] = useState(true);
   const [meta, setMeta] = useState<any>(null);
+  const [finalStatus, setFinalStatus] = useState<'completed'|'canceled'|'errored'|''>('');
+  const [finalReason, setFinalReason] = useState<string>('');
   const [connState, setConnState] = useState<ConnState>("idle");
 
   const seenSeqRef = useRef<Set<number>>(new Set());
@@ -431,6 +433,21 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
           return true;
         });
         setEvents((prev) => [...prev, ...unique].sort((a, b) => a.seq - b.seq));
+
+        // If already completed, derive final status/reason from the last final message
+        if (data?.status === 'completed') {
+          const lastFinal = [...unique].reverse().find((e) => e.type === 'message' && e.finality === 'conversation');
+          if (lastFinal) {
+            try {
+              const payload: any = (lastFinal as any).payload || {};
+              const outcome: any = payload.outcome || {};
+              const status = outcome.status || 'completed';
+              const reason = outcome.reason || payload.text || '';
+              setFinalStatus(status as any);
+              setFinalReason(String(reason || '').trim());
+            } catch {}
+          }
+        }
       }
     } catch (err) {
       console.error("Error loading conversation:", err);
@@ -467,6 +484,18 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
           if (seenSeqRef.current.has(ue.seq)) continue;
           seenSeqRef.current.add(ue.seq);
           setEvents((prev) => [...prev, ue].sort((a, b) => a.seq - b.seq));
+
+          // Capture terminal status/reason when a conversation-final message arrives
+          if (ue.type === 'message' && ue.finality === 'conversation') {
+            try {
+              const payload: any = (ue as any).payload || {};
+              const outcome: any = payload.outcome || {};
+              const status = outcome.status || 'completed';
+              const reason = outcome.reason || payload.text || '';
+              setFinalStatus(status as any);
+              setFinalReason(String(reason || '').trim());
+            } catch {}
+          }
         }
       } catch (err) {
         console.warn("WS stream error", err);
@@ -679,6 +708,11 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
             <div className="flex items-center justify-between gap-2 text-[12px] text-gray-700">
               <div className="truncate">
                 <span className="font-semibold">{meta?.metadata?.title || `Conversation #${id}`}</span>
+                {meta?.status === 'completed' && (
+                  <span className={`ml-2 inline-block text-[11px] px-1.5 py-0.5 rounded border ${finalStatus==='canceled' ? 'bg-amber-100 text-amber-800 border-amber-200' : finalStatus==='errored' ? 'bg-rose-100 text-rose-800 border-rose-200' : 'bg-emerald-100 text-emerald-700 border-emerald-200'}`}>
+                    {finalStatus ? finalStatus.charAt(0).toUpperCase() + finalStatus.slice(1) : 'Completed'}
+                  </span>
+                )}
                 {meta?.scenarioId && (
                   <span className="ml-2 text-gray-500">Scenario: {meta.scenarioId}</span>
                 )}
@@ -702,6 +736,18 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
             </div>
           </div>
         </div>
+        {meta?.status === 'completed' && (
+          <div className={`${finalStatus==='canceled' ? 'bg-amber-50 border-amber-200 text-amber-900' : finalStatus==='errored' ? 'bg-rose-50 border-rose-200 text-rose-900' : 'bg-emerald-50 border-emerald-200 text-emerald-800'} text-xs border rounded p-2 mx-1`}
+               data-block>
+            <div>This conversation is completed.</div>
+            {(finalReason || finalStatus) && (
+              <div className="mt-0.5">
+                {(finalStatus) && (<span className="font-medium">{finalStatus.charAt(0).toUpperCase() + finalStatus.slice(1)}</span>)}
+                {finalReason && (<span> — Reason: <span className="font-medium">{finalReason}</span></span>)}
+              </div>
+            )}
+          </div>
+        )}
         {turns.map((t, i) => {
           const color = colorForAgent(t.agentId);
           return (
@@ -723,12 +769,17 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
                     // Special rendering for TOOL_RESULT with markdown content
                     const isToolResult = label === 'TOOL_RESULT';
                     const hasMarkdown = isToolResult && p?.result && typeof p.result === 'object' && typeof p.result.content === 'string' && typeof p.result.contentType === 'string' && p.result.contentType.toLowerCase() === 'text/markdown';
-                    const hasJson = isToolResult && p?.result && typeof p.result === 'object' && typeof p.result.content === 'string' && typeof p.result.contentType === 'string' && p.result.contentType.toLowerCase().includes('json');
+                    const hasJson = isToolResult
+                      && p?.result && typeof p.result === 'object'
+                      && typeof p.result.contentType === 'string'
+                      && p.result.contentType.toLowerCase().includes('json')
+                      && (typeof (p.result as any).content === 'string' || typeof (p.result as any).content === 'object');
 
                     if (hasMarkdown) {
                       const SENTINEL = '___MARKDOWN_SENTINEL___';
-                      const resultClone: any = { ...p.result, content: SENTINEL };
-                      const jsonStr = JSON.stringify(resultClone, null, 2);
+                      // Show the full tool_result wrapper, but replace result.content with a sentinel
+                      const payloadClone: any = { ...p, result: { ...(p.result || {}), content: SENTINEL } };
+                      const jsonStr = JSON.stringify(payloadClone, null, 2);
                       const token = `"${SENTINEL}"`;
                       const pos = jsonStr.indexOf(token);
                       const before = pos >= 0 ? jsonStr.slice(0, pos) : jsonStr;
@@ -757,8 +808,9 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
 
                     if (hasJson) {
                       const SENTINEL = '___JSON_SENTINEL___';
-                      const resultClone: any = { ...p.result, content: SENTINEL };
-                      const jsonStr = JSON.stringify(resultClone, null, 2);
+                      // Show the full tool_result wrapper, but replace result.content with a sentinel
+                      const payloadClone: any = { ...p, result: { ...(p.result || {}), content: SENTINEL } };
+                      const jsonStr = JSON.stringify(payloadClone, null, 2);
                       const token = `"${SENTINEL}"`;
                       const pos = jsonStr.indexOf(token);
                       const before = pos >= 0 ? jsonStr.slice(0, pos) : jsonStr;
@@ -768,7 +820,15 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
                       const contentIdx = lastLine.indexOf('"content"');
                       const indentCols = contentIdx >= 0 ? contentIdx + 1 : (lastLine.match(/^\s*/)?.[0].length ?? 0);
                       let prettyInner = '';
-                      try { prettyInner = JSON.stringify(JSON.parse(p.result.content as string), null, 2); } catch { prettyInner = p.result.content as string; }
+                      try {
+                        if (typeof (p.result as any).content === 'string') {
+                          prettyInner = JSON.stringify(JSON.parse((p.result as any).content as string), null, 2);
+                        } else {
+                          prettyInner = JSON.stringify((p.result as any).content, null, 2);
+                        }
+                      } catch {
+                        prettyInner = typeof (p.result as any).content === 'string' ? (p.result as any).content : JSON.stringify((p.result as any).content, null, 2);
+                      }
                       return (
                         <div key={tr.seq} data-block className={`bg-yellow-50/70 border border-yellow-200 text-gray-800 px-2 py-2 rounded shadow-[0_0_0_1px_rgba(0,0,0,0.02)] ${isAbortedSegment ? 'opacity-50' : ''}`}>
                           <div className="uppercase tracking-wide text-[0.7rem] font-semibold text-yellow-700 mb-1">{label}</div>
@@ -785,19 +845,76 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
                     }
 
                     // Default pretty JSON for other traces
-                    let pretty = '';
-                    try {
-                      const obj = typeof tr.payload === 'string' ? JSON.parse(tr.payload as any) : tr.payload;
-                      pretty = JSON.stringify(obj, null, 2);
-                    } catch {
-                      pretty = typeof tr.payload === 'string' ? tr.payload : JSON.stringify(tr.payload, null, 2);
+                    // If this is a TOOL_RESULT without special content handling, show the full wrapper
+                    // and pretty-render result.content inline if present
+                    if (isToolResult) {
+                      const SENTINEL = '___GENERIC_SENTINEL___';
+                      const hasContent = p?.result && typeof p.result === 'object' && 'content' in (p.result as any);
+                      if (hasContent) {
+                        const payloadClone: any = { ...p, result: { ...(p.result || {}), content: SENTINEL } };
+                        const jsonStr = JSON.stringify(payloadClone, null, 2);
+                        const token = `"${SENTINEL}"`;
+                        const pos = jsonStr.indexOf(token);
+                        const before = pos >= 0 ? jsonStr.slice(0, pos) : jsonStr;
+                        const after = pos >= 0 ? jsonStr.slice(pos + token.length) : '';
+                        const lastNl = before.lastIndexOf('\n');
+                        const lastLine = lastNl >= 0 ? before.slice(lastNl + 1) : before;
+                        const contentIdx = lastLine.indexOf('"content"');
+                        const indentCols = contentIdx >= 0 ? contentIdx + 1 : (lastLine.match(/^\s*/)?.[0].length ?? 0);
+                        let prettyInner = '';
+                        try {
+                          prettyInner = typeof (p.result as any).content === 'string'
+                            ? (p.result as any).content
+                            : JSON.stringify((p.result as any).content, null, 2);
+                        } catch {
+                          prettyInner = String((p.result as any).content);
+                        }
+                        return (
+                          <div key={tr.seq} data-block className={`bg-yellow-50/70 border border-yellow-200 text-gray-800 px-2 py-2 rounded shadow-[0_0_0_1px_rgba(0,0,0,0.02)] ${isAbortedSegment ? 'opacity-50' : ''}`}>
+                            <div className="uppercase tracking-wide text-[0.7rem] font-semibold text-yellow-700 mb-1">{label}</div>
+                            <pre className="text-xs font-mono whitespace-pre-wrap break-words leading-snug">{before}</pre>
+                            <div className="my-1">
+                              <pre
+                                className="inline-block max-w-full border border-yellow-300 bg-white/60 rounded px-1 py-1 text-xs font-mono leading-snug whitespace-pre-wrap break-words"
+                                style={{ marginLeft: `${indentCols}ch` }}
+                              >{prettyInner}</pre>
+                            </div>
+                            <pre className="text-xs font-mono whitespace-pre-wrap break-words leading-snug">{after}</pre>
+                          </div>
+                        );
+                      } else {
+                        // No content field; show entire payload as-is
+                        let prettyPayload = '';
+                        try { prettyPayload = JSON.stringify(p, null, 2); } catch { prettyPayload = String(p); }
+                        return (
+                          <div key={tr.seq} data-block className={`bg-yellow-50/70 border border-yellow-200 text-gray-800 px-2 py-2 rounded shadow-[0_0_0_1px_rgba(0,0,0,0.02)] ${isAbortedSegment ? 'opacity-50' : ''}`}>
+                            <div className="uppercase tracking-wide text-[0.7rem] font-semibold text-yellow-700 mb-1">{label}</div>
+                            <pre className="text-xs font-mono whitespace-pre-wrap break-words leading-snug">{prettyPayload}</pre>
+                          </div>
+                        );
+                      }
+                    } else {
+                      // Always show a frame including a "type" for traces
+                      let pretty = '';
+                      try {
+                        const labelLower = label.toLowerCase();
+                        const obj = typeof tr.payload === 'string'
+                          ? { type: labelLower, value: tr.payload }
+                          : (tr.payload || { type: labelLower });
+                        pretty = JSON.stringify(obj, null, 2);
+                      } catch {
+                        const labelLower = label.toLowerCase();
+                        pretty = typeof tr.payload === 'string'
+                          ? JSON.stringify({ type: labelLower, value: tr.payload }, null, 2)
+                          : JSON.stringify(tr.payload ?? { type: labelLower }, null, 2);
+                      }
+                      return (
+                        <div key={tr.seq} data-block className={`bg-yellow-50/70 border border-yellow-200 text-gray-800 px-2 py-2 rounded shadow-[0_0_0_1px_rgba(0,0,0,0.02)] ${isAbortedSegment ? 'opacity-50' : ''}`}>
+                          <div className="uppercase tracking-wide text-[0.7rem] font-semibold text-yellow-700 mb-1">{label}</div>
+                          <pre className="text-xs font-mono whitespace-pre-wrap break-words leading-snug">{pretty}</pre>
+                        </div>
+                      );
                     }
-                    return (
-                      <div key={tr.seq} data-block className={`bg-yellow-50/70 border border-yellow-200 text-gray-800 px-2 py-2 rounded shadow-[0_0_0_1px_rgba(0,0,0,0.02)] ${isAbortedSegment ? 'opacity-50' : ''}`}>
-                        <div className="uppercase tracking-wide text-[0.7rem] font-semibold text-yellow-700 mb-1">{label}</div>
-                        <pre className="text-xs font-mono whitespace-pre-wrap break-words leading-snug">{pretty}</pre>
-                      </div>
-                    );
                   })}
                 </div>
               )}
