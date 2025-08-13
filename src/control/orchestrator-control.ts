@@ -5,7 +5,7 @@ export interface OrchestratorControl {
   createConversation(meta: ConversationMeta): Promise<number>;
   getConversation(conversationId: number, opts?: { includeScenario?: boolean }): Promise<ConversationSnapshot>;
 
-  ensureAgentsRunning(conversationId: number, agentIds?: string[]): Promise<{ ensured: Array<{ id: string; class?: string }> }>;
-  stopAgents(conversationId: number): Promise<void>;
+  getEnsuredAgentsOnServer(conversationId: number): Promise<{ ensured: Array<{ id: string; class?: string }> }>;
+  ensureAgentsRunningOnServer(conversationId: number, agentIds?: string[]): Promise<{ ensured: Array<{ id: string; class?: string }> }>;
+  stopAgentsOnServer(conversationId: number, agentIds?: string[]): Promise<void>;
 }
-

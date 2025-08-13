@@ -5,7 +5,8 @@ import { LLMProviderManager } from '$src/llm/provider-manager';
 import type { SchedulePolicy } from '$src/types/orchestrator.types';
 import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
 import { AgentHost } from './agent-host';
-import { RunnerRegistry } from './runner-registry';
+import { ServerAgentRegistry } from './control/server-agent-registry';
+import { ServerAgentLifecycleManager } from './control/server-agent-lifecycle';
 import kneeMriScenario from '$src/db/fixtures/knee-mri-scenario.json';
 import visionScreeningScenario from '$src/db/fixtures/vision-screening-scenario.json';
 
@@ -20,7 +21,7 @@ export class App {
   readonly orchestrator: OrchestratorService;
   readonly llmProviderManager: LLMProviderManager;
   readonly agentHost: AgentHost;
-  readonly runnerRegistry: RunnerRegistry;
+  readonly lifecycleManager: ServerAgentLifecycleManager;
 
   constructor(options?: AppOptions) {
     const { policy, skipAutoRun, ...configOverrides } = options || {};
@@ -40,7 +41,8 @@ export class App {
       this.configManager.orchestratorConfig
     );
     this.agentHost = new AgentHost(this.orchestrator, this.llmProviderManager);
-    this.runnerRegistry = new RunnerRegistry(this.storage.db, this.agentHost);
+    const registry = new ServerAgentRegistry(this.storage.db);
+    this.lifecycleManager = new ServerAgentLifecycleManager(registry, this.agentHost);
     
     // Seed default scenarios on startup (no-op if already present)
     this.seedDefaultScenarios();
@@ -49,7 +51,7 @@ export class App {
     const shouldSkipAutoRun = skipAutoRun ?? (this.configManager.get().nodeEnv === 'test');
     if (!shouldSkipAutoRun) {
       try {
-        void this.runnerRegistry.resumeAgentsFromLocalRegistryOnServer();
+        void this.lifecycleManager.resumeAll();
       } catch (err) {
         console.error('[App] Failed to resume runner registry', err);
       }

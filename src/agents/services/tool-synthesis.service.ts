@@ -114,13 +114,29 @@ export class ToolSynthesisService {
     const prompt = this.buildOraclePrompt(input);
     const messages: LLMMessage[] = [{ role: 'user', content: prompt }];
 
-    const response = await this.llm.complete({
-      messages,
-      temperature: this.temperature,
-    });
+    const attempt = async (msgs: LLMMessage[], temp: number) => {
+      const resp = await this.llm.complete({ messages: msgs, temperature: temp });
+      return this.parseOracleResponse(resp.content || '');
+    };
 
-    const parsed = this.parseOracleResponse(response.content || '');
-    return parsed;
+    try {
+      return await attempt(messages, this.temperature);
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      if (msg.includes('Oracle response was not valid JSON with required { reasoning, output } shape.')) {
+        // One-time retry with an explicit formatting reminder and slightly lower temperature
+        const retryMessages: LLMMessage[] = [
+          { role: 'user', content: prompt },
+          { role: 'system', content: 'Return exactly one JSON code block with keys "reasoning" (string) and "output" (JSON). No extra text.' },
+        ];
+        try {
+          return await attempt(retryMessages, Math.max(0, this.temperature - 0.3));
+        } catch {
+          // Fall through to throw the original error for clearer diagnostics upstream
+        }
+      }
+      throw e;
+    }
   }
 
   // Prompt assembly (liberal knowledge embedding)

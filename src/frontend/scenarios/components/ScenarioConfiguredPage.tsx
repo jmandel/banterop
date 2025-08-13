@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { ScenarioDrivenAgent } from '$src/agents/scenario/scenario-driven.agent';
-import { WsTransport } from '$src/agents/runtime/ws.transport';
-import { LLMProviderManager } from '$src/llm/provider-manager';
+import { BrowserAgentRegistry } from '$src/agents/clients/browser-agent-registry';
+import { BrowserAgentHost } from '$src/agents/clients/browser-agent-host';
+import { BrowserAgentLifecycleManager } from '$src/agents/clients/browser-agent-lifecycle';
+import { WsControl } from '$src/control/ws.control';
 import type { UnifiedEvent } from '$src/types/event.types';
 
 declare const __API_BASE__: string | undefined;
@@ -38,16 +39,20 @@ export function ScenarioConfiguredPage() {
   const [error, setError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [conversationId, setConversationId] = useState<number | null>(null);
-  const [agentsRunning, setAgentsRunning] = useState<'none'|'browser'|'server'>('none');
   const [actionMsg, setActionMsg] = useState<string>('');
-  const [starting, setStarting] = useState<boolean>(false);
+  const [startingByAgent, setStartingByAgent] = useState<Record<string, boolean>>({});
+  const [serverRunning, setServerRunning] = useState<Record<string, boolean>>({});
+  const [browserRunning, setBrowserRunning] = useState<Record<string, boolean>>({});
 
   // Inline thread state
   const [messages, setMessages] = useState<UnifiedEvent[]>([]);
   const [convSnap, setConvSnap] = useState<any | null>(null);
   const eventWsRef = useRef<WebSocket | null>(null);
-  const agentsRef = useRef<Map<string, ScenarioDrivenAgent>>(new Map());
   const startingRef = useRef<boolean>(false);
+  const managerRef = useRef<BrowserAgentLifecycleManager | null>(null);
+  const serverControlRef = useRef<WsControl | null>(null);
+  const resumedRef = useRef<boolean>(false);
+  const [resumed, setResumed] = useState<boolean>(false);
 
   useEffect(() => {
     // If we have a conversationId in the route, use it directly
@@ -91,11 +96,19 @@ export function ScenarioConfiguredPage() {
     const subId = `sub-${conversationId}`;
     ws.onopen = () => {
       ws.send(JSON.stringify({ jsonrpc: '2.0', id: subId, method: 'subscribe', params: { conversationId, sinceSeq: 0 } }));
-      // Also fetch a one-shot snapshot for safety
-      wsRpcCall<any>('getConversation', { conversationId, includeScenario: false }).then((snap) => {
+      // Also fetch a one-shot snapshot (with scenario/meta) for UI details and breadcrumbs
+      wsRpcCall<any>('getConversation', { conversationId, includeScenario: true }).then((snap) => {
         setConvSnap(snap);
         const msgs: UnifiedEvent[] = (snap.events || []).filter((e: UnifiedEvent) => e.type === 'message');
         setMessages(msgs);
+        try {
+          const meta = snap?.metadata || {};
+          const store = {
+            scenarioId: meta?.scenarioId || meta?.scenario?.id || meta?.scenario?.metadata?.id,
+            title: meta?.title || meta?.scenario?.metadata?.title,
+          };
+          localStorage.setItem(`convoMeta:${conversationId}`, JSON.stringify(store));
+        } catch {}
       }).catch(() => {});
     };
     ws.onmessage = (evt) => {
@@ -128,93 +141,132 @@ export function ScenarioConfiguredPage() {
     const fromSnap = (convSnap?.metadata?.agents || []).map((a: any) => a.id);
     return fromSnap;
   };
-  const serverUrl = API_BASE.replace('/api', '');
-
-  async function startInBrowser() {
-    if (!conversationId || startingRef.current) return;
-    startingRef.current = true;
-    setStarting(true);
-    setActionMsg('Starting agents in browser…');
-    try {
-      // Prepare provider manager
-      const defaultModel = config?.meta?.agents?.[0]?.config?.model
-        || convSnap?.metadata?.agents?.[0]?.config?.model
-        || 'gemini-2.5-flash';
-      const providerManager = new LLMProviderManager({ defaultLlmProvider: 'browserside', defaultLlmModel: defaultModel, serverUrl });
-      // Clear any existing
-      for (const [, agent] of agentsRef.current) agent.stop();
-      agentsRef.current.clear();
-      // Start per agent
-      const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws';
-      const agentMetas = (config?.meta?.agents && config.meta.agents.length
-        ? config.meta.agents
-        : (convSnap?.metadata?.agents || [])
-      );
-      for (const agentMeta of agentMetas) {
-        const transport = new WsTransport(wsUrl);
-        const agent = new ScenarioDrivenAgent(transport, { agentId: agentMeta.id, providerManager, turnRecoveryMode: 'restart' });
-        agentsRef.current.set(agentMeta.id, agent);
-        await agent.start(conversationId, agentMeta.id);
+  // Ensure browser manager exists and resume local agents once on load
+  useEffect(() => {
+    if (managerRef.current) return;
+    const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws';
+    const reg = new BrowserAgentRegistry();
+    const host = new BrowserAgentHost(wsUrl);
+    managerRef.current = new BrowserAgentLifecycleManager(reg, host);
+    (async () => {
+      try { await managerRef.current!.resumeAll(); }
+      catch {}
+      finally { resumedRef.current = true; setResumed(true); }
+      // If we already know the conversation, sync its local state now
+      if (conversationId) {
+        try {
+          const infos = managerRef.current!.listRuntime(conversationId) || [];
+          setBrowserRunning((prev) => {
+            const next = { ...prev } as Record<string, boolean>;
+            for (const i of infos) next[i.id] = true;
+            return next;
+          });
+        } catch {}
       }
-      setAgentsRunning('browser');
-      setActionMsg('Agents running in browser.');
+    })();
+  }, []);
+
+  // Whenever the conversationId becomes available, sync browser-running from runtime
+  useEffect(() => {
+    if (!conversationId || !managerRef.current) return;
+    (async () => {
+      try {
+        // Clear any browser-registered agents for other conversations in this tab
+        await managerRef.current!.clearOthers(conversationId);
+      } catch {}
+      try {
+        const infos = managerRef.current!.listRuntime(conversationId) || [];
+        // Replace map to reflect only current convo's browser agents
+        setBrowserRunning(() => {
+          const next: Record<string, boolean> = {};
+          for (const i of infos) next[i.id] = true;
+          return next;
+        });
+      } catch {}
+    })();
+  }, [conversationId, resumed]);
+
+  // On load (or conversation change), ask orchestrator for ensured server-side agents
+  useEffect(() => {
+    if (!conversationId) return;
+    if (!serverControlRef.current) serverControlRef.current = new WsControl(API_BASE.replace(/^http/, 'ws') + '/ws');
+    (async () => {
+      try {
+        const ensured = await serverControlRef.current!.getEnsuredAgentsOnServer(conversationId);
+        const running = (ensured?.ensured || []).map((e) => e.id);
+        console.debug('[Configured] ensured (server)', running);
+        setServerRunning((prev) => {
+          const next: Record<string, boolean> = { ...prev };
+          for (const id of running) next[id] = true;
+          return next;
+        });
+        // per-agent statuses are shown; no global summary
+      } catch {}
+    })();
+  }, [conversationId]);
+
+  async function startServerAgent(agentId: string) {
+    if (!conversationId) return;
+    // mark just this agent as starting
+    setStartingByAgent((m) => ({ ...m, [agentId]: true }));
+    setActionMsg(`Ensuring ${agentId} on server…`);
+    try {
+      if (!serverControlRef.current) serverControlRef.current = new WsControl(API_BASE.replace(/^http/, 'ws') + '/ws');
+      await serverControlRef.current.ensureAgentsRunningOnServer(conversationId, [agentId]);
+      setServerRunning((m) => ({ ...m, [agentId]: true }));
+      setActionMsg(`${agentId} running on server.`);
     } catch (e: any) {
-      console.error('[Configured] Failed to start in browser', e);
-      setActionMsg(`Failed to start in browser: ${e?.message || e}`);
-      setAgentsRunning('none');
+      console.error('[Configured] Failed to ensure server agent', e);
+      setActionMsg(`Failed to start ${agentId} on server: ${e?.message || e}`);
     } finally {
-      startingRef.current = false;
-      setStarting(false);
+      setStartingByAgent((m) => ({ ...m, [agentId]: false }));
     }
   }
 
-  async function startOnServer() {
-    if (!conversationId) return;
-    setStarting(true);
-    setActionMsg('Ensuring agents on server…');
+  async function startBrowserAgent(agentId: string) {
+    if (!conversationId || startingRef.current) return;
+    startingRef.current = true;
+    setStartingByAgent((m) => ({ ...m, [agentId]: true }));
+    setActionMsg(`Starting ${agentId} in browser…`);
     try {
-      // If running in browser, stop first
-      if (agentsRunning === 'browser') {
-        await stop();
+      const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws';
+      if (!managerRef.current) {
+        const reg = new BrowserAgentRegistry();
+        const host = new BrowserAgentHost(wsUrl);
+        managerRef.current = new BrowserAgentLifecycleManager(reg, host);
       }
-      const agentIds = listAgentIds();
-      if (!agentIds || agentIds.length === 0) {
-        setActionMsg('No agents found to start on server.');
-        return;
-      }
-      await wsRpcCall('ensureAgentsRunningOnServer', { conversationId, agentIds });
-      setAgentsRunning('server');
-      setActionMsg('Agents running on server.');
+      await managerRef.current.ensure(conversationId, [agentId]);
+      setBrowserRunning((m) => ({ ...m, [agentId]: true }));
+      setActionMsg(`${agentId} running in browser.`);
     } catch (e: any) {
-      console.error('[Configured] Failed to ensure server agents', e);
-      setActionMsg(`Failed to start on server: ${e?.message || e}`);
-    } finally { setStarting(false); }
+      console.error('[Configured] Failed to start in browser', e);
+      setActionMsg(`Failed to start ${agentId} in browser: ${e?.message || e}`);
+    } finally {
+      startingRef.current = false;
+      setStartingByAgent((m) => ({ ...m, [agentId]: false }));
+    }
   }
 
-  async function stop() {
-    setStarting(true);
+  async function stopAgent(agentId: string) {
     try {
-      if (agentsRunning === 'browser') {
-        for (const [, agent] of agentsRef.current) {
-          try { agent.stop(); } catch {}
+      const wasBrowser = browserRunning[agentId];
+      const wasServer = serverRunning[agentId];
+      if (wasBrowser) {
+        if (managerRef.current && conversationId) {
+          await managerRef.current.stop(conversationId, [agentId]);
         }
-        agentsRef.current.clear();
-        setAgentsRunning('none');
-        setActionMsg('Stopped browser agents.');
-      } else if (agentsRunning === 'server') {
-        if (!conversationId) return;
-        const agentIds = listAgentIds();
-        await wsRpcCall('stopAgentsOnServer', { conversationId, agentIds });
-        setAgentsRunning('none');
-        setActionMsg('Stopped server agents.');
-      } else {
-        setActionMsg('No agents running.');
+        setBrowserRunning((m) => ({ ...m, [agentId]: false }));
       }
+      if (wasServer && conversationId) {
+        if (!serverControlRef.current) serverControlRef.current = new WsControl(API_BASE.replace(/^http/, 'ws') + '/ws');
+        await serverControlRef.current.stopAgentsOnServer(conversationId, [agentId]);
+        setServerRunning((m) => ({ ...m, [agentId]: false }));
+      }
+      setActionMsg(`Stopped ${agentId}.`);
     } catch (e: any) {
-      console.error('[Configured] Failed to stop agents', e);
-      setActionMsg(`Failed to stop agents: ${e?.message || e}`);
+      console.error('[Configured] Failed to stop agent', e);
+      setActionMsg(`Failed to stop ${agentId}: ${e?.message || e}`);
     } finally {
-      setStarting(false);
     }
   }
 
@@ -224,22 +276,62 @@ export function ScenarioConfiguredPage() {
       {conversationId ? (
         <div className="border rounded bg-white p-3 space-y-3">
           <div className="flex items-center justify-between">
-            <div className="font-medium">Conversation created: #{conversationId}</div>
-            {agentsRunning !== 'none' && (
-              <div className="text-xs text-slate-600">Running: <span className="font-semibold">{agentsRunning === 'browser' ? 'Browser' : 'Server'}</span></div>
-            )}
-          </div>
-
-          <div className="flex flex-wrap gap-2 items-center">
-            <button disabled={starting} className="px-3 py-1 text-sm bg-blue-600 text-white rounded disabled:opacity-50" onClick={startOnServer}>Start on Server</button>
-            <button disabled={starting} className="px-3 py-1 text-sm bg-blue-600 text-white rounded disabled:opacity-50" onClick={startInBrowser}>Start in Browser</button>
-            {agentsRunning !== 'none' && (
-              <button disabled={starting} className="px-3 py-1 text-sm bg-slate-700 text-white rounded disabled:opacity-50" onClick={stop}>Stop</button>
-            )}
+            <div className="font-medium">Conversation #{conversationId}</div>
             <a className="px-3 py-1 text-sm bg-indigo-600 text-white rounded" href={`/watch#/conversation/${conversationId}`} target="_blank" rel="noreferrer">Open in Watch</a>
           </div>
 
-          {actionMsg && <div className="text-xs text-slate-600">{actionMsg}</div>}
+          <div className="text-xs text-slate-600 min-h-[1.25rem]">{actionMsg}</div>
+
+          <div className="border-t pt-2">
+            <div className="font-medium text-sm mb-1">Agents</div>
+            <div className="text-xs text-slate-600 mb-2">Start each agent in your preferred place. Server starts use ensure-running and persist across reloads and restarts. Browser starts run locally.</div>
+            <div className="space-y-2">
+              {listAgentIds().map((aid) => {
+                const isRunning = Boolean(browserRunning[aid] || serverRunning[aid]);
+                const isStarting = Boolean(startingByAgent[aid]);
+                const status = browserRunning[aid]
+                  ? 'Browser'
+                  : serverRunning[aid]
+                  ? 'Server'
+                  : isStarting
+                  ? 'Starting…'
+                  : 'Idle';
+                const disableStart = isRunning || isStarting;
+                const disableStop = !isRunning || isStarting;
+                return (
+                  <div
+                    key={aid}
+                    style={{ display: 'grid', gridTemplateColumns: '1fr 80px 1fr', columnGap: 8, alignItems: 'center' }}
+                  >
+                    <div className="font-mono text-xs px-2 py-1 border rounded bg-gray-50 truncate" title={aid}>{aid}</div>
+                    <div className="text-xs text-gray-700 text-center" style={{ width: 80 }}>{status}</div>
+                    <div style={{ height: 28, display: 'flex', alignItems: 'center' }}>
+                      <button
+                        disabled={disableStart}
+                        className="px-2 py-1 text-xs bg-blue-600 text-white rounded disabled:opacity-40"
+                        style={{ width: 130 }}
+                        onClick={() => startBrowserAgent(aid)}
+                      >Start in Browser</button>
+                      <span style={{ display: 'inline-block', width: 8 }} />
+                      <button
+                        disabled={disableStart}
+                        className="px-2 py-1 text-xs bg-blue-600 text-white rounded disabled:opacity-40"
+                        style={{ width: 130 }}
+                        onClick={() => startServerAgent(aid)}
+                      >Start on Server</button>
+                      <span style={{ display: 'inline-block', width: 8 }} />
+                      <button
+                        disabled={disableStop}
+                        className="px-2 py-1 text-xs bg-rose-600 text-white rounded disabled:opacity-40"
+                        style={{ width: 70 }}
+                        onClick={() => stopAgent(aid)}
+                      >Stop</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
           <div className="border-t pt-2">
             <div className="font-medium text-sm mb-2">Thread (messages)</div>

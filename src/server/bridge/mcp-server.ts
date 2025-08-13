@@ -15,7 +15,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod';
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
 import type { LLMProviderManager } from '$src/llm/provider-manager';
-import type { RunnerRegistry } from '$src/server/runner-registry';
+import type { ServerAgentLifecycleManager } from '$src/server/control/server-agent-lifecycle';
 import type { UnifiedEvent } from '$src/types/event.types';
 import type { AgentMeta } from '$src/types/conversation.meta';
 import {
@@ -30,7 +30,7 @@ export interface McpBridgeDeps {
   orchestrator: OrchestratorService;
   providerManager: LLMProviderManager;
   replyTimeoutMs?: number;
-  runnerRegistry: RunnerRegistry;
+  lifecycle: ServerAgentLifecycleManager;
 }
 
 export class McpBridgeServer {
@@ -242,11 +242,11 @@ export class McpBridgeServer {
       },
     });
 
-    // Start internal agents only (exclude the external/MCP agent) and PERSIST in runner registry
+    // Start internal agents only (exclude the external/MCP agent) and PERSIST via lifecycle
     const startingId = getStartingAgentId(meta);
     const internalIds = agents.map(a => a.id).filter(id => id !== startingId);
     if (internalIds.length > 0) {
-      await this.deps.runnerRegistry.ensureAgentsRunningOnServer(conversationId, internalIds);
+      await this.deps.lifecycle.ensure(conversationId, internalIds);
     }
 
     return conversationId;

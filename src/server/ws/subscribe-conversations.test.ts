@@ -11,7 +11,7 @@ describe('WS subscribeConversations', () => {
   beforeEach(async () => {
     app = new App({ dbPath: ':memory:' });
     const hono = new Hono();
-    hono.route('/', createWebSocketServer(app.orchestrator, app.agentHost));
+    hono.route('/', createWebSocketServer(app.orchestrator, app.agentHost, app.lifecycleManager));
     server = Bun.serve({ port: 0, fetch: hono.fetch, websocket });
     wsUrl = `ws://localhost:${server.port}/api/ws`;
   });
@@ -66,4 +66,3 @@ describe('WS subscribeConversations', () => {
     ws.close();
   });
 });
-

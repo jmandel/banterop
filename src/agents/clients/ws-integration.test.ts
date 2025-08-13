@@ -18,7 +18,7 @@ describe('WsEventStream Integration Tests', () => {
     app = new App({ dbPath: ':memory:' });
     
     const honoServer = new Hono();
-    honoServer.route('/', createWebSocketServer(app.orchestrator, app.agentHost));
+    honoServer.route('/', createWebSocketServer(app.orchestrator, app.agentHost, app.lifecycleManager));
     
     server = Bun.serve({
       port: 0, // Random port
@@ -351,7 +351,7 @@ describe('WsEventStream Integration Tests', () => {
     
     // Restart server on same port
     const honoServer2 = new Hono();
-    honoServer2.route('/', createWebSocketServer(app.orchestrator, app.agentHost));
+    honoServer2.route('/', createWebSocketServer(app.orchestrator, app.agentHost, app.lifecycleManager));
     server = Bun.serve({
       port: oldPort,
       fetch: honoServer2.fetch,
