@@ -35,9 +35,11 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 .panel-title { font-weight: 600; color: var(--muted); }
 .log { overflow: auto; display: grid; gap: 10px; padding-right: 2px; }
 .bubble { max-width: 72%; padding: 10px 12px; border-radius: 12px; line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
+/* User & external agent on the right (cool blue variants) */
 .who-you { justify-self: end; background: #1e2a3a; border: 1px solid #273141; }
-.who-them { justify-self: start; background: #16202c; border: 1px solid #223042; }
-.who-planner { justify-self: start; background: #1a2231; border: 1px solid #2a3550; }
+.who-them { justify-self: end; background: #243447; border: 1px solid #2d3f55; }
+/* Planner on the left (distinct purple hue) */
+.who-planner { justify-self: start; background: #261f36; border: 1px solid #3b2f59; }
 .who-sys { justify-self: center; background: transparent; border: 1px dashed var(--border); color: var(--dim); }
 .partial { opacity: 0.65; font-style: italic; }
 .composer { display: grid; gap: 8px; }

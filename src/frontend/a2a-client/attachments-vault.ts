@@ -7,6 +7,7 @@ export type AttachmentRecord = {
   bytes: string; // base64
   size: number;
   digest: string; // sha256 of bytes
+  source?: 'local' | 'agent';
   summary?: string;
   keywords?: string[];
   last_inspected?: string; // ISO timestamp
@@ -46,6 +47,10 @@ export class AttachmentVault {
     }));
   }
 
+  listBySource(src: 'local' | 'agent'): AttachmentRecord[] {
+    return this.listDetailed().filter(a => (a.source || 'local') === src);
+  }
+
   getByName(name: string): AttachmentRecord | undefined {
     return this.byName.get(name);
   }
@@ -67,6 +72,7 @@ export class AttachmentVault {
       bytes,
       size: file.size,
       digest,
+      source: 'local',
       private: false,
       priority: false,
       analysisPending: false,
@@ -86,10 +92,22 @@ export class AttachmentVault {
     const bytes = btoa(unescape(encodeURIComponent(contentUtf8)));
     const rec: AttachmentRecord = {
       name, mimeType, bytes, size: contentUtf8.length,
-      digest: "", private: false, priority: false, analysisPending: false
+      digest: "", source: 'local', private: false, priority: false, analysisPending: false
     };
     // synthetic: compute digest too
     sha256Hex(bytes).then(d => { rec.digest = d; });
+    this.byName.set(name, rec);
+    return rec;
+  }
+
+  // Add an attachment provided by an agent (bytes already base64-encoded)
+  addFromAgent(name: string, mimeType: string, bytesBase64: string): AttachmentRecord {
+    const rec: AttachmentRecord = {
+      name, mimeType, bytes: bytesBase64, size: atob(bytesBase64).length,
+      digest: "", source: 'agent', private: false, priority: false, analysisPending: false
+    };
+    // compute digest asynchronously
+    sha256Hex(bytesBase64).then(d => { rec.digest = d; });
     this.byName.set(name, rec);
     return rec;
   }

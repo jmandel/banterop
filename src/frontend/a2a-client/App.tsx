@@ -352,6 +352,7 @@ export default function App() {
     if (!text.trim()) return;
     console.log("Sending front message:", text);
     dispatch({ type: "frontAppend", msg: { id: crypto.randomUUID(), role: "you", text } });
+    try { plannerRef.current?.recordUserReply?.(text); } catch {}
     setFrontInput("");
     
     // In passthrough mode, proactively send:
@@ -616,7 +617,7 @@ export default function App() {
           </div>
         </div>
         <div className="attach-list-rows">
-          {vaultRef.current.listDetailed().map((att) => (
+          {vaultRef.current.listBySource('local').map((att) => (
             <div className="attach-row" key={`${att.name}:${att.digest}`}>
               <div className="attach-row-left">
                 <div className="attach-name">
@@ -687,9 +688,46 @@ export default function App() {
               </div>
             </div>
           ))}
-          {!vaultRef.current.listDetailed().length ? (
+          {!vaultRef.current.listBySource('local').length ? (
             <div className="tiny" style={{ color: "var(--muted)" }}>
               No attachments yet. Upload files above; summaries will fill in automatically (unless private).
+            </div>
+          ) : null}
+        </div>
+
+        {/* Received from agent */}
+        <div className="row" style={{ marginTop: 12 }}>
+          <label>Received from agent</label>
+        </div>
+        <div className="attach-list-rows">
+          {vaultRef.current.listBySource('agent').map((att) => (
+            <div className="attach-row" key={`agent:${att.name}:${att.digest}`}>
+              <div className="attach-row-left">
+                <div className="attach-name">
+                  <span className="badge">{att.name}</span>
+                  <span className="tiny" style={{ marginLeft: 8, color: "var(--muted)" }}>
+                    {att.mimeType} • {att.size.toLocaleString()} bytes • from agent
+                  </span>
+                </div>
+                {att.summary ? (
+                  <div className="tiny" style={{ marginTop: 4 }}>Summary: {att.summary}</div>
+                ) : null}
+              </div>
+              <div className="attach-row-actions">
+                <button
+                  className="ghost"
+                  onClick={() => openBase64Attachment(att.name, att.mimeType, att.bytes, undefined)}
+                  title="Open in new tab"
+                >
+                  Open
+                </button>
+                <button className="ghost" onClick={() => { vaultRef.current.remove(att.name); setFrontInput((x)=>x); }}>Remove</button>
+              </div>
+            </div>
+          ))}
+          {!vaultRef.current.listBySource('agent').length ? (
+            <div className="tiny" style={{ color: "var(--muted)" }}>
+              No documents received from the agent yet.
             </div>
           ) : null}
         </div>
@@ -760,7 +798,7 @@ export default function App() {
           <div className="panel-title">Planner ↔ Agent (Task Transcript)</div>
           <div className="log" ref={agentLogRef}>
             {agentLog.map((m) => (
-              <div key={m.id} className={`bubble ${m.role === "planner" ? "who-you" : "who-them"} ${m.partial ? "partial" : ""}`}>
+              <div key={m.id} className={`bubble ${m.role === "planner" ? "who-planner" : "who-them"} ${m.partial ? "partial" : ""}`}>
                 {m.text}
                 {m.attachments && m.attachments.length ? (
                   <div className="row" style={{ marginTop: 6, flexWrap: 'wrap', gap: 6 }}>
@@ -791,10 +829,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* Footer */}
-      <div style={{ textAlign: "center", color: "var(--muted)" }}>
-        A2A Browser Client • Dual-channel UI • Full-history planner • Attachment Intelligence
-      </div>
+      {/* Footer removed */}
     </div>
   );
 }

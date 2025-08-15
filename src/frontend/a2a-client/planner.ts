@@ -1,7 +1,7 @@
 import { A2AClient } from "./a2a-client";
 import type { A2APart } from "./a2a-types";
 import { AttachmentVault } from "./attachments-vault";
-import type { LLMProvider, LLMStepContext, ToolCall, ToolEvent } from "./llm-types";
+import type { LLMProvider, LLMStepContext, ToolCall, ToolEvent, PlannerEvent } from "./llm-types";
 import { TaskHistoryStore } from "./task-history";
 import { inspectAttachment } from "./attachment-inspector";
 
@@ -30,12 +30,14 @@ const MAX_EVENT_TEXT = 12000;
 export class Planner {
   private running = false;
   private toolEvents: ToolEvent[] = [];
+  private plannerEvents: PlannerEvent[] = [];
   private loopCount = 0;
   private lastFrontCount = 0; // for passthrough: track forwarded front messages
   private activeStream?: AbortController;
   private lastAgentMsgId?: string;
   private lastUserCount = 0;
   private lastStatus?: import('./a2a-types').A2AStatus;
+  private lastStimKey?: string;
 
   constructor(private opts: PlannerDeps) {}
 
@@ -51,7 +53,16 @@ export class Planner {
     this.running = false; 
   }
 
+  // Exposed to App: record a user reply
+  recordUserReply(text: string) {
+    const t = String(text || '').trim();
+    if (!t) return;
+    this.plannerEvents.push({ type: 'user_reply', at: new Date().toISOString(), text: t });
+  }
+
   private buildLLMCtx(): LLMStepContext {
+    const full = this.opts.store.getPlannerFullHistory();
+    const priorMediator = full.filter((m) => m.role === 'user').length;
     return {
       instructions: this.opts.getInstructions(),
       goals: this.opts.getGoals(),
@@ -59,9 +70,11 @@ export class Planner {
       policy: this.opts.getPolicy(),
       counterpartHint: this.opts.getCounterpartHint?.(),
       available_files: this.opts.vault.listForPlanner(),
-      task_history_full: this.opts.store.getPlannerFullHistory(),
+      task_history_full: full,
       user_mediator_recent: this.opts.getUserMediatorRecent(),
       tool_events_recent: this.toolEvents.slice(-8),
+      planner_events_recent: this.plannerEvents.slice(-20),
+      prior_mediator_messages: priorMediator,
     };
   }
 
@@ -89,6 +102,11 @@ export class Planner {
     }
 
     if (txt) this.opts.onSendToAgentEcho?.(txt);
+    // Record planner event for sent message
+    try {
+      const simpleAtts = atts.map((a: any) => ({ name: String(a?.name || 'attachment'), mimeType: String(a?.mimeType || 'application/octet-stream') }));
+      this.plannerEvents.push({ type: 'sent_to_agent', at: new Date().toISOString(), text: txt || undefined, attachments: simpleAtts.length ? simpleAtts : undefined });
+    } catch {}
 
     const hasTask = !!this.opts.store.getTaskId();
     try {
@@ -150,22 +168,60 @@ export class Planner {
     try {
       while (this.running) {
         this.loopCount++;
-        const ctx: LLMStepContext = this.buildLLMCtx();
-        // Deduplicate triggers: only act when there is a new agent message or user text or status change
+        // Reconcile latest agent events and attachments BEFORE building ctx so prompt sees fresh state
         const agentLog = (this.opts.store as any).getAgentLogEntries?.() || [];
         const lastAgent = agentLog.filter((e: any) => e.role === 'agent' && !e.partial).slice(-1)[0];
         const userCount = this.opts.getUserMediatorRecent().length;
+        // On new agent message, record planner events and persist docs to vault (if any)
+        if (lastAgent && this.lastAgentMsgId !== lastAgent.id) {
+          try {
+            const text = String((lastAgent as any).text || '');
+            this.plannerEvents.push({ type: 'agent_message', at: new Date().toISOString(), text: text || undefined });
+            const attachments = (lastAgent as any).attachments as Array<{ name: string; mimeType: string; bytes?: string; uri?: string }> | undefined;
+            if (attachments && attachments.length) {
+              for (const a of attachments) {
+                if (a?.name && a?.mimeType) {
+                  this.plannerEvents.push({ type: 'agent_document_added', at: new Date().toISOString(), name: a.name, mimeType: a.mimeType });
+                  if (a.bytes) {
+                    try { this.opts.vault.addFromAgent(a.name, a.mimeType, a.bytes); } catch {}
+                  }
+                }
+              }
+            }
+          } catch {}
+        }
+
+        // Now build a fresh context that includes any new events/files
+        const ctx: LLMStepContext = this.buildLLMCtx();
         console.debug(`[Planner] Stimulus status=${ctx.status} lastAgent=${lastAgent?.id || '-'} userCount=${userCount}`);
-        const sameAgent = !!this.lastAgentMsgId && !!lastAgent && this.lastAgentMsgId === lastAgent.id;
-        const sameUsers = this.lastUserCount === userCount;
-        const sameStatus = this.lastStatus === ctx.status;
-        if (sameAgent && sameUsers && sameStatus) {
+      // Record agent message arrival and agent attachments into planner events and vault
+      if (lastAgent && this.lastAgentMsgId !== lastAgent.id) {
+        try {
+          const text = String((lastAgent as any).text || '');
+          this.plannerEvents.push({ type: 'agent_message', at: new Date().toISOString(), text: text || undefined });
+          const attachments = (lastAgent as any).attachments as Array<{ name: string; mimeType: string; bytes?: string; uri?: string }> | undefined;
+          if (attachments && attachments.length) {
+            for (const a of attachments) {
+              if (a?.name && a?.mimeType) {
+                this.plannerEvents.push({ type: 'agent_document_added', at: new Date().toISOString(), name: a.name, mimeType: a.mimeType });
+                if (a.bytes) {
+                  try { this.opts.vault.addFromAgent(a.name, a.mimeType, a.bytes); } catch {}
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+        // Only external stimuli (status, last agent message id, user reply count) should drive a new LLM turn
+        const stimKey = `${ctx.status}|${lastAgent?.id || ''}|${userCount}`;
+        if (this.lastStimKey === stimKey) {
           await this.opts.waitNextEvent();
           continue;
         }
         this.lastAgentMsgId = lastAgent?.id;
         this.lastUserCount = userCount;
         this.lastStatus = ctx.status;
+        this.lastStimKey = stimKey;
         console.log(`[Planner] Loop iteration ${this.loopCount}, status: ${ctx.status}`);
 
         // Passthrough mode: thin relay without LLM
@@ -200,7 +256,10 @@ export class Planner {
 
         if (kind === "ask_user") {
           const q = String((tool as any).args?.question ?? "").trim();
-          if (q) this.opts.onAskUser(q);
+          if (q) {
+            this.opts.onAskUser(q);
+            this.plannerEvents.push({ type: 'asked_user', at: new Date().toISOString(), question: q });
+          }
           await this.opts.waitNextEvent();
           continue;
         }

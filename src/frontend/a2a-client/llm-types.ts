@@ -28,13 +28,20 @@ export type ToolEvent = {
   at: string;
 };
 
+export type PlannerEvent =
+  | { type: 'asked_user'; at: string; question: string }
+  | { type: 'user_reply'; at: string; text: string }
+  | { type: 'sent_to_agent'; at: string; text?: string; attachments?: Array<{ name: string; mimeType: string }> }
+  | { type: 'agent_message'; at: string; text?: string }
+  | { type: 'agent_document_added'; at: string; name: string; mimeType: string };
+
 export type LLMStepContext = {
   instructions: string;
   goals: string;
   status: A2AStatus;
   policy: { has_task: boolean; planner_mode?: "passthrough" | "autostart" | "approval" };
   counterpartHint?: string;
-
+  
   available_files: Array<{
     name: string; mimeType: string; size: number;
     summary?: string; keywords?: string[]; last_inspected?: string;
@@ -45,6 +52,8 @@ export type LLMStepContext = {
   user_mediator_recent: Array<{ role: "user" | "planner" | "system"; text: string }>;
 
   tool_events_recent: ToolEvent[];
+  planner_events_recent: PlannerEvent[];
+  prior_mediator_messages: number;
 };
 
 export interface LLMProvider {
