@@ -4,7 +4,8 @@ import { A2AClient } from "./a2a-client";
 import { AttachmentVault } from "./attachments-vault";
 import { Planner } from "./planner";
 import { ServerLLMProvider } from "./llm-provider";
-import { TaskHistoryStore, AgentLogEntry } from "./task-history";
+type AgentLogEntry = { id: string; role: "planner" | "agent"; text: string; partial?: boolean; attachments?: Array<{ name: string; mimeType: string; bytes?: string; uri?: string }>; };
+import { A2ATaskClient } from "./a2a-task-client";
 import { AttachmentSummarizer } from "./attachment-summaries";
 import { useDebounce } from "./useDebounce";
 
@@ -16,7 +17,7 @@ type Model = {
   connected: boolean;
   endpoint: string;
   taskId?: string;
-  status: A2AStatus;
+  status: A2AStatus | "initializing";
   front: FrontMsg[];
   plannerMode: PlannerMode;
   plannerStarted: boolean;
@@ -28,7 +29,7 @@ type Model = {
 type Act =
   | { type: "connect"; endpoint: string }
   | { type: "setTask"; taskId?: string }
-  | { type: "status"; status: A2AStatus }
+  | { type: "status"; status: A2AStatus | "initializing" }
   | { type: "frontAppend"; msg: FrontMsg }
   | { type: "system"; text: string }
   | { type: "busy"; busy: boolean }
@@ -41,7 +42,7 @@ type Act =
 const initModel = (endpoint: string): Model => ({
   connected: false,
   endpoint,
-  status: "submitted",
+  status: "initializing",
   front: [],
   plannerMode: (localStorage.getItem("a2a.planner.mode") as PlannerMode) || "autostart",
   plannerStarted: false,
@@ -105,7 +106,7 @@ export default function App() {
   const clientRef = useRef<A2AClient | null>(null);
   const vaultRef = useRef(new AttachmentVault());
   const providerRef = useRef<ServerLLMProvider | null>(null);
-  const storeRef = useRef<TaskHistoryStore | null>(null);
+  const taskRef = useRef<A2ATaskClient | null>(null);
   const plannerRef = useRef<Planner | null>(null);
   const summarizerRef = useRef<AttachmentSummarizer | null>(null);
   const summarizerModelRef = useRef<string>(summarizerModel);
@@ -143,7 +144,7 @@ export default function App() {
   const agentLogRef = useRef<HTMLDivElement | null>(null);
   const ptSendInFlight = useRef(false);
   const ptStreamAbort = useRef<AbortController | null>(null);
-  const lastStatusRef = useRef<A2AStatus>("submitted");
+  const lastStatusRef = useRef<A2AStatus | "initializing">("initializing");
   const lastTaskIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
@@ -180,7 +181,11 @@ export default function App() {
         const res = await fetch(`${base}/llm/providers`);
         if (!res.ok) return;
         const list = await res.json();
-        const filtered = (Array.isArray(list) ? list : []).filter((p: any) => p?.name !== "browserside");
+        const filtered = (Array.isArray(list) ? list : []).filter((p: any) => 
+          p?.name !== "browserside" && 
+          p?.name !== "mock" &&
+          p?.available !== false
+        );
         setProviders(filtered);
         if (!selectedModel) {
           const first = filtered.flatMap((p: any) => p.models || [])[0];
@@ -205,7 +210,7 @@ export default function App() {
       lastStatusRef.current = "submitted";
       lastTaskIdRef.current = undefined;
       clientRef.current = null;
-      storeRef.current = null;
+      taskRef.current = null;
       plannerRef.current?.stop();
       plannerRef.current = null;
       return;
@@ -221,8 +226,8 @@ export default function App() {
 
     // Provider is created when planner starts (and only if not in passthrough mode)
 
-    const store = new TaskHistoryStore(client);
-    storeRef.current = store;
+    const taskClient = new A2ATaskClient(endpointUrl);
+    taskRef.current = taskClient;
 
     // Attachment summarizer (background)
     summarizerRef.current = new AttachmentSummarizer(() => summarizerModelRef.current || undefined, vaultRef.current);
@@ -233,34 +238,35 @@ export default function App() {
       setFrontInput((x) => x);
     });
 
-    store.subscribe(() => {
-      setAgentLog(store.getAgentLogEntries());
-      const curTask = store.getTaskId();
+    const updateAgentLogFromTask = () => {
+      const t = taskRef.current?.getTask();
+      const hist = t?.history || [];
+      const entries: AgentLogEntry[] = hist.map((m) => {
+        const text = (m.parts || []).filter((p: any) => p?.kind === 'text').map((p: any) => p.text).join('\n') || '';
+        const atts = (m.parts || []).filter((p:any)=>p?.kind==='file' && p?.file).map((p:any)=>({ name: String(p.file.name||'attachment'), mimeType: String(p.file.mimeType||'application/octet-stream'), bytes: p.file.bytes, uri: p.file.uri }));
+        return { id: m.messageId, role: m.role === 'user' ? 'planner' : 'agent', text, attachments: atts };
+      });
+      setAgentLog(entries);
+    };
+    taskClient.on('new-task', () => {
+      const curTask = taskRef.current?.getTaskId();
       if (lastTaskIdRef.current !== curTask) {
         lastTaskIdRef.current = curTask;
         dispatch({ type: "setTask", taskId: curTask });
       }
-      const curStatus = store.getStatus();
-      if (lastStatusRef.current !== curStatus) {
-        lastStatusRef.current = curStatus;
-        dispatch({ type: "status", status: curStatus });
-        if (curStatus === "input-required") dispatch({ type: "system", text: "— your turn now —" });
-        if (curStatus === "completed") dispatch({ type: "system", text: "— conversation completed —" });
-        if (curStatus === "failed") dispatch({ type: "system", text: "— conversation failed —" });
-        if (curStatus === "canceled") dispatch({ type: "system", text: "— conversation canceled —" });
-      }
-
-      // Mirror agent replies into front channel in passthrough mode
-      if (plannerModeRef.current === "passthrough") {
-        const entries = store.getAgentLogEntries();
-        for (const e of entries) {
-          if (e.role === "agent" && !e.partial && !mirroredAgentIdsRef.current.has(e.id)) {
-            mirroredAgentIdsRef.current.add(e.id);
-            dispatch({ type: "frontAppend", msg: { id: `mirror:${e.id}`, role: "planner", text: e.text } });
-          }
-        }
-      }
+      updateAgentLogFromTask();
       signalEvent('store');
+    });
+    taskClient.on('new-task', () => {
+      const st = taskRef.current?.getStatus();
+      if (st && lastStatusRef.current !== st) {
+        lastStatusRef.current = st;
+        dispatch({ type: 'status', status: st });
+        if (st === 'input-required') dispatch({ type: 'system', text: '— your turn now —' });
+        if (st === 'completed') dispatch({ type: 'system', text: '— conversation completed —' });
+        if (st === 'failed') dispatch({ type: 'system', text: '— conversation failed —' });
+        if (st === 'canceled') dispatch({ type: 'system', text: '— conversation canceled —' });
+      }
     });
 
     // Fetch agent card (UX)
@@ -281,7 +287,7 @@ export default function App() {
     // Resume task if provided
     if (resumeTask.trim()) {
       try {
-        await store.resume(resumeTask.trim()); // tasks/get(full) + resubscribe
+        await taskClient.resume(resumeTask.trim());
         dispatch({ type: "setTask", taskId: resumeTask.trim() });
       } catch (e: any) {
         dispatch({ type: "error", error: String(e?.message ?? e) });
@@ -292,7 +298,6 @@ export default function App() {
 
   const startPlanner = () => {
     const client = clientRef.current!;
-    const store = storeRef.current!;
     // Instantiate provider only for non-passthrough modes
     if (model.plannerMode !== "passthrough") {
       if (!providerRef.current) providerRef.current = new ServerLLMProvider(() => selectedModel || undefined);
@@ -301,13 +306,13 @@ export default function App() {
     }
 
     if (plannerRef.current) return;
+    const task = taskRef.current!;
     const orch = new Planner({
       provider: model.plannerMode === "passthrough" ? undefined : providerRef.current!,
-      a2a: client,
-      store,
+      task: task,
       vault: vaultRef.current,
       getPolicy: () => ({
-        has_task: !!store.getTaskId(),
+        has_task: !!task.getTaskId(),
         planner_mode: model.plannerMode,
       }),
       getInstructions: () => instructions,
@@ -320,7 +325,7 @@ export default function App() {
       getCounterpartHint: () => {
         try {
           const skill = (card as any)?.skills?.[0];
-          const hasTask = !!store.getTaskId();
+          const hasTask = !!task.getTaskId();
           if (skill?.description && typeof skill.description === 'string') {
             const d: string = skill.description as string; // e.g., "Open a conversation with <id> acting for \"<principal>\" — ..."
             const msg = hasTask
@@ -339,9 +344,10 @@ export default function App() {
         } catch { return undefined; }
       },
       waitNextEvent: waitNextEventFn,
+      cancelTask: cancelTask,
       onSystem: (text) => dispatch({ type: "system", text }),
       onAskUser: (q) => dispatch({ type: "frontAppend", msg: { id: crypto.randomUUID(), role: "planner", text: q } }),
-      onSendToAgentEcho: (text) => store.addOptimisticUserMessage(text),
+      onSendToAgentEcho: (_text) => {},
     });
     plannerRef.current = orch;
     orch.start();
@@ -352,10 +358,10 @@ export default function App() {
 
   const cancelTask = async () => {
     const client = clientRef.current;
-    const store = storeRef.current;
-    if (!client || !store?.getTaskId()) return;
+    const task = taskRef.current;
+    if (!client || !task?.getTaskId()) return;
     try {
-      await client.tasksCancel(store.getTaskId()!);
+      await client.tasksCancel(task.getTaskId()!);
     } catch (e: any) {
       dispatch({ type: "error", error: String(e?.message ?? e) });
     }
@@ -377,16 +383,14 @@ export default function App() {
       plannerModeRef.current === "passthrough" &&
       plannerRef.current &&
       clientRef.current &&
-      storeRef.current &&
+      taskRef.current &&
       (
         // Allow send if no stream in flight, or if we already have a task (we'll abort the old stream)
-        !ptSendInFlight.current || !!storeRef.current.getTaskId()
+        !ptSendInFlight.current || !!taskRef.current.getTaskId()
       )
     ) {
       const parts = [{ kind: "text", text } as const];
-      const taskId = storeRef.current.getTaskId();
-      // Immediately reflect mediator→agent message in the transcript (optimistic)
-      storeRef.current.addOptimisticUserMessage(text);
+      const taskId = taskRef.current.getTaskId();
       if (!taskId) {
         ptSendInFlight.current = true;
         (async () => {
@@ -401,57 +405,18 @@ export default function App() {
           ptStreamAbort.current = ac;
           let gotAny = false;
           try {
-            for await (const frame of clientRef.current!.messageStreamParts(parts as any, undefined, ac.signal)) {
-              gotAny = true;
-              storeRef.current!.ingestFrame(frame as any);
-            }
+            await taskRef.current!.startNew(parts as any);
+            gotAny = true;
           } catch (e: any) {
             const msg = String(e?.message ?? e ?? "");
             if (!gotAny) dispatch({ type: "system", text: `stream error: ${msg || 'unknown'}` });
           } finally {
             if (ptStreamAbort.current === ac) ptStreamAbort.current = null;
-            // If stream ended but task remains active (not terminal and not waiting for user), resubscribe
-            try {
-              const s = storeRef.current;
-              if (s && s.getTaskId()) {
-                const st = s.getStatus();
-                if (st !== "completed" && st !== "failed" && st !== "canceled" && st !== "input-required") {
-                  s.resubscribe();
-                }
-              }
-            } catch {}
             ptSendInFlight.current = false;
           }
         })();
       } else {
-        (async () => {
-          try {
-            // Follow-up also uses message/stream with existing taskId
-            try {
-              if (ptStreamAbort.current) {
-                console.warn(`[SSEAbort] Passthrough: aborting prior send stream before follow-up message (reason=new-followup-send taskId=${taskId})`);
-                ptStreamAbort.current.abort();
-              }
-            } catch {}
-            const ac = new AbortController();
-            ptStreamAbort.current = ac;
-            let gotAny = false;
-            for await (const frame of clientRef.current!.messageStreamParts(parts as any, taskId, ac.signal)) {
-              gotAny = true;
-              storeRef.current!.ingestFrame(frame as any);
-            }
-            if (ptStreamAbort.current === ac) ptStreamAbort.current = null;
-            // If this stream ends early and task continues (not user turn), resubscribe
-            try {
-              const st = storeRef.current!.getStatus();
-              if (st !== "completed" && st !== "failed" && st !== "canceled" && st !== "input-required") {
-                storeRef.current!.resubscribe();
-              }
-            } catch {}
-          } catch (e: any) {
-            dispatch({ type: "system", text: `send error: ${String(e?.message ?? e)}` });
-          }
-        })();
+        (async () => { try { await taskRef.current!.send(parts as any); } catch (e:any) { dispatch({ type: 'system', text: `send error: ${String(e?.message ?? e)}` }); } })();
       }
     }
 
@@ -473,7 +438,8 @@ export default function App() {
 
   const statusPill = useMemo(() => {
     const s = model.status;
-    const map: Record<A2AStatus, { label: string; cls: string }> = {
+    const map: Record<A2AStatus | "initializing", { label: string; cls: string }> = {
+      initializing: { label: "initializing…", cls: "" },
       submitted: { label: "submitted", cls: "" },
       working: { label: "working…", cls: "" },
       "input-required": { label: "your turn", cls: "warn" },
@@ -498,20 +464,32 @@ export default function App() {
   function openBase64Attachment(name: string, mimeType: string, bytes?: string, uri?: string) {
     try {
       if (bytes) {
+        // Prefer Blob URLs to avoid browsers blocking data: URL popups
+        const safeMime = mimeType || 'application/octet-stream';
+        // If bytes was mistakenly a data URL, just open it directly
+        if (/^data:[^;]+;base64,/.test(bytes)) {
+          window.open(bytes, '_blank');
+          return;
+        }
         const bin = atob(bytes);
         const len = bin.length;
         const buf = new Uint8Array(len);
         for (let i = 0; i < len; i++) buf[i] = bin.charCodeAt(i);
-        const blob = new Blob([buf], { type: mimeType || 'application/octet-stream' });
+        const blob = new Blob([buf], { type: safeMime });
         const url = URL.createObjectURL(blob);
         window.open(url, '_blank');
         setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      } else if (uri) {
-        const base = (window as any)?.__APP_CONFIG__?.API_BASE || "http://localhost:3000/api";
-        const full = uri.startsWith("http") ? uri : `${base}${uri}`;
-        window.open(full, '_blank');
+        return;
       }
-    } catch {}
+      if (uri) {
+        const base = (window as any)?.__APP_CONFIG__?.API_BASE || 'http://localhost:3000/api';
+        const full = uri.startsWith('http') ? uri : `${base}${uri}`;
+        window.open(full, '_blank');
+        return;
+      }
+    } catch (e) {
+      try { console.warn('[AttachmentOpen] error', e); } catch {}
+    }
   }
 
   return (

@@ -55,24 +55,17 @@
  */
 export interface ScenarioConfiguration {
   metadata: {
-    id: string;
+    id: string; // snake_case_descriptive_unique
     title: string;
+    tags?: string[]; // for easy searching and categorization during connectathon testing
     /** A description of the core human or business problem this simulation models. */
     description: string;
-    tags?: string[];
-    /** Moved from scenario.background */
+    /** More detailed background on the scenario */
     background?: string;
     /** Moved from scenario.challenges */
     challenges?: string[];
   };
 
-  /**
-   * SIMULATION METADATA: The objective "God's-eye view" of the interaction.
-   * As described in the guide, this is for the designer and the Oracle, not the Actors.
-   */
-  scenario?: {
-    interactionNotes?: Record<string, unknown>;
-  };
 
   /** An array of the agents participating in the conversation. */
   agents: ScenarioConfigAgentDetails[];

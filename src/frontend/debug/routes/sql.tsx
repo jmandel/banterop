@@ -19,7 +19,11 @@ export default function SqlPage() {
 
   React.useEffect(() => {
     API.llmProviders().then((list) => {
-      const usable = list.filter(p => p.name !== 'browserside' && p.name !== 'mock');
+      const usable = list.filter((p: any) => 
+        p.name !== 'browserside' && 
+        p.name !== 'mock' && 
+        p.available !== false
+      );
       setModels(usable);
       if (!usable.length) return;
       const m = usable.flatMap(p => p.models).find(m => /lite|flash/i.test(m))

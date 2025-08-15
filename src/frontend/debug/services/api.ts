@@ -6,7 +6,7 @@ export const API = {
   async llmProviders() {
     const r = await fetch(`/api/llm/providers`);
     if (!r.ok) throw new Error('providers');
-    return r.json() as Promise<Array<{ name: string; models: string[]; defaultModel: string }>>;
+    return r.json() as Promise<Array<{ name: string; models: string[]; defaultModel: string; available?: boolean }>>;
   },
   async llmComplete(body: {
     messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>;

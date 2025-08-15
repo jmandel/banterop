@@ -1,0 +1,193 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: interop
+---
+# Database storage (existing)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: convo-db
+  namespace: interop
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+# NEW: Separate debug logs storage - 10GB
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: debug-logs
+  namespace: interop
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: interop
+data:
+  PORT: "3000"
+  DB_PATH: "/data/data.db"
+  DEFAULT_LLM_PROVIDER: "openrouter"
+  DEFAULT_LLM_MODEL: "openai/gpt-oss-120b:nitro"
+  # Debug settings - now enabled
+  DEBUG_LLM_REQUESTS: "true"
+  LLM_DEBUG_DIR: "/debug/llm-debug"
+  # Public config exported into built frontends at container startup
+  PUBLIC_API_BASE_URL: "https://chitchat.fhir.me/api"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+  namespace: interop
+type: Opaque
+stringData:
+  # Set your API keys here before applying
+  # Option 1: Edit this file directly (be careful not to commit!)
+  # Option 2: Use kubectl to set after creation:
+  #   kubectl -n interop create secret generic app-secrets \
+  #     --from-literal=OPENROUTER_API_KEY=your-key-here \
+  #     --from-literal=GEMINI_API_KEY=your-key-here \
+  #     --dry-run=client -o yaml | kubectl apply -f -
+  GEMINI_API_KEY: ""
+  OPENROUTER_API_KEY: ""  # Required if using OpenRouter
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: interop-api
+  namespace: interop
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: interop-api
+  template:
+    metadata:
+      labels:
+        app: interop-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: api
+          image: ghcr.io/jmandel/conversational-interop:main
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+              name: http
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: debug-logs
+              mountPath: /debug
+            - name: public
+              mountPath: /app/public
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secrets
+          # These can override ConfigMap values if needed
+          env:
+            - name: DEBUG_LLM_REQUESTS
+              value: "true"
+            - name: LLM_DEBUG_DIR
+              value: "/debug/llm-debug"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: convo-db
+        - name: debug-logs
+          persistentVolumeClaim:
+            claimName: debug-logs
+        - name: public
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: interop-api
+  namespace: interop
+spec:
+  selector:
+    app: interop-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: interop-api
+  namespace: interop
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+spec:
+  # Match working namespaces: rely on kubernetes.io/ingress.class annotation
+  tls:
+    - hosts:
+        - chitchat.fhir.me
+      secretName: chitchat-fhir-me-tls
+  rules:
+    - host: chitchat.fhir.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: interop-api
+                port:
+                  number: 80
+---
+# Explicit Certificate to trigger issuance
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: chitchat-fhir-me
+  namespace: interop
+spec:
+  secretName: chitchat-fhir-me-tls
+  commonName: chitchat.fhir.me
+  dnsNames:
+    - chitchat.fhir.me
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod

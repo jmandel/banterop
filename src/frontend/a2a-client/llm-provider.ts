@@ -26,29 +26,30 @@ export class ServerLLMProvider implements LLMProvider {
   async generateToolCall(ctx: LLMStepContext): Promise<ToolCall> {
     const lines: string[] = [];
 
-    // Dynamic tool spec: omit attachments/inspect when no files are available
+    // Dynamic tool spec: restrict available tools to what is permitted now
     const attachmentsAvailable = (ctx.available_files?.length || 0) > 0;
+    const allowSendToAgent = (ctx.status === 'input-required') || (!ctx.policy?.has_task);
     const TOOL_SPEC = (() => {
-      const baseSend = `  | { "tool": "send_to_agent",      "args": { "text"?: string${attachmentsAvailable ? ", \"attachments\"?: Array<{ \"name\": string, \"mimeType\"?: string, \"bytes\"?: string, \"uri\"?: string, \"summary\"?: string, \"docId\"?: string }>" : ""} } }`;
-      const inspect = attachmentsAvailable
-        ? `  | { "tool": "inspect_attachment", "args": { "name": string, "purpose"?: string } }\n`
-        : "";
+      const sendToAgent = allowSendToAgent
+        ? `  | { "tool": "send_to_agent",      "args": { "text"?: string${attachmentsAvailable ? ", \"attachments\"?: Array<{ \"name\": string, \"mimeType\"?: string, \"bytes\"?: string, \"uri\"?: string, \"summary\"?: string, \"docId\"?: string }>" : ""} } }\n`
+        : ``;
+      const read = attachmentsAvailable
+        ? `  | { "tool": "read_attachment", "args": { "name": string, "purpose"?: string } }\n`
+        : ``;
       return (
         `Respond with EXACTLY ONE JSON object (no commentary) matching:\n\n` +
         `type ToolCall =\n` +
-        `${baseSend}\n` +
-        `${inspect}` +
+        `${sendToAgent}` +
+        `${read}` +
         `  | { "tool": "send_to_local_user", "args": { "text": string } }\n` +
-        `  | { "tool": "sleep",              "args": { "ms": number } }\n` +
+        `  | { "tool": "sleep",              "args": { } }\n` +
         `  | { "tool": "done",               "args": { "summary": string } };\n\n` +
         `Rules:\n` +
         `- You are event-driven: the host wakes you when NEW info arrives (agent reply, user input, status change, file changes, or tool results).\n` +
-        (attachmentsAvailable
-          ? `- Use \"inspect_attachment\" to check content/sensitivity before attaching when appropriate.\n`
-          : ``) +
-        `- Prefer \"send_to_agent\" with concise text; attach files by NAME when needed.\n` +
+        (attachmentsAvailable ? `- Use \"read_attachment\" to examine a file when appropriate.\n` : ``) +
+        (allowSendToAgent ? `- Prefer \"send_to_agent\" with concise text. When attaching, choose ONLY from AVAILABLE_FILES by NAME; do not invent files.\n` : ``) +
         `- Use \"send_to_local_user\" to report progress or ask questions when you need information/approval or when the agent requests info from the user.\n` +
-        `- Use \"sleep\" only for brief coalescing (<1000ms) if absolutely necessary.\n` +
+        `- Use \"sleep\" to wait for the next event (you'll be woken when something happens).\n` +
         `- Finish with \"done\" when the objective is achieved.\n` +
         `- Output ONLY the JSON (no backticks, no extra prose).\n`
       );
@@ -94,30 +95,7 @@ export class ServerLLMProvider implements LLMProvider {
     lines.push("</VOICE>");
     lines.push("");
 
-    lines.push("<POLICY>");
-    lines.push(`- has_task: ${ctx.policy.has_task}`);
-    if (ctx.policy.planner_mode === 'approval') {
-      lines.push(`- approval_mode: true (ask user before first send)`);
-    }
-    lines.push("</POLICY>");
-    lines.push("");
-
-    // Dynamic allowance for send_to_agent based on status and has_task
-    const canInitiate = !ctx.policy.has_task;
-    const canReply = ctx.status === 'input-required';
-    lines.push("<ALLOWED_ACTIONS>");
-    if (canInitiate) {
-      lines.push("- No active task: you MAY use send_to_agent to initiate the first message (be concise).");
-    }
-    if (canReply) {
-      lines.push("- Agent awaits reply (input-required): you MAY use send_to_agent with a concise answer, attaching needed files by NAME.");
-    }
-    if (!canInitiate && !canReply) {
-      lines.push("- Active task but agent is busy/working: you MUST NOT use send_to_agent now.");
-      lines.push("- Instead: use send_to_local_user to report progress or ask for info; use inspect_attachment to prepare; or sleep briefly to coalesce.");
-    }
-    lines.push("</ALLOWED_ACTIONS>");
-    lines.push("");
+    // Remove policy and allowed-actions prose; the tool schema above already constrains allowed actions.
 
     lines.push("<SESSION_BACKGROUND_AND_GOALS>");
     lines.push(ctx.goals.trim() ? ctx.goals.trim() : "(none)", "");
@@ -154,7 +132,7 @@ export class ServerLLMProvider implements LLMProvider {
       lines.push("<RECENT_TOOL_EVENTS>");
       for (const ev of ctx.tool_events_recent.slice(-8)) {
         lines.push(`- TOOL: ${ev.tool} @ ${ev.at}`);
-        lines.push(`  args: name="${ev.args.name}"${ev.args.purpose ? `, purpose="${ev.args.purpose}"` : ""}`);
+        lines.push(`  args: { "name": "${ev.args.name}"${ev.args.purpose ? `, "purpose": "${ev.args.purpose}"` : ""} }`);
         const r = ev.result;
         let desc = r.ok
           ? (r.description || (r.text_excerpt ? `text_excerpt(${r.text_excerpt.length} chars)${r.truncated ? " [truncated]" : ""}` : "ok"))
@@ -167,29 +145,59 @@ export class ServerLLMProvider implements LLMProvider {
 
     if (ctx.planner_events_recent.length) {
       lines.push("<EVENT_LOG>");
-      for (const ev of ctx.planner_events_recent.slice(-12)) {
-        if (ev.type === 'init') lines.push(`- init @ ${ev.at}`);
-        else if (ev.type === 'asked_user') lines.push(`- send_to_local_user @ ${ev.at}: ${ev.question}`);
-        else if (ev.type === 'user_reply') lines.push(`- user_reply @ ${ev.at}: ${ev.text}`);
-        else if (ev.type === 'sent_to_agent') {
-          const att = ev.attachments?.map(a=>`${a.name} (${a.mimeType})`).join(', ');
-          lines.push(`- sent_to_agent @ ${ev.at}: ${ev.text || '(no text)'}${att ? ` [attachments: ${att}]` : ''}`);
+      
+      // Smart slicing: if too many events, keep first 10% and last 90%
+      const MAX_EVENTS_IN_PROMPT = 200;
+      let eventsToShow = ctx.planner_events_recent;
+      if (eventsToShow.length > MAX_EVENTS_IN_PROMPT) {
+        const headCount = Math.floor(MAX_EVENTS_IN_PROMPT * 0.1);
+        const tailCount = MAX_EVENTS_IN_PROMPT - headCount;
+        const head = eventsToShow.slice(0, headCount);
+        const tail = eventsToShow.slice(-tailCount);
+        eventsToShow = [...head, { type: 'omitted', at: '...', text: '[events omitted]' } as any, ...tail];
+      }
+      
+      for (const ev of eventsToShow) {
+        if (ev.type === 'init') {
+          lines.push(`<init at="${ev.at}" />`);
+        } else if (ev.type === 'asked_user') {
+          lines.push(`<planner_asked_user at="${ev.at}">${ev.question}</planner_asked_user>`);
+        } else if (ev.type === 'user_message') {
+          lines.push(`<user_wrote_to_planner at="${ev.at}">${ev.text}</user_wrote_to_planner>`);
+        } else if (ev.type === 'sent_to_agent') {
+          const attStr = ev.attachments?.length ? 
+            ` attachments="${ev.attachments.map(a=>`${a.name}(${a.mimeType})`).join(', ')}"` : '';
+          lines.push(`<planner_wrote_to_agent at="${ev.at}"${attStr}>${ev.text || '(no text)'}</planner_wrote_to_agent>`);
         } else if (ev.type === 'agent_message') {
-          lines.push(`- agent_message @ ${ev.at}: ${ev.text || '(no text)'}`);
-        } else if (ev.type === 'agent_document_added') {
-          lines.push(`- agent_document_added @ ${ev.at}: ${ev.name} (${ev.mimeType})`);
+          lines.push(`<agent_wrote_to_planner at="${ev.at}">${ev.text || '(no text)'}</agent_wrote_to_planner>`);
+        } else if (ev.type === 'agent_attachment_added') {
+          lines.push(`<agent_sent_file name="${(ev as any).name}" mimeType="${(ev as any).mimeType}" at="${ev.at}" />`);
+        } else if (ev.type === 'read_attachment') {
+          const r = ev.result;
+          if (r.ok && r.text_excerpt) {
+            const purposeAttr = ev.purpose ? ` purpose="${ev.purpose}"` : '';
+            const truncatedAttr = r.truncated ? ' truncated="true"' : '';
+            lines.push(`<planner_read_attachment name="${ev.name}" at="${ev.at}"${purposeAttr}${truncatedAttr}>`);
+            lines.push(r.text_excerpt.slice(0, 1000));
+            lines.push(`</planner_read_attachment>`);
+          } else if (!r.ok) {
+            lines.push(`<planner_read_attachment_failed name="${ev.name}" at="${ev.at}" reason="${r.reason || 'unknown'}" />`);
+          }
         } else if (ev.type === 'status') {
-          lines.push(`- status @ ${ev.at}: ${ev.status}`);
+          // Skip status changes - they're just A2A protocol noise
         } else if (ev.type === 'error') {
           if (ev.code === 'attach_missing') {
-            lines.push(`- error @ ${ev.at}: attach_missing [${ev.details.names.join(', ')}]`);
+            lines.push(`<error code="attach_missing" at="${ev.at}" files="${ev.details.names?.join(', ') || ''}" />`);
           } else if (ev.code === 'send_not_allowed') {
-            lines.push(`- error @ ${ev.at}: send_not_allowed`);
+            lines.push(`<error code="send_not_allowed" at="${ev.at}" />`);
           } else {
-            lines.push(`- error @ ${ev.at}: ${ev.code}`);
+            lines.push(`<error code="${ev.code}" at="${ev.at}" />`);
           }
+        } else if ((ev as any).type === 'omitted') {
+          lines.push(`<events_omitted />`);
         }
       }
+      
       lines.push("</EVENT_LOG>");
       lines.push("");
     }
@@ -212,12 +220,13 @@ export class ServerLLMProvider implements LLMProvider {
     const model = this.getModel?.();
     if (model) body.model = model;
 
-    // Robust request with up to 2 retries on transient failures
+    // Robust request with up to 3 retries on transient failures
     const url = `${apiBase()}/llm/complete`;
-    const maxAttempts = 3; // initial + 2 retries
+    const maxAttempts = 4; // Allow up to 3 retries for JSON parsing or network failures
     let lastErr: any = null;
-    let j: any = null;
+    
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let j: any = null;
       try {
         const res = await fetch(url, {
           method: "POST",
@@ -237,12 +246,28 @@ export class ServerLLMProvider implements LLMProvider {
           throw new Error(msg);
         }
         j = await res.json();
-        break; // success
+        
+        // Try to parse the JSON response
+        const text = String(j?.content ?? "");
+        console.log("[LLMProvider] LLM response:", text.slice(0, 200));
+        if (!text) return { tool: "sleep", args: {} };
+        
+        try {
+          return extractJsonObject(text) as ToolCall;
+        } catch (jsonErr: any) {
+          // JSON parsing failed - retry if we have attempts left
+          if (attempt < maxAttempts) {
+            console.warn(`[LLMProvider] attempt ${attempt} failed to parse JSON: ${jsonErr.message}; retrying...`);
+            await new Promise((r) => setTimeout(r, 250 * attempt));
+            continue;
+          }
+          throw jsonErr;
+        }
       } catch (e: any) {
         lastErr = e;
         const m = String(e?.message ?? e ?? 'error');
         // Network fetch errors should be retried
-        if (attempt < maxAttempts) {
+        if (attempt < maxAttempts && !m.includes('JSON')) {
           console.warn(`[LLMProvider] network/provider error on attempt ${attempt}: ${m}; retrying...`);
           await new Promise((r) => setTimeout(r, 250 * attempt));
           continue;
@@ -250,9 +275,8 @@ export class ServerLLMProvider implements LLMProvider {
         throw e;
       }
     }
-    const text = String(j?.content ?? "");
-    console.log("[LLMProvider] LLM response:", text.slice(0, 200));
-    if (!text) return { tool: "sleep", args: { ms: 250 } };
-    return extractJsonObject(text) as ToolCall;
+    
+    // Should never reach here, but just in case
+    throw lastErr || new Error("Failed to get valid response from LLM");
   }
 }

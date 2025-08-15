@@ -143,11 +143,11 @@ function ScenarioList() {
       const providers = await response.json();
       console.log('Received providers:', providers);
       
-      // Extract all model names from all providers (except browserside)
+      // Extract all model names from all providers (except browserside/mock and unavailable ones)
       const models = new Set<string>();
       for (const provider of providers) {
-        // Skip browserside provider since it's just a proxy
-        if (provider.name === 'browserside') {
+        // Skip browserside/mock providers and unavailable ones
+        if (provider.name === 'browserside' || provider.name === 'mock' || provider.available === false) {
           continue;
         }
         
@@ -882,7 +882,7 @@ function ConversationView({ id }: { id: number }) {
             <div className="p-4 border border-yellow-200 bg-yellow-50 rounded-lg">
               <div className="text-sm text-yellow-800">
                 <strong>Monitor in Watch App:</strong> For a better viewing experience,
-                open the <a href={`/watch#/conversation/${id}`} className="underline hover:text-yellow-900">Watch app</a> in a new tab.
+                open the <a href={`/watch/#/conversation/${id}`} className="underline hover:text-yellow-900">Watch app</a> in a new tab.
               </div>
             </div>
           </div>

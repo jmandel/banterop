@@ -50,7 +50,11 @@ export function ScenarioRunPage() {
           try {
             const p = await api.getLLMConfig();
             if (p.success) {
-              const filtered = (p.data.providers || []).filter((x: any) => x.name !== 'browserside' && x.name !== 'mock');
+              const filtered = (p.data.providers || []).filter((x: any) => 
+                x.name !== 'browserside' && 
+                x.name !== 'mock' && 
+                x.available !== false
+              );
               setProviders(filtered);
               const flat = filtered.flatMap((x: any) => x.models || []);
               setModelOptions(flat);

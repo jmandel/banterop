@@ -228,7 +228,26 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
         this.ensureNotStopped('after tool execution');
 
         if (timeToConcludeConversation) {
-          await this.completeTurn(ctx, "I was supposed to conclude this conversation but I didn't send a message. Ending conversation with error.", true);
+          // Try to attach the most recent document if available
+          const attachments: any[] = [];
+          const lastDocId = Array.from(this.availableDocuments.keys()).pop();
+          if (lastDocId) {
+            const doc = this.availableDocuments.get(lastDocId);
+            if (doc) {
+              attachments.push({
+                docId: lastDocId,
+                name: doc.name || lastDocId,
+                contentType: doc.contentType || 'text/markdown',
+                content: doc.content || ''
+              });
+            }
+          }
+          
+          const errorMessage = attachments.length > 0 
+            ? "Thank you. Please see the attached document. I apologize for ending abruptly - I encountered an error on my side."
+            : "Thank you for your patience. I apologize for ending abruptly - I encountered an error on my side and was unable to complete the requested document.";
+          
+          await this.completeTurn(ctx, errorMessage, true, attachments);
           break;
         }
 
