@@ -93,6 +93,7 @@ export class A2ABridgeServer {
       const done = new Promise<void>((resolve) => { resolveDone = resolve; });
       
       try {
+        // Emit an initial submitted snapshot; follow with status-updates as events arrive
         const initial = await this.buildTask(conversationId, externalId, 'submitted');
         await s.writeSSE({ data: JSON.stringify({ jsonrpc: '2.0', id: rpcId, result: initial }) });
         try { await (s as any).flush?.(); } catch {}
@@ -379,7 +380,9 @@ export class A2ABridgeServer {
       const name = f.name || 'upload';
       const contentType = f.mimeType || 'application/octet-stream';
       if (f.bytes) {
-        out.push({ name, contentType, content: f.bytes });
+        // Decode base64 bytes from A2A to plaintext for internal storage
+        const plaintext = atob(f.bytes);
+        out.push({ name, contentType, content: plaintext });
       } else if (f.uri) {
         // store reference or copy; for now, keep URI as content for later fetchers (optional)
         out.push({ name, contentType, content: f.uri });
@@ -393,7 +396,7 @@ export class A2ABridgeServer {
       includeScenario: false,
     });
     const id = String(conversationId);
-    const state = forceState ?? this.deriveState(snap);
+    const state = forceState ?? this.deriveState(snap, externalId);
     const artifacts: any[] = [];
     const history = this.toA2aHistory(snap, externalId);
 
@@ -409,7 +412,8 @@ export class A2ABridgeServer {
   }
 
   private deriveState(
-    snap: any
+    snap: any,
+    externalId: string
   ): 'submitted' | 'working' | 'input-required' | 'completed' | 'failed' | 'canceled' {
     const evts = snap?.events || [];
     const lastMsg = [...evts].reverse().find((e: any) => e.type === 'message');
@@ -420,7 +424,12 @@ export class A2ABridgeServer {
       const st = out?.status;
       return st === 'canceled' ? 'canceled' : st === 'errored' ? 'failed' : 'completed';
     }
-    if (lastMsg.finality === 'turn') return 'input-required';
+    if (lastMsg.finality === 'turn') {
+      // If the last closing message was authored by the external participant (client),
+      // it's now the agent's turn to work; otherwise, the client must provide input.
+      const authoredByExternal = lastMsg.agentId === externalId;
+      return authoredByExternal ? 'working' : 'input-required';
+    }
     return 'working';
   }
 
@@ -441,6 +450,7 @@ export class A2ABridgeServer {
           if (a?.id && a?.contentType) {
             const row = this.deps.orchestrator.getAttachment(a.id);
             const c = (row as any)?.content as string;
+            // Internal content is always plaintext, encode to base64 for A2A
             const bytes = btoa(c);
             parts.push({ kind: 'file', file: { name: a.name ?? 'attachment', mimeType: a.contentType, bytes } });
           }
@@ -475,6 +485,7 @@ export class A2ABridgeServer {
           if (a?.id && a?.contentType) {
             const row = this.deps.orchestrator.getAttachment(a.id);
             const c = (row as any)?.content as string;
+            // Internal content is always plaintext, encode to base64 for A2A
             const bytes = btoa(c);
             parts.push({ kind: 'file', file: { name: a.name ?? 'attachment', mimeType: a.contentType, bytes } });
           }

@@ -12,7 +12,7 @@ export type InspectionResult = {
   description?: string;    // fallback description for binaries / unsupported types
 };
 
-const MAX_CHARS = 32000; // keep prompt-safe
+const MAX_CHARS = 80000; // Increased limit for reading larger documents
 
 function isTexty(mime: string): boolean {
   if (!mime) return false;

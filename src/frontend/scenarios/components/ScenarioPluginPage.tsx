@@ -197,7 +197,7 @@ export function ScenarioPluginPage() {
               {matches.map((cid) => (
                 <div key={cid} className="flex items-center gap-2 text-sm">
                   <span>Conversation #{cid}</span>
-                  <a className="text-blue-600 hover:underline" href={`/watch#/conversation/${cid}`} target="_blank" rel="noreferrer">Open in Watch</a>
+                  <a className="text-blue-600 hover:underline" href={`/watch/#/conversation/${cid}`} target="_blank" rel="noreferrer">Open in Watch</a>
                 </div>
               ))}
             </div>

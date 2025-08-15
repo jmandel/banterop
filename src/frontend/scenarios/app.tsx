@@ -212,7 +212,7 @@ function ConfiguredPage() {
         <div className="card">
           <div>Conversation created: #{conversationId}</div>
           <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-            <a className="btn" href={`#/conversation/${conversationId}`} onClick={(e) => { e.preventDefault(); window.open(`/watch#/conversation/${conversationId}`, '_blank'); }}>Open in Watch</a>
+            <a className="btn" href={`#/conversation/${conversationId}`} onClick={(e) => { e.preventDefault(); window.open(`/watch/#/conversation/${conversationId}`, '_blank'); }}>Open in Watch</a>
           </div>
         </div>
       )}
@@ -244,7 +244,7 @@ function RunPage() {
       const startingAgentId = agents[0]?.id || '';
       const result = await wsRpcCall<{ conversationId: number }>('createConversation', { meta: { title: `${snap.name} - run`, scenarioId: cfg?.metadata?.id || params.scenarioId, agents, startingAgentId } });
       navigate(`/scenarios/configured/${btoa(JSON.stringify({ meta: { title: `${snap.name} - run`, scenarioId: cfg?.metadata?.id || params.scenarioId, agents, startingAgentId } })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`);
-      window.open(`/watch#/conversation/${result.conversationId}`, '_blank');
+      window.open(`/watch/#/conversation/${result.conversationId}`, '_blank');
     } catch (e) { setError((e as Error).message); } finally { setCreating(false); }
   };
   return (

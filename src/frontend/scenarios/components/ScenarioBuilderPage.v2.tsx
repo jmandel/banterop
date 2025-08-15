@@ -191,9 +191,13 @@ export function ScenarioBuilderPage() {
       const llmConfig = await api.getLLMConfig();
       
       if (llmConfig.success && llmConfig.data?.providers) {
-        // Filter out providers we don't want to expose to users
+        // Filter out providers we don't want to expose to users and those that aren't available
         const providersAll = llmConfig.data.providers;
-        const providers = providersAll.filter((p: any) => p.name !== 'browserside' && p.name !== 'mock');
+        const providers = providersAll.filter((p: any) => 
+          p.name !== 'browserside' && 
+          p.name !== 'mock' && 
+          p.available !== false
+        );
         const savedModel = getSavedModel();
         
         // Check if saved model is still available in the filtered providers
