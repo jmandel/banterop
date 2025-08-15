@@ -86,7 +86,23 @@ export interface ScenarioConfigAgentDetails {
   /** FOR THE CONVERSATIONAL AGENT: The agent's pre-interaction internal state. */
   situation: string;
 
-  /** FOR THE CONVERSATIONAL AGENT: The agent's core persona and mandate. */
+  /** 
+   * FOR THE CONVERSATIONAL AGENT: The agent's core persona and mandate.
+   * 
+   * **CRITICAL: Agent Role Semantics**
+   * The systemPrompt must frame the LLM as an *agent representing* the principal, 
+   * not the principal themselves. This maintains proper conversational boundaries.
+   * 
+   * ✅ GOOD Examples:
+   * - "You are an agent representing Dr. Chen. Relay her clinical intent..."
+   * - "You are an AI assistant working on behalf of Memorial Hospital..."
+   * - "You represent Acme Insurance's prior authorization team..."
+   * 
+   * ❌ BAD Examples:
+   * - "You are Dr. Chen..." (agent should not claim to BE the principal)
+   * - "You are Memorial Hospital..." (AI cannot be an institution)
+   * - "You are the insurance company..." (inappropriate identity claim)
+   */
   systemPrompt: string;
 
   /** FOR THE CONVERSATIONAL AGENT: The agent's high-level objectives. */
@@ -95,24 +111,46 @@ export interface ScenarioConfigAgentDetails {
   /**
    * The list of tools available to the agent.
    * 
-   * IMPORTANT: In conversational interoperability, tools should retrieve or process 
-   * information, NOT submit forms or requests. The conversation itself IS the medium 
-   * of exchange - agents communicate their needs directly through dialogue.
+   * **🔥 CONVERSATION AS MEDIUM PRINCIPLE:**
+   * In conversational interoperability, agents negotiate outcomes through dialogue. 
+   * Tools do not submit requests—they reveal data. Decisions emerge from conversation, 
+   * not tool execution. The conversation itself IS the medium of exchange.
    * 
-   * GOOD tool examples (information retrieval):
-   * - search_ehr_clinical_notes: Retrieve patient's clinical documentation
-   * - lookup_insurance_policy: Access policy requirements and criteria
-   * - check_lab_results: Get specific test results from the EHR
-   * - calculate_treatment_duration: Compute how long a therapy was tried
+   * **NON-TERMINAL TOOLS (Information Retrieval & Computation Only):**
+   * These tools are strictly for gathering information or performing calculations.
+   * They should NEVER make recommendations, decisions, or suggest actions.
    * 
-   * BAD tool examples (form submission anti-patterns):
+   * ✅ GOOD Examples (proper naming with prefixes):
+   * - retrieve_patient_clinical_notes: Get patient's medical documentation
+   * - lookup_insurance_policy_requirements: Access coverage criteria and rules
+   * - check_lab_results: Fetch specific test values from EHR
+   * - calculate_treatment_duration: Compute therapy timeframe from records
+   * - search_formulary_alternatives: Find equivalent medication options
+   * - get_appointment_availability: Check scheduling system for open slots
+   * 
+   * ❌ BAD Examples (decision-making anti-patterns):
+   * - recommend_alternative_therapy: NO! Use "retrieve_alternative_therapy_options"
+   * - suggest_precautions: NO! Use "lookup_precaution_guidelines" 
+   * - advise_next_step: NO! Use "get_next_step_options"
    * - submit_prior_auth_request: NO! The conversation IS the request
-   * - fill_out_claim_form: NO! Discuss the claim details in conversation
-   * - send_referral_form: NO! Express the referral need through dialogue
+   * - fill_out_claim_form: NO! Discuss claim details in conversation
+   * - send_referral_form: NO! Express referral need through dialogue
    * 
-   * Terminal tools (endsConversation: true) should represent final DECISIONS,
-   * not form submissions. Examples: approve_authorization, deny_request,
-   * no_appointments_available.
+   * **TERMINAL TOOLS (Final Authoritative Decisions):**
+   * These represent conclusive outcomes that end the interaction.
+   * Use outcome-focused names only for these final decision points.
+   * 
+   * ✅ GOOD Examples:
+   * - approve_authorization: Grant the requested approval
+   * - deny_request: Reject the application with reasoning
+   * - confirm_appointment: Finalize the scheduled time
+   * - contraindicate_medication: Medical determination against use
+   * - no_appointments_available: Definitive scheduling unavailability
+   * 
+   * ❌ BAD Examples (not truly terminal):
+   * - request_more_information: NO! Just ask in conversation
+   * - put_on_hold: NO! This expects further interaction
+   * - ask_for_clarification: NO! Continue the dialogue instead
    */
   tools: Tool[];
 
@@ -132,37 +170,67 @@ export interface ScenarioConfigAgentDetails {
 /**
  * Defines a single capability available to an agent.
  * 
- * Remember: Tools retrieve information from systems, they don't submit forms.
+ * **Remember:** Tools retrieve information from systems or make final decisions. 
  * In conversational interoperability, the dialogue itself carries the request.
+ * Non-terminal tools should use prefixes like retrieve_, lookup_, check_, calculate_.
  */
 export interface Tool {
   toolName: string;
   
   /**
    * FOR THE CONVERSATIONAL AGENT: What this tool does.
-   * Should describe information retrieval or computation, not form submission.
+   * Should describe information retrieval, computation, or final decision-making.
+   * Use proper naming conventions with prefixes for clarity.
    * 
-   * GOOD: "Retrieve patient's medication history from the EHR"
-   * BAD: "Submit prior authorization request to insurer"
+   * ✅ GOOD Examples:
+   * - "retrieve_patient_medication_history: Get complete medication list from EHR"
+   * - "lookup_formulary_coverage: Check if medication is covered by insurance"
+   * - "calculate_dosage_adjustment: Compute dose based on patient weight and kidney function"
+   * - "approve_prior_authorization: Grant approval for the requested treatment" (terminal)
+   * 
+   * ❌ BAD Examples:
+   * - "submit_prior_authorization_request: Send request to insurer" (conversation IS the request)
+   * - "recommend_alternatives: Suggest other treatment options" (tools don't recommend, they retrieve options)
    */
   description: string;
   
   inputSchema: { type: 'object', properties?: Record<string, any>, required?: string[] };
 
   /**
-   * A CREATIVE BRIEF FOR THE OMNISCIENT TOOL-EXECUTING ORACLE.
-   * This is a "director's note," not code. Guide the Oracle's performance.
+   * **CREATIVE BRIEF FOR THE OMNISCIENT TOOL-EXECUTING ORACLE**
+   * This is a "director's note," not code. Guide the Oracle's performance using its omniscience.
    *
-   * PROMPT: Assume the Oracle can see the ENTIRE scenario. Your job is to tell it
-   * what character to play and what information to reveal (or withhold) to be
-   * realistic and to advance the story.
+   * The Oracle can see the ENTIRE scenario including all agents' private knowledgeBase data.
+   * Your job is to tell it what character to play and what information to reveal (or withhold) 
+   * to create realistic, context-aware responses that advance the story.
    *
-   * GOOD EXAMPLE (Leveraging omniscience):
-   * "Act as the insurer's policy engine. Your source of truth is the Payer's `knowledgeBase`.
-   *  Because you can also see the Provider's `knowledgeBase`, you can make your audit
-   *  findings hyper-specific. Instead of saying 'trial duration not met,' say 'Policy
-   *  requires 6-month trial; provider's record confirms a 5-month trial was administered.'
-   *  This specificity is key to a realistic interaction."
+   * **🎯 KEY PRINCIPLE: Leverage Omniscience for Specificity**
+   * Instead of generic responses, use cross-agent knowledge to be hyper-specific.
+   *
+   * ✅ EXCELLENT Examples (showing omniscient cross-referencing):
+   * 
+   * Example 1 - Prior Authorization Tool:
+   * "Act as the insurer's policy engine accessing their knowledgeBase. Because you can also 
+   * see the Provider's knowledgeBase, make your audit findings hyper-specific. Instead of 
+   * saying 'trial duration not met,' say: 'Policy requires 6-month trial; provider's EHR 
+   * shows patient received only 5 months of therapy (Jan 15 - June 10).' Reference specific 
+   * dates, values, and criteria from both knowledge bases."
+   * 
+   * Example 2 - Appointment Scheduling:
+   * "You see both the patient's preference (mornings) and the provider's actual schedule. 
+   * When showing available slots, you can say: 'I see you prefer morning appointments. 
+   * Dr. Martinez has Tuesday 9:30 AM and Friday 10:15 AM open, which aligns with your 
+   * stated preference for early appointments.'"
+   * 
+   * Example 3 - Lab Results Check:
+   * "Because you see the provider's eGFR concern (knowledgeBase) and the institution's 
+   * contrast safety threshold (knowledgeBase), you can say: 'Patient's eGFR is 48 mL/min, 
+   * which meets your institution's ≥45 threshold for safe contrast administration.'"
+   * 
+   * ❌ BAD Examples (missing omniscient opportunity):
+   * - "Check if the trial duration was adequate" (too vague, doesn't use cross-agent knowledge)
+   * - "Policy requires 6-month trial" (misses chance to reference provider's specific records)
+   * - "Patient has appointments available" (doesn't leverage preference matching)
    */
   synthesisGuidance: string;
 
@@ -201,3 +269,44 @@ export interface Tool {
    */
   conversationEndStatus?: 'success' | 'failure' | 'neutral';
 }
+
+/**
+ * ===================================================================================
+ *   🚨 COMMON PITFALLS TO AVOID
+ * ===================================================================================
+ * 
+ * Based on frequent errors observed during scenario development, here are the most 
+ * common mistakes and how to avoid them:
+ * 
+ * **1. IDENTITY CONFUSION (Agent vs Principal)**
+ * ❌ Problem: systemPrompt says "You are Dr. Smith..."
+ * ✅ Solution: "You are an agent representing Dr. Smith..."
+ * 
+ * **2. TOOL SUBMISSION ANTI-PATTERNS**
+ * ❌ Problem: Tools named "submit_request", "send_form", "file_claim"
+ * ✅ Solution: The conversation IS the submission. Use "retrieve_", "lookup_", "check_"
+ * 
+ * **3. RECOMMENDATION TOOLS (Non-terminal tools making decisions)**
+ * ❌ Problem: "recommend_treatment", "suggest_alternatives", "advise_patient"
+ * ✅ Solution: "retrieve_treatment_options", "lookup_alternatives", "get_patient_guidelines"
+ * 
+ * **4. PSEUDO-TERMINAL TOOLS (Using terminal for intermediate steps)**
+ * ❌ Problem: endsConversation=true for "request_more_info", "put_on_hold"
+ * ✅ Solution: Only use terminal for FINAL decisions: "approve", "deny", "confirm"
+ * 
+ * **5. VAGUE SYNTHESIS GUIDANCE (Missing omniscient opportunities)**
+ * ❌ Problem: "Check the policy requirements"
+ * ✅ Solution: "Because you see both the provider's specific request AND the payer's 
+ *     exact policy criteria, respond with: 'Your request for Drug X requires 6-month 
+ *     trial of Drug Y. Patient records show only 4 months completed.'"
+ * 
+ * **6. WEAK CONVERSATION MEDIUM UNDERSTANDING**
+ * ❌ Problem: Creating tools to "communicate" or "negotiate"
+ * ✅ Solution: Remember that talking IS the tool. Tools reveal data; conversation decides.
+ * 
+ * **7. GENERIC TOOL DESCRIPTIONS**
+ * ❌ Problem: "Get patient information"
+ * ✅ Solution: "retrieve_patient_allergy_history: Get documented allergic reactions from EHR"
+ * 
+ * These improvements make scenarios more self-explanatory and reduce iterative corrections.
+ */
