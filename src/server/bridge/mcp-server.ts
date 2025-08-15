@@ -193,7 +193,7 @@ export class McpBridgeServer {
       }
     } catch {}
     if (agentSummaries.length === 0) {
-      agentSummaries = (meta.agents || []).map((a) => `${a.id}${a.displayName ? ` (${a.displayName})` : ''}${a.role ? ` – ${a.role}` : ''}`);
+      agentSummaries = (meta.agents || []).map((a) => `${a.id}`);
     }
     const roleLine = `Agents: ${agentSummaries.join(', ')}`;
     const scenarioLine = `Scenario: ${title || scId || 'unknown'}`;
@@ -220,9 +220,7 @@ export class McpBridgeServer {
         id: a.id,
       };
       if (a.agentClass !== undefined) agent.agentClass = a.agentClass;
-      if (a.role !== undefined) agent.role = a.role;
-      if (a.displayName !== undefined) agent.displayName = a.displayName;
-      if (a.avatarUrl !== undefined) agent.avatarUrl = a.avatarUrl;
+      // role, displayName, avatarUrl removed
       if (a.config !== undefined) agent.config = a.config;
       return agent;
     });

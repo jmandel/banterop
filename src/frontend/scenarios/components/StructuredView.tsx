@@ -137,12 +137,12 @@ export function StructuredView({ config }: { config: any; onConfigChange?: (c: a
         <div className="space-y-3">
           <div>
             <div className="text-xs font-medium text-gray-600 mb-1">Background</div>
-            <div className="text-sm whitespace-pre-wrap">{config?.scenario?.background}</div>
+            <div className="text-sm whitespace-pre-wrap">{config?.metadata?.background}</div>
           </div>
           <div>
             <div className="text-xs font-medium text-gray-600 mb-1">Challenges</div>
             <ul className="text-sm space-y-1">
-              {(config?.scenario?.challenges || []).map((c: string, i: number) => <li key={i} className="ml-4 list-disc">{c}</li>)}
+              {(config?.metadata?.challenges || []).map((c: string, i: number) => <li key={i} className="ml-4 list-disc">{c}</li>)}
             </ul>
           </div>
         </div>

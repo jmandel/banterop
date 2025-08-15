@@ -75,11 +75,10 @@ describe('ScenarioDrivenAgent', () => {
         title: 'Test Scenario',
         description: 'A test scenario',
         tags: ['test'],
-      },
-      scenario: {
         background: 'Testing scenario-driven agents',
         challenges: ['Test challenge'],
       },
+      scenario: {},
       agents: [
         {
           agentId: 'test-agent',

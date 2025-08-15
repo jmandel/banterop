@@ -7,6 +7,7 @@ import scenarios from '$src/frontend/scenarios/index.html';
 import watch from '$src/frontend/watch/index.html';
 import launcher from '$src/frontend/scenario-launcher/index.html';
 import debugUi from '$src/frontend/debug/index.html';
+import a2aClient from '$src/frontend/a2a-client/index.html';
 
 // Full-stack dev server: static HTML at "/" and API proxied under "/api"
 const server = serve({
@@ -27,6 +28,7 @@ const server = serve({
     '/frontends/debug': debugUi,
     '/frontends/debug/': debugUi,
     '/debug': debugUi,
+    '/a2a-client': a2aClient,
   },
   async fetch(req, srv) {
     const url = new URL(req.url);
@@ -35,14 +37,8 @@ const server = serve({
       // Important: pass Bun's server/env so Hono's bun adapter gets c.env
       return (apiServer as any).fetch(req, srv);
     }
-    // Redirect old /debug to /frontends/debug to match app basename
-    if (url.pathname === '/debug') {
-      return Response.redirect(url.origin + '/frontends/debug', 302);
-    }
-    // Unmatched: 404
     return new Response('Not Found', { status: 404 });
   },
-  // Reuse websocket upgrade handlers from the existing server
   websocket: apiServer.websocket,
 });
 

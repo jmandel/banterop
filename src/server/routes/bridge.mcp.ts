@@ -5,6 +5,7 @@
 //
 
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
 import type { LLMProviderManager } from '$src/llm/provider-manager';
 import type { ServerAgentLifecycleManager } from '$src/server/control/server-agent-lifecycle';
@@ -14,6 +15,8 @@ import { parseConversationMetaFromConfig64 } from '$src/server/bridge/conv-confi
 
 export function createBridgeRoutes(orchestrator: OrchestratorService, providerManager: LLMProviderManager, lifecycle: ServerAgentLifecycleManager, replyTimeoutMs?: number) {
   const app = new Hono();
+  // Enable CORS when mounted standalone (e.g., tests)
+  app.use('*', cors({ origin: (origin) => origin ?? '*', credentials: true }));
 
   app.all('/:config64/mcp', async (c) => {
     try {

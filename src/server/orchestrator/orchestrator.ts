@@ -58,17 +58,9 @@ export class OrchestratorService {
       this.bus.publish(persisted);
     }
     
-    // If conversation finality set, mark conversation status and clear autoRun flag
+    // If conversation finality set, mark conversation status
     if (input.type === 'message' && input.finality === 'conversation') {
       this.storage.conversations.complete(input.conversation);
-      
-      // Clear autoRun flag if set
-      const convo = this.storage.conversations.getWithMetadata(input.conversation);
-      if (convo?.metadata?.custom?.autoRun) {
-        convo.metadata.custom.autoRun = false;
-        this.storage.conversations.updateMeta(convo.conversation, convo.metadata);
-        console.log(`[AutoRun] Conversation ${convo.conversation} completed; autoRun flag cleared.`);
-      }
     }
     
     // Post-write orchestration
@@ -191,6 +183,31 @@ export class OrchestratorService {
       finality,
       agentId
     });
+  }
+
+  // Append a final message with finality='conversation' and a structured outcome.
+  // This closes the conversation as a proper terminal message.
+  async endConversation(
+    conversationId: number,
+    opts: {
+      authorId?: string;
+      text?: string;
+      outcome?: 'completed' | 'canceled' | 'failed';
+      metadata?: Record<string, any>;
+    } = {}
+  ): Promise<void> {
+    const authorId = opts.authorId ?? 'system';
+    const text = opts.text ?? 'Conversation ended.';
+    let status: import('$src/types/event.types').MessagePayload['outcome'] = { status: 'completed' };
+    if (opts.outcome === 'canceled') status = { status: 'canceled' };
+    else if (opts.outcome === 'failed') status = { status: 'errored' };
+
+    this.sendMessage(
+      conversationId,
+      authorId,
+      { text, outcome: status, ...(opts.metadata ? { metadata: opts.metadata } : {}) } as any,
+      'conversation'
+    );
   }
 
   // Reads

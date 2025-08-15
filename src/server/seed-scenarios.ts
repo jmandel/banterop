@@ -9,8 +9,8 @@
  */
 
 import { App } from './app';
-import { createScenarioConfiguration as createKneeMriScenario } from '$src/cli/scenarios/knee-mri-scenario';
-import { createScenarioConfiguration as createVisionScreeningScenario } from '$src/cli/scenarios/vision-screening-scenario';
+import kneeMriScenario from '$src/db/fixtures/knee-mri-scenario.json';
+import visionScreeningScenario from '$src/db/fixtures/vision-screening-scenario.json';
 
 async function seedScenarios() {
   console.log('🌱 Seeding scenarios...\n');
@@ -22,8 +22,8 @@ async function seedScenarios() {
   });
 
   const scenarios = [
-    createKneeMriScenario(),
-    createVisionScreeningScenario(),
+    kneeMriScenario as any,
+    visionScreeningScenario as any,
   ];
 
   let created = 0;

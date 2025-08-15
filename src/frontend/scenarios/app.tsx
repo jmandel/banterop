@@ -6,6 +6,7 @@ import { ScenarioLandingPage } from './components/ScenarioLandingPage';
 import { ScenarioBuilderPage } from './components/ScenarioBuilderPage.v2';
 import { ScenarioRunPage } from './components/ScenarioRunPage';
 import { ScenarioPluginPage } from './components/ScenarioPluginPage';
+import { ScenarioA2APreLaunchPage } from './components/ScenarioA2APreLaunchPage';
 import { ScenarioConfiguredPage } from './components/ScenarioConfiguredPage';
 
 declare const __API_BASE__: string | undefined;
@@ -114,7 +115,7 @@ function BuilderPage() {
           setJson(JSON.stringify(s.config, null, 2));
         } else {
           setName('New Scenario');
-          setJson(JSON.stringify({ metadata: { id: 'my-scenario', title: 'New Scenario' }, scenario: { background: '', challenges: [] }, agents: [] }, null, 2));
+          setJson(JSON.stringify({ metadata: { id: 'my-scenario', title: 'New Scenario', background: '', challenges: [] }, scenario: {}, agents: [] }, null, 2));
         }
       } catch (e) {
         setStatus(`Error: ${(e as Error).message}`);
@@ -273,6 +274,7 @@ function App() {
           <Route path="/scenarios/:scenarioId/edit" element={<ScenarioBuilderPage />} />
           <Route path="/scenarios/:scenarioId/run" element={<ScenarioRunPage />} />
           <Route path="/scenarios/:scenarioId/plug-in/:config64" element={<ScenarioPluginPage />} />
+          <Route path="/scenarios/:scenarioId/a2a/:config64" element={<ScenarioA2APreLaunchPage />} />
           <Route path="/scenarios/configured/:config64" element={<ScenarioConfiguredPage />} />
           <Route path="/scenarios/created/:conversationId" element={<ScenarioConfiguredPage />} />
         </Routes>

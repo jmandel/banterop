@@ -1,9 +1,7 @@
 export interface AgentMeta {
   id: string;                              // slug, immutable (matches agentId from scenario)
   agentClass?: string;                     // e.g., "AssistantAgent", "EchoAgent", "ScriptAgent"
-  role?: string;
-  displayName?: string;
-  avatarUrl?: string;
+  // role and avatarUrl removed
   config?: Record<string, unknown>;        // agent-specific configuration (e.g., LLM provider settings)
 }
 

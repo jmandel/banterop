@@ -3,15 +3,14 @@
     "id": "scen_knee_mri_01",
     "title": "Knee MRI Prior Auth",
     "description": "Tests prior auth negotiation for knee MRI with conservative therapy and network constraints.",
-    "tags": ["prior-auth", "orthopedics"]
-  },
-  "scenario": {
+    "tags": ["prior-auth", "orthopedics"],
     "background": "Jordan Alvarez, a 38-year-old amateur soccer player, sustained an acute right knee injury. After 16 days of conservative therapy with persistent instability, his PCP has ordered an MRI.",
     "challenges": [
       "The insurer's policy requires ≥14 days of conservative therapy, which has been met, but documentation must be clear.",
       "The insurer gives expedited processing for in-network providers, which must be verified."
     ]
   },
+  "scenario": {},
   "agents": [
     {
       "agentId": "patient-agent",

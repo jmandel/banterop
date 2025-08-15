@@ -3,9 +3,7 @@
     "id": "scen_vision_screen_01",
     "title": "Pediatric Vision Screening",
     "description": "Tests coordination between school nurse and pediatrician for vision screening referral and follow-up.",
-    "tags": ["pediatrics", "vision", "school-health"]
-  },
-  "scenario": {
+    "tags": ["pediatrics", "vision", "school-health"],
     "background": "Emma Chen, a 7-year-old second grader, failed her routine school vision screening. The school nurse needs to coordinate with the family pediatrician for comprehensive eye exam and potential treatment.",
     "challenges": [
       "The school uses a different screening protocol than the pediatric office expects.",
@@ -13,6 +11,7 @@
       "Parent work schedule makes appointment coordination challenging."
     ]
   },
+  "scenario": {},
   "agents": [
     {
       "agentId": "school-nurse",
