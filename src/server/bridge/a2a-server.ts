@@ -495,10 +495,12 @@ export class A2ABridgeServer {
 
         // Then emit a status update if the message closed the turn or conversation
         if (evt.finality === 'turn') {
+          // Reached a turn boundary: it's now the client's turn. Mark final:true and allow streams to close.
           frames.push({
             taskId: String(conversationId),
             contextId: String(conversationId),
             status: { state: 'input-required' },
+            final: true,
             kind: 'status-update',
           });
         } else if (evt.finality === 'conversation') {
@@ -540,9 +542,12 @@ export class A2ABridgeServer {
   }
 
   private isTerminalFrame(frame: any) {
-    const st = frame?.status?.state;
     const k = frame?.kind;
     if (k !== 'status-update') return false;
+    // Treat any status-update with final:true as terminal (including input-required turn boundaries),
+    // and also conversation terminal states for backward compatibility.
+    if (frame?.final === true) return true;
+    const st = frame?.status?.state;
     return st === 'completed' || st === 'failed' || st === 'canceled';
   }
 
