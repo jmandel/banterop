@@ -100,8 +100,8 @@ describe('ensureAgentsRunning leads to progress', () => {
         title: 'Server-side run test',
         startingAgentId: 'alpha',
         agents: [
-          { id: 'alpha', agentClass: 'AssistantAgent', displayName: 'Alpha' },
-          { id: 'beta', agentClass: 'EchoAgent', displayName: 'Beta' },
+          { id: 'alpha', agentClass: 'AssistantAgent' },
+          { id: 'beta', agentClass: 'EchoAgent' },
         ],
       },
     });

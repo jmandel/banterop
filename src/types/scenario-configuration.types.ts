@@ -60,15 +60,17 @@ export interface ScenarioConfiguration {
     /** A description of the core human or business problem this simulation models. */
     description: string;
     tags?: string[];
+    /** Moved from scenario.background */
+    background?: string;
+    /** Moved from scenario.challenges */
+    challenges?: string[];
   };
 
   /**
    * SIMULATION METADATA: The objective "God's-eye view" of the interaction.
    * As described in the guide, this is for the designer and the Oracle, not the Actors.
    */
-  scenario: {
-    background: string;
-    challenges: string[];
+  scenario?: {
     interactionNotes?: Record<string, unknown>;
   };
 

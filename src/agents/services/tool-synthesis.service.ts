@@ -177,6 +177,14 @@ export class ToolSynthesisService {
 
     // Scenario knowledge (shared)
     const scenarioKnowledge = this.formatScenarioKnowledge(scenario);
+    const metadataBlock = this.prettyOrString({
+      id: scenario.metadata?.id,
+      title: scenario.metadata?.title,
+      description: scenario.metadata?.description,
+      background: (scenario.metadata as any)?.background,
+      challenges: (scenario.metadata as any)?.challenges,
+      tags: scenario.metadata?.tags,
+    });
 
     // Director’s notes and terminal tool guidance
     const directorsNote = tool.synthesisGuidance;
@@ -259,6 +267,9 @@ EXAMPLE:
       otherKbBlock,
       '',
       scenarioKnowledge,
+      '',
+      'SCENARIO METADATA (JSON):',
+      metadataBlock,
       '',
       'TOOL INVOCATION:',
       `- name: ${tool.toolName}`,

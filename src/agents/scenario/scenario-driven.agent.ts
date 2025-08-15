@@ -289,8 +289,21 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
 
     const separator = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
 
-    // Omit all scenario-level metadata (no title/description/background in prompt)
-    const scenarioInfo = '';
+    // Include scenario-level metadata (title/background) in the system prompt
+    let scenarioInfo = '';
+    try {
+      const sc = this.scenario as ScenarioConfiguration | undefined;
+      if (sc) {
+        const title = sc.metadata?.title || sc.metadata?.id || '';
+        const background = sc.metadata?.background || '';
+        const desc = sc.metadata?.description || '';
+        const lines: string[] = [];
+        if (title) lines.push(`Scenario: ${title}`);
+        if (desc) lines.push(`Description: ${desc}`);
+        if (background) lines.push(`Background: ${background}`);
+        if (lines.length) scenarioInfo = lines.join('\n') + '\n';
+      }
+    } catch {}
 
     // Merge in any runtime extras captured at takeTurn (no scenario-level meta)
     const mergedSystemPrompt = [agentConfig.systemPrompt, this.systemPromptExtra]

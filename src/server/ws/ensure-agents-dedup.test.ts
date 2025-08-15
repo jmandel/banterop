@@ -99,7 +99,7 @@ describe('ensureAgentsRunning is idempotent per conversation', () => {
         title: 'Dedup ensure test',
         startingAgentId: 'alpha',
         agents: [
-          { id: 'alpha', agentClass: 'AssistantAgent', displayName: 'Alpha' },
+          { id: 'alpha', agentClass: 'AssistantAgent' },
         ],
       },
     });

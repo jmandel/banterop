@@ -14,8 +14,14 @@ export function ScenarioRunPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scenario, setScenario] = useState<any | null>(null);
-  const [runMode, setRunMode] = useState<'internal'|'plugin'>(() => {
-    try { return (localStorage.getItem('scenarioLauncher.launchType') === 'plugin') ? 'plugin' : 'internal'; } catch { return 'internal'; }
+  const [runMode, setRunMode] = useState<'internal'|'plugin'|'a2a'>(() => {
+    try {
+      const params = new URLSearchParams(location.hash.split('?')[1] || '');
+      const mode = params.get('mode');
+      if (mode === 'plugin') return 'plugin';
+      if (mode === 'a2a') return 'a2a';
+      return (localStorage.getItem('scenarioLauncher.launchType') === 'plugin') ? 'plugin' : 'internal';
+    } catch { return 'internal'; }
   });
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -73,7 +79,7 @@ export function ScenarioRunPage() {
     if (!scenario) return;
     const cfg = scenario.config || scenario;
     const base = cfg?.metadata?.title || scenario.name || '';
-    setTitle(base ? `${base} - ${runMode === 'plugin' ? 'Plugin' : 'Run'}` : (runMode === 'plugin' ? 'MCP Plugin' : 'Test Run'));
+    setTitle(base ? `${base} - ${runMode === 'plugin' ? 'Plugin' : (runMode === 'a2a' ? 'A2A' : 'Run')}` : (runMode === 'plugin' ? 'MCP Plugin' : (runMode === 'a2a' ? 'A2A Plugin' : 'Test Run')));
   }, [runMode, scenario]);
 
   const agentOptions = useMemo(() => (scenario?.config?.agents || []).map((a: any) => a.agentId), [scenario]);
@@ -95,7 +101,6 @@ export function ScenarioRunPage() {
       if (initiatingMessageExtra) config.initiatingMessageExtra = initiatingMessageExtra;
       return {
         id: a.agentId,
-        displayName: a.principal?.name || humanize(a.agentId),
         ...(Object.keys(config).length ? { config } : {}),
       };
     });
@@ -146,7 +151,7 @@ export function ScenarioRunPage() {
       </div>
 
       <div className="bg-white border rounded p-4 space-y-4">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           <div className={`p-3 border-2 rounded cursor-pointer ${runMode==='internal'?'border-blue-600 bg-blue-50':'border-gray-200 hover:border-gray-300'}`} onClick={() => setRunMode('internal')}>
             <div className="font-medium">Run Internally</div>
             <div className="text-xs text-slate-600">Simulate with internal agents</div>
@@ -154,6 +159,10 @@ export function ScenarioRunPage() {
           <div className={`p-3 border-2 rounded cursor-pointer ${runMode==='plugin'?'border-blue-600 bg-blue-50':'border-gray-200 hover:border-gray-300'}`} onClick={() => setRunMode('plugin')}>
             <div className="font-medium">Plug In (MCP)</div>
             <div className="text-xs text-slate-600">Connect external MCP client</div>
+          </div>
+          <div className={`p-3 border-2 rounded cursor-pointer ${runMode==='a2a'?'border-blue-600 bg-blue-50':'border-gray-200 hover:border-gray-300'}`} onClick={() => setRunMode('a2a')}>
+            <div className="font-medium">Plug In (A2A)</div>
+            <div className="text-xs text-slate-600">Connect JSON‑RPC A2A client</div>
           </div>
         </div>
 
@@ -168,7 +177,7 @@ export function ScenarioRunPage() {
         </div>
 
         <div>
-          <label className="block text-sm text-slate-700 mb-1">{runMode === 'plugin' ? 'External Agent (MCP client)' : 'Starting Agent'}</label>
+          <label className="block text-sm text-slate-700 mb-1">{runMode !== 'internal' ? (runMode === 'plugin' ? 'External Agent (MCP client)' : 'External Agent (A2A)') : 'Starting Agent'}</label>
           <select className="w-full border rounded px-3 py-2" value={startingAgentId} onChange={(e) => setStartingAgentId(e.target.value)}>
             {agentOptions.map((id: string) => (<option key={id} value={id}>{id}</option>))}
           </select>
@@ -179,7 +188,7 @@ export function ScenarioRunPage() {
           <div className="space-y-2">
             <div className="text-sm font-medium">Agent Configuration</div>
             <div className="space-y-4">
-              {(scenario?.config?.agents || []).filter((a: any) => !(runMode === 'plugin' && a.agentId === startingAgentId)).map((a: any) => (
+              {(scenario?.config?.agents || []).filter((a: any) => !((runMode !== 'internal') && a.agentId === startingAgentId)).map((a: any) => (
                 <div key={a.agentId} className="border rounded p-2 space-y-2">
                   <div className="text-sm font-medium text-slate-700 break-all">{a.agentId}</div>
                   <div className="grid grid-cols-3 items-center gap-2">
@@ -233,8 +242,14 @@ export function ScenarioRunPage() {
         <div className="pt-2">
           {runMode === 'internal' ? (
             <button className="w-full bg-blue-600 text-white rounded px-3 py-2 hover:bg-blue-700" onClick={continueInternal}>Start Conversation</button>
-          ) : (
+          ) : runMode === 'plugin' ? (
             <button className="w-full bg-blue-600 text-white rounded px-3 py-2 hover:bg-blue-700" onClick={continuePlugin}>Continue to Plugin Configuration</button>
+          ) : (
+            <button className="w-full bg-blue-600 text-white rounded px-3 py-2 hover:bg-blue-700" onClick={() => {
+              const meta = buildMeta();
+              const config64 = encodeBase64Url(meta);
+              navigate(`/scenarios/${encodeURIComponent(scenarioId!)}/a2a/${config64}`);
+            }}>Continue to A2A Configuration</button>
           )}
         </div>
       </div>

@@ -7,6 +7,7 @@ import { createConversationRoutes } from './routes/conversations.http';
 import { createAttachmentRoutes } from './routes/attachments.http';
 import { createLLMRoutes } from './routes/llm.http';
 import { createBridgeRoutes } from './routes/bridge.mcp';
+import { createA2ARoutes } from './routes/bridge.a2a';
 import { createDebugRoutes } from './routes/debug/index';
 
 // Create singleton app instance
@@ -16,8 +17,11 @@ const server = new Hono();
 
 // Enable CORS for all routes
 server.use('*', cors({
-  origin: ['http://localhost:3001', 'http://localhost:3003'],
+  // Reflect request origin to support credentials across any origin
+  origin: (origin) => origin ?? '*',
   credentials: true,
+  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['*'],
 }));
 
 // HTTP: health under /api
@@ -37,6 +41,9 @@ server.route('/api', createLLMRoutes(appInstance.llmProviderManager));
 
 // Optional: MCP bridge under /api/bridge/:config64/mcp
 server.route('/api/bridge', createBridgeRoutes(appInstance.orchestrator, appInstance.llmProviderManager, appInstance.lifecycleManager));
+
+// A2A bridge under /api/bridge/:config64/a2a
+server.route('/api/bridge', createA2ARoutes(appInstance.orchestrator, appInstance.lifecycleManager));
 
 // Debug API (read-only) under /api/debug
 server.route('/api/debug', createDebugRoutes(appInstance.orchestrator));

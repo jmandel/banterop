@@ -19,7 +19,7 @@ describe("OrchestratorService config validation", () => {
         title: "Demo",
         description: "Testing",
       },
-      scenario: { background: "", challenges: [] },
+      scenario: {},
       agents: [
         {
           agentId: "agent-1",

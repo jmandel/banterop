@@ -12,7 +12,6 @@ import visionScreeningScenario from '$src/db/fixtures/vision-screening-scenario.
 
 export interface AppOptions extends Partial<Config> {
   policy?: SchedulePolicy;
-  skipAutoRun?: boolean;  // Explicitly control autoRun resumption
 }
 
 export class App {
@@ -24,7 +23,7 @@ export class App {
   readonly lifecycleManager: ServerAgentLifecycleManager;
 
   constructor(options?: AppOptions) {
-    const { policy, skipAutoRun, ...configOverrides } = options || {};
+    const { policy, ...configOverrides } = options || {};
     this.configManager = new ConfigManager(configOverrides);
     this.storage = new Storage(this.configManager.dbPath);
     const config = this.configManager.get();
@@ -48,13 +47,10 @@ export class App {
     this.seedDefaultScenarios();
     
     // Resume any server-local ensured agents post-restart
-    const shouldSkipAutoRun = skipAutoRun ?? (this.configManager.get().nodeEnv === 'test');
-    if (!shouldSkipAutoRun) {
-      try {
-        void this.lifecycleManager.resumeAll();
-      } catch (err) {
-        console.error('[App] Failed to resume runner registry', err);
-      }
+    try {
+      void this.lifecycleManager.resumeAll();
+    } catch (err) {
+      console.error('[App] Failed to resume runner registry', err);
     }
   }
 

@@ -16,9 +16,7 @@ import { z } from 'zod';
 const AgentMetaSchema = z.object({
   id: z.string(),
   agentClass: z.string().optional(),       // e.g. "ScenarioDrivenAgent", "AssistantAgent", "EchoAgent", "ScriptAgent"
-  role: z.string().optional(),
-  displayName: z.string().optional(),
-  avatarUrl: z.string().optional(),
+  // role, displayName, avatarUrl removed
   config: z.record(z.unknown()).optional(),// agent-specific runtime config (LLM provider settings, script steps, etc.)
 });
 

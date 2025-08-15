@@ -59,7 +59,7 @@ interface LaunchConfig {
   title: string;
   agents: Array<{
     id: string;
-    displayName: string;
+    // displayName removed
     model: string;
   }>;
   startingAgentId: string;
@@ -188,7 +188,7 @@ function ScenarioList() {
         // Extract agent configurations from scenario
         const agents = scenario.config?.agents?.map((a: any) => ({
           id: a.agentId,
-          displayName: a.agentId.replace(/-/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+          // displayName removed
           model: defaultModel
         })) || [];
 
@@ -237,7 +237,7 @@ function ScenarioList() {
     // Extract agent configurations from scenario
     const agents = scenario.config?.agents?.map((a: any) => ({
       id: a.agentId,
-      displayName: a.agentId.replace(/-/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+      // displayName removed
       model: defaultModel
     })) || [];
 
@@ -270,7 +270,7 @@ function ScenarioList() {
           scenarioId: launchConfig.scenarioId,
           agents: launchConfig.agents.map(a => ({
             id: a.id,
-            displayName: a.displayName,
+            // displayName removed
             config: { model: a.model }
           })),
           startingAgentId: launchConfig.startingAgentId,
@@ -417,7 +417,7 @@ function ScenarioList() {
                         checked={launchConfig.startingAgentId === agent.id}
                         onChange={() => setLaunchConfig({ ...launchConfig, startingAgentId: agent.id })}
                       />
-                      <span>{agent.displayName}</span>
+                      <span>{agent.id}</span>
                       <span className="text-xs text-gray-500">({agent.id})</span>
                     </label>
                   ))}
@@ -437,7 +437,7 @@ function ScenarioList() {
                 <div className="space-y-2">
                   {launchConfig.agents.map((agent, idx) => (
                     <div key={agent.id} className="p-3 bg-gray-50 rounded-md">
-                      <div className="font-medium text-sm mb-2">{agent.displayName}</div>
+                      <div className="font-medium text-sm mb-2">{agent.id}</div>
                       <div className="grid grid-cols-2 gap-2">
                         <div className="col-span-2">
                           <label className="block text-xs text-gray-500">Model (hint)</label>
@@ -496,19 +496,19 @@ function ScenarioList() {
             <div className="p-4 border border-gray-200 rounded-lg">
               <h3 className="font-semibold mb-2">Scenario Details</h3>
               <div className="space-y-2 text-sm">
-                {selectedScenario.config?.scenario?.background && (
+                {selectedScenario.config?.metadata?.background && (
                   <div>
                     <span className="font-medium">Background:</span>
                     <div className="text-gray-600 mt-1">
-                      {selectedScenario.config.scenario.background}
+                      {selectedScenario.config.metadata.background}
                     </div>
                   </div>
                 )}
-                {selectedScenario.config?.scenario?.challenges && (
+                {selectedScenario.config?.metadata?.challenges && (
                   <div>
                     <span className="font-medium">Challenges:</span>
                     <ul className="list-disc list-inside text-gray-600 mt-1">
-                      {selectedScenario.config.scenario.challenges.map((c: string, i: number) => (
+                      {selectedScenario.config.metadata.challenges.map((c: string, i: number) => (
                         <li key={i}>{c}</li>
                       ))}
                     </ul>
@@ -929,7 +929,7 @@ async function buildBridgeConfig64(cfg: LaunchConfig): Promise<string> {
   const meta = {
     title: cfg.title,
     scenarioId: cfg.scenarioId,
-    agents: cfg.agents.map(a => ({ id: a.id, displayName: a.displayName, config: { model: a.model } })),
+    agents: cfg.agents.map(a => ({ id: a.id, config: { model: a.model } })),
     startingAgentId: cfg.startingAgentId,
   };
   return base64UrlEncodeJson(meta);
