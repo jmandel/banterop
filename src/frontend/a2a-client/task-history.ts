@@ -24,6 +24,8 @@ export class TaskHistoryStore {
   private orderCounter = 0;
   private msgOrder = new Map<string, number>();
   private partialOrder = new Map<string, number>();
+  private msgContentById = new Map<string, string>();
+  private dupCounterByBase = new Map<string, number>();
 
   constructor(client?: A2AClient | null) { this.client = client ?? null; }
   setClient(c: A2AClient | null) { this.client = c; }
@@ -42,8 +44,13 @@ export class TaskHistoryStore {
     this.seen.clear();
     this.partials.clear();
     this.optimistics = [];
-    this.resubAbort?.abort();
+    if (this.resubAbort) {
+      try { console.warn(`[SSEAbort] Store: aborting resubscribe due to clear() (taskId=${this.taskId || 'n/a'})`); } catch {}
+      try { this.resubAbort.abort(); } catch {}
+    }
     this.resubAbort = null;
+    this.msgContentById.clear();
+    this.dupCounterByBase.clear();
     this.emit();
   }
 
@@ -94,14 +101,17 @@ export class TaskHistoryStore {
   }
   private openResubscribe(taskId: string) {
     if (!this.client) return;
-    this.resubAbort?.abort();
+    if (this.resubAbort) {
+      try { console.warn(`[SSEAbort] Store: aborting existing resubscribe stream (taskId=${this.taskId || taskId})`); } catch {}
+      try { this.resubAbort.abort(); } catch {}
+    }
     const ac = new AbortController();
     this.resubAbort = ac;
     try { console.debug(`[Store] openResubscribe(${taskId})`); } catch {}
     (async () => {
       let attempt = 0;
       while (!ac.signal.aborted) {
-        if (this.status === "completed" || this.status === "failed" || this.status === "canceled" || this.status === "input-required") {
+        if (this.status === "completed" || this.status === "failed" || this.status === "canceled") {
           try { console.debug(`[Store] resubscribe halted due to status=${this.status}`); } catch {}
           break;
         }
@@ -146,28 +156,33 @@ export class TaskHistoryStore {
   ingestFrame(frame: A2AFrame) {
     const r: any = (frame as any).result;
     if (!r) return;
+    let changed = false;
     if (r.kind === "task") {
       const t = r as A2ATask;
       // Record task id, but do not auto-resubscribe here.
       // In the no-handoff flow, the original message/stream remains open.
       if (!this.taskId) { this.taskId = t.id; }
       try { console.debug(`[Store] task snapshot arrived id=${t.id} status=${t.status?.state}`); } catch {}
-      this.ingestTaskSnapshot(t);
-      this.emit(); return;
+      changed = this.ingestTaskSnapshot(t);
+      if (changed) this.emit();
+      return;
     }
 
     if (r.kind === "message" && (r as any).messageId) {
       const m = r as A2AMessage;
       try { console.debug(`[Store] message arrived midstream id=${m.messageId} role=${m.role}`); } catch {}
-      this.ingestMessage(m);
-      this.emit(); return;
+      changed = this.ingestMessage(m);
+      if (changed) this.emit();
+      return;
     }
 
     if (r.kind === "status-update") {
       const su = r as any;
       const st = su.status?.state as A2AStatus;
       try { console.debug(`[Store] status-update arrived state=${st}`); } catch {}
+      const priorStatus = this.status;
       this.status = st || this.status;
+      changed = changed || (this.status !== priorStatus);
       const m = su.status?.message as A2AMessage | undefined;
       if (m) {
         const text = partsToText(m.parts);
@@ -175,37 +190,67 @@ export class TaskHistoryStore {
           if (st === "working") {
             this.partials.set(m.messageId, { text, role: m.role });
             try { console.debug(`[Store] partial update id=${m.messageId} role=${m.role}`); } catch {}
+            changed = true;
           } else {
             this.partials.delete(m.messageId);
-            this.ingestMessage(m);
+            changed = this.ingestMessage(m) || changed;
           }
         }
       }
-      this.emit(); return;
+      if (changed) this.emit();
+      return;
     }
   }
 
-  private ingestTaskSnapshot(t: A2ATask) {
+  private ingestTaskSnapshot(t: A2ATask): boolean {
+    let changed = false;
     this.taskId = t.id;
+    const priorStatus = this.status;
     this.status = (t.status?.state ?? "submitted");
-    if (Array.isArray(t.history)) for (const h of t.history) this.ingestMessage(h);
+    if (this.status !== priorStatus) changed = true;
+    if (Array.isArray(t.history)) {
+      for (const h of t.history) {
+        const added = this.ingestMessage(h);
+        if (added) changed = true;
+      }
+    }
     const sm = t.status?.message;
     if (sm) {
       const text = partsToText(sm.parts);
       if (text) {
-        if (t.status.state === "working") this.partials.set(sm.messageId, { text, role: sm.role });
-        else { this.partials.delete(sm.messageId); this.ingestMessage(sm); }
+        if (t.status.state === "working") { this.partials.set(sm.messageId, { text, role: sm.role }); changed = true; }
+        else { this.partials.delete(sm.messageId); const added = this.ingestMessage(sm); if (added) changed = true; }
       }
     }
+    return changed;
   }
 
-  private ingestMessage(m: A2AMessage) {
-    if (this.seen.has(m.messageId)) return;
+  private ingestMessage(m: A2AMessage): boolean {
+    const text = partsToText(m.parts);
+    const attSig = (m.parts || [])
+      .filter((p: any) => p?.kind === 'file' && p?.file)
+      .map((p: any) => `${p.file.name}:${p.file.mimeType}`)
+      .join('|');
+    const contentKey = `${m.role}|${text}|${attSig}`;
+
+    if (this.seen.has(m.messageId)) {
+      // If a duplicate id carries different content, synthesize a unique id and accept it
+      const prior = this.msgContentById.get(m.messageId);
+      if (prior === contentKey) return false; // true duplicate; ignore
+      const base = m.messageId;
+      const next = (this.dupCounterByBase.get(base) || 0) + 1;
+      this.dupCounterByBase.set(base, next);
+      const newId = `${base}:${next}`;
+      m = { ...m, messageId: newId };
+    }
+
     if (m.role === "user") this.popOneOptimistic();
     this.seen.add(m.messageId);
+    this.msgContentById.set(m.messageId, contentKey);
     const order = ++this.orderCounter;
     this.msgOrder.set(m.messageId, order);
     this.history.push(m);
     try { console.debug(`[Store] ingest message id=${m.messageId} role=${m.role} order=${order}`); } catch {}
+    return true;
   }
 }

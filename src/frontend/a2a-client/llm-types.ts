@@ -12,6 +12,8 @@ export type SendToAgentAttachmentArg = {
 export type ToolCall =
   | { tool: "send_to_agent"; args: { text?: string; attachments?: SendToAgentAttachmentArg[] } }
   | { tool: "inspect_attachment"; args: { name: string; purpose?: string } }
+  | { tool: "send_to_local_user"; args: { text: string } }
+  // Back-compat: accept ask_user from older prompts
   | { tool: "ask_user"; args: { question: string } }
   | { tool: "sleep"; args: { ms: number } }
   | { tool: "done"; args: { summary: string } };
@@ -29,11 +31,14 @@ export type ToolEvent = {
 };
 
 export type PlannerEvent =
+  | { type: 'init'; at: string }
   | { type: 'asked_user'; at: string; question: string }
   | { type: 'user_reply'; at: string; text: string }
   | { type: 'sent_to_agent'; at: string; text?: string; attachments?: Array<{ name: string; mimeType: string }> }
   | { type: 'agent_message'; at: string; text?: string }
-  | { type: 'agent_document_added'; at: string; name: string; mimeType: string };
+  | { type: 'agent_document_added'; at: string; name: string; mimeType: string }
+  | { type: 'status'; at: string; status: string }
+  | { type: 'error'; at: string; code: 'attach_missing'; details: { names: string[] } };
 
 export type LLMStepContext = {
   instructions: string;

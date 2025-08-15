@@ -15,14 +15,41 @@ async function llmSummarize(model: string | undefined, prompt: string): Promise<
     temperature: 0.2,
   };
   if (model) body.model = model;
-  const res = await fetch(`${apiBase()}/llm/complete`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`LLM summarize error: ${res.status}`);
-  const j = await res.json();
+  const url = `${apiBase()}/llm/complete`;
+  const maxAttempts = 3; // initial + 2 retries
+  let j: any = null;
+  let lastErr: any = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        let msg = `LLM summarize error: ${res.status}`;
+        try { const errJson = await res.json(); if (errJson?.message) msg = String(errJson.message); } catch {}
+        if (res.status >= 500 && attempt < maxAttempts) {
+          console.warn(`[Summarizer] attempt ${attempt} failed (${msg}); retrying...`);
+          await new Promise((r) => setTimeout(r, 250 * attempt));
+          continue;
+        }
+        throw new Error(msg);
+      }
+      j = await res.json();
+      break;
+    } catch (e: any) {
+      lastErr = e;
+      const m = String(e?.message ?? e ?? 'error');
+      if (attempt < maxAttempts) {
+        console.warn(`[Summarizer] network/provider error on attempt ${attempt}: ${m}; retrying...`);
+        await new Promise((r) => setTimeout(r, 250 * attempt));
+        continue;
+      }
+      throw e;
+    }
+  }
   const text = String(j?.content ?? "").trim();
   const m = text.match(/```json\s*([\s\S]*?)```/i);
   const raw = (m ? m[1] : text) ?? "";

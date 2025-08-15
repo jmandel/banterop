@@ -6,7 +6,7 @@ export class A2AClient {
   private endpoint() { return this.endpointUrl; }
 
   async messageSendParts(parts: A2APart[], taskId?: string): Promise<A2ATask> {
-    const body = { jsonrpc: "2.0", id: crypto.randomUUID(), method: "message/send", params: { message: { ...(taskId ? { taskId } : {}), parts } } };
+    const body = { jsonrpc: "2.0", id: crypto.randomUUID(), method: "message/send", params: { message: { messageId: crypto.randomUUID(), ...(taskId ? { taskId } : {}), parts } } };
     const res = await fetch(this.endpoint(), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), credentials: "include" });
     if (!res.ok) throw new Error(`message/send failed: ${res.status} ${await res.text()}`);
     const j = (await res.json()) as { result?: A2ATask; error?: { message: string } };
@@ -15,7 +15,7 @@ export class A2AClient {
   }
 
   async *messageStreamParts(parts: A2APart[], taskId?: string, signal?: AbortSignal): AsyncGenerator<A2AFrame> {
-    const body = { jsonrpc: "2.0", id: crypto.randomUUID(), method: "message/stream", params: { message: { ...(taskId ? { taskId } : {}), parts } } };
+    const body = { jsonrpc: "2.0", id: crypto.randomUUID(), method: "message/stream", params: { message: { messageId: crypto.randomUUID(), ...(taskId ? { taskId } : {}), parts } } };
     const res = await fetch(this.endpoint(), { method: "POST", headers: { "content-type": "application/json", accept: "text/event-stream" }, body: JSON.stringify(body), credentials: "include", signal });
     if (!res.ok) throw new Error(`message/stream failed: ${res.status} ${await res.text()}`);
     for await (const data of readSSE(res)) {
