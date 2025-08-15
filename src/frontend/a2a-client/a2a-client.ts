@@ -19,6 +19,7 @@ export class A2AClient {
     const res = await fetch(this.endpoint(), { method: "POST", headers: { "content-type": "application/json", accept: "text/event-stream" }, body: JSON.stringify(body), credentials: "include", signal });
     if (!res.ok) throw new Error(`message/stream failed: ${res.status} ${await res.text()}`);
     for await (const data of readSSE(res)) {
+      try { console.debug(`[A2AClient] SSE event (message/stream) bytes=${data?.length ?? 0}`); } catch {}
       try { const obj = JSON.parse(data) as A2AFrame; if (obj && "result" in obj) yield obj; } catch {}
     }
   }
@@ -28,6 +29,7 @@ export class A2AClient {
     const res = await fetch(this.endpoint(), { method: "POST", headers: { "content-type": "application/json", accept: "text/event-stream" }, body: JSON.stringify(body), credentials: "include", signal });
     if (!res.ok) throw new Error(`resubscribe failed: ${res.status} ${await res.text()}`);
     for await (const data of readSSE(res)) {
+      try { console.debug(`[A2AClient] SSE event (resubscribe) bytes=${data?.length ?? 0}`); } catch {}
       try { const obj = JSON.parse(data) as A2AFrame; if (obj && "result" in obj) yield obj; } catch {}
     }
   }

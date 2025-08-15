@@ -4,22 +4,46 @@ export async function* readSSE(resp: Response): AsyncGenerator<string> {
   if (!reader) return;
   const decoder = new TextDecoder();
   let buf = "";
+  let pendingDataLines: string[] = [];
+
+  const flushEvent = function* () {
+    if (pendingDataLines.length) {
+      const data = pendingDataLines.join("\n");
+      pendingDataLines = [];
+      yield data;
+    }
+  };
+
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
     buf += decoder.decode(value, { stream: true });
     for (;;) {
-      const idx = buf.indexOf("\n\n");
+      // Normalize CRLF
+      const sepIdx = buf.indexOf("\n\n");
+      const sepCR = buf.indexOf("\r\n\r\n");
+      const idx = sepIdx === -1 ? (sepCR === -1 ? -1 : sepCR + 2) : sepIdx; // allow either delimiter
       if (idx === -1) break;
-      const chunk = buf.slice(0, idx);
+      const raw = buf.slice(0, idx);
       buf = buf.slice(idx + 2);
-      const lines = chunk.split("\n");
-      for (const line of lines) if (line.startsWith("data:")) yield line.slice(5).trim();
+      const lines = raw.replace(/\r/g, "").split("\n");
+      for (const line of lines) {
+        if (!line) continue;
+        if (line.startsWith("data:")) pendingDataLines.push(line.slice(5).trimStart());
+        // ignore other SSE fields: event:, id:, retry:
+      }
+      for (const out of flushEvent()) yield out;
     }
   }
-  if (buf.trim()) {
-    const lines = buf.split("\n");
-    for (const line of lines) if (line.startsWith("data:")) yield line.slice(5).trim();
+  if (buf.length) {
+    const lines = buf.replace(/\r/g, "").split("\n");
+    for (const line of lines) {
+      if (line.startsWith("data:")) pendingDataLines.push(line.slice(5).trimStart());
+    }
+  }
+  if (pendingDataLines.length) {
+    yield pendingDataLines.join("\n");
+    pendingDataLines = [];
   }
 }
 

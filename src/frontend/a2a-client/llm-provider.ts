@@ -41,9 +41,12 @@ export class ServerLLMProvider implements LLMProvider {
     lines.push(
       "- Speak as the user's agent/representative, NOT as the user.",
     );
-    lines.push(
-      "- Identify yourself briefly (e.g., 'I'm the care coordinator on behalf of Sarah Mitchell, RN …').",
-    );
+    if ((ctx.prior_mediator_messages || 0) === 0) {
+      lines.push("- First contact: briefly identify yourself and purpose (one line max).",
+                 "  e.g., 'I'm the care coordinator on behalf of …' ");
+    } else {
+      lines.push("- Ongoing thread: do not re-introduce yourself; continue concisely.");
+    }
     lines.push(
       "- Refer to the user in third person by name/title when needed; do not claim to be them.",
       "",
@@ -100,6 +103,23 @@ export class ServerLLMProvider implements LLMProvider {
           ? (r.description || (r.text_excerpt ? `text_excerpt(${r.text_excerpt.length} chars)${r.truncated ? " [truncated]" : ""}` : "ok"))
           : `blocked: ${r.reason || "unknown"}`;
         lines.push(`  result: ${desc}`);
+      }
+      lines.push("");
+    }
+
+    if (ctx.planner_events_recent.length) {
+      lines.push("RECENT PLANNER EVENTS:");
+      for (const ev of ctx.planner_events_recent.slice(-12)) {
+        if (ev.type === 'asked_user') lines.push(`- asked_user @ ${ev.at}: ${ev.question}`);
+        else if (ev.type === 'user_reply') lines.push(`- user_reply @ ${ev.at}: ${ev.text}`);
+        else if (ev.type === 'sent_to_agent') {
+          const att = ev.attachments?.map(a=>`${a.name} (${a.mimeType})`).join(', ');
+          lines.push(`- sent_to_agent @ ${ev.at}: ${ev.text || '(no text)'}${att ? ` [attachments: ${att}]` : ''}`);
+        } else if (ev.type === 'agent_message') {
+          lines.push(`- agent_message @ ${ev.at}: ${ev.text || '(no text)'}`);
+        } else if (ev.type === 'agent_document_added') {
+          lines.push(`- agent_document_added @ ${ev.at}: ${ev.name} (${ev.mimeType})`);
+        }
       }
       lines.push("");
     }

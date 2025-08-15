@@ -19,8 +19,11 @@ export class TaskHistoryStore {
   private history: A2AMessage[] = [];
   private seen = new Set<string>();
   private partials = new Map<string, { text: string; role: "user" | "agent" }>();
-  private optimistics: AgentLogEntry[] = [];
+  private optimistics: (AgentLogEntry & { __order: number })[] = [];
   private resubAbort: AbortController | null = null;
+  private orderCounter = 0;
+  private msgOrder = new Map<string, number>();
+  private partialOrder = new Map<string, number>();
 
   constructor(client?: A2AClient | null) { this.client = client ?? null; }
   setClient(c: A2AClient | null) { this.client = c; }
@@ -55,23 +58,29 @@ export class TaskHistoryStore {
   }
 
   getAgentLogEntries(): AgentLogEntry[] {
-    const entries: AgentLogEntry[] = [];
+    const entries: { entry: AgentLogEntry; order: number }[] = [];
     for (const m of this.history) {
       const text = partsToText(m.parts);
       const atts = (m.parts || [])
         .filter((p: any) => p?.kind === "file" && p?.file)
         .map((p: any) => ({ name: String(p.file.name || "attachment"), mimeType: String(p.file.mimeType || "application/octet-stream"), bytes: p.file.bytes, uri: p.file.uri })) as Array<{ name: string; mimeType: string; bytes?: string; uri?: string }>;
       if (!text && !atts.length) continue;
-      entries.push({ id: m.messageId, role: m.role === "user" ? "planner" : "agent", text: text || "", ...(atts.length ? { attachments: atts } : {}) });
+      const order = this.msgOrder.get(m.messageId) ?? (++this.orderCounter);
+      this.msgOrder.set(m.messageId, order);
+      entries.push({ entry: { id: m.messageId, role: m.role === "user" ? "planner" : "agent", text: text || "", ...(atts.length ? { attachments: atts } : {}) }, order });
     }
-    for (const [mid, p] of this.partials) entries.push({ id: `${mid}:partial`, role: p.role === "user" ? "planner" : "agent", text: p.text, partial: true });
-    for (const o of this.optimistics) entries.push(o);
-    return entries;
+    for (const [mid, p] of this.partials) {
+      const order = this.partialOrder.get(mid) ?? (++this.orderCounter);
+      this.partialOrder.set(mid, order);
+      entries.push({ entry: { id: `${mid}:partial`, role: p.role === "user" ? "planner" : "agent", text: p.text, partial: true }, order });
+    }
+    for (const o of this.optimistics) entries.push({ entry: { id: o.id, role: o.role, text: o.text, partial: o.partial, attachments: o.attachments }, order: o.__order });
+    return entries.sort((a, b) => a.order - b.order).map(e => e.entry);
   }
 
   addOptimisticUserMessage(text: string) {
     if (!text.trim()) return;
-    this.optimistics.push({ id: `local:${crypto.randomUUID()}`, role: "planner", text });
+    this.optimistics.push({ id: `local:${crypto.randomUUID()}`, role: "planner", text, __order: ++this.orderCounter });
     this.emit();
   }
   private popOneOptimistic() { if (this.optimistics.length) this.optimistics.shift(); }
@@ -142,12 +151,14 @@ export class TaskHistoryStore {
       // Record task id, but do not auto-resubscribe here.
       // In the no-handoff flow, the original message/stream remains open.
       if (!this.taskId) { this.taskId = t.id; }
+      try { console.debug(`[Store] task snapshot arrived id=${t.id} status=${t.status?.state}`); } catch {}
       this.ingestTaskSnapshot(t);
       this.emit(); return;
     }
 
     if (r.kind === "message" && (r as any).messageId) {
       const m = r as A2AMessage;
+      try { console.debug(`[Store] message arrived midstream id=${m.messageId} role=${m.role}`); } catch {}
       this.ingestMessage(m);
       this.emit(); return;
     }
@@ -155,6 +166,7 @@ export class TaskHistoryStore {
     if (r.kind === "status-update") {
       const su = r as any;
       const st = su.status?.state as A2AStatus;
+      try { console.debug(`[Store] status-update arrived state=${st}`); } catch {}
       this.status = st || this.status;
       const m = su.status?.message as A2AMessage | undefined;
       if (m) {
@@ -162,6 +174,7 @@ export class TaskHistoryStore {
         if (text) {
           if (st === "working") {
             this.partials.set(m.messageId, { text, role: m.role });
+            try { console.debug(`[Store] partial update id=${m.messageId} role=${m.role}`); } catch {}
           } else {
             this.partials.delete(m.messageId);
             this.ingestMessage(m);
@@ -190,6 +203,9 @@ export class TaskHistoryStore {
     if (this.seen.has(m.messageId)) return;
     if (m.role === "user") this.popOneOptimistic();
     this.seen.add(m.messageId);
+    const order = ++this.orderCounter;
+    this.msgOrder.set(m.messageId, order);
     this.history.push(m);
+    try { console.debug(`[Store] ingest message id=${m.messageId} role=${m.role} order=${order}`); } catch {}
   }
 }
