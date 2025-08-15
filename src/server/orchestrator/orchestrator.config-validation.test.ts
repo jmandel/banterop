@@ -19,7 +19,6 @@ describe("OrchestratorService config validation", () => {
         title: "Demo",
         description: "Testing",
       },
-      scenario: {},
       agents: [
         {
           agentId: "agent-1",

@@ -78,7 +78,6 @@ describe('ScenarioDrivenAgent', () => {
         background: 'Testing scenario-driven agents',
         challenges: ['Test challenge'],
       },
-      scenario: {},
       agents: [
         {
           agentId: 'test-agent',
