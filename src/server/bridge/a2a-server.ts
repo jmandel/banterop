@@ -129,9 +129,8 @@ export class A2ABridgeServer {
               }
             }
 
-            if (arr.some((f) => this.isTerminalFrame(f) || this.isTurnBoundaryFrame(f))) {
-              const why = arr.some((f)=> this.isTerminalFrame(f)) ? 'terminal' : 'input-required';
-              console.log(`[A2A SSE] ${why} frame detected, closing stream for conversation ${conversationId}`);
+            if (arr.some((f) => this.isTerminalFrame(f))) {
+              console.log(`[A2A SSE] terminal frame detected, closing stream for conversation ${conversationId}`);
               try { await s.close(); } catch {}
               try { this.deps.orchestrator.unsubscribe(subId); } catch {}
               (resolveDone as any)?.();
@@ -272,7 +271,7 @@ export class A2ABridgeServer {
                 return;
               }
             }
-            if (arr.some((f) => this.isTerminalFrame(f) || this.isTurnBoundaryFrame(f))) {
+            if (arr.some((f) => this.isTerminalFrame(f))) {
               try { await s.close(); } catch {}
               try { this.deps.orchestrator.unsubscribe(subId); } catch {}
               (resolveDone as any)?.();
@@ -363,7 +362,6 @@ export class A2ABridgeServer {
     const text = String(parts.find((p: any) => p?.kind === 'text')?.text ?? '');
     const atts = await this.persistUploads(parts);
     const clientRequestId = a2aMsg?.messageId || undefined;
-
     this.deps.orchestrator.sendMessage(
       conversationId,
       externalId,
@@ -447,10 +445,12 @@ export class A2ABridgeServer {
             parts.push({ kind: 'file', file: { name: a.name ?? 'attachment', mimeType: a.contentType, bytes } });
           }
         }
+        const clientReq = (e as any)?.payload?.clientRequestId as string | undefined;
+        const outMsgId = isExternal && clientReq ? clientReq : String(e.event);
         return {
           role: isExternal ? 'user' : 'agent',
           parts,
-          messageId: String(e.event),
+          messageId: String(outMsgId),
           taskId: convId,
           contextId: convId,
           kind: 'message',
@@ -479,10 +479,11 @@ export class A2ABridgeServer {
             parts.push({ kind: 'file', file: { name: a.name ?? 'attachment', mimeType: a.contentType, bytes } });
           }
         }
+        const outMsgId = String(evt.event);
         const messageObj = {
           role: 'agent',
           parts,
-          messageId: String(evt.event),
+          messageId: String(outMsgId),
           taskId: String(conversationId),
           contextId: String(conversationId),
           kind: 'message',
@@ -545,10 +546,6 @@ export class A2ABridgeServer {
     return st === 'completed' || st === 'failed' || st === 'canceled';
   }
 
-  private isTurnBoundaryFrame(frame: any) {
-    const st = frame?.status?.state;
-    const k = frame?.kind;
-    return k === 'status-update' && st === 'input-required';
-  }
+  
 
 }

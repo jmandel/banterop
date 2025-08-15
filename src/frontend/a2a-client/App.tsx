@@ -319,8 +319,23 @@ export default function App() {
         })),
       getCounterpartHint: () => {
         try {
-          const desc = (card as any)?.skills?.[0]?.description || (card as any)?.description;
-          return typeof desc === 'string' && desc ? `Counterpart: ${desc}` : undefined;
+          const skill = (card as any)?.skills?.[0];
+          const hasTask = !!store.getTaskId();
+          if (skill?.description && typeof skill.description === 'string') {
+            const d: string = skill.description as string; // e.g., "Open a conversation with <id> acting for \"<principal>\" — ..."
+            const msg = hasTask
+              ? d.replace(/^Open a conversation with/i, 'Calling send_to_agent will continue the conversation with')
+              : d.replace(/^Open a conversation with/i, 'Calling send_to_agent will begin a new conversation with');
+            return msg;
+          }
+          // Fallback to generic description
+          const desc = (card as any)?.description;
+          if (typeof desc === 'string' && desc) {
+            return hasTask
+              ? `Calling send_to_agent will continue the conversation with the configured counterpart. ${desc}`
+              : `Calling send_to_agent will begin a new conversation with the configured counterpart. ${desc}`;
+          }
+          return undefined;
         } catch { return undefined; }
       },
       waitNextEvent: waitNextEventFn,
@@ -376,7 +391,12 @@ export default function App() {
         ptSendInFlight.current = true;
         (async () => {
           // Close any prior stream before starting a new one
-          try { ptStreamAbort.current?.abort(); } catch {}
+          try {
+            if (ptStreamAbort.current) {
+              console.warn(`[SSEAbort] Passthrough: aborting prior send stream before first message (reason=new-initial-send)`);
+              ptStreamAbort.current.abort();
+            }
+          } catch {}
           const ac = new AbortController();
           ptStreamAbort.current = ac;
           let gotAny = false;
@@ -407,7 +427,12 @@ export default function App() {
         (async () => {
           try {
             // Follow-up also uses message/stream with existing taskId
-            try { ptStreamAbort.current?.abort(); } catch {}
+            try {
+              if (ptStreamAbort.current) {
+                console.warn(`[SSEAbort] Passthrough: aborting prior send stream before follow-up message (reason=new-followup-send taskId=${taskId})`);
+                ptStreamAbort.current.abort();
+              }
+            } catch {}
             const ac = new AbortController();
             ptStreamAbort.current = ac;
             let gotAny = false;

@@ -449,9 +449,9 @@ CAS: Turn validation is enforced server‑side. Clients typically do not need cl
 - Default policy: strict alternation over `metadata.agents`; emits guidance for the next agent when a turn‑ending message arrives.
 - Scenario‑aware policies are available; scheduling is pluggable.
 
-## 🔁 Auto‑Run Resume
+## 🔁 Agent Resume
 
-- Conversations marked with `metadata.custom.autoRun = true` will resume internal agent loops on server restart if recently updated; stale runs are skipped and the flag is cleared.
+- Server restarts resume server‑managed agents via the runner registry (`resumeAll()`); no special per‑conversation flags are needed.
 
 ## 🔐 Security & Data
 
