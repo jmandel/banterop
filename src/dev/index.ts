@@ -5,7 +5,6 @@ import apiServer from '$src/server/index.ts';
 import home from './home.html';
 import scenarios from '$src/frontend/scenarios/index.html';
 import watch from '$src/frontend/watch/index.html';
-import launcher from '$src/frontend/scenario-launcher/index.html';
 import debugUi from '$src/frontend/debug/index.html';
 import a2aClient from '$src/frontend/a2a-client/index.html';
 
@@ -22,9 +21,6 @@ const server = serve({
     '/scenarios/': scenarios,
     '/watch': watch,
     '/watch/': watch,
-    '/launcher': launcher,
-    '/scenario-launcher': launcher,
-    '/scenario-launcher/': launcher,
     '/frontends/debug': debugUi,
     '/frontends/debug/': debugUi,
     '/debug': debugUi,

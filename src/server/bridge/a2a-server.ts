@@ -3,10 +3,8 @@ import { streamSSE } from 'hono/streaming';
 import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
 import type { ServerAgentLifecycleManager } from '$src/server/control/server-agent-lifecycle';
 import type { UnifiedEvent } from '$src/types/event.types';
-import {
-  parseConversationMetaFromConfig64,
-  getStartingAgentId,
-} from '$src/server/bridge/conv-config.types';
+import { parseConversationMetaFromConfig64, getStartingAgentId } from '$src/server/bridge/conv-config.types';
+import { sha256Base64Url } from '$src/lib/hash';
 
 type Deps = {
   orchestrator: OrchestratorService;
@@ -341,6 +339,9 @@ export class A2ABridgeServer {
       ...(a.config !== undefined ? { config: a.config } : {}),
     }));
 
+    // Stamp a stable template-derived hash for discovery and matching
+    const bridgeConfig64Hash = await sha256Base64Url(this.config64);
+
     const conversationId = this.deps.orchestrator.createConversation({
       meta: {
         ...(meta.title !== undefined ? { title: meta.title } : {}),
@@ -348,7 +349,7 @@ export class A2ABridgeServer {
         ...(meta.scenarioId !== undefined ? { scenarioId: meta.scenarioId } : {}),
         agents,
         ...(meta.config !== undefined ? { config: meta.config } : {}),
-        custom: { ...(meta.custom ?? {}), bridge: 'a2a' },
+        custom: { ...(meta.custom ?? {}), bridge: 'a2a', bridgeConfig64Hash },
       },
     });
 
@@ -357,6 +358,8 @@ export class A2ABridgeServer {
 
     return { conversationId, externalId };
   }
+
+  // hashed via shared util
 
   private async postExternalMessage(conversationId: number, externalId: string, a2aMsg: any) {
     const parts = Array.isArray(a2aMsg?.parts) ? a2aMsg.parts : [];

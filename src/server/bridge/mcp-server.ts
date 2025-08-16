@@ -25,6 +25,7 @@ import {
 } from '$src/server/bridge/conv-config.types';
 import { startAgents } from '$src/agents/factories/agent.factory';
 import { InProcessTransport } from '$src/agents/runtime/inprocess.transport';
+import { sha256Base64Url } from '$src/lib/hash';
 
 export interface McpBridgeDeps {
   orchestrator: OrchestratorService;
@@ -211,7 +212,7 @@ export class McpBridgeServer {
   private async beginChatThread(meta: ConvConversationMeta): Promise<number> {
     const { orchestrator } = this.deps;
     // Stable template-derived hash for matching: base64url(sha256(config64))
-    const bridgeConfig64Hash = await this.sha256Base64Url(this.config64);
+    const bridgeConfig64Hash = await sha256Base64Url(this.config64);
 
     // Create conversation directly from meta (aligned with CreateConversationRequest)
     // Build agents array with proper optional handling
@@ -250,16 +251,7 @@ export class McpBridgeServer {
     return conversationId;
   }
 
-  // Compute sha-256 over input and return base64url without padding
-  private async sha256Base64Url(input: string): Promise<string> {
-    const data = new TextEncoder().encode(input);
-    const digest = await crypto.subtle.digest('SHA-256', data);
-    const bytes = new Uint8Array(digest);
-    let bin = '';
-    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
-    const b64 = btoa(bin);
-    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  }
+  // hashed via shared util
 
   private getNextSeq(conversationId: number): number {
     const events = this.deps.orchestrator.getEventsPage(conversationId, undefined, 1_000_000);

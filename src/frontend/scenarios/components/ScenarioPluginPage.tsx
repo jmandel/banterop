@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { sha256Base64Url } from '$src/lib/hash';
 import { useParams, Link } from 'react-router-dom';
+import { PreLaunchShared } from './PreLaunchShared';
 
 declare const __API_BASE__: string | undefined;
 const API_BASE: string =
@@ -21,15 +23,6 @@ async function wsRpcCall<T>(method: string, params?: any): Promise<T> {
     };
     ws.onerror = (e) => reject(e);
   });
-}
-
-async function sha256Base64Url(input: string): Promise<string> {
-  const enc = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest('SHA-256', enc);
-  const bytes = new Uint8Array(digest);
-  let bin = '';
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
-  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function base64UrlDecodeJson<T = any>(b64url: string): T {
@@ -153,85 +146,49 @@ export function ScenarioPluginPage() {
   const prettyMeta = meta ? JSON.stringify(meta, null, 2) : '';
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-4">
-      <div>
-        <nav className="text-sm text-slate-600 mb-1">
-          <Link to="/scenarios" className="hover:underline">Scenarios</Link>
-          <span className="mx-1">/</span>
-          <Link to={`/scenarios/${encodeURIComponent(scenarioId)}`} className="hover:underline">{scenarioName || scenarioId}</Link>
-          <span className="mx-1">/</span>
-          <Link to={`/scenarios/${encodeURIComponent(scenarioId)}/run?mode=plugin`} className="hover:underline">Run</Link>
-          <span className="mx-1">/</span>
-          <span className="text-slate-500">Plugin</span>
-        </nav>
-        <h1 className="text-2xl font-semibold">MCP Pre‑Launch</h1>
-      </div>
+    <>
+      <PreLaunchShared
+        heading="MCP Pre‑Launch"
+        serverUrlLabel="MCP Server URL"
+        serverUrl={mcpUrl}
+        onCopy={copyUrl}
+        copied={copiedUrl}
+        meta={{ scenarioId, startingAgentId: meta?.startingAgentId }}
+        hash={hash}
+        subState={subState}
+        matches={matches}
+        urlNote={null}
+      />
 
-      <div className="p-4 border rounded">
-        <div className="text-sm text-slate-600 mb-2">Plug‑In Settings</div>
-        <div className="text-sm"><span className="text-slate-500">Scenario:</span> <span className="font-mono">{meta?.scenarioId || '(none)'}</span></div>
-        <div className="text-sm"><span className="text-slate-500">Plug‑in as:</span> <span className="font-mono">{meta?.startingAgentId || '(unset)'}</span></div>
-      </div>
+      <div className="p-6 max-w-4xl mx-auto space-y-4">
+        <div className="p-4 border rounded space-y-2 bg-white">
+          <div className="text-sm font-semibold">Template (decoded)</div>
+          <pre className="text-xs bg-slate-50 p-2 rounded border overflow-auto">{prettyMeta}</pre>
+        </div>
 
-      <div className="p-4 border rounded">
-        <div className="text-sm text-slate-600 mb-2">MCP Server URL</div>
-        <div className="font-mono break-all p-2 bg-slate-50 rounded border">{mcpUrl}</div>
-        <div className="mt-2">
-          <button onClick={copyUrl} className="px-2 py-1 text-xs border rounded hover:bg-gray-50">{copiedUrl ? 'Copied!' : 'Copy URL'}</button>
+        <div className="p-4 border rounded space-y-2 bg-white">
+          <div className="text-sm font-semibold">How To Use (MCP)</div>
+          <ul className="text-sm text-slate-700 space-y-1" style={{ listStyleType: 'disc', paddingLeft: 20 }}>
+            <li><span className="font-medium">begin_chat_thread</span>: starts a new conversation from this template.</li>
+            <li><span className="font-medium">send_message_to_chat_thread</span>: input — <code>conversationId</code>, <code>message</code>, optional <code>attachments[]</code>; output — <code>{`{ ok: true, guidance, status: 'waiting' }`}</code>.</li>
+            <li>
+              <span className="font-medium">check_replies</span>: input — <code>conversationId</code>, optional <code>waitMs</code> (default 10000); output includes:
+              <ul className="mt-1 space-y-1" style={{ listStyleType: 'disc', paddingLeft: 20 }}>
+                <li>
+                  <code>messages</code>: array of objects with keys:
+                  <span className="ml-1"><code>from</code>, <code>at</code> (ISO), <code>text</code>,</span>
+                  <span className="ml-1"><code>attachments</code> (array of objects: <code>name</code>, <code>contentType</code>, <code>summary?</code>, <code>docId?</code>)</span>
+                  — only replies since your last message.
+                </li>
+                <li><code>guidance</code>: short hint (e.g., “Your turn to respond.”).</li>
+                <li><code>status</code>: <code>input_required</code> | <code>waiting</code>.</li>
+                <li><code>conversation_ended</code>: boolean.</li>
+              </ul>
+            </li>
+          </ul>
+          <div className="text-xs text-slate-500">External client speaks as: <span className="font-mono">{meta?.startingAgentId || '(unset)'}</span></div>
         </div>
       </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="p-4 border rounded">
-          <div className="text-sm text-slate-600 mb-2">Template Hash</div>
-          <div className="font-mono break-all p-2 bg-slate-50 rounded border">{hash || 'computing…'}</div>
-          <div className="text-xs text-slate-500 mt-2">Discovery listens for conversations stamped with this hash.</div>
-        </div>
-        <div className="p-4 border rounded">
-          <div className="text-sm text-slate-600 mb-2">Conversations</div>
-          <div className="text-xs text-slate-500">Subscription: {subState}</div>
-          {matches.length === 0 ? (
-            <div className="text-sm text-slate-600 mt-2">Waiting for matching conversations…</div>
-          ) : (
-            <div className="mt-2 space-y-1">
-              {matches.map((cid) => (
-                <div key={cid} className="flex items-center gap-2 text-sm">
-                  <span>Conversation #{cid}</span>
-                  <a className="text-blue-600 hover:underline" href={`/watch/#/conversation/${cid}`} target="_blank" rel="noreferrer">Open in Watch</a>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="p-4 border rounded space-y-2">
-        <div className="text-sm font-semibold">Template (decoded)</div>
-        <pre className="text-xs bg-slate-50 p-2 rounded border overflow-auto">{prettyMeta}</pre>
-      </div>
-
-      <div className="p-4 border rounded space-y-2">
-        <div className="text-sm font-semibold">How To Use (MCP)</div>
-        <ul className="text-sm text-slate-700 space-y-1" style={{ listStyleType: 'disc', paddingLeft: 20 }}>
-          <li><span className="font-medium">begin_chat_thread</span>: starts a new conversation from this template.</li>
-          <li><span className="font-medium">send_message_to_chat_thread</span>: input — <code>conversationId</code>, <code>message</code>, optional <code>attachments[]</code>; output — <code>{`{ ok: true, guidance, status: 'waiting' }`}</code>.</li>
-          <li>
-            <span className="font-medium">check_replies</span>: input — <code>conversationId</code>, optional <code>waitMs</code> (default 10000); output includes:
-            <ul className="mt-1 space-y-1" style={{ listStyleType: 'disc', paddingLeft: 20 }}>
-              <li>
-                <code>messages</code>: array of objects with keys:
-                <span className="ml-1"><code>from</code>, <code>at</code> (ISO), <code>text</code>,</span>
-                <span className="ml-1"><code>attachments</code> (array of objects: <code>name</code>, <code>contentType</code>, <code>summary?</code>, <code>docId?</code>)</span>
-                — only replies since your last message.
-              </li>
-              <li><code>guidance</code>: short hint (e.g., “Your turn to respond.”).</li>
-              <li><code>status</code>: <code>input_required</code> | <code>waiting</code>.</li>
-              <li><code>conversation_ended</code>: boolean.</li>
-            </ul>
-          </li>
-        </ul>
-        <div className="text-xs text-slate-500">External client speaks as: <span className="font-mono">{meta?.startingAgentId || '(unset)'}</span></div>
-      </div>
-    </div>
+    </>
   );
 }

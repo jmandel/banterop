@@ -43,7 +43,8 @@ export function ScenarioRunPage() {
           setScenario(s);
           const cfg = s.config || s;
           const defaultTitle = cfg?.metadata?.title || s.name || '';
-          setTitle(defaultTitle ? `${defaultTitle} - ${runMode === 'plugin' ? 'Plugin' : 'Run'}` : (runMode === 'plugin' ? 'MCP Plugin' : 'Test Run'));
+          const modeLabel = runMode === 'internal' ? 'Internal' : (runMode === 'plugin' ? 'External MCP Client' : 'External A2A Client');
+          setTitle(defaultTitle ? `${defaultTitle} - ${modeLabel}` : (runMode === 'internal' ? 'Internal Run' : (runMode === 'plugin' ? 'MCP Client Run' : 'A2A Client Run')));
           const firstId = (cfg?.agents?.[0]?.agentId) || '';
           setStartingAgentId(firstId);
           // Load providers and build model options
@@ -83,7 +84,8 @@ export function ScenarioRunPage() {
     if (!scenario) return;
     const cfg = scenario.config || scenario;
     const base = cfg?.metadata?.title || scenario.name || '';
-    setTitle(base ? `${base} - ${runMode === 'plugin' ? 'Plugin' : (runMode === 'a2a' ? 'A2A' : 'Run')}` : (runMode === 'plugin' ? 'MCP Plugin' : (runMode === 'a2a' ? 'A2A Plugin' : 'Test Run')));
+    const modeLabel = runMode === 'internal' ? 'Internal' : (runMode === 'plugin' ? 'External MCP Client' : 'External A2A Client');
+    setTitle(base ? `${base} - ${modeLabel}` : (runMode === 'internal' ? 'Internal Run' : (runMode === 'plugin' ? 'MCP Client Run' : 'A2A Client Run')));
   }, [runMode, scenario]);
 
   const agentOptions = useMemo(() => (scenario?.config?.agents || []).map((a: any) => a.agentId), [scenario]);
@@ -143,13 +145,6 @@ export function ScenarioRunPage() {
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-6">
       <div>
-        <nav className="text-sm text-slate-600 mb-1">
-          <Link to="/scenarios" className="hover:underline">Scenarios</Link>
-          <span className="mx-1">/</span>
-          <Link to={`/scenarios/${encodeURIComponent(scenarioId!)}`} className="hover:underline">{scenario.config?.metadata?.title || scenario.name}</Link>
-          <span className="mx-1">/</span>
-          <span className="text-slate-500">Run</span>
-        </nav>
         <h1 className="text-2xl font-semibold">{scenario.config?.metadata?.title || scenario.name}</h1>
         <div className="text-sm text-slate-500">{scenario.config?.metadata?.id}</div>
       </div>
@@ -157,16 +152,16 @@ export function ScenarioRunPage() {
       <div className="bg-white border rounded p-4 space-y-4">
         <div className="grid grid-cols-3 gap-3">
           <div className={`p-3 border-2 rounded cursor-pointer ${runMode==='internal'?'border-blue-600 bg-blue-50':'border-gray-200 hover:border-gray-300'}`} onClick={() => setRunMode('internal')}>
-            <div className="font-medium">Run Internally</div>
-            <div className="text-xs text-slate-600">Simulate with internal agents</div>
+            <div className="font-medium">Internal (Simulated)</div>
+            <div className="text-xs text-slate-600">Run with internal agents</div>
           </div>
           <div className={`p-3 border-2 rounded cursor-pointer ${runMode==='plugin'?'border-blue-600 bg-blue-50':'border-gray-200 hover:border-gray-300'}`} onClick={() => setRunMode('plugin')}>
-            <div className="font-medium">Plug In (MCP)</div>
-            <div className="text-xs text-slate-600">Connect external MCP client</div>
+            <div className="font-medium">External (MCP Client)</div>
+            <div className="text-xs text-slate-600">Connect an external MCP client</div>
           </div>
           <div className={`p-3 border-2 rounded cursor-pointer ${runMode==='a2a'?'border-blue-600 bg-blue-50':'border-gray-200 hover:border-gray-300'}`} onClick={() => setRunMode('a2a')}>
-            <div className="font-medium">Plug In (A2A)</div>
-            <div className="text-xs text-slate-600">Connect JSON‑RPC A2A client</div>
+            <div className="font-medium">External (A2A Client)</div>
+            <div className="text-xs text-slate-600">Connect an external A2A client</div>
           </div>
         </div>
 
@@ -181,7 +176,7 @@ export function ScenarioRunPage() {
         </div>
 
         <div>
-          <label className="block text-sm text-slate-700 mb-1">{runMode !== 'internal' ? (runMode === 'plugin' ? 'External Agent (MCP client)' : 'External Agent (A2A)') : 'Starting Agent'}</label>
+          <label className="block text-sm text-slate-700 mb-1">{runMode !== 'internal' ? (runMode === 'plugin' ? 'External Client Agent (MCP)' : 'External Client Agent (A2A)') : 'Starting Agent'}</label>
           <select className="w-full border rounded px-3 py-2" value={startingAgentId} onChange={(e) => setStartingAgentId(e.target.value)}>
             {agentOptions.map((id: string) => (<option key={id} value={id}>{id}</option>))}
           </select>
