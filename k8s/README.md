@@ -45,12 +45,13 @@ containers:
     image: your-dockerhub-username/interop-api:latest  # <- set THIS
 ```
 
-Optionally set real LLM credentials in the Secret:
+Secrets are managed separately to avoid accidental resets:
 
-```yaml
-stringData:
-  GEMINI_API_KEY: "..."
-  OPENROUTER_API_KEY: "..."
+```bash
+kubectl -n interop create secret generic app-secrets \
+  --from-literal=OPENROUTER_API_KEY="..." \
+  --from-literal=GEMINI_API_KEY="..." \
+  --dry-run=client -o yaml | kubectl apply -f -
 ```
 
 ## Apply
@@ -75,6 +76,8 @@ curl -s https://chitchat.fhir.me/api/health
 
 ## Notes
 - SQLite data is persisted in `convo-db` PVC. To reset, delete the PVC (will delete data).
+- To restrict OpenRouter models, set:
+  `LLM_MODELS_OPENROUTER_INCLUDE="openai/gpt-oss-120b:nitro,qwen/qwen3-235b-a22b-2507:nitro"` in the Deployment env.
 - WebSocket endpoint is `/api/ws` under the same host.
 
 

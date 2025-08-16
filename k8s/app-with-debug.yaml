@@ -43,22 +43,23 @@ data:
   # Public config exported into built frontends at container startup
   PUBLIC_API_BASE_URL: "https://chitchat.fhir.me/api"
 ---
-apiVersion: v1
-kind: Secret
-metadata:
-  name: app-secrets
-  namespace: interop
-type: Opaque
-stringData:
-  # Set your API keys here before applying
-  # Option 1: Edit this file directly (be careful not to commit!)
-  # Option 2: Use kubectl to set after creation:
-  #   kubectl -n interop create secret generic app-secrets \
-  #     --from-literal=OPENROUTER_API_KEY=your-key-here \
-  #     --from-literal=GEMINI_API_KEY=your-key-here \
-  #     --dry-run=client -o yaml | kubectl apply -f -
-  GEMINI_API_KEY: ""
-  OPENROUTER_API_KEY: ""  # Required if using OpenRouter
+# NOTE: Secret intentionally managed separately to avoid accidental resets on apply.
+# Use k8s/update-secrets.sh or kubectl to create/update the app-secrets Secret, e.g.:
+#   kubectl -n interop create secret generic app-secrets \
+#     --from-literal=OPENROUTER_API_KEY=your-key \
+#     --from-literal=GEMINI_API_KEY=your-key \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+# Example (commented out):
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: app-secrets
+#   namespace: interop
+# type: Opaque
+# stringData:
+#   GEMINI_API_KEY: ""
+#   OPENROUTER_API_KEY: ""
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -128,6 +129,15 @@ spec:
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    ln -snf /debug/llm-debug /app/public/debug-logs 2>/dev/null || true
+
       volumes:
         - name: data
           persistentVolumeClaim:

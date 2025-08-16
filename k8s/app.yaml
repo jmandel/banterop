@@ -28,16 +28,23 @@ data:
   PUBLIC_API_BASE_URL: "https://chitchat.fhir.me/api"
   # Note: Set OPENROUTER_API_KEY in Secret `app-secrets`
 ---
-apiVersion: v1
-kind: Secret
-metadata:
-  name: app-secrets
-  namespace: interop
-type: Opaque
-stringData:
-  # Set if you use real providers; otherwise leave empty
-  GEMINI_API_KEY: ""
-  OPENROUTER_API_KEY: ""  # paste your key here before applying, or set it out-of-band
+# NOTE: Secret intentionally managed separately to avoid accidental resets on apply.
+# Use k8s/update-secrets.sh or kubectl to create/update the app-secrets Secret, e.g.:
+#   kubectl -n interop create secret generic app-secrets \
+#     --from-literal=OPENROUTER_API_KEY=your-key \
+#     --from-literal=GEMINI_API_KEY=your-key \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+# Example (commented out):
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: app-secrets
+#   namespace: interop
+# type: Opaque
+# stringData:
+#   GEMINI_API_KEY: ""
+#   OPENROUTER_API_KEY: ""
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -160,4 +167,3 @@ spec:
   issuerRef:
     kind: ClusterIssuer
     name: letsencrypt-prod
-
