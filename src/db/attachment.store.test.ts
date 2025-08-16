@@ -26,7 +26,7 @@ describe('AttachmentStore', () => {
   afterEach(() => sqlite.close());
 
   it('inserts and retrieves attachments', () => {
-    const ids = store.insertMany({
+    const pairs = store.insertMany({
       conversation: 1,
       turn: 1,
       event: 1,
@@ -42,10 +42,12 @@ describe('AttachmentStore', () => {
       ],
     });
 
-    expect(ids.length).toBe(1);
-    const firstId = ids[0];
+    expect(pairs.length).toBe(1);
+    const firstId = pairs[0]?.id;
+    const firstDocId = pairs[0]?.docId;
     expect(firstId).toBeDefined();
     if (!firstId) throw new Error('Expected id');
+    expect(firstDocId).toBe('doc-1');
     
     const a = store.getById(firstId);
     expect(a?.name).toBe('doc.txt');

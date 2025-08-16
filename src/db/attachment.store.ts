@@ -22,10 +22,10 @@ export interface AttachmentInsertParams {
 export class AttachmentStore {
   constructor(private db: Database) {}
 
-  insertMany(params: AttachmentInsertParams): string[] {
+  insertMany(params: AttachmentInsertParams): Array<{ id: string; docId: string }> {
     if (!params.items?.length) return [];
 
-    const ids: string[] = [];
+    const results: Array<{ id: string; docId: string }> = [];
     const stmt = this.db.prepare(
       `INSERT INTO attachments
        (id, conversation, turn, event, doc_id, name, content_type, content, summary, created_by_agent_id)
@@ -35,24 +35,25 @@ export class AttachmentStore {
     const tx = this.db.transaction(() => {
       for (const item of params.items) {
         const id = item.id ?? `att_${randomUUID()}`;
+        const docId = item.docId ?? id;
         stmt.run(
           id,
           params.conversation,
           params.turn,
           params.event,
-          item.docId ?? null,
+          docId,
           item.name,
           item.contentType,
           item.content,
           item.summary ?? null,
           params.createdByAgentId
         );
-        ids.push(id);
+        results.push({ id, docId });
       }
     });
 
     tx();
-    return ids;
+    return results;
   }
 
   getById(id: string): AttachmentRow | null {

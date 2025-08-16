@@ -115,7 +115,7 @@ function BuilderPage() {
           setJson(JSON.stringify(s.config, null, 2));
         } else {
           setName('New Scenario');
-          setJson(JSON.stringify({ metadata: { id: 'my-scenario', title: 'New Scenario', background: '', challenges: [] }, scenario: {}, agents: [] }, null, 2));
+          setJson(JSON.stringify({ metadata: { id: 'my-scenario', title: 'New Scenario', background: '', challenges: [] }, agents: [] }, null, 2));
         }
       } catch (e) {
         setStatus(`Error: ${(e as Error).message}`);

@@ -37,6 +37,14 @@ const apps: AppDef[] = [
     entry: 'src/frontend/debug/main.tsx',
     html: 'src/frontend/debug/index.html',
   },
+  {
+    outPath: 'a2a-client',
+    entry: 'src/frontend/a2a-client/main.tsx',
+    html: 'src/frontend/a2a-client/index.html',
+    extraAssets: [
+      'src/frontend/a2a-client/styles.css',
+    ],
+  },
 ];
 
 async function ensureDir(path: string) {
@@ -96,13 +104,10 @@ export async function buildAllFrontends(apiBase: string) {
   await ensureDir('public');
   const home = await Bun.file('src/dev/home.html').text();
   const siteOrigin = apiBase.startsWith('http') ? apiBase.replace(/\/?api$/, '') : '';
+  // Just copy the home page as-is - the relative URLs work fine in production
   const landing = home
     .replace('Dev Home', 'Home')
-    .replace('Static frontends at "/" and API at "/api".', 'Static frontends at "/" and API at "/api".')
-    .replace(/href="\/scenarios"/g, `href="${siteOrigin}/scenarios/"`)
-    .replace(/href="\/watch"/g, `href="${siteOrigin}/watch/"`)
-    .replace(/href="\/launcher"/g, `href="${siteOrigin}/scenario-launcher/"`)
-    .replace(/href="\/frontends\/debug"/g, `href="${siteOrigin}/frontends/debug/"`);
+    .replace('Language-Track Dev Server', 'Language Track');
   await Bun.write('public/index.html', landing);
 
   for (const app of apps) {

@@ -434,7 +434,7 @@ export class EventStore {
       attachmentItems.push(item);
     }
 
-    const ids = this.attachments.insertMany({
+    const inserted = this.attachments.insertMany({
       conversation,
       turn,
       event,
@@ -446,14 +446,15 @@ export class EventStore {
     const attached: MessagePayload['attachments'] = [];
     for (let i = 0; i < items.length; i++) {
       const a = items[i];
-      const attachmentId = ids[i];
-      if (!a || !attachmentId) continue;
+      const pair = inserted[i];
+      if (!a || !pair) continue;
       const attachment: NonNullable<MessagePayload['attachments']>[number] = {
-        id: attachmentId,
+        id: pair.id,
         name: a.name,
         contentType: a.contentType,
       };
-      if (a.docId !== undefined) attachment.docId = a.docId;
+      // Use the docId assigned/persisted by AttachmentStore (non-null)
+      attachment.docId = pair.docId;
       if (a.summary !== undefined) attachment.summary = a.summary;
       attached.push(attachment);
     }

@@ -1,12 +1,14 @@
 # 💬 Conversational Interop Reference Stack
 
-A transparent, extensible simulation and orchestration environment for **conversation‑driven interoperability** between systems, teams, and tools in complex domains.
+This project provides a transparent, extensible simulation and orchestration environment designed to solve complex, cross-organization workflows by enabling autonomous AI agents to **"just talk"**.
+
+Instead of relying on rigid, pre-defined APIs, agents on this platform communicate through a sequence of conversational turns, sharing data and negotiating outcomes dynamically. It's built to model and solve real-world challenges like prior authorizations, specialist appointment booking, or clinical trial matching, where context and negotiation are key.
 
 ---
 
 ## 💡 What This Stack Lets You Do
 
-This reference stack is designed so **any developer** can plug in their own conversational agent and have it interact naturally with simulated agents in **nearly any scenario you can design**.
+This reference stack is a "neutral ground" where **any developer** can plug in their own conversational agent and have it interact with other agents in **nearly any scenario you can design**.
 
 We provide:
 
@@ -140,6 +142,7 @@ A Conversation is the bounded “room” agents stay in until the job is done �
 
 ---
 
+
 ### 2. Scenarios — *Realistic improv setup*
 
 **Concept:**  
@@ -152,6 +155,7 @@ Repeatable, comparable runs in the same “world”.
 
 ---
 
+
 ### 3. Tool Synthesis (“Oracle”)
 
 Simulates tool/API calls:
@@ -160,6 +164,7 @@ Simulates tool/API calls:
 - Output: `{ reasoning, output }` plausible in-world.
 
 ---
+
 
 ### 4. Orchestrator
 
@@ -173,6 +178,7 @@ Keeps order:
 
 ---
 
+
 ### 5. Event Log
 
 Immutable ledger:
@@ -182,11 +188,13 @@ Immutable ledger:
 
 ---
 
+
 ### 6. Attachments
 
 Store large or structured content once, reference via `docId`.
 
 ---
+
 
 ### 7. Guidance & Turn Safety
 
@@ -250,6 +258,7 @@ flowchart TB
 
 ---
 
+
 ### Turn Lifecycle
 ```mermaid
 sequenceDiagram
@@ -264,6 +273,7 @@ sequenceDiagram
 ```
 
 ---
+
 
 ### Architecture Overview
 ```mermaid
@@ -449,9 +459,29 @@ CAS: Turn validation is enforced server‑side. Clients typically do not need cl
 - Default policy: strict alternation over `metadata.agents`; emits guidance for the next agent when a turn‑ending message arrives.
 - Scenario‑aware policies are available; scheduling is pluggable.
 
-## 🔁 Agent Resume
+## 🔁 Automatic Conversation Resume
 
-- Server restarts resume server‑managed agents via the runner registry (`resumeAll()`); no special per‑conversation flags are needed.
+The orchestrator provides **automatic resume** for active conversations after server restarts, crashes, or deployments. This ensures high availability for ongoing agent interactions.
+
+#### How It Works
+
+When the server starts, it automatically discovers active conversations in the database (within a configurable lookback period). For each active conversation, the system:
+1.  Recreates the conversation state in memory.
+2.  Automatically recreates all server-managed agents.
+3.  Subscribes the agents to all conversation events.
+4.  Agents can then analyze the history and seamlessly continue the conversation from where it left off.
+
+#### What Gets Resumed
+
+-   ✅ **Automatically:** Server-managed internal agents, full conversation state (turns, traces), and event subscriptions.
+-   ❌ **Must Reconnect Manually:** External agents (e.g., connecting via WebSocket or other bridges). These clients must detect disconnection and reconnect themselves. Upon reconnecting, they receive the full, resumed conversation state.
+
+#### Configuration
+
+The lookback period determines how old a conversation's last activity can be before it's considered stale and excluded from the resume process.
+
+-   **Default**: 24 hours
+-   **Environment Variable**: `RESUME_LOOKBACK_HOURS`
 
 ## 🔐 Security & Data
 

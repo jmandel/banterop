@@ -69,7 +69,7 @@ export interface AttachmentRow {
   conversation: number;
   turn: number;
   event: number;
-  docId?: string;
+  docId: string;
   name: string;
   contentType: string;
   content: string;
