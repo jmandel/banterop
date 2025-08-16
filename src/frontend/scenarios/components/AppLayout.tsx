@@ -66,10 +66,12 @@ export function AppLayout({ children }: AppLayoutProps) {
           crumbs.push({ label: 'View', path: null });
         } else if (pathSegments.includes('run')) {
           crumbs.push({ label: 'Run', path: null });
-        } else if (pathSegments.includes('plug-in')) {
-          crumbs.push({ label: 'MCP Server', path: null });
-        } else if (pathSegments.includes('a2a')) {
-          crumbs.push({ label: 'A2A Server', path: null });
+        } else if (pathSegments.includes('external-mcp-client')) {
+          crumbs.push({ label: 'Run', path: `/scenarios/${encodeURIComponent(sid)}/run` });
+          crumbs.push({ label: 'External MCP Client', path: null });
+        } else if (pathSegments.includes('external-a2a-client')) {
+          crumbs.push({ label: 'Run', path: `/scenarios/${encodeURIComponent(sid)}/run` });
+          crumbs.push({ label: 'External A2A Client', path: null });
         } else if (pathSegments.includes('configured')) {
           crumbs.push({ label: 'Configured', path: null });
         } else if (pathSegments.includes('created')) {

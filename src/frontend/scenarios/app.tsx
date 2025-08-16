@@ -273,8 +273,8 @@ function App() {
           <Route path="/scenarios/:scenarioId" element={<ScenarioBuilderPage />} />
           <Route path="/scenarios/:scenarioId/edit" element={<ScenarioBuilderPage />} />
           <Route path="/scenarios/:scenarioId/run" element={<ScenarioRunPage />} />
-          <Route path="/scenarios/:scenarioId/plug-in/:config64" element={<ScenarioPluginPage />} />
-          <Route path="/scenarios/:scenarioId/a2a/:config64" element={<ScenarioA2APreLaunchPage />} />
+          <Route path="/scenarios/:scenarioId/external-mcp-client/:config64" element={<ScenarioPluginPage />} />
+          <Route path="/scenarios/:scenarioId/external-a2a-client/:config64" element={<ScenarioA2APreLaunchPage />} />
           <Route path="/scenarios/configured/:config64" element={<ScenarioConfiguredPage />} />
           <Route path="/scenarios/created/:conversationId" element={<ScenarioConfiguredPage />} />
         </Routes>

@@ -14,13 +14,14 @@ export function ScenarioRunPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scenario, setScenario] = useState<any | null>(null);
-  const [runMode, setRunMode] = useState<'internal'|'plugin'|'a2a'>(() => {
+  const [runMode, setRunMode] = useState<'internal'|'mcp'|'a2a'>(() => {
     try {
       const params = new URLSearchParams(location.hash.split('?')[1] || '');
       const mode = params.get('mode');
-      if (mode === 'plugin') return 'plugin';
+      if (mode === 'plugin' || mode === 'mcp') return 'mcp';
       if (mode === 'a2a') return 'a2a';
-      return (localStorage.getItem('scenarioLauncher.launchType') === 'plugin') ? 'plugin' : 'internal';
+      const lt = localStorage.getItem('scenarioLauncher.launchType');
+      return (lt === 'mcp' || lt === 'plugin') ? 'mcp' : 'internal';
     } catch { return 'internal'; }
   });
   const [title, setTitle] = useState('');
@@ -43,8 +44,8 @@ export function ScenarioRunPage() {
           setScenario(s);
           const cfg = s.config || s;
           const defaultTitle = cfg?.metadata?.title || s.name || '';
-          const modeLabel = runMode === 'internal' ? 'Internal' : (runMode === 'plugin' ? 'External MCP Client' : 'External A2A Client');
-          setTitle(defaultTitle ? `${defaultTitle} - ${modeLabel}` : (runMode === 'internal' ? 'Internal Run' : (runMode === 'plugin' ? 'MCP Client Run' : 'A2A Client Run')));
+          const modeLabel = runMode === 'internal' ? 'Internal' : (runMode === 'mcp' ? 'External MCP Client' : 'External A2A Client');
+          setTitle(defaultTitle ? `${defaultTitle} - ${modeLabel}` : (runMode === 'internal' ? 'Internal Run' : (runMode === 'mcp' ? 'MCP Client Run' : 'A2A Client Run')));
           const firstId = (cfg?.agents?.[0]?.agentId) || '';
           setStartingAgentId(firstId);
           // Load providers and build model options
@@ -84,31 +85,32 @@ export function ScenarioRunPage() {
     if (!scenario) return;
     const cfg = scenario.config || scenario;
     const base = cfg?.metadata?.title || scenario.name || '';
-    const modeLabel = runMode === 'internal' ? 'Internal' : (runMode === 'plugin' ? 'External MCP Client' : 'External A2A Client');
-    setTitle(base ? `${base} - ${modeLabel}` : (runMode === 'internal' ? 'Internal Run' : (runMode === 'plugin' ? 'MCP Client Run' : 'A2A Client Run')));
+    const modeLabel = runMode === 'internal' ? 'Internal' : (runMode === 'mcp' ? 'External MCP Client' : 'External A2A Client');
+    setTitle(base ? `${base} - ${modeLabel}` : (runMode === 'internal' ? 'Internal Run' : (runMode === 'mcp' ? 'MCP Client Run' : 'A2A Client Run')));
   }, [runMode, scenario]);
 
   const agentOptions = useMemo(() => (scenario?.config?.agents || []).map((a: any) => a.agentId), [scenario]);
 
   useEffect(() => {
-    try { localStorage.setItem('scenarioLauncher.launchType', runMode === 'plugin' ? 'plugin' : 'watch'); } catch {}
+    try { localStorage.setItem('scenarioLauncher.launchType', runMode === 'mcp' ? 'mcp' : 'watch'); } catch {}
   }, [runMode]);
 
   const buildMeta = () => {
     const cfg = scenario.config;
-    const humanize = (id: string) => id.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    const externalId = runMode !== 'internal' ? startingAgentId : null;
     const agents = (cfg.agents || []).map((a: any) => {
+      const isExternal = externalId && a.agentId === externalId;
       const model = modelOptions.length ? (agentModels[a.agentId] || modelOptions[0] || '') : undefined;
       const systemPromptExtra = (agentSystemExtra[a.agentId] || '').trim();
       const initiatingMessageExtra = (agentInitiatingExtra[a.agentId] || '').trim();
       const config: Record<string, unknown> = {};
-      if (model) config.model = model;
-      if (systemPromptExtra) config.systemPromptExtra = systemPromptExtra;
-      if (initiatingMessageExtra) config.initiatingMessageExtra = initiatingMessageExtra;
-      return {
-        id: a.agentId,
-        ...(Object.keys(config).length ? { config } : {}),
-      };
+      // Only include model/extras for internal agents; omit for external client agent in MCP/A2A modes
+      if (!isExternal) {
+        if (model) config.model = model;
+        if (systemPromptExtra) config.systemPromptExtra = systemPromptExtra;
+        if (initiatingMessageExtra) config.initiatingMessageExtra = initiatingMessageExtra;
+      }
+      return Object.keys(config).length ? { id: a.agentId, config } : { id: a.agentId };
     });
     return {
       title,
@@ -116,7 +118,6 @@ export function ScenarioRunPage() {
       scenarioId: cfg?.metadata?.id || scenarioId,
       agents,
       startingAgentId,
-      // No implicit autoRun/autostart here; selection happens on the Created page per agent
     };
   };
 
@@ -135,7 +136,7 @@ export function ScenarioRunPage() {
   const continuePlugin = () => {
     const meta = buildMeta();
     const config64 = encodeBase64Url(meta); // MCP bridge expects ConversationMeta directly
-    navigate(`/scenarios/${encodeURIComponent(scenarioId!)}/plug-in/${config64}`);
+    navigate(`/scenarios/${encodeURIComponent(scenarioId!)}/external-mcp-client/${config64}`);
   };
 
   if (isLoading) return <div className="p-6 text-slate-600">Loading…</div>;
@@ -155,7 +156,7 @@ export function ScenarioRunPage() {
             <div className="font-medium">Internal (Simulated)</div>
             <div className="text-xs text-slate-600">Run with internal agents</div>
           </div>
-          <div className={`p-3 border-2 rounded cursor-pointer ${runMode==='plugin'?'border-blue-600 bg-blue-50':'border-gray-200 hover:border-gray-300'}`} onClick={() => setRunMode('plugin')}>
+          <div className={`p-3 border-2 rounded cursor-pointer ${runMode==='mcp'?'border-blue-600 bg-blue-50':'border-gray-200 hover:border-gray-300'}`} onClick={() => setRunMode('mcp')}>
             <div className="font-medium">External (MCP Client)</div>
             <div className="text-xs text-slate-600">Connect an external MCP client</div>
           </div>
@@ -176,7 +177,7 @@ export function ScenarioRunPage() {
         </div>
 
         <div>
-          <label className="block text-sm text-slate-700 mb-1">{runMode !== 'internal' ? (runMode === 'plugin' ? 'External Client Agent (MCP)' : 'External Client Agent (A2A)') : 'Starting Agent'}</label>
+          <label className="block text-sm text-slate-700 mb-1">{runMode !== 'internal' ? (runMode === 'mcp' ? 'External Client Agent (MCP)' : 'External Client Agent (A2A)') : 'Starting Agent'}</label>
           <select className="w-full border rounded px-3 py-2" value={startingAgentId} onChange={(e) => setStartingAgentId(e.target.value)}>
             {agentOptions.map((id: string) => (<option key={id} value={id}>{id}</option>))}
           </select>
@@ -241,13 +242,13 @@ export function ScenarioRunPage() {
         <div className="pt-2">
           {runMode === 'internal' ? (
             <button className="w-full bg-blue-600 text-white rounded px-3 py-2 hover:bg-blue-700" onClick={continueInternal}>Start Conversation</button>
-          ) : runMode === 'plugin' ? (
-            <button className="w-full bg-blue-600 text-white rounded px-3 py-2 hover:bg-blue-700" onClick={continuePlugin}>Continue to Plugin Configuration</button>
+          ) : runMode === 'mcp' ? (
+            <button className="w-full bg-blue-600 text-white rounded px-3 py-2 hover:bg-blue-700" onClick={continuePlugin}>Continue to MCP Configuration</button>
           ) : (
             <button className="w-full bg-blue-600 text-white rounded px-3 py-2 hover:bg-blue-700" onClick={() => {
               const meta = buildMeta();
               const config64 = encodeBase64Url(meta);
-              navigate(`/scenarios/${encodeURIComponent(scenarioId!)}/a2a/${config64}`);
+              navigate(`/scenarios/${encodeURIComponent(scenarioId!)}/external-a2a-client/${config64}`);
             }}>Continue to A2A Configuration</button>
           )}
         </div>

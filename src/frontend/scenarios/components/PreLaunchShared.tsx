@@ -25,6 +25,7 @@ function displayUrl(url: string): string {
 
 export function PreLaunchShared({ heading, serverUrlLabel, serverUrl, onCopy, copied, meta, hash, subState, matches, urlNote }: Props) {
   const [showInfo, setShowInfo] = useState(false);
+  const [tipPos, setTipPos] = useState<{ left: number; top: number } | null>(null);
   const statusLabel = (() => {
     const s = String(subState).toLowerCase();
     if (s === 'open') return 'open';
@@ -73,13 +74,58 @@ export function PreLaunchShared({ heading, serverUrlLabel, serverUrl, onCopy, co
             <div className="flex items-center gap-1" title={`Connection: ${statusLabel}`} aria-label={`Connection: ${statusLabel}`}>
               <span className={`inline-block w-2.5 h-2.5 rounded-full ${statusColor}`} />
             </div>
-            <div className="relative inline-flex items-center">
-              <button type="button" aria-label="Template hash info" title="Template hash info" onMouseEnter={() => setShowInfo(true)} onMouseLeave={() => setShowInfo(false)} onFocus={() => setShowInfo(true)} onBlur={() => setShowInfo(false)} onClick={() => setShowInfo(!showInfo)} className="w-6 h-6 inline-flex items-center justify-center rounded-full border text-slate-700 bg-white hover:bg-slate-50">i</button>
-              {showInfo && (<div className="absolute right-0 top-7 z-20 w-72 p-3 bg-white border rounded shadow text-xs text-slate-700">
-                <div className="font-medium mb-1">Template hash</div>
-                <div className="mb-2">Used to stamp and discover conversations that match this pre‑launch config.</div>
-                <div className="font-mono break-all text-slate-600">{hash || '(computing…)'}
-                </div>
+            <div className="inline-flex items-center">
+              <button
+                type="button"
+                aria-label="Template hash info"
+                title="Template hash info"
+                onMouseEnter={(e) => {
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  const width = 288; // w-72
+                  let left = r.right - width;
+                  if (left < 8) left = 8;
+                  let top = r.bottom + 8;
+                  const estHeight = 160;
+                  if (top + estHeight > window.innerHeight) top = Math.max(8, r.top - 8 - estHeight);
+                  setTipPos({ left, top });
+                  setShowInfo(true);
+                }}
+                onMouseLeave={() => setShowInfo(false)}
+                onFocus={(e) => {
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  const width = 288;
+                  let left = r.right - width;
+                  if (left < 8) left = 8;
+                  let top = r.bottom + 8;
+                  const estHeight = 160;
+                  if (top + estHeight > window.innerHeight) top = Math.max(8, r.top - 8 - estHeight);
+                  setTipPos({ left, top });
+                  setShowInfo(true);
+                }}
+                onBlur={() => setShowInfo(false)}
+                onClick={(e) => {
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  const width = 288;
+                  let left = r.right - width;
+                  if (left < 8) left = 8;
+                  let top = r.bottom + 8;
+                  const estHeight = 160;
+                  if (top + estHeight > window.innerHeight) top = Math.max(8, r.top - 8 - estHeight);
+                  setTipPos({ left, top });
+                  setShowInfo((v) => !v);
+                }}
+                aria-haspopup="dialog"
+                aria-expanded={showInfo}
+                className="w-8 h-8 inline-flex items-center justify-center rounded-full border text-slate-700 bg-white hover:bg-slate-50 text-base"
+              >
+                i
+              </button>
+              {showInfo && tipPos && (
+                <div className="fixed z-50 w-72 p-3 bg-white border rounded shadow-lg text-xs text-slate-700" style={{ left: tipPos.left, top: tipPos.top }}>
+                  <div className="font-medium mb-1">Template hash</div>
+                  <div className="mb-2">Used to stamp and discover conversations that match this pre‑launch config.</div>
+                  <div className="font-mono break-all text-slate-600">{hash || '(computing…)'}
+                  </div>
               </div>)}
             </div>
           </div>
