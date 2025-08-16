@@ -20,7 +20,7 @@ export function buildScenarioAgentCard(baseUrlToA2A: URL, config64: string, orch
       const sc = orchestrator.storage?.scenarios?.findScenarioById(meta.scenarioId);
       if (sc) {
         title = (sc as any).config?.metadata?.title || (sc as any).name || title;
-        scenarioDescription = (sc as any).config?.metadata?.description || (sc as any).config?.scenario?.background;
+        scenarioDescription = (sc as any).config?.metadata?.description || (sc as any).config?.metadata?.background;
         const scAgents = ((sc as any).config?.agents || []);
         agentSummaries = scAgents.map((a: any) => {
           const n = a?.principal?.name || a?.agentId || '';

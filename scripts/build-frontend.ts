@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
 type AppDef = {
-  outPath: string;          // path under public/, e.g., 'scenarios' or 'frontends/debug'
+  outPath: string;          // path under public/
   entry: string;            // TS/TSX entry
   html: string;             // source HTML to transform and copy
   extraAssets?: string[];   // additional files to copy (css, images)
@@ -14,7 +14,7 @@ type AppDef = {
 
 const apps: AppDef[] = [
   {
-    outPath: 'scenarios',
+    outPath: '',
     entry: 'src/frontend/scenarios/app.tsx',
     html: 'src/frontend/scenarios/index.html',
     extraAssets: [
@@ -26,16 +26,6 @@ const apps: AppDef[] = [
     outPath: 'watch',
     entry: 'src/frontend/watch/app.tsx',
     html: 'src/frontend/watch/index.html',
-  },
-  {
-    outPath: 'scenario-launcher',
-    entry: 'src/frontend/scenario-launcher/app.tsx',
-    html: 'src/frontend/scenario-launcher/index.html',
-  },
-  {
-    outPath: 'frontends/debug',
-    entry: 'src/frontend/debug/main.tsx',
-    html: 'src/frontend/debug/index.html',
   },
   {
     outPath: 'a2a-client',
@@ -124,5 +114,4 @@ if (import.meta.main) {
     process.exit(1);
   });
 }
-
 

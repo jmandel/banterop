@@ -121,8 +121,8 @@ export function ScenarioConfiguredPage() {
         try {
           const meta = snap?.metadata || {};
           const store = {
-            scenarioId: meta?.scenarioId || meta?.scenario?.id || meta?.scenario?.metadata?.id,
-            title: meta?.title || meta?.scenario?.metadata?.title,
+            scenarioId: meta?.scenarioId,
+            title: meta?.title,
           };
           localStorage.setItem(`convoMeta:${conversationId}`, JSON.stringify(store));
         } catch {}

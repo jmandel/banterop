@@ -5,7 +5,6 @@ import apiServer from '$src/server/index.ts';
 import home from './home.html';
 import scenarios from '$src/frontend/scenarios/index.html';
 import watch from '$src/frontend/watch/index.html';
-import debugUi from '$src/frontend/debug/index.html';
 import a2aClient from '$src/frontend/a2a-client/index.html';
 
 // Full-stack dev server: static HTML at "/" and API proxied under "/api"
@@ -16,15 +15,10 @@ const server = serve({
     console: true,
   },
   routes: {
-    '/': home,
-    '/scenarios': scenarios,
+    '/': scenarios,
     '/scenarios/': scenarios,
-    '/watch': watch,
     '/watch/': watch,
-    '/frontends/debug': debugUi,
-    '/frontends/debug/': debugUi,
-    '/debug': debugUi,
-    '/a2a-client': a2aClient,
+    '/a2a-client/': a2aClient,
   },
   async fetch(req, srv) {
     const url = new URL(req.url);

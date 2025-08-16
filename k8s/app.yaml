@@ -83,6 +83,9 @@ spec:
               value: "0" # set to "1" or "true" to enable plain-text LLM request/response logs
             - name: LLM_DEBUG_DIR
               value: "/data/llm-debug"
+            # Limit OpenRouter models to a curated subset (optional)
+            - name: LLM_MODELS_OPENROUTER_INCLUDE
+              value: "openai/gpt-oss-120b:nitro,qwen/qwen3-235b-a22b-2507:nitro"
           readinessProbe:
             httpGet:
               path: /api/health

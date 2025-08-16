@@ -177,4 +177,28 @@ describe('ProviderManager', () => {
     const provider = manager.getProvider({ model: 'gemini-2.5-pro' });
     expect(provider.getMetadata().name).toBe('google');
   });
+  it('overrides provider models with INCLUDE env and sets default to first include', () => {
+    const prev = process.env.LLM_MODELS_OPENROUTER_INCLUDE;
+    try {
+      process.env.LLM_MODELS_OPENROUTER_INCLUDE = 'foo/bar-1,baz/qux-2';
+      const manager = new LLMProviderManager({ ...mockConfig, defaultLlmProvider: 'openrouter' });
+
+      const providers = manager.getAvailableProviders();
+      const or = providers.find(p => p.name === 'openrouter')!;
+      expect(or.models).toEqual(['foo/bar-1', 'baz/qux-2']);
+      expect(or.defaultModel).toBe('foo/bar-1');
+
+      // Auto-detect respects overridden list
+      const detected = (manager as any).findProviderForModel('baz/qux-2');
+      expect(detected).toBe('openrouter');
+
+      // Unknown model not in include is not detected
+      const notDetected = (manager as any).findProviderForModel('openai/gpt-5');
+      expect(notDetected).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.LLM_MODELS_OPENROUTER_INCLUDE;
+      else process.env.LLM_MODELS_OPENROUTER_INCLUDE = prev;
+    }
+  });
+
 });

@@ -107,6 +107,8 @@ spec:
               value: "true"
             - name: LLM_DEBUG_DIR
               value: "/debug/llm-debug"
+            - name: LLM_MODELS_OPENROUTER_INCLUDE
+              value: "openai/gpt-oss-120b:nitro,qwen/qwen3-235b-a22b-2507:nitro"
           resources:
             requests:
               memory: "512Mi"

@@ -511,11 +511,11 @@ export function ScenarioBuilderPage() {
       } else if (builderResult.replaceEntireScenario) {
         // Minimal validation – ensure shape exists
         const repl = builderResult.replaceEntireScenario;
-        if (!repl?.metadata || !repl?.scenario || !Array.isArray(repl?.agents)) {
+        if (!repl?.metadata || !Array.isArray(repl?.agents)) {
           const errorMsg = {
             id: `msg_${Date.now() + 2}`,
             role: 'assistant' as const,
-            content: 'Replacement scenario is missing required fields (metadata/scenario/agents).',
+            content: 'Replacement scenario is missing required fields (metadata/agents).',
             timestamp: Date.now()
           };
           setState(prev => ({
@@ -656,7 +656,7 @@ export function ScenarioBuilderPage() {
     state.pendingConfig.metadata?.id !== undefined &&
     // And has some meaningful content (agents or background)
     (state.pendingConfig.agents?.length > 0 || 
-     state.pendingConfig.scenario?.background?.trim() ||
+     state.pendingConfig.metadata?.background?.trim() ||
      state.pendingConfig.metadata?.description?.trim())
   );
   

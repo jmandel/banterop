@@ -68,10 +68,10 @@ export class LLMProviderManager {
    * Checks each provider's model list dynamically.
    */
   private findProviderForModel(modelName: string): SupportedProvider | null {
-    // Single source of truth: check each provider's supported models using static metadata
+    // Single source of truth: check each provider's supported models using filtered metadata
     for (const [providerName, ProviderClass] of Object.entries(PROVIDER_MAP)) {
       try {
-        const metadata = ProviderClass.getMetadata();
+        const metadata = this.getFilteredMetadata(providerName as SupportedProvider);
         
         // Check if this provider supports the model
         if (metadata.models.includes(modelName)) {
@@ -91,6 +91,32 @@ export class LLMProviderManager {
     }
 
     return null;
+  }
+
+  /**
+   * Return provider metadata with models filtered according to env allow list.
+   * Environment variable (per provider, uppercased):
+   * - LLM_MODELS_{PROVIDER}_INCLUDE: comma-separated list; if set, only these models are exposed.
+   * Example: LLM_MODELS_OPENROUTER_INCLUDE="openai/gpt-oss-120b:nitro,qwen/qwen3-235b-a22b-2507:nitro"
+   */
+  private getFilteredMetadata(provider: SupportedProvider): LLMProviderMetadata {
+    const ProviderClass = PROVIDER_MAP[provider];
+    const meta = ProviderClass.getMetadata();
+    const envBase = `LLM_MODELS_${provider.toUpperCase()}`;
+    const include = (process.env[`${envBase}_INCLUDE`] || '').split(',').map(s => s.trim()).filter(Boolean);
+    let models = meta.models.slice();
+    let defaultModel = meta.defaultModel;
+    if (include.length > 0) {
+      // Override built-in list completely, preserving order from INCLUDE
+      models = include.slice();
+      defaultModel = include[0] || '';
+    } else {
+      // Keep built-ins; if defaultModel is missing, pick first available
+      if (defaultModel && !models.includes(defaultModel)) {
+        defaultModel = models[0] || '';
+      }
+    }
+    return { ...meta, models, defaultModel };
   }
 
   private createProviderInstance(providerName: SupportedProvider, config?: Partial<LLMProviderConfig>): LLMProvider {
@@ -142,7 +168,8 @@ export class LLMProviderManager {
         googleApiKey: this.config.googleApiKey,
         openRouterApiKey: this.config.openRouterApiKey,
       }) ?? true;
-      return { ...ProviderClass.getMetadata(), available } as LLMProviderMetadata & { available: boolean };
+      const filtered = this.getFilteredMetadata(name as SupportedProvider);
+      return { ...filtered, available } as LLMProviderMetadata & { available: boolean };
     });
   }
 }
