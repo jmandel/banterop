@@ -55,7 +55,9 @@ try {
   const flag = (process.env.DEBUG_LLM_REQUESTS || '').toString().trim();
   const debugEnabled = flag && !/^0|false|off$/i.test(flag);
   const debugDir = (process.env.LLM_DEBUG_DIR || '').toString().trim();
-  if (debugEnabled && debugDir) {
+  const publishFlag = (process.env.PUBLISH_LLM_DEBUG_LOGS_OPENLY || '').toString().trim();
+  const publishEnabled = publishFlag && !/^0|false|off$/i.test(publishFlag);
+  if (debugEnabled && publishEnabled && debugDir) {
     const pageSize = 1000;
     const listDir = (basePath: string, urlPath: string, page: number) => {
       const entries = readdirSync(basePath, { withFileTypes: true });
