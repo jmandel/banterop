@@ -29,6 +29,6 @@ EXPOSE 3000
 VOLUME ["/data"]
 
 # Start unified server in production mode
-CMD ["bun", "src/index.ts"]
+CMD ["bun", "run", "start"]
 
 

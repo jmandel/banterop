@@ -7,7 +7,8 @@ import watch from '$src/frontend/watch/index.html';
 import a2aClient from '$src/frontend/a2a-client/index.html';
 
 // Determine if we're in dev or prod mode
-const isDev = process.env.NODE_ENV !== 'production';
+// Bun supports NODE_ENV for Node.js compatibility
+const isDev = (Bun.env.NODE_ENV || process.env.NODE_ENV) !== 'production';
 const port = Number(process.env.PORT ?? 3000);
 
 const server = serve({
@@ -37,4 +38,4 @@ const server = serve({
 });
 
 const mode = isDev ? 'Dev' : 'Prod';
-console.log(`${mode} server listening on ${server.url}`);
+console.log(`${mode} server listening on ${server.url} (NODE_ENV=${Bun.env.NODE_ENV || 'development'})`);
