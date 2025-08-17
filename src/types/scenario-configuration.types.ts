@@ -10,9 +10,10 @@
  * --- HOW IT WORKS ---
  *
  * 1. **Agents** (LLMs) represent principals, conversing to achieve goals
- * 2. **Tools** help agents access their organization's data and capabilities  
- * 3. **The Oracle** (omniscient LLM) executes tools using the knowledgeBase
- * 4. **Terminal tools** record final decisions and end the conversation
+ * 2. **Tools** let agents query THEIR OWN organization's data (not for sharing with others)
+ * 3. **Information exchange happens through CONVERSATION, not tools**  
+ * 4. **The Oracle** (omniscient LLM) executes tools using the knowledgeBase
+ * 5. **Terminal tools** record final decisions and end the conversation
  *
  * --- CRITICAL DESIGN RULES ---
  *
@@ -20,9 +21,13 @@
  *    ✅ "You are an agent representing Dr. Chen..."
  *    ❌ "You are Dr. Chen..."
  *
- * 2. **Tools that retrieve data should be named accordingly**
- *    ✅ search_patient_records, lookup_policy, check_eligibility
- *    ❌ submit_request, send_form (suggests out-of-band action)
+ * 2. **Tools access the agent's OWN systems, not other agents'**
+ *    ✅ search_patient_records, lookup_policy, escalate_to_supervisor
+ *    ❌ share_with_partner, send_to_other_agent, submit_to_insurer
+ *    
+ *    Each agent's tools access that agent's own organization's systems.
+ *    Tool results can become attachments on the agent's messages.
+ *    Tools don't directly communicate with the OTHER agent in the conversation.
  *
  * 3. **Make tools flexible with natural language inputs**
  *    ✅ { query: "knee therapy notes from June 2024 for patient MRN-445892" }
