@@ -100,6 +100,7 @@ describe('ScenarioDrivenAgent', () => {
           knowledgeBase: {
             testFact: 'This is test knowledge',
           },
+          messageToUseWhenInitiatingConversation: 'Hello, I am a test agent. How can I help you today?',
         },
         {
           agentId: 'other-agent',
@@ -113,6 +114,7 @@ describe('ScenarioDrivenAgent', () => {
           goals: ['Interact with test agent'],
           tools: [],
           knowledgeBase: {},
+          messageToUseWhenInitiatingConversation: 'Hello, I am the other agent. I need to interact with you.',
         },
       ],
     };

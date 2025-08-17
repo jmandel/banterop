@@ -13,6 +13,7 @@ export function ChatPanel({
   selectedModel,
   onModelChange,
   availableProviders,
+  initialInput,
 }: {
   messages: ChatMessage[];
   onSendMessage: (m: string) => void;
@@ -23,13 +24,20 @@ export function ChatPanel({
   selectedModel: string;
   onModelChange: (m: string) => void;
   availableProviders: Array<{ name: string; models: string[] }>;
+  initialInput?: string;
 }) {
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(initialInput || '');
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'instant' }); }, [messages]);
   useEffect(() => {
     if (!isLoading && wascanceled && lastUserMessage && input === '') setInput(lastUserMessage);
   }, [isLoading, wascanceled, lastUserMessage]);
+  // Update input when initialInput changes (for scenario idea from URL)
+  useEffect(() => {
+    if (initialInput && input === '') {
+      setInput(initialInput);
+    }
+  }, [initialInput]);
   const submit = (e: React.FormEvent) => { e.preventDefault(); if (input.trim() && !isLoading) { onSendMessage(input.trim()); setInput(''); } };
   const fmt = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   return (

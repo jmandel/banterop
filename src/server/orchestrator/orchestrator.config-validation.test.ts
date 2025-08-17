@@ -28,6 +28,7 @@ describe("OrchestratorService config validation", () => {
           goals: [],
           tools: [],
           knowledgeBase: {},
+          messageToUseWhenInitiatingConversation: "Hello from agent-1",
         },
         {
           agentId: "agent-2",
@@ -37,6 +38,7 @@ describe("OrchestratorService config validation", () => {
           goals: [],
           tools: [],
           knowledgeBase: {},
+          messageToUseWhenInitiatingConversation: "Hello from agent-2",
         },
       ],
     };

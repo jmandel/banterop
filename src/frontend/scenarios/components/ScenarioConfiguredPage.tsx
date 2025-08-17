@@ -396,28 +396,31 @@ export function ScenarioConfiguredPage() {
                 return (
                   <div
                     key={aid}
-                    className="grid [grid-template-columns:1fr_80px_1fr] gap-2 items-center"
+                    className="grid grid-cols-[1fr_50px_auto] gap-2 items-center"
                   >
-                    <div className="font-mono text-xs px-2 py-1 border rounded bg-gray-50 truncate" title={aid}>{aid}</div>
-                    <div className="text-xs text-gray-700 text-center w-[80px]">{status}</div>
-                    <div className="h-7 flex items-center gap-2">
+                    <div className="font-mono text-xs px-2 py-1 border rounded bg-gray-50 truncate min-w-0" title={aid}>{aid}</div>
+                    <div className="text-xs text-gray-700 text-center">{status}</div>
+                    <div className="flex items-center gap-1">
                       <Button
                         variant="primary"
+                        size="sm"
                         disabled={disableStart}
-                        className="w-[130px]"
                         onClick={() => startBrowserAgent(aid)}
+                        className="text-xs"
                       >Start in Browser</Button>
                       <Button
                         variant="primary"
+                        size="sm"
                         disabled={disableStart}
-                        className="w-[130px]"
                         onClick={() => startServerAgent(aid)}
+                        className="text-xs"
                       >Start on Server</Button>
                       <Button
                         variant="danger"
+                        size="sm"
                         disabled={disableStop}
-                        className="w-[70px]"
                         onClick={() => stopAgent(aid)}
+                        className="text-xs"
                       >Stop</Button>
                     </div>
                   </div>

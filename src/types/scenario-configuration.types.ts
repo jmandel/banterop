@@ -1,51 +1,43 @@
 /**
  * ===================================================================================
- *   Welcome to the Scenario Builder's Guide!
+ *                     SCENARIO CONFIGURATION - DESIGN PHILOSOPHY
  * ===================================================================================
  *
- * This file defines the "ScenarioConfiguration" for creating rich, realistic, and
- * emergent multi-agent simulations. To build great scenarios, it's essential to
- * understand the architecture that brings them to life.
+ * CORE PRINCIPLE: In these interop scenarios, all official proceedings happen through
+ * the conversation itself (messages and attachments). No out-of-band communication
+ * is needed or allowed. The conversation carries the full transaction.
  *
- * --- Architectural Overview ---
+ * --- HOW IT WORKS ---
  *
- * Your scenario will be run by an Orchestrator that manages three key components:
+ * 1. **Agents** (LLMs) represent principals, conversing to achieve goals
+ * 2. **Tools** help agents access their organization's data and capabilities  
+ * 3. **The Oracle** (omniscient LLM) executes tools using the knowledgeBase
+ * 4. **Terminal tools** record final decisions and end the conversation
  *
- * 1.  **The Conversational Agents (The "Actors"):**
- *     These are LLMs whose only job is to talk, reason, and decide which tool to use.
- *     They are "blissfully ignorant" of the simulation's ground truth. They only know
- *     their own persona, goals, and available tools. They must discover everything
- *     else through conversation and action.
+ * --- CRITICAL DESIGN RULES ---
  *
- * 2.  **The Tool-Executing Oracle (The "World Simulator" / "Dungeon Master"):**
- *     This is another, more powerful LLM. Its critical feature is that it is **omniscient**:
- *     it sees the *entire* `ScenarioConfiguration`, including both agents' private
- *     `knowledgeBase`s and the overall `scenario` context. Its job is to use this
- *     omniscient view to craft tool responses that are realistic, in-character, and
- *     drive the simulation forward in interesting ways. It only reveals what is
- *     plausible for that specific tool to know.
+ * 1. **Frame agents as representatives, not principals**
+ *    ✅ "You are an agent representing Dr. Chen..."
+ *    ❌ "You are Dr. Chen..."
  *
- * 3.  **The Orchestrator (The "Conductor"):**
- *     This system passes messages between the two Actors and routes tool calls to the
- *     Oracle for execution.
+ * 2. **Tools that retrieve data should be named accordingly**
+ *    ✅ search_patient_records, lookup_policy, check_eligibility
+ *    ❌ submit_request, send_form (suggests out-of-band action)
  *
- * --- A Phased Approach to Scenario Authoring ---
+ * 3. **Make tools flexible with natural language inputs**
+ *    ✅ { query: "knee therapy notes from June 2024 for patient MRN-445892" }
+ *    ❌ { startDate, endDate, patientId, recordType, bodyPart, provider... }
  *
- * We recommend collaborating with a Scenario Building Assistant (an LLM) and tackling
- * it in these phases:
+ * 4. **Terminal tools formalize outcomes and end the conversation**
+ *    Terminal tools generate artifacts (approval letters, auth numbers, JSON records)
+ *    that memorialize the decision and signal conversation end.
  *
- *   **Phase 1: The Narrative Foundation (The "What")**
- *   - Fill out `metadata` to define the interaction's purpose.
- *   - Write the `scenario.background` and `challenges` to define the story and its core conflict.
+ * 5. **Synthesis guidance shapes presentation, not content**
+ *    knowledgeBase: Contains the actual data, detailed enough to sketch out a realistic rich scenario
+ *    synthesisGuidance: Describes HOW to format/present that data
  *
- *   **Phase 2: Defining the Participants (The "Who")**
- *   - For each agent, define the `principal`, `systemPrompt`, `goals`, and `situation`.
- *
- *   **Phase 3: Crafting the World and Tools (The "How")**
- *   - Populate each agent's `knowledgeBase` with their private, ground-truth data.
- *   - Define the `tools`. For each tool, write a clear `description` for the Actor and
- *     an evocative, intent-driven `synthesisGuidance` (a "director's note") for the Oracle.
- *
+ * Remember: Agents don't know they're in a simulation. Design tools as plausible
+ * interfaces to real systems they would actually use.
  */
 
 // AgentId is now just a string
@@ -99,27 +91,7 @@ export interface ScenarioConfigAgentDetails {
 
   /**
    * The list of tools available to the agent.
-   * 
-   * IMPORTANT: In conversational interoperability, tools should retrieve or process 
-   * information, NOT submit forms or requests. The conversation itself IS the medium 
-   * of exchange - agents communicate their needs directly through dialogue.
-   * 
-   * GOOD tool examples (information retrieval/computation):
-   * - retrieve_clinical_notes: Get patient's clinical documentation
-   * - lookup_policy_criteria: Access insurance requirements
-   * - check_lab_results: Get specific test results
-   * - calculate_treatment_duration: Compute therapy duration
-   * 
-   * Use prefixes like retrieve_, lookup_, check_, calculate_ for non-terminal tools
-   * 
-   * BAD tool examples (form submission anti-patterns):
-   * - submit_prior_auth_request: NO! The conversation IS the request
-   * - fill_out_claim_form: NO! Discuss the claim details in conversation
-   * - send_referral_form: NO! Express the referral need through dialogue
-   * 
-   * Terminal tools (endsConversation: true) should represent final DECISIONS,
-   * not form submissions. Examples: approve_authorization, deny_request,
-   * no_appointments_available.
+   * See Tool interface below for detailed design principles.
    */
   tools: Tool[];
 
@@ -130,27 +102,39 @@ export interface ScenarioConfigAgentDetails {
   knowledgeBase: Record<string, unknown>;
 
   /**
-   * An optional message this agent will use if it is designated as the conversation initiator.
-   * This allows scenarios to be started from different perspectives without modifying the core configuration.
+   * Message this agent uses when initiating conversation.
+   * EVERY agent should have one - scenarios can be initiated from any perspective.
+   * 
+   * MUST include:
+   * - Introduction as agent representing principal
+   * - Purpose for initiating contact
+   * 
+   * ✅ "Hello, I'm an agent representing Dr. Chen from City Orthopedics. I'm reaching out 
+   *     regarding prior authorization for an MRI for our mutual patient."
+   * 
+   * ❌ "I need to get an MRI approved"
    */
-  messageToUseWhenInitiatingConversation?: string;
+  messageToUseWhenInitiatingConversation: string;
 }
 
 /**
  * Defines a single capability available to an agent.
  * 
- * Remember: Tools retrieve information from systems, they don't submit forms.
- * In conversational interoperability, the dialogue itself carries the request.
+ * DESIGN PRINCIPLES:
+ * - Mid-conversation (non-terminal) tools: Retrieve data, look up information, consult a supervisor, etc.
+ * - Terminal tools: Generate formal artifacts (auth letters, JSON records) that reflect a conclusoin to the task at hand
+ * - Prefer flexible natural language inputs over rigid parameters
+ * - The conversation carries the transaction through messages and attachments; tools provide data to inform it
  */
 export interface Tool {
   toolName: string;
   
   /**
    * FOR THE CONVERSATIONAL AGENT: What this tool does.
-   * Should describe information retrieval or computation, not form submission.
+   * Describe the system capability, not an action.
    * 
-   * GOOD: "Retrieve patient's medication history from the EHR"
-   * BAD: "Submit prior authorization request to insurer"
+   * ✅ "Search patient medical records using natural language"
+   * ❌ "Submit prior authorization request"
    */
   description: string;
   
@@ -158,37 +142,28 @@ export interface Tool {
 
   /**
    * A CREATIVE BRIEF FOR THE OMNISCIENT TOOL-EXECUTING ORACLE.
-   * This is a "director's note," not code. Guide the Oracle's performance.
-   *
-   * PROMPT: Assume the Oracle can see the ENTIRE scenario. Your job is to tell it
-   * what character to play and what information to reveal (or withhold) to be
-   * realistic and to advance the story.
-   *
-   * GOOD EXAMPLE:
-   * "Return policy details in formal medical review language. Include specific
-   *  criteria numbers and thresholds from the knowledgeBase. Format as a
-   *  structured assessment with clear pass/fail indicators."
    * 
-   * The synthesisGuidance shapes HOW to present information (style, format, detail),
-   * while the knowledgeBase provides WHAT information to present.
+   * Guide the Oracle's style and format, but give it creative freedom.
+   * Don't use rigid templates - let the Oracle craft contextually appropriate responses.
+   *
+   * Examples:
+   * - "Return clinical findings in professional medical language"
+   * - "Format as JSON with relevant policy criteria from knowledgeBase"
+   * - "Generate a formal approval letter - be creative but professional"
+   * 
+   * Avoid tools that just "document" things - in these scenarios, the conversation
+   * itself is the documentation. Tools should retrieve or compute, not record.
    */
   synthesisGuidance: string;
 
   /**
    * Indicates whether this tool's execution should end the conversation.
    * 
-   * When true, the agent will use this tool call result to help conclude the conversation.
+   * When true, this tool generates formal artifacts (approval letters, auth numbers,
+   * structured confirmations) that memorialize the outcome and signal conversation end.
    * 
-   * IMPORTANT: Only use this for FINAL DECISIONS that complete the interaction.
-   * Do NOT use this for:
-   * - Requesting more information (just ask in the conversation)
-   * - Temporary pauses or holds
-   * - Any action that expects a response from the other party
-   * 
-   * Good terminal tools: approve_authorization, deny_request, confirm_appointment
-   * Bad terminal tools: suggest_alternative, recommend_action, request_more_info
-   * 
-   * Terminal tools represent final decisions, not intermediate recommendations
+   * ✅ approve_authorization, deny_request, confirm_appointment
+   * ❌ suggest_alternative, request_more_info, put_on_hold
    */
   endsConversation?: boolean;
 
@@ -211,3 +186,148 @@ export interface Tool {
    */
   conversationEndStatus?: 'success' | 'failure' | 'neutral';
 }
+
+/**
+ * EXAMPLE SCENARIO following best practices (truncated for brevity):
+ * 
+ * const priorAuthScenario: ScenarioConfiguration = {
+ *   metadata: {
+ *     id: "knee_mri_prior_auth",
+ *     title: "Knee MRI Prior Authorization",
+ *     description: "Provider seeks prior auth for knee MRI after conservative therapy"
+ *   },
+ *   agents: [
+ *     {
+ *       agentId: "provider",
+ *       principal: {
+ *         type: "individual",
+ *         name: "Dr. Sarah Chen",
+ *         description: "Orthopedic specialist"
+ *       },
+ *       systemPrompt: "You are an agent representing Dr. Chen, seeking prior authorization for a knee MRI...",
+ *       // ✅ Good: Framed as agent representing the doctor, not as the doctor
+ *       goals: ["Obtain MRI authorization", "Provide clinical justification"],
+ *       situation: "Patient has completed 6 weeks of physical therapy with limited improvement",
+ *       
+ *       tools: [
+ *         {
+ *           toolName: "search_patient_ehr",
+ *           description: "Search the EHR system using natural language queries about a patient",
+ *           inputSchema: { 
+ *             type: "object", 
+ *             properties: { 
+ *               query: { 
+ *                 type: "string", 
+ *                 description: "Natural language search query (e.g., 'knee injury notes for patient MRN-445892 from June 2024')" 
+ *               },
+ *               patientId: { 
+ *                 type: "string", 
+ *                 description: "Optional: Patient MRN if not included in query" 
+ *               }
+ *             },
+ *             required: ["query"]
+ *           },
+ *           synthesisGuidance: "Search knowledgeBase.clinicalRecords matching the query. Return as markdown with dates and findings.",
+ *           // ✅ Good: Flexible natural language search that LLMs can easily use
+ *         },
+ *         {
+ *           toolName: "retrieve_treatment_history", 
+ *           description: "Retrieve comprehensive treatment history using natural language query",
+ *           inputSchema: { 
+ *             type: "object", 
+ *             properties: {
+ *               query: { 
+ *                 type: "string", 
+ *                 description: "Natural language query (e.g., 'physical therapy history for patient MRN-445892')" 
+ *               }
+ *             },
+ *             required: ["query"]
+ *           },
+ *           synthesisGuidance: "Search knowledgeBase.treatments and return a comprehensive therapeutic history report with dates, durations, outcomes",
+ *           // ✅ Good: Returns full information, agent can extract what they need
+ *         }
+ *       ],
+ *       knowledgeBase: {
+ *         patient: { mrn: "MRN-445892", name: "Jordan Lee", dob: "1985-03-14" },
+ *         clinicalRecords: [
+ *           { date: "2024-06-01", type: "injury", notes: "Knee pivot injury during soccer" },
+ *           { date: "2024-06-15", type: "therapy_start", notes: "Begin PT 3x/week" }
+ *         ],
+ *         timeline: [
+ *           { event: "injury", date: "2024-06-01" },
+ *           { event: "therapy_start", date: "2024-06-15" }
+ *         ]
+ *         // <... more structured data for tools to reference ...>
+ *       },
+ *       messageToUseWhenInitiatingConversation: 
+ *         "Hello, I'm an agent representing Dr. Sarah Chen from Regional Orthopedics. " +
+ *         "I'm contacting you regarding prior authorization for a knee MRI for our mutual " +
+ *         "patient Jordan Lee, DOB 1985-03-14. The patient has completed conservative therapy " + 
+ *         "but continues to have significant instability."
+ *     },
+ *     {
+ *       agentId: "insurer",
+ *       // <... principal, systemPrompt, goals, situation snipped ...>
+ *       tools: [
+ *         {
+ *           toolName: "lookup_medical_policy",
+ *           description: "Look up coverage criteria for a specific CPT code in the medical policy database",
+ *           inputSchema: { 
+ *             type: "object", 
+ *             properties: { 
+ *               cptCode: { type: "string", description: "CPT procedure code (e.g., 73721 for knee MRI)" },
+ *               planType: { type: "string", description: "Insurance plan type: PPO, HMO, EPO" },
+ *               state: { type: "string", description: "State abbreviation for regional policies" }
+ *             },
+ *             required: ["cptCode", "planType"]
+ *           },
+ *           synthesisGuidance: "Lookup in knowledgeBase.policies. Return as JSON array with criteria, thresholds, and requirements.",
+ *           // ✅ Good: Realistic tool that would exist in insurer's system
+ *         },
+ *         {
+ *           toolName: "approve_prior_authorization",
+ *           description: "Approve a prior authorization request and generate authorization number",
+ *           inputSchema: { 
+ *             type: "object", 
+ *             properties: { 
+ *               memberId: { type: "string", description: "Member ID number" },
+ *               cptCode: { type: "string", description: "Approved CPT code" },
+ *               approvalReason: { type: "string", description: "Clinical justification for approval" },
+ *               validityDays: { type: "number", description: "Number of days authorization is valid" }
+ *             },
+ *             required: ["memberId", "cptCode", "approvalReason"]
+ *           },
+ *           synthesisGuidance: "Generate formal approval letter using knowledgeBase.templates.approval. Include auth number from knowledgeBase.authSequence.",
+ *           endsConversation: true,
+ *           conversationEndStatus: "success"
+ *           // ✅ Good: Terminal tool with realistic parameters
+ *         }
+ *         // <... deny_authorization tool snipped ...>
+ *       ],
+ *       knowledgeBase: {
+ *         policies: {
+ *           "73721": { // CPT code for knee MRI - ABBREVIATED for example
+ *             requirements: ["14 days conservative therapy", "documented instability"],
+ *             thresholds: { therapy_days: 14, auth_validity_days: 90 }
+ *             // In reality, this would have MUCH more detail:
+ *             // - exclusions, age limits, frequency limits
+ *             // - specific documentation requirements
+ *             // - alternative criteria pathways
+ *             // - cross-references to other policies
+ *             // - 20+ additional fields...
+ *           }
+ *           // <... dozens more CPT codes with similar depth ...>
+ *         },
+ *         authSequence: "PA2024-03-",
+ *         memberDatabase: {
+ *           // <... thousands of members with full coverage details ...>
+ *         },
+ *         providerNetwork: {
+ *           // <... provider contracts, rates, specialties ...>
+ *         }
+ *         // KnowledgeBases can be extremely detailed - this is just a sketch
+ *       }
+ *     }
+ *   ]
+ * };
+ */

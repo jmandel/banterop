@@ -345,18 +345,10 @@ ${agentConfig.goals.map(g => `• ${g}`).join('\n')}
 
 </SYSTEM_PROMPT>`;
     
-    // Knowledge Base Section if present
+    // Knowledge Base Section - REMOVED
+    // The knowledge base is private to the Oracle and accessed only through tools
+    // It should NOT be exposed directly to the conversational agent
     let knowledgeBaseSection = '';
-    if (agentConfig.knowledgeBase && Object.keys(agentConfig.knowledgeBase).length > 0) {
-      knowledgeBaseSection = `
-<KNOWLEDGE_BASE>
-You have access to the following knowledge:
-
-${Object.entries(agentConfig.knowledgeBase)
-  .map(([key, value]) => `${key}: ${typeof value === 'object' ? JSON.stringify(value) : value}`)
-  .join('\n')}
-</KNOWLEDGE_BASE>`;
-    }
     
     // Tools Section with usage guidance
     const toolsSection = `<AVAILABLE_TOOLS>

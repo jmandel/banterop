@@ -95,6 +95,7 @@ export function ScenarioBuilderPage() {
   // Store the abort controller outside of state
   const abortControllerRef = React.useRef<AbortController | null>(null);
   const hasAutoSubmittedRef = React.useRef(false);
+  const [initialInput, setInitialInput] = React.useState<string | undefined>(undefined);
 
   // Load scenarios and schema on mount
   useEffect(() => {
@@ -131,31 +132,18 @@ export function ScenarioBuilderPage() {
     }
   }, [scenarioId, isCreateMode]);
 
-  // Auto-submit message in create mode once schema is loaded
+  // Populate input field with scenario idea when creating with ?idea parameter
   useEffect(() => {
-    console.log('[Auto-submit] Checking conditions:');
-    console.log('  isCreateMode:', isCreateMode);
-    console.log('  state.schemaText:', !!state.schemaText);
-    console.log('  state.activeScenarioId:', state.activeScenarioId);
-    console.log('  hasAutoSubmittedRef.current:', hasAutoSubmittedRef.current);
-    console.log('  state.chatHistory.length:', state.chatHistory.length);
-    console.log('  state.isWaitingForLLM:', state.isWaitingForLLM);
-    
     if (isCreateMode && state.schemaText && state.activeScenarioId === 'new' && !hasAutoSubmittedRef.current && !state.isWaitingForLLM) {
       const scenarioIdea = getScenarioIdea();
-      console.log('[Auto-submit] Scenario idea:', scenarioIdea);
       
       if (scenarioIdea && state.chatHistory.length === 0) { // Check for empty history
-        console.log('[Auto-submit] All conditions met, triggering auto-submit');
         hasAutoSubmittedRef.current = true;
         
         const message = `I want to create a new scenario: ${scenarioIdea}\n\nPlease help me build this scenario with appropriate agents, tools, and interaction dynamics.`;
         
-        // Small delay to ensure all state is ready
-        setTimeout(() => {
-          console.log('[Auto-submit] Calling sendMessage now');
-          sendMessage(message);
-        }, 500);
+        // Set the initial input instead of auto-sending
+        setInitialInput(message);
       }
     }
   }, [isCreateMode, state.schemaText, state.activeScenarioId, state.chatHistory.length, state.isWaitingForLLM]);
@@ -348,10 +336,6 @@ export function ScenarioBuilderPage() {
   };
 
   const sendMessage = async (userText: string) => {
-    console.log('[sendMessage] Called with:', userText);
-    console.log('[sendMessage] activeScenarioId:', state.activeScenarioId);
-    console.log('[sendMessage] isWaitingForLLM:', state.isWaitingForLLM);
-    
     if (!state.activeScenarioId || state.isWaitingForLLM) return;
 
     // In create mode (activeScenarioId === 'new'), there's no active scenario in the list
@@ -359,18 +343,14 @@ export function ScenarioBuilderPage() {
       ? null 
       : state.scenarios.find(s => s.config.metadata.id === state.activeScenarioId);
     
-    console.log('[sendMessage] Found active scenario:', active);
-    
     // In create mode, we use pendingConfig; otherwise use the active scenario's config
     if (!active && state.activeScenarioId !== 'new') {
-      console.log('[sendMessage] No active scenario found and not in create mode, returning');
       return;
     }
 
     // Always clone before patching to avoid in-place mutation
     const baseScenario = state.pendingConfig || active?.config;
     if (!baseScenario) {
-      console.log('[sendMessage] No base scenario available, returning');
       return;
     }
     
@@ -405,15 +385,6 @@ export function ScenarioBuilderPage() {
       // Use effectiveHistory including the new user turn
       const effectiveHistory = [...state.chatHistory, newUserMessage];
       
-      console.log('=== CHAT HISTORY DEBUG ===');
-      console.log('State chat history length:', state.chatHistory.length);
-      console.log('Effective history length:', effectiveHistory.length);
-      console.log('Effective history:', effectiveHistory.map(h => ({
-        role: h.role,
-        content: h.content.substring(0, 100) + (h.content.length > 100 ? '...' : ''),
-        toolCalls: h.toolCalls
-      })));
-      
       const prompt = buildScenarioBuilderPrompt({
         scenario: currentScenario,
         history: effectiveHistory.map(h => ({ 
@@ -426,12 +397,6 @@ export function ScenarioBuilderPage() {
         examplesText: state.examplesText,
         modelCapabilitiesNote: '' // optional
       });
-      
-      console.log('=== GENERATED PROMPT ===');
-      console.log('Prompt length:', prompt.length);
-      console.log('Full prompt:');
-      console.log(prompt);
-      console.log('=== END PROMPT ===');
       
       // 2) Call LLM generate (server routing, no scenario-chat endpoint)
       let llmResponse;
@@ -638,7 +603,6 @@ export function ScenarioBuilderPage() {
   };
 
   const updateConfigFromEditor = (newConfig: ScenarioConfiguration) => {
-    console.log('[ScenarioBuilderPage] updateConfigFromEditor called, setting pendingConfig');
     setState(prev => ({ ...prev, pendingConfig: newConfig }));
   };
 
@@ -691,6 +655,7 @@ export function ScenarioBuilderPage() {
                       lastUserMessage={state.lastUserMessage}
                       wascanceled={state.wascanceled}
                       selectedModel={state.selectedModel}
+                      initialInput={initialInput}
                       onModelChange={(model) => {
                         // Save to localStorage
                         try {
