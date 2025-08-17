@@ -22,7 +22,7 @@ describe('Abort Turn Mechanism', () => {
   describe('clearTurn', () => {
     it('should add abort marker for open turn owned by agent', () => {
       // Agent A starts a turn
-      orchestrator.sendMessage(conversationId, 'agent-a', { text: 'Hello' }, 'none');
+      orchestrator.sendMessage(conversationId, 1, 'agent-a', { text: 'Hello' }, 'none');
       
       // Agent A aborts
       const result = orchestrator.clearTurn(conversationId, 'agent-a');
@@ -40,7 +40,7 @@ describe('Abort Turn Mechanism', () => {
 
     it('should be idempotent - not write another abort if already aborted', () => {
       // Agent A starts and aborts
-      orchestrator.sendMessage(conversationId, 'agent-a', { text: 'Hello' }, 'none');
+      orchestrator.sendMessage(conversationId, 1, 'agent-a', { text: 'Hello' }, 'none');
       orchestrator.clearTurn(conversationId, 'agent-a');
       
       const eventCount = orchestrator.getConversationSnapshot(conversationId).events.length;
@@ -58,7 +58,7 @@ describe('Abort Turn Mechanism', () => {
 
     it('should return next turn for closed turn', () => {
       // Agent A completes a turn
-      orchestrator.sendMessage(conversationId, 'agent-a', { text: 'Hello' }, 'turn');
+      orchestrator.sendMessage(conversationId, 1, 'agent-a', { text: 'Hello' }, 'turn');
       
       // Agent A tries to abort (turn is closed)
       const result = orchestrator.clearTurn(conversationId, 'agent-a');
@@ -76,7 +76,7 @@ describe('Abort Turn Mechanism', () => {
 
     it('should return next turn for wrong agent', () => {
       // Agent A starts a turn
-      orchestrator.sendMessage(conversationId, 'agent-a', { text: 'Hello' }, 'none');
+      orchestrator.sendMessage(conversationId, 1, 'agent-a', { text: 'Hello' }, 'none');
       
       // Agent B tries to abort (wrong agent)
       const result = orchestrator.clearTurn(conversationId, 'agent-b');
@@ -94,12 +94,13 @@ describe('Abort Turn Mechanism', () => {
 
     it('should allow continuing after abort', () => {
       // Agent A starts, aborts, and continues
-      orchestrator.sendMessage(conversationId, 'agent-a', { text: 'First try' }, 'none');
+      orchestrator.sendMessage(conversationId, 1, 'agent-a', { text: 'First try' }, 'none');
       const { turn } = orchestrator.clearTurn(conversationId, 'agent-a');
       
-      // Continue work on same turn
+      // Continue work on same turn - must provide turn number
       const result = orchestrator.sendMessage(
         conversationId, 
+        turn,  // Use the same turn that was cleared
         'agent-a', 
         { text: 'Second try' }, 
         'turn'
@@ -114,53 +115,53 @@ describe('Abort Turn Mechanism', () => {
   describe('Turn enforcement', () => {
     it('should reject explicit turn when turn already open', () => {
       // Open turn 1
-      orchestrator.sendMessage(conversationId, 'agent-a', { text: 'Hello' }, 'none');
+      orchestrator.sendMessage(conversationId, 1, 'agent-a', { text: 'Hello' }, 'none');
       
       // Try to explicitly open turn 2 while turn 1 is open
       expect(() => {
         orchestrator.sendMessage(
           conversationId, 
+          2, // Try to jump to turn 2
           'agent-b', 
           { text: 'Jump ahead' }, 
-          'none',
-          2 // Explicit turn
+          'none'
         );
       }).toThrow('Turn already open');
     });
 
     it('should reject invalid turn number when no turn open', () => {
       // Complete turn 1
-      orchestrator.sendMessage(conversationId, 'agent-a', { text: 'Hello' }, 'turn');
+      orchestrator.sendMessage(conversationId, 1, 'agent-a', { text: 'Hello' }, 'turn');
       
       // Try to use wrong turn number
       expect(() => {
         orchestrator.sendMessage(
           conversationId, 
+          5, // Invalid turn (should be 2)
           'agent-b', 
           { text: 'Wrong turn' }, 
-          'none',
-          5 // Invalid turn (should be 2)
+          'none'
         );
       }).toThrow('Invalid turn number');
     });
 
-    it('should continue open turn when turn omitted', () => {
+    it('should continue open turn when providing same turn', () => {
       // Start turn
-      const r1 = orchestrator.sendMessage(conversationId, 'agent-a', { text: 'First' }, 'none');
+      const r1 = orchestrator.sendMessage(conversationId, 1, 'agent-a', { text: 'First' }, 'none');
       
-      // Continue without specifying turn
-      const r2 = orchestrator.sendMessage(conversationId, 'agent-a', { text: 'Second' }, 'none');
+      // Continue with same turn
+      const r2 = orchestrator.sendMessage(conversationId, 1, 'agent-a', { text: 'Second' }, 'none');
       
       // Should be same turn
       expect(r2.turn).toBe(r1.turn);
     });
 
-    it('should open new turn when none open and turn omitted', () => {
+    it('should open new turn when providing next turn number', () => {
       // Complete turn 1
-      orchestrator.sendMessage(conversationId, 'agent-a', { text: 'Turn 1' }, 'turn');
+      orchestrator.sendMessage(conversationId, 1, 'agent-a', { text: 'Turn 1' }, 'turn');
       
-      // Start new turn without specifying
-      const result = orchestrator.sendMessage(conversationId, 'agent-b', { text: 'Turn 2' }, 'none');
+      // Start new turn with explicit turn 2
+      const result = orchestrator.sendMessage(conversationId, 2, 'agent-b', { text: 'Turn 2' }, 'none');
       
       // Should be turn 2
       expect(result.turn).toBe(2);
@@ -169,26 +170,29 @@ describe('Abort Turn Mechanism', () => {
 
   describe('sendTrace', () => {
     it('should follow same turn validation rules as sendMessage', () => {
-      // Open turn 1 with trace
-      orchestrator.sendTrace(conversationId, 'agent-a', { type: 'thought', content: 'Thinking...' });
+      // Start turn 1 with message first
+      orchestrator.sendMessage(conversationId, 1, 'agent-a', { text: 'Starting' }, 'none');
+      
+      // Add trace to turn 1
+      orchestrator.sendTrace(conversationId, 1, 'agent-a', { type: 'thought', content: 'Thinking...' });
       
       // Try to explicitly use turn 2 while turn 1 is open
       expect(() => {
         orchestrator.sendTrace(
           conversationId, 
+          2, // Try to jump to turn 2
           'agent-b', 
-          { type: 'thought', content: 'Jump ahead' },
-          2 // Explicit turn
+          { type: 'thought', content: 'Jump ahead' }
         );
       }).toThrow('Turn already open');
     });
 
-    it('should continue open turn when turn omitted', () => {
+    it('should continue open turn when providing same turn number', () => {
       // Start turn with message
-      const r1 = orchestrator.sendMessage(conversationId, 'agent-a', { text: 'Hello' }, 'none');
+      const r1 = orchestrator.sendMessage(conversationId, 1, 'agent-a', { text: 'Hello' }, 'none');
       
-      // Add trace without specifying turn
-      const r2 = orchestrator.sendTrace(conversationId, 'agent-a', { type: 'thought', content: 'Thinking...' });
+      // Add trace with same turn number
+      const r2 = orchestrator.sendTrace(conversationId, r1.turn, 'agent-a', { type: 'thought', content: 'Thinking...' });
       
       // Should be same turn
       expect(r2.turn).toBe(r1.turn);

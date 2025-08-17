@@ -77,11 +77,63 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
     // Use the snapshot from context (stable view at turn start)
     const snapshot = ctx.snapshot;
     
-    // Count turn number based on messages from this agent
-    const agentMessages = snapshot.events.filter(e => 
-      e.type === 'message' && e.agentId === agentId
-    );
-    this.currentTurnNumber = agentMessages.length + 1;
+    // Log complete guidance details
+    console.log(`[${agentId}] takeTurn called with context:`, {
+      conversationId: ctx.conversationId,
+      agentId: ctx.agentId,
+      guidanceSeq: ctx.guidanceSeq,
+      currentTurnNumber: ctx.currentTurnNumber,
+      deadlineMs: ctx.deadlineMs,
+      deadlineFromNow: ctx.deadlineMs ? ctx.deadlineMs - Date.now() : 'N/A',
+      transportType: ctx.transport?.constructor?.name || 'unknown'
+    });
+    
+    // Get the explicit turn number from the context
+    if (ctx.currentTurnNumber === undefined) {
+      // Log detailed context information for debugging
+      console.error(`[${agentId}] MISSING TURN NUMBER - Context details:`, {
+        conversationId: ctx.conversationId,
+        guidanceSeq: ctx.guidanceSeq,
+        hasGuidance: ctx.guidanceSeq > 0,
+        deadlineMs: ctx.deadlineMs,
+        deadlineFromNow: ctx.deadlineMs - Date.now(),
+        currentTurnNumber: ctx.currentTurnNumber,
+        snapshotEvents: snapshot.events.length,
+        lastEvent: snapshot.events.length > 0 ? {
+          type: snapshot.events[snapshot.events.length - 1]?.type,
+          turn: snapshot.events[snapshot.events.length - 1]?.turn,
+          agentId: snapshot.events[snapshot.events.length - 1]?.agentId,
+        } : null,
+        maxTurnInEvents: Math.max(0, ...snapshot.events.map(e => e.turn || 0)),
+        hasScenario: !!snapshot.scenario,
+        hasRuntimeMeta: !!snapshot.runtimeMeta,
+      });
+      
+      // Determine the likely cause
+      const likelyCause = ctx.guidanceSeq === 0 
+        ? 'No guidance received (startup recovery without guidance)' 
+        : 'Guidance received but missing turn field (orchestrator bug)';
+      
+      console.error(`[${agentId}] Guidance path analysis:`);
+      if (ctx.guidanceSeq === 0) {
+        console.error(`  - guidanceSeq is 0, meaning no guidance was provided`);
+        console.error(`  - This happens during startup recovery when agent owns an open turn`);
+        console.error(`  - BaseAgent.reconcileAndMaybeAct was called with guidance=null`);
+        console.error(`  - BaseAgent.startTurn was called without guidance`);
+        console.error(`  - Turn number should have been provided by orchestrator but wasn't`);
+      } else {
+        console.error(`  - guidanceSeq is ${ctx.guidanceSeq}, meaning guidance was provided`);
+        console.error(`  - Guidance event was received from orchestrator`);
+        console.error(`  - BaseAgent.reconcileAndMaybeAct was called with guidance`);
+        console.error(`  - BaseAgent.startTurn was called with guidance`);
+        console.error(`  - Guidance should have included turn field but didn't`);
+      }
+      
+      throw new Error(`[${agentId}] No turn number provided in context - ${likelyCause}. See console for full context details.`);
+    }
+    this.currentTurnNumber = ctx.currentTurnNumber;
+    
+    console.log(`[${agentId}] Starting turn ${this.currentTurnNumber} (from context)`)
     
     // Only log essential info, not the full objects
     console.log(`[${agentId}] takeTurn - has scenario: ${!!snapshot.scenario}, has runtimeMeta: ${!!snapshot.runtimeMeta}`);
@@ -803,6 +855,18 @@ Your response MUST follow this EXACT format:
   private buildConversationHistory(events: UnifiedEvent[], myAgentId: string): string {
     const sections: string[] = [];
     
+    // Debug: Log all events
+    console.log(`[${myAgentId}] buildConversationHistory: Processing ${events.length} total events`);
+    console.log(`[${myAgentId}] Event breakdown:`, {
+      messages: events.filter(e => e.type === 'message').map(e => ({
+        turn: e.turn,
+        agentId: e.agentId,
+        text: (e.payload as any).text?.substring(0, 50) + '...'
+      })),
+      traces: events.filter(e => e.type === 'trace').length,
+      system: events.filter(e => e.type === 'system').length
+    });
+    
     // Group events by turn
     const turnMap = new Map<number, UnifiedEvent[]>();
     for (const event of events) {
@@ -813,15 +877,33 @@ Your response MUST follow this EXACT format:
       turnMap.get(turn)!.push(event);
     }
     
+    // Debug: Log turn grouping
+    console.log(`[${myAgentId}] Turns found:`, Array.from(turnMap.keys()).sort((a, b) => a - b));
+    for (const [turnId, turnEvents] of Array.from(turnMap.entries()).sort((a, b) => a[0] - b[0])) {
+      const message = turnEvents.find(e => e.type === 'message');
+      console.log(`[${myAgentId}] Turn ${turnId}:`, {
+        eventCount: turnEvents.length,
+        hasMessage: !!message,
+        messageAgent: message?.agentId,
+        messageText: message ? (message.payload as any).text?.substring(0, 50) + '...' : 'N/A',
+        eventTypes: turnEvents.map(e => e.type)
+      });
+    }
+    
     // Process each turn
     for (const [turnId, turnEvents] of turnMap) {
       // Find the main message for this turn
       const message = turnEvents.find(e => e.type === 'message');
-      if (!message) continue;
+      if (!message) {
+        console.log(`[${myAgentId}] Skipping turn ${turnId} - no message event found`);
+        continue;
+      }
       
       const agentId = message.agentId;
       const timestamp = this.formatTimestamp(message.ts);
       const payload = message.payload as MessagePayload;
+      
+      console.log(`[${myAgentId}] Including turn ${turnId} from ${agentId} in history`);
       
       if (agentId === myAgentId) {
         // Our own turn - include detailed formatting with traces
@@ -832,6 +914,8 @@ Your response MUST follow this EXACT format:
         sections.push(this.formatOtherAgentTurn(agentId, timestamp, payload.text, payload.attachments));
       }
     }
+    
+    console.log(`[${myAgentId}] Final history has ${sections.length} sections`);
     
     return sections.join('\n\n');
   }
@@ -914,7 +998,7 @@ Your response MUST follow this EXACT format:
         const extra = this.initiatingMessageExtra || '';
         const composed = [starter, extra].filter(s => !!s && String(s).trim().length > 0).join('\n\n');
         const hint = composed
-          ? `<scratchpad>\nI should send my first message. Suggested content:\n\n${composed}\n</scratchpad>`
+          ? `<scratchpad>\nI should send my first message. Suggested content:\n\n"""${composed}"""\nWe don't need any tool calls at this point, we can just start the conversation by sending a message to the agent thread!</scratchpad>`
           : '<!-- No actions taken yet in this turn -->';
         return `${hint}\n***=>>YOU ARE HERE<<=***`;
       }
@@ -1134,7 +1218,8 @@ ${resultJson}
     await ctx.transport.postTrace({
       conversationId: ctx.conversationId,
       agentId: ctx.agentId,
-      payload: { type: 'thought', content }
+      payload: { type: 'thought', content },
+      turn: ctx.currentTurnNumber
     });
   }
 
@@ -1156,7 +1241,8 @@ ${resultJson}
         name: toolName,
         args,
         toolCallId
-      } as any
+      } as any,
+      turn: ctx.currentTurnNumber
     });
     
     return toolCallId;
@@ -1178,7 +1264,8 @@ ${resultJson}
         toolCallId,
         result,
         ...(error !== undefined ? { error } : {})
-      } as any
+      } as any,
+      turn: ctx.currentTurnNumber
     });
   }
 
@@ -1188,7 +1275,8 @@ ${resultJson}
       agentId: ctx.agentId,
       text,
       finality: concludeConversation ? 'conversation' : 'turn',
-      ...(attachments && attachments.length > 0 ? { attachments } : {})
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
+      turn: ctx.currentTurnNumber
     });
     
     logLine(ctx.agentId, 'info', `ScenarioDrivenAgent(${ctx.agentId}) completed turn`);

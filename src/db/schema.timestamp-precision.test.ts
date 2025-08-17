@@ -13,6 +13,7 @@ describe("DB timestamp precision", () => {
 
     store.appendEvent({
       conversation: 1,
+      turn: 1,  // Explicit turn number
       type: "message",
       payload: { text: "First" } as MessagePayload,
       finality: "none",
@@ -24,6 +25,7 @@ describe("DB timestamp precision", () => {
 
     store.appendEvent({
       conversation: 1,
+      turn: 1,  // Same turn
       type: "message",
       payload: { text: "Second" } as MessagePayload,
       finality: "none",

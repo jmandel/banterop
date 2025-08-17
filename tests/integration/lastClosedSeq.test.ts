@@ -24,7 +24,7 @@ describe('lastClosedSeq per-conversation isolation', () => {
     });
     
     // Send a message that closes a turn
-    const result1 = orchestrator.sendMessage(conv1, 'user', { text: 'Hello conv1' }, 'turn');
+    const result1 = orchestrator.sendMessage(conv1, 1, 'user', { text: 'Hello conv1' }, 'turn');
     
     // Create second conversation  
     const conv2 = orchestrator.createConversation({
@@ -47,6 +47,7 @@ describe('lastClosedSeq per-conversation isolation', () => {
     // This should succeed with precondition 0
     const result2 = orchestrator.sendMessage(
       conv2, 
+      1,  // First turn in conv2
       'user', 
       { text: 'First message in conv2' }, 
       'turn'
@@ -85,13 +86,13 @@ describe('lastClosedSeq per-conversation isolation', () => {
     const results = [];
     
     // Conv 2 gets first message
-    results[2] = orchestrator.sendMessage(convIds[2]!, 'agent', { text: 'Conv 2 msg' }, 'turn');
+    results[2] = orchestrator.sendMessage(convIds[2]!, 1, 'agent', { text: 'Conv 2 msg' }, 'turn');
     
     // Conv 0 gets second message  
-    results[0] = orchestrator.sendMessage(convIds[0]!, 'agent', { text: 'Conv 0 msg' }, 'turn');
+    results[0] = orchestrator.sendMessage(convIds[0]!, 1, 'agent', { text: 'Conv 0 msg' }, 'turn');
     
     // Conv 1 gets third message
-    results[1] = orchestrator.sendMessage(convIds[1]!, 'agent', { text: 'Conv 1 msg' }, 'turn');
+    results[1] = orchestrator.sendMessage(convIds[1]!, 1, 'agent', { text: 'Conv 1 msg' }, 'turn');
     
     // Each conversation should have its own lastClosedSeq
     for (let i = 0; i < 3; i++) {
@@ -104,10 +105,10 @@ describe('lastClosedSeq per-conversation isolation', () => {
     const conv0Snapshot = orchestrator.getConversationSnapshot(convIds[0]!);
     const secondMsg = orchestrator.sendMessage(
       convIds[0]!,
+      2, // Second turn
       'agent', 
       { text: 'Second message' },
-      'turn',
-      undefined // new turn
+      'turn'
     );
     
     expect(secondMsg.turn).toBe(2);
@@ -131,12 +132,13 @@ describe('lastClosedSeq per-conversation isolation', () => {
     });
     
     // First message creates turn 1
-    const msg1 = orchestrator.sendMessage(conv, 'agent', { text: 'First' }, 'turn');
+    const msg1 = orchestrator.sendMessage(conv, 1, 'agent', { text: 'First' }, 'turn');
     expect(msg1.turn).toBe(1);
     
     // Second message creates turn 2 (since first had finality='turn')
     const msg2 = orchestrator.sendMessage(
       conv,
+      2,  // Second turn
       'agent',
       { text: 'Second' },
       'turn'
@@ -146,6 +148,7 @@ describe('lastClosedSeq per-conversation isolation', () => {
     // Third message creates turn 3
     const msg3 = orchestrator.sendMessage(
       conv,
+      3,  // Third turn
       'agent',
       { text: 'Third' },
       'turn'

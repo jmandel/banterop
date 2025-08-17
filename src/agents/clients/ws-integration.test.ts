@@ -68,21 +68,9 @@ describe('WsEventStream Integration Tests', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
 
     // Post some events through the orchestrator
-    app.orchestrator.appendEvent({
-      conversation: conversationId,
-      type: 'message',
-      payload: { text: 'First message' },
-      finality: 'none',
-      agentId: 'test-agent',
-    });
+    app.orchestrator.sendMessage(conversationId, 1, 'test-agent', { text: 'First message' }, 'none');
 
-    app.orchestrator.appendEvent({
-      conversation: conversationId,
-      type: 'message',
-      payload: { text: 'Second message' },
-      finality: 'turn',
-      agentId: 'test-agent',
-    });
+    app.orchestrator.sendMessage(conversationId, 1, 'test-agent', { text: 'Second message' }, 'turn');
 
     // Wait for events to be consumed
     await Promise.race([
@@ -117,13 +105,7 @@ describe('WsEventStream Integration Tests', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
 
     // Post a message that will trigger guidance
-    app.orchestrator.appendEvent({
-      conversation: conversationId,
-      type: 'message',
-      payload: { text: 'User message' },
-      finality: 'turn',
-      agentId: 'user',
-    });
+    app.orchestrator.sendMessage(conversationId, 1, 'user', { text: 'User message' }, 'turn');
 
     // Wait a bit for guidance to be emitted
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -164,13 +146,7 @@ describe('WsEventStream Integration Tests', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
 
     // Post conversation-ending message
-    app.orchestrator.appendEvent({
-      conversation: conversationId,
-      type: 'message',
-      payload: { text: 'Goodbye' },
-      finality: 'conversation',
-      agentId: 'test-agent',
-    });
+    app.orchestrator.sendMessage(conversationId, 1, 'test-agent', { text: 'Goodbye' }, 'conversation');
 
     // Wait for stream to end
     await Promise.race([
@@ -218,13 +194,7 @@ describe('WsEventStream Integration Tests', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
 
     // Post an event
-    app.orchestrator.appendEvent({
-      conversation: conversationId,
-      type: 'message',
-      payload: { text: 'Broadcast message' },
-      finality: 'turn',
-      agentId: 'test-agent',
-    });
+    app.orchestrator.sendMessage(conversationId, 1, 'test-agent', { text: 'Broadcast message' }, 'turn');
 
     // Wait for both streams to receive
     await Promise.all([
@@ -244,22 +214,10 @@ describe('WsEventStream Integration Tests', () => {
 
   test('subscribe with filters and sinceSeq backlog', async () => {
     // Post some seed events by different agents
-    app.orchestrator.appendEvent({
-      conversation: conversationId,
-      type: 'message',
-      payload: { text: 'from A1' },
-      finality: 'none',
-      agentId: 'agent-A',
-    });
+    app.orchestrator.sendMessage(conversationId, 1, 'agent-A', { text: 'from A1' }, 'none');
     const lastA1 = app.orchestrator.getConversationSnapshot(conversationId).events.slice(-1)[0]!.seq;
 
-    app.orchestrator.appendEvent({
-      conversation: conversationId,
-      type: 'message',
-      payload: { text: 'from B1' },
-      finality: 'none',
-      agentId: 'agent-B',
-    });
+    app.orchestrator.sendMessage(conversationId, 1, 'agent-B', { text: 'from B1' }, 'none');
 
     // Subscribe to only agent-B messages and replay from before B1 (so we get B1)
     const stream = new WsEventStream(wsUrl, {
@@ -280,20 +238,8 @@ describe('WsEventStream Integration Tests', () => {
     await new Promise((r) => setTimeout(r, 100));
 
     // Now post live events for A and B; only B should be delivered due to filters
-    app.orchestrator.appendEvent({
-      conversation: conversationId,
-      type: 'message',
-      payload: { text: 'from A2' },
-      finality: 'none',
-      agentId: 'agent-A',
-    });
-    app.orchestrator.appendEvent({
-      conversation: conversationId,
-      type: 'message',
-      payload: { text: 'from B2' },
-      finality: 'turn',
-      agentId: 'agent-B',
-    });
+    app.orchestrator.sendMessage(conversationId, 1, 'agent-A', { text: 'from A2' }, 'none');
+    app.orchestrator.sendMessage(conversationId, 1, 'agent-B', { text: 'from B2' }, 'turn');
 
     await Promise.race([consuming, new Promise((r) => setTimeout(r, 1000))]);
 
@@ -330,13 +276,7 @@ describe('WsEventStream Integration Tests', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
 
     // Post first event
-    app.orchestrator.appendEvent({
-      conversation: conversationId,
-      type: 'message',
-      payload: { text: 'Before disconnect' },
-      finality: 'turn',
-      agentId: 'test-agent',
-    });
+    app.orchestrator.sendMessage(conversationId, 1, 'test-agent', { text: 'Before disconnect' }, 'turn');
 
     // Wait for event to be received
     await new Promise(resolve => setTimeout(resolve, 50));
@@ -365,13 +305,7 @@ describe('WsEventStream Integration Tests', () => {
     const snapshot = app.orchestrator.getConversationSnapshot(conversationId);
     
     // Post another event
-    app.orchestrator.appendEvent({
-      conversation: conversationId,
-      type: 'message',
-      payload: { text: 'After reconnect' },
-      finality: 'turn',
-      agentId: 'test-agent'
-    });
+    app.orchestrator.sendMessage(conversationId, 2, 'test-agent', { text: 'After reconnect' }, 'turn');
 
     // Wait for consumption
     await Promise.race([

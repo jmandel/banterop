@@ -28,6 +28,7 @@ describe('lastClosedSeq bug reproduction', () => {
     // Add a message to conv1 that closes turn 1
     const result1 = eventStore.appendEvent({
       conversation: conv1Id,
+      turn: 1,  // Explicit turn number
       type: 'message',
       payload: { text: 'Message in conv1' },
       finality: 'turn',
@@ -60,6 +61,7 @@ describe('lastClosedSeq bug reproduction', () => {
     // Add a message to conv2
     const result2 = eventStore.appendEvent({
       conversation: conv2Id,
+      turn: 1,  // Explicit turn number
       type: 'message',
       payload: { text: 'Message in conv2' },
       finality: 'turn',
@@ -87,6 +89,7 @@ describe('lastClosedSeq bug reproduction', () => {
     // Add TWO turns to conv3
     const result3a = eventStore.appendEvent({
       conversation: conv3Id,
+      turn: 1,  // Explicit turn number
       type: 'message',
       payload: { text: 'First message in conv3' },
       finality: 'turn',
@@ -97,6 +100,7 @@ describe('lastClosedSeq bug reproduction', () => {
     
     const result3b = eventStore.appendEvent({
       conversation: conv3Id,
+      turn: 2,  // Second turn - explicit turn number
       type: 'message', 
       payload: { text: 'Second message in conv3' },
       finality: 'turn',

@@ -119,25 +119,23 @@ export class OrchestratorService {
 
   // Convenience helpers for common patterns
 
-  sendTrace(conversation: number, agentId: string, payload: TracePayload, turn?: number): AppendEventResult {
+  sendTrace(conversation: number, turn: number, agentId: string, payload: TracePayload): AppendEventResult {
     const head = this.storage.events.getHead(conversation);
     
-    // Validate explicit turn if provided
-    if (turn !== undefined) {
-      if (head.hasOpenTurn && turn !== head.lastTurn) {
-        throw new Error(`Turn already open (expected turn ${head.lastTurn})`);
-      }
-      if (!head.hasOpenTurn && turn !== head.lastTurn + 1) {
-        throw new Error(`Invalid turn number (next is ${head.lastTurn + 1})`);
-      }
+    // Validate the provided turn number
+    if (head.hasOpenTurn && turn !== head.lastTurn) {
+      throw new Error(`Turn already open (expected turn ${head.lastTurn}, got ${turn})`);
+    }
+    if (!head.hasOpenTurn && turn !== head.lastTurn + 1) {
+      throw new Error(`Invalid turn number (expected ${head.lastTurn + 1}, got ${turn})`);
     }
     
-    // Use provided turn, or continue open turn, or start new turn
-    const targetTurn = turn ?? (head.hasOpenTurn ? head.lastTurn : undefined);
+    // Use the explicitly provided turn number
+    const targetTurn = turn;
     
     return this.appendEvent({
       conversation,
-      ...(targetTurn !== undefined ? { turn: targetTurn } : {}),
+      turn: targetTurn,  // ALWAYS provide turn number
       type: 'trace',
       payload,
       finality: 'none',
@@ -145,21 +143,19 @@ export class OrchestratorService {
     });
   }
 
-  sendMessage(conversation: number, agentId: string, payload: MessagePayload, finality: Finality, turn?: number): AppendEventResult {
+  sendMessage(conversation: number, turn: number, agentId: string, payload: MessagePayload, finality: Finality): AppendEventResult {
     const head = this.storage.events.getHead(conversation);
     
-    // Validate explicit turn if provided
-    if (turn !== undefined) {
-      if (head.hasOpenTurn && turn !== head.lastTurn) {
-        throw new Error(`Turn already open (expected turn ${head.lastTurn})`);
-      }
-      if (!head.hasOpenTurn && turn !== head.lastTurn + 1) {
-        throw new Error(`Invalid turn number (next is ${head.lastTurn + 1})`);
-      }
+    // Validate the provided turn number
+    if (head.hasOpenTurn && turn !== head.lastTurn) {
+      throw new Error(`Turn already open (expected turn ${head.lastTurn}, got ${turn})`);
+    }
+    if (!head.hasOpenTurn && turn !== head.lastTurn + 1) {
+      throw new Error(`Invalid turn number (expected ${head.lastTurn + 1}, got ${turn})`);
     }
     
-    // Use provided turn, or continue open turn, or start new turn
-    const targetTurn = turn ?? (head.hasOpenTurn ? head.lastTurn : undefined);
+    // Use the explicitly provided turn number
+    const targetTurn = turn;
     
     // If this is a terminal message, ensure outcome.status convention is set
     let payloadToWrite: MessagePayload = payload;
@@ -177,7 +173,7 @@ export class OrchestratorService {
 
     return this.appendEvent({
       conversation,
-      ...(targetTurn !== undefined ? { turn: targetTurn } : {}),
+      turn: targetTurn,  // ALWAYS provide turn number
       type: 'message',
       payload: payloadToWrite,
       finality,
@@ -202,8 +198,13 @@ export class OrchestratorService {
     if (opts.outcome === 'canceled') status = { status: 'canceled' };
     else if (opts.outcome === 'failed') status = { status: 'errored' };
 
+    // Get the current state to determine the turn number
+    const head = this.storage.events.getHead(conversationId);
+    const closingTurn = head.hasOpenTurn ? head.lastTurn : head.lastTurn + 1;
+    
     this.sendMessage(
       conversationId,
+      closingTurn,
       authorId,
       { text, outcome: status, ...(opts.metadata ? { metadata: opts.metadata } : {}) } as any,
       'conversation'
@@ -287,6 +288,7 @@ export class OrchestratorService {
             nextAgentId: startingAgent.id,
             kind: 'start_turn',
             deadlineMs: Date.now() + 30000,
+            turn: 1, // First turn of the conversation
           };
           
           // Publish guidance immediately (event-driven only)
@@ -411,6 +413,7 @@ export class OrchestratorService {
         seq: 0.1,
         kind: 'start_turn',
         deadlineMs: Date.now() + 30000,
+        turn: 1, // First turn for poke guidance
       };
       this.bus.publishGuidance(guidanceEvent);
     } catch {
@@ -550,6 +553,7 @@ export class OrchestratorService {
               nextAgentId,
               kind: 'start_turn',
               deadlineMs: 30000,
+              turn: e.turn + 1, // Next turn number after the one that just closed
             };
             this.bus.publishGuidance(guidanceEvent);
           }

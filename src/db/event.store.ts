@@ -1,5 +1,5 @@
 import type { Database } from 'bun:sqlite';
-import { allocNextEvent, allocNextTurn } from '$src/lib/utils/id-alloc';
+import { allocNextEvent } from '$src/lib/utils/id-alloc';
 import type {
   AppendEventInput,
   AppendEventResult,
@@ -38,22 +38,25 @@ export class EventStore {
         throw new Error('Only message events may set finality to turn or conversation');
       }
 
-      // Turn allocation
+      // Turn allocation - REQUIRE explicit turn numbers to avoid bugs
       let turn = input.turn;
       if (turn === undefined) {
         if (input.type === 'system') {
           // System events use an out-of-band lane: turn 0
           turn = 0;
-        } else if (input.type === 'message' || input.type === 'trace') {
-          turn = allocNextTurn(this.db, input.conversation);
         } else {
-          throw new Error('Only message or trace events may start a new turn');
+          // FAIL LOUDLY - turn number is required for messages and traces
+          throw new Error(
+            `Turn number is REQUIRED for ${input.type} events. ` +
+            `Event type: ${input.type}, Agent: ${input.agentId}, Conversation: ${input.conversation}. ` +
+            `This is a bug - the orchestrator should always provide explicit turn numbers.`
+          );
         }
       } else {
         // If turn is explicitly provided, reject writes to closed turns for normal turns (> 0)
         if (turn !== 0) {
           const closed = this.isTurnClosed(input.conversation, turn);
-          if (closed) throw new Error('Turn already finalized');
+          if (closed) throw new Error(`Turn ${turn} already finalized - cannot append more events`);
         }
       }
 

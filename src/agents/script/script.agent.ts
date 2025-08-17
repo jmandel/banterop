@@ -84,6 +84,7 @@ export class ScriptAgent extends BaseAgent {
           conversationId: ctx.conversationId,
           agentId: ctx.agentId,
           payload: step.payload as TracePayload,
+          turn: ctx.currentTurnNumber
         });
         break;
       case 'post':
@@ -93,6 +94,7 @@ export class ScriptAgent extends BaseAgent {
           agentId: ctx.agentId,
           text: step.text,
           finality: step.finality ?? 'turn',
+          turn: ctx.currentTurnNumber
         });
         break;
       case 'assert':

@@ -229,7 +229,7 @@ async function handleRpc(
   if (method === 'sendTrace') {
     const { conversationId, agentId, tracePayload, turn } = params as SendTraceRequest;
     try {
-      const res = orchestrator.sendTrace(conversationId, agentId, tracePayload, turn);
+      const res = orchestrator.sendTrace(conversationId, turn, agentId, tracePayload);
       ws.send(JSON.stringify(ok(id, res)));
     } catch (e) {
       const { code, message } = mapError(e);
@@ -241,7 +241,7 @@ async function handleRpc(
   if (method === 'sendMessage') {
     const { conversationId, agentId, messagePayload, finality, turn } = params as SendMessageRequest;
     try {
-      const res = orchestrator.sendMessage(conversationId, agentId, messagePayload, finality, turn);
+      const res = orchestrator.sendMessage(conversationId, turn, agentId, messagePayload, finality);
       ws.send(JSON.stringify(ok(id, res)));
     } catch (e) {
       const { code, message } = mapError(e);

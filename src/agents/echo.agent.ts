@@ -26,7 +26,8 @@ export class EchoAgent extends BaseAgent {
       conversationId: ctx.conversationId, 
       agentId: ctx.agentId, 
       text: this.progressText, 
-      finality: 'none'
+      finality: 'none',
+      turn: ctx.currentTurnNumber
     });
     logLine(ctx.agentId, 'posted progress', `seq=${r1.seq}`, `${Date.now() - t0}ms`);
     
@@ -35,7 +36,8 @@ export class EchoAgent extends BaseAgent {
       conversationId: ctx.conversationId, 
       agentId: ctx.agentId, 
       text: this.finalText, 
-      finality: 'turn'
+      finality: 'turn',
+      turn: ctx.currentTurnNumber
     });
     logLine(ctx.agentId, 'posted final', `seq=${r2.seq}`, `${Date.now() - t0}ms`);
   }

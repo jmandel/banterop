@@ -42,7 +42,7 @@ export interface SendTraceRequest {
   conversationId: number;
   agentId: string;
   tracePayload: TracePayload;
-  turn?: number; // optional turn override for advanced clients
+  turn: number; // Required turn number for explicit turn management
 }
 
 export interface SendTraceResponse {
@@ -56,7 +56,7 @@ export interface SendMessageRequest {
   agentId: string;
   messagePayload: MessagePayload; // clientRequestId must be inside this payload for idempotency
   finality: Finality;
-  turn?: number; // optional turn override for advanced clients
+  turn: number; // Required turn number for explicit turn management
 }
 
 export interface SendMessageResponse {

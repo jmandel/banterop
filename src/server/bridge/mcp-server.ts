@@ -94,9 +94,14 @@ export class McpBridgeServer {
         const text = String(params?.message ?? '');
         const attachments = Array.isArray(params?.attachments) ? params.attachments : undefined;
 
-        // Send message
+        // Determine the correct turn number
+        const head = (this.deps.orchestrator as any).storage.events.getHead(conversationId);
+        const turn = head.hasOpenTurn ? head.lastTurn : head.lastTurn + 1;
+
+        // Send message with the correct turn
         this.deps.orchestrator.sendMessage(
           conversationId,
+          turn,
           startingId,
           { text, ...(attachments ? { attachments } : {}) },
           'turn'

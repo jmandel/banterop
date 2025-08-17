@@ -63,7 +63,13 @@ export class McpProxyAgent extends BaseAgent<any> {
         if (!text) continue;
         const isLast = i === replies.messages.length - 1;
         const finality = ended && isLast ? 'conversation' : 'turn';
-        await this.transport.postMessage({ conversationId, agentId: this.cfg.bridgedAgentId, text, finality });
+        await this.transport.postMessage({ 
+          conversationId, 
+          agentId: this.cfg.bridgedAgentId, 
+          text, 
+          finality,
+          turn: ctx.currentTurnNumber
+        });
       }
     }
   }

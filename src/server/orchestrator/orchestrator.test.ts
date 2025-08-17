@@ -27,13 +27,7 @@ describe('OrchestratorService', () => {
     orch.subscribe(1, (e: UnifiedEvent) => recv.push(e));
 
     // Start a user turn and finalize
-    orch.appendEvent({
-      conversation: 1,
-      type: 'message',
-      payload: { text: 'Hi' } as MessagePayload,
-      finality: 'turn',
-      agentId: 'user',
-    });
+    orch.sendMessage(1, 1, 'user', { text: 'Hi' } as MessagePayload, 'turn');
 
     // We should have received the message itself and possibly a system advisory
     expect(recv.length).toBeGreaterThanOrEqual(1);
@@ -48,19 +42,19 @@ describe('OrchestratorService', () => {
 
   it('sendTrace can start a new turn when none exists', () => {
     // Starting a new turn via message
-    orch.sendMessage(1, 'user', { text: 'Part 1' }, 'none'); // turn 1
+    orch.sendMessage(1, 1, 'user', { text: 'Part 1' }, 'none'); // turn 1
 
     // sendTrace on open turn should work
-    orch.sendTrace(1, 'user', { type: 'thought', content: 'thinking' });
+    orch.sendTrace(1, 1, 'user', { type: 'thought', content: 'thinking' });
 
     // Finalize the turn
-    orch.sendMessage(1, 'user', { text: 'Part 2' }, 'turn', 1);
+    orch.sendMessage(1, 1, 'user', { text: 'Part 2' }, 'turn');
 
     // Get the lastClosedSeq for the precondition
     const snapshot1 = orch.getConversationSnapshot(1);
     
     // Now sendTrace can start a new turn (turn 2) with proper precondition
-    orch.sendTrace(1, 'assistant', { type: 'thought', content: 'starting new turn' }, undefined);
+    orch.sendTrace(1, 2, 'assistant', { type: 'thought', content: 'starting new turn' });
     
     // Verify the trace started a new turn
     const snapshot = orch.getConversationSnapshot(1);
@@ -112,13 +106,7 @@ describe('OrchestratorService', () => {
     orch2.subscribe(convId, (e: any) => recv.push(e), true); // includeGuidance = true
 
     // User finalizes a turn -> should emit guidance
-    orch2.appendEvent({
-      conversation: convId,
-      type: 'message',
-      payload: { text: 'Please answer' } as MessagePayload,
-      finality: 'turn',
-      agentId: 'user',
-    });
+    orch2.sendMessage(convId, 1, 'user', { text: 'Please answer' } as MessagePayload, 'turn');
 
     // Check that guidance was emitted
     const guidanceEvents = recv.filter((e) => e.type === 'guidance');

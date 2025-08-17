@@ -30,12 +30,21 @@ export class InProcessTransport implements IAgentTransport {
       ...(params.clientRequestId ? { clientRequestId: params.clientRequestId } : {}),
     };
 
+    // Calculate turn when not provided - transport layer adapts for agents that don't track turns
+    let turn: number;
+    if (params.turn === undefined) {
+      const head = (this.orchestrator as any).storage.events.getHead(params.conversationId);
+      turn = head.hasOpenTurn ? head.lastTurn : head.lastTurn + 1;
+    } else {
+      turn = params.turn;
+    }
+
     return this.orchestrator.sendMessage(
       params.conversationId,
+      turn,
       params.agentId,
       payload,
-      params.finality,
-      params.turn
+      params.finality
     );
   }
 
@@ -43,7 +52,7 @@ export class InProcessTransport implements IAgentTransport {
     conversationId: number;
     agentId: string;
     payload: TracePayload;
-    turn?: number;
+    turn: number;  // REQUIRED
     clientRequestId?: string;
   }): Promise<{ conversation: number; seq: number; turn: number; event: number }> {
     const payload = {
@@ -53,9 +62,9 @@ export class InProcessTransport implements IAgentTransport {
 
     return this.orchestrator.sendTrace(
       params.conversationId,
+      params.turn,
       params.agentId,
-      payload,
-      params.turn
+      payload
     );
   }
 

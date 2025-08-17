@@ -17,9 +17,10 @@ describe('EventStore append invariants and retrieval', () => {
 
   afterEach(() => sqlite.close());
 
-  it('starts a new turn with a message and auto-allocates turn/event', () => {
+  it('starts a new turn with a message with explicit turn number', () => {
     const res = events.appendEvent({
       conversation: 1,
+      turn: 1,  // Explicit turn number
       type: 'message',
       payload: { text: 'Hello' } as MessagePayload,
       finality: 'none',
@@ -36,6 +37,7 @@ describe('EventStore append invariants and retrieval', () => {
   it('appends trace in same open turn and then finalize with message(turn)', () => {
     events.appendEvent({
       conversation: 1,
+      turn: 1,  // Explicit turn number
       type: 'message',
       payload: { text: 'Start' } as MessagePayload,
       finality: 'none',
@@ -68,6 +70,7 @@ describe('EventStore append invariants and retrieval', () => {
   it('rejects traces after a turn is finalized', () => {
     events.appendEvent({
       conversation: 1,
+      turn: 1,  // Explicit turn number
       type: 'message',
       payload: { text: 'Start' } as MessagePayload,
       finality: 'turn',
@@ -83,12 +86,13 @@ describe('EventStore append invariants and retrieval', () => {
         finality: 'none',
         agentId: 'user',
       })
-    ).toThrow(/Turn already finalized/);
+    ).toThrow(/already finalized/);
   });
 
   it('rejects events after conversation finality=conversation', () => {
     events.appendEvent({
       conversation: 1,
+      turn: 1,  // Explicit turn number
       type: 'message',
       payload: { text: 'Closing' } as MessagePayload,
       finality: 'conversation',
@@ -98,6 +102,7 @@ describe('EventStore append invariants and retrieval', () => {
     expect(() =>
       events.appendEvent({
         conversation: 1,
+        turn: 2,  // Attempting to add to turn 2
         type: 'message',
         payload: { text: 'Should fail' } as MessagePayload,
         finality: 'none',
@@ -110,6 +115,7 @@ describe('EventStore append invariants and retrieval', () => {
     expect(() =>
       events.appendEvent({
         conversation: 1,
+        turn: 1,  // Explicit turn number
         type: 'trace',
         payload: { type: 'thought', content: 'x' },
         finality: 'turn',
@@ -132,6 +138,7 @@ describe('EventStore append invariants and retrieval', () => {
     // First ensure conversation exists
     const res = events.appendEvent({
       conversation: 1,
+      turn: 1,  // Explicit turn number
       type: 'message',
       payload: {
         text: 'See attached',
@@ -151,6 +158,7 @@ describe('EventStore append invariants and retrieval', () => {
   it('idempotency: returns existing event on duplicate clientRequestId', () => {
     const first = events.appendEvent({
       conversation: 1,
+      turn: 1,  // Explicit turn number
       type: 'message',
       payload: { text: 'Hello', clientRequestId: 'rid-1' } as MessagePayload,
       finality: 'none',
@@ -158,6 +166,7 @@ describe('EventStore append invariants and retrieval', () => {
     });
     const dup = events.appendEvent({
       conversation: 1,
+      turn: 1,  // Same turn for duplicate
       type: 'message',
       payload: { text: 'Hello', clientRequestId: 'rid-1' } as MessagePayload,
       finality: 'none',
@@ -193,6 +202,7 @@ describe('EventStore append invariants and retrieval', () => {
     // Meanwhile, a message starts turn 1
     const msg = events.appendEvent({
       conversation: 1,
+      turn: 1,  // Explicit turn number
       type: 'message',
       payload: { text: 'Hello' } as MessagePayload,
       finality: 'none',
@@ -219,10 +229,20 @@ describe('EventStore append invariants and retrieval', () => {
     expect(systemEvents.every(e => e.turn === 0)).toBe(true);
   });
 
-  it('trace can start a new turn when no turn exists', () => {
-    // First trace starts turn 1
+  it('requires explicit turn numbers for traces', () => {
+    // Traces MUST have explicit turn numbers
+    expect(() => events.appendEvent({
+      conversation: 1,
+      type: 'trace',
+      payload: { type: 'thought', content: 'starting work' } as TracePayload,
+      finality: 'none',
+      agentId: 'assistant',
+    })).toThrow(/Turn number is REQUIRED/);
+
+    // With explicit turn, trace works
     const trace1 = events.appendEvent({
       conversation: 1,
+      turn: 1,  // Explicit turn number required
       type: 'trace',
       payload: { type: 'thought', content: 'starting work' } as TracePayload,
       finality: 'none',
@@ -231,10 +251,10 @@ describe('EventStore append invariants and retrieval', () => {
     expect(trace1.turn).toBe(1);
     expect(trace1.event).toBe(1);
 
-    // Subsequent traces need to specify turn or they start a new turn
+    // Subsequent traces in same turn
     const trace2 = events.appendEvent({
       conversation: 1,
-      turn: 1,  // Explicitly provide the turn to stay in same turn
+      turn: 1,  // Same turn
       type: 'trace',
       payload: { type: 'tool_call', name: 'search', args: {}, toolCallId: 'call_1' } as TracePayload,
       finality: 'none',
@@ -246,7 +266,7 @@ describe('EventStore append invariants and retrieval', () => {
     // Message finalizes the turn
     const msg = events.appendEvent({
       conversation: 1,
-      turn: 1,  // Stay in same turn
+      turn: 1,  // Same turn
       type: 'message',
       payload: { text: 'Here is the result' } as MessagePayload,
       finality: 'turn',
@@ -255,9 +275,10 @@ describe('EventStore append invariants and retrieval', () => {
     expect(msg.turn).toBe(1);
     expect(msg.event).toBe(3);
 
-    // Next trace without turn starts turn 2 (since turn 1 is finalized)
+    // Next trace must explicitly specify turn 2
     const trace3 = events.appendEvent({
       conversation: 1,
+      turn: 2,  // Must explicitly start turn 2
       type: 'trace',
       payload: { type: 'thought', content: 'processing next request' } as TracePayload,
       finality: 'none',
@@ -278,6 +299,7 @@ describe('EventStore append invariants and retrieval', () => {
   it('getEventsSince returns events with seq greater than given', () => {
     const e1 = events.appendEvent({
       conversation: 1,
+      turn: 1,  // Explicit turn number
       type: 'message',
       payload: { text: 'one' } as MessagePayload,
       finality: 'none',
@@ -285,6 +307,7 @@ describe('EventStore append invariants and retrieval', () => {
     });
     events.appendEvent({
       conversation: 1,
+      turn: 1,  // Same turn
       type: 'message',
       payload: { text: 'two' } as MessagePayload,
       finality: 'turn',

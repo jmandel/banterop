@@ -40,13 +40,25 @@ export class AssistantAgent extends BaseAgent<ConversationSnapshot> {
       return;
     }
     
+    // Log warning if turn number is missing but continue (less critical for AssistantAgent)
+    if (ctx.currentTurnNumber === undefined) {
+      logLine(ctx.agentId, 'warn', `Missing turn number in context - debugging info: ${JSON.stringify({
+        conversationId: ctx.conversationId,
+        guidanceSeq: ctx.guidanceSeq,
+        hasGuidance: ctx.guidanceSeq > 0,
+        deadlineMs: ctx.deadlineMs,
+        eventCount: snapshot.events.length,
+        lastEventTurn: snapshot.events.length > 0 ? snapshot.events[snapshot.events.length - 1]?.turn : null,
+      })}`);
+    }
+    
     // Call the LLM provider with logging metadata
     const response = await this.llmProvider.complete({ 
       messages,
       loggingMetadata: {
         conversationId: String(ctx.conversationId),
         agentName: ctx.agentId,
-        turnNumber: messages.filter(m => m.role === 'assistant').length + 1
+        turnNumber: ctx.currentTurnNumber
       }
     });
 
@@ -61,7 +73,8 @@ export class AssistantAgent extends BaseAgent<ConversationSnapshot> {
       conversationId: ctx.conversationId,
       agentId: ctx.agentId,
       text: response.content,
-      finality: 'turn'
+      finality: 'turn',
+      turn: ctx.currentTurnNumber
     });
 
     logLine(ctx.agentId, 'info', 'AssistantAgent turn completed.');

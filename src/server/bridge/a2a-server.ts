@@ -202,8 +202,13 @@ export class A2ABridgeServer {
     } catch {
       // Fallback: write a terminal message directly
       try {
+        // Get the current state to determine turn number
+        const head = (this.deps.orchestrator as any).storage.events.getHead(taskNum);
+        const closingTurn = head.hasOpenTurn ? head.lastTurn : head.lastTurn + 1;
+        
         this.deps.orchestrator.sendMessage(
           taskNum,
+          closingTurn,
           'system',
           { text: 'Conversation canceled by client.', outcome: { status: 'canceled' } },
           'conversation'
@@ -366,8 +371,14 @@ export class A2ABridgeServer {
     const text = String(parts.find((p: any) => p?.kind === 'text')?.text ?? '');
     const atts = await this.persistUploads(parts);
     const clientRequestId = a2aMsg?.messageId || undefined;
+    
+    // Get the current state to determine turn number
+    const head = (this.deps.orchestrator as any).storage.events.getHead(conversationId);
+    const turn = head.hasOpenTurn ? head.lastTurn : head.lastTurn + 1;
+    
     this.deps.orchestrator.sendMessage(
       conversationId,
+      turn,
       externalId,
       { text, ...(atts.length ? { attachments: atts } : {}), ...(clientRequestId ? { clientRequestId } : {}) },
       'turn'

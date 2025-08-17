@@ -18,7 +18,7 @@ describe('ScenarioDrivenAgent', () => {
   let eventHandlers: ((event: any) => void)[] = [];
 
   // Helper to trigger a turn
-  async function triggerTurn(conversationId: number, agentId: string, seq: number = 1.1) {
+  async function triggerTurn(conversationId: number, agentId: string, seq: number = 1.1, turn: number = 1) {
     await agent.start(conversationId, agentId);
     
     const guidance: GuidanceEvent = {
@@ -27,7 +27,8 @@ describe('ScenarioDrivenAgent', () => {
       seq,
       nextAgentId: agentId,
       kind: 'start_turn',
-      deadlineMs: 30000
+      deadlineMs: 30000,
+      turn // Add turn number to guidance
     };
     
     // Emit to all registered handlers

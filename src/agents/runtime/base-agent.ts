@@ -9,6 +9,7 @@ export interface TurnContext<TSnap = any> {
   agentId: string;
   guidanceSeq: number;
   deadlineMs: number;
+  currentTurnNumber?: number; // The turn number for this action
   snapshot: TSnap; // stable at turn start
   transport: IAgentTransport;
   getLatestSnapshot(): TSnap; // live mirror
@@ -89,14 +90,14 @@ export abstract class BaseAgent<TSnap = any> {
       // Handle guidance events
       if ((ev as GuidanceEvent).type === 'guidance') {
         const g = ev as GuidanceEvent;
-        logLine(agentId, 'debug', `Received guidance for ${g.nextAgentId}, seq=${g.seq}`);
+        logLine(agentId, 'guidance', `Received COMPLETE GUIDANCE: nextAgentId=${g.nextAgentId}, seq=${g.seq}, turn=${g.turn}, kind=${g.kind}, deadlineMs=${g.deadlineMs}, forUs=${g.nextAgentId === agentId}`);
         
         if (g.nextAgentId !== agentId) {
           logLine(agentId, 'debug', `Guidance not for us (looking for ${agentId})`);
           return; // Not for us
         }
         
-        logLine(agentId, 'guidance', `Received guidance seq=${g.seq}`);
+        logLine(agentId, 'guidance', `Received guidance seq=${g.seq}, turn=${g.turn}, kind=${g.kind}`);
 
         // If we're currently in a turn, ignore guidance (we're already working)
         if (this.inTurn) {
@@ -131,7 +132,7 @@ export abstract class BaseAgent<TSnap = any> {
   protected abstract takeTurn(ctx: TurnContext<TSnap>): Promise<void>;
 
   private async reconcileAndMaybeAct(conversationId: number, agentId: string, guidance: GuidanceEvent | null): Promise<void> {
-    logLine(agentId, 'reconcile', `Starting reconcile (guidance seq: ${guidance?.seq || 'none'})`);
+    logLine(agentId, 'reconcile', `Starting reconcile with: guidanceSeq=${guidance?.seq || 'none'}, guidanceTurn=${guidance?.turn}, guidanceKind=${guidance?.kind}, hasGuidance=${!!guidance}`);
     
     // Fetch fresh snapshot
     logLine(agentId, 'reconcile', `Fetching snapshot for conversation ${conversationId}`);
@@ -152,12 +153,14 @@ export abstract class BaseAgent<TSnap = any> {
 
     // If no explicit guidance: only act if we own an open turn (startup recovery)
     if (!guidance) {
+      logLine(agentId, 'reconcile', 'NO GUIDANCE - startup recovery path');
       if (hasOpenTurn && ownerAgentId === agentId) {
         const mode = typeof this.turnRecoveryMode === 'function' ? this.turnRecoveryMode(snapshot) : this.turnRecoveryMode;
         if (mode === 'restart') {
           const { turn } = await this.transport.clearTurn(conversationId, agentId);
           logLine(agentId, 'abort', `Aborted turn ${turn} per restart policy (startup)`);
         }
+        logLine(agentId, 'reconcile', 'Starting turn WITHOUT guidance (startup recovery)');
         await this.startTurn(conversationId, agentId, null);
       } else {
         logLine(agentId, 'reconcile', 'No guidance and not owning open turn; idle');
@@ -215,7 +218,12 @@ export abstract class BaseAgent<TSnap = any> {
   // No enqueue; base agent keeps reconciliation simple and synchronous
 
   private async startTurn(conversationId: number, agentId: string, guidance: GuidanceEvent | null): Promise<void> {
-    logLine(agentId, 'startTurn', `Called with guidance seq: ${guidance?.seq || 'none'}, inTurn=${this.inTurn}`);
+    logLine(agentId, 'startTurn', `Called with: guidanceSeq=${guidance?.seq || 'none'}, guidanceTurn=${guidance?.turn}, guidanceKind=${guidance?.kind}, inTurn=${this.inTurn}, hasGuidance=${!!guidance}`);
+    
+    if (!guidance) {
+      logLine(agentId, 'startTurn', 'WARNING: Starting turn WITHOUT guidance (startup recovery)');
+    }
+    
     if (this.inTurn) {
       logLine(agentId, 'warn', 'Already in turn, skipping start');
       return;
@@ -230,10 +238,13 @@ export abstract class BaseAgent<TSnap = any> {
         agentId,
         guidanceSeq: guidance?.seq || 0,
         deadlineMs: guidance?.deadlineMs || Date.now() + 30000,
+        currentTurnNumber: guidance?.turn,
         snapshot: this.clone(this.liveSnapshot!),
         transport: this.transport,
         getLatestSnapshot: () => this.clone(this.liveSnapshot!),
       };
+      
+      logLine(agentId, 'startTurn', `Created TurnContext with: guidanceSeq=${ctx.guidanceSeq}, currentTurnNumber=${ctx.currentTurnNumber}, hasGuidance=${!!guidance}, guidanceFields=${guidance ? Object.keys(guidance).join(',') : 'N/A'}`);
 
       // Execute the turn
       logLine(agentId, 'turn', 'Starting turn execution');

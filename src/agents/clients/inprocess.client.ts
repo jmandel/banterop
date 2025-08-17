@@ -27,12 +27,21 @@ export class InProcessClient implements IAgentClient {
       ...(params.attachments ? { attachments: params.attachments } : {}),
       ...(params.clientRequestId ? { clientRequestId: params.clientRequestId } : {}),
     };
+    // Calculate the correct turn if not provided
+    let turn: number;
+    if (params.turn === undefined) {
+      const head = (this.orchestrator as any).storage.events.getHead(params.conversationId);
+      turn = head.hasOpenTurn ? head.lastTurn : head.lastTurn + 1;
+    } else {
+      turn = params.turn;
+    }
+
     const res = this.orchestrator.sendMessage(
       params.conversationId,
+      turn,
       params.agentId,
       payload,
-      params.finality,
-      params.turn
+      params.finality
     );
     return { seq: res.seq, turn: res.turn, event: res.event };
   }
@@ -44,11 +53,24 @@ export class InProcessClient implements IAgentClient {
     turn?: number;
     clientRequestId?: string;
   }) {
+    // Calculate the correct turn if not provided
+    let turn: number;
+    if (params.turn === undefined) {
+      const head = (this.orchestrator as any).storage.events.getHead(params.conversationId);
+      // For traces, we must have an open turn
+      if (!head.hasOpenTurn) {
+        throw new Error(`Cannot send trace without an open turn. Current state: lastTurn=${head.lastTurn}`);
+      }
+      turn = head.lastTurn;
+    } else {
+      turn = params.turn;
+    }
+
     const res = this.orchestrator.sendTrace(
       params.conversationId,
+      turn,
       params.agentId,
-      params.payload,
-      params.turn
+      params.payload
     );
     return { seq: res.seq, turn: res.turn, event: res.event };
   }

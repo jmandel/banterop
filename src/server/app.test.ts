@@ -18,13 +18,7 @@ describe('App integration', () => {
     expect(conversationId).toBe(1);
     
     // Add an event
-    const result = app.orchestrator.appendEvent({
-      conversation: conversationId,
-      type: 'message',
-      payload: { text: 'Hello' } as MessagePayload,
-      finality: 'turn',
-      agentId: 'test-agent'
-    });
+    const result = app.orchestrator.sendMessage(conversationId, 1, 'test-agent', { text: 'Hello' } as MessagePayload, 'turn');
     
     expect(result.conversation).toBe(conversationId);
     expect(result.turn).toBe(1);
@@ -56,21 +50,9 @@ describe('App integration', () => {
     expect(list.length).toBe(2);
     
     // Add events to different conversations
-    app.orchestrator.appendEvent({
-      conversation: id1,
-      type: 'message',
-      payload: { text: 'Message 1' } as MessagePayload,
-      finality: 'none',
-      agentId: 'agent1'
-    });
+    app.orchestrator.sendMessage(id1, 1, 'agent1', { text: 'Message 1' } as MessagePayload, 'none');
     
-    app.orchestrator.appendEvent({
-      conversation: id2,
-      type: 'message',
-      payload: { text: 'Message 2' } as MessagePayload,
-      finality: 'none',
-      agentId: 'agent2'
-    });
+    app.orchestrator.sendMessage(id2, 1, 'agent2', { text: 'Message 2' } as MessagePayload, 'none');
     
     // Each conversation should have its own events
     const snap1 = app.orchestrator.getConversationSnapshot(id1);

@@ -74,7 +74,7 @@ describe('MCP Proxy loopback (both sides our stack)', () => {
     await app.lifecycleManager.ensure(conversationA, ['patient', 'insurer-proxy']);
 
     // Post an initial message from the local patient to kick things off
-    app.orchestrator.sendMessage(conversationA, 'patient', { text: 'Hello, requesting MRI authorization.' }, 'turn');
+    app.orchestrator.sendMessage(conversationA, 1, 'patient', { text: 'Hello, requesting MRI authorization.' }, 'turn');
 
     // Wait for proxy to forward and mirror a reply locally as 'insurer'
     let seenInsurer = false;
