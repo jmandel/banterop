@@ -5,6 +5,7 @@ import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { UnifiedEvent } from "$src/types/event.types";
 import { WsEventStream } from "$src/agents/clients/event-stream";
+import { WatchLayout } from "./WatchLayout";
 
 dayjs.extend(relativeTime);
 
@@ -1120,30 +1121,25 @@ function SplitLayout() {
     };
   }, []);
 
+  const statusIndicator = (() => {
+    // Single dot status with tooltip
+    let color = 'bg-gray-400';
+    let label = 'idle';
+    if (health === false) { color = 'bg-red-500'; label = 'api down'; }
+    else if (health === true) {
+      if (connState === 'open') { color = 'bg-green-500'; label = 'live'; }
+      else if (connState === 'connecting' || connState === 'reconnecting') { color = 'bg-yellow-500'; label = connState; }
+      else if (connState === 'closed') { color = 'bg-gray-400'; label = 'disconnected'; }
+      else { color = 'bg-gray-400'; label = 'ready'; }
+    } else { color = 'bg-gray-400'; label = 'checking'; }
+    return (
+      <span className={`inline-block w-2.5 h-2.5 rounded-full ${color}`} title={`Status: ${label}`} aria-label={`Status: ${label}`} />
+    );
+  })();
+
   return (
-    <div className="font-sans text-gray-900 bg-gray-50 h-screen overflow-hidden flex flex-col">
-      <header className="flex items-center justify-between px-3 py-1.5 border-b bg-white text-[13px]">
-        <div className="font-semibold tracking-tight">Watch</div>
-        <div className="relative flex items-center gap-2">
-          {(() => {
-            // Single dot status with tooltip
-            let color = 'bg-gray-400';
-            let label = 'idle';
-            if (health === false) { color = 'bg-red-500'; label = 'api down'; }
-            else if (health === true) {
-              if (connState === 'open') { color = 'bg-green-500'; label = 'live'; }
-              else if (connState === 'connecting' || connState === 'reconnecting') { color = 'bg-yellow-500'; label = connState; }
-              else if (connState === 'closed') { color = 'bg-gray-400'; label = 'disconnected'; }
-              else { color = 'bg-gray-400'; label = 'ready'; }
-            } else { color = 'bg-gray-400'; label = 'checking'; }
-            return (
-              <span className={`inline-block w-2.5 h-2.5 rounded-full ${color}`} title={`Status: ${label}`} aria-label={`Status: ${label}`} />
-            );
-          })()}
-          {/* Legend and info moved into sticky header inside detail pane */}
-        </div>
-      </header>
-      <div className="flex-1 flex min-h-0">
+    <WatchLayout statusIndicator={statusIndicator}>
+      <div className="flex h-full min-h-0 font-sans text-gray-900">
         <div className={`border-r border-gray-200 bg-white min-w-[240px] flex flex-col min-h-0 overflow-hidden border-t-2 ${focusedPane==='list' ? 'border-t-blue-400' : 'border-t-transparent'}`} style={{ width: leftWidth }}>
           <ConversationList onSelect={onSelect} selectedId={selectedId ?? null} focusRef={listRef} requestFocusKey={listFocusKey} />
         </div>
@@ -1163,7 +1159,7 @@ function SplitLayout() {
         </div>
       </div>
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
-    </div>
+    </WatchLayout>
   );
 }
 

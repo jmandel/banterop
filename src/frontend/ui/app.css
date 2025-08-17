@@ -1,0 +1,20 @@
+@import "./theme.css";
+@import "tailwindcss";
+
+/* Tailwind v4 content scanning for UI + all frontends */
+@source "../**/*.{ts,tsx,html}";
+@source "./**/*.{ts,tsx,html}";
+
+/* Optional: map some tokens into Tailwind theme names for convenience */
+@theme {
+  --radius-2xl: var(--radius);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --color-primary: var(--primary);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-panel: var(--panel);
+  --color-bg: var(--bg);
+}
+

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from '../../ui';
 
 export function RawJsonEditor({ config, onChange, isReadOnly }: { config: any; onChange: (c: any) => void; isReadOnly?: boolean }) {
   const [text, setText] = React.useState<string>(() => JSON.stringify(config, null, 2));
@@ -23,16 +24,15 @@ export function RawJsonEditor({ config, onChange, isReadOnly }: { config: any; o
     <div>
       <textarea
         ref={taRef}
-        className="w-full border rounded font-mono text-sm p-2 resize-none overflow-hidden leading-snug"
+        className="w-full border border-[color:var(--border)] rounded-2xl bg-[color:var(--panel)] text-[color:var(--text)] font-mono text-sm px-3 py-2 resize-none overflow-hidden leading-snug"
         value={text}
         onChange={(e) => setText(e.target.value)}
         onInput={autoSize}
         readOnly={isReadOnly}
-        style={{ height: 'auto' }}
       />
       {!isReadOnly && (
         <div className="mt-2 text-right">
-          <button className="px-3 py-1 text-xs bg-blue-600 text-white rounded" onClick={apply}>Apply JSON</button>
+          <Button variant="primary" onClick={apply}>Apply JSON</Button>
         </div>
       )}
     </div>

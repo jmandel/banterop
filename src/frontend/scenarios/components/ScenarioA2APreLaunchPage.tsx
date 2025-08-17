@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Card, CardHeader } from '../../ui';
 import { useParams, Link } from 'react-router-dom';
 import { PreLaunchShared } from './PreLaunchShared';
 import { sha256Base64Url } from '$src/lib/hash';
@@ -163,21 +164,21 @@ export function ScenarioA2APreLaunchPage() {
       />
 
       <div className="p-6 max-w-4xl mx-auto space-y-4">
-        <div className="p-4 border rounded space-y-2 bg-white">
-          <div className="text-sm font-semibold">How To Use (A2A)</div>
-          <ul className="text-sm text-slate-700 space-y-1" style={{ listStyleType: 'disc', paddingLeft: 20 }}>
+        <Card className="space-y-2">
+          <CardHeader title="How To Use (A2A)" />
+          <ul className="text-sm text-slate-700 space-y-1 list-disc pl-5">
             <li><span className="font-medium">message/send</span>: starts a new task (no taskId) or continues a non‑terminal one (with taskId).</li>
             <li><span className="font-medium">message/stream</span>: same payload as message/send; responds with SSE stream of JSON‑RPC frames.</li>
             <li><span className="font-medium">tasks/get</span>: returns snapshot (status + full history).</li>
             <li><span className="font-medium">tasks/resubscribe</span>: resume streaming updates for an existing task.</li>
             <li><span className="font-medium">tasks/cancel</span>: end the conversation with outcome=canceled.</li>
           </ul>
-        </div>
+        </Card>
 
-        <div className="p-4 border rounded space-y-2 bg-white">
-          <div className="text-sm font-semibold">Template (decoded)</div>
+        <Card className="space-y-2">
+          <CardHeader title="Template (decoded)" />
           <pre className="text-xs bg-slate-50 p-2 rounded border overflow-auto">{prettyMeta}</pre>
-        </div>
+        </Card>
       </div>
     </>
   );

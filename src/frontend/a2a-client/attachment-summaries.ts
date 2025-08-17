@@ -8,7 +8,7 @@ function apiBase(): string {
 async function llmSummarize(model: string | undefined, prompt: string): Promise<{ summary: string; keywords: string[] }> {
   const body: any = {
     messages: [
-      { role: "system", content: "You write compact JSON summaries. Output JSON ONLY." },
+      { role: "system", content: "You are a document analyzer. You MUST respond with valid JSON only, no other text. Your response must be a JSON object with exactly two fields: 'summary' (string) and 'keywords' (array of strings)." },
       { role: "user", content: prompt },
     ],
     maxTokens: 300,
@@ -50,19 +50,50 @@ async function llmSummarize(model: string | undefined, prompt: string): Promise<
       throw e;
     }
   }
-  const text = String(j?.content ?? "").trim();
-  const m = text.match(/```json\s*([\s\S]*?)```/i);
-  const raw = (m ? m[1] : text) ?? "";
+  let text = String(j?.content ?? "").trim();
+  
+  // Try multiple parsing strategies
+  // 1. Check for markdown code blocks
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (codeBlockMatch && codeBlockMatch[1]) {
+    text = codeBlockMatch[1].trim();
+  }
+  
+  // 2. Find JSON object in the text
+  const jsonMatch = text.match(/{[^{}]*"summary"[^{}]*}/s);
+  if (jsonMatch) {
+    text = jsonMatch[0];
+  }
+  
   try {
-    const obj = JSON.parse(raw);
+    const obj = JSON.parse(text);
+    
+    // Validate the response structure
+    if (typeof obj !== 'object' || !obj || !obj.summary) {
+      throw new Error('Invalid response structure');
+    }
+    
     let summary = String(obj.summary || "").trim();
-    let keywords = Array.isArray(obj.keywords) ? obj.keywords.map((s: any) => String(s)).slice(0, 12) : [];
-    if (!summary) summary = "(no summary)";
+    let keywords = Array.isArray(obj.keywords) 
+      ? obj.keywords.filter((k: any) => typeof k === 'string').map((s: any) => String(s).trim()).slice(0, 12) 
+      : [];
+    
+    // Clean up summary if it's too long or contains JSON
+    if (summary.length > 200 || summary.includes('{') || summary.includes('[')) {
+      summary = summary.substring(0, 200).replace(/[{\[].*/, '').trim();
+    }
+    
+    if (!summary) summary = "File analyzed but no summary generated";
+    
     return { summary, keywords };
-  } catch {
-    const s = raw.replace(/^["'`]+|["'`]+$/g, "");
-    const kw = Array.from(new Set(s.split(/\W+/g).filter(Boolean))).slice(0, 8);
-    return { summary: s.slice(0, 240), keywords: kw };
+  } catch (parseError) {
+    console.warn('[Summarizer] Failed to parse AI response as JSON:', text.substring(0, 200));
+    // Fallback: treat the whole response as the summary if it's not JSON
+    const cleanText = text.replace(/[{\["'`].*$/s, '').replace(/^["'`]+|["'`]+$/g, '').trim();
+    if (cleanText && cleanText.length < 200 && !cleanText.includes('{')) {
+      return { summary: cleanText, keywords: [] };
+    }
+    return { summary: "Failed to analyze file content", keywords: [] };
   }
 }
 
@@ -82,7 +113,21 @@ function decodeText(b64: string): string {
 const MAX_INPUT_CHARS = 12000;
 
 function buildPrompt(name: string, mime: string, text: string): string {
-  const head = `File: ${name}\nMIME: ${mime}\n\nBelow is the file content (may be truncated). Provide:\n- "summary": a crisp 1-2 sentence description with salient details.\n- "keywords": 5-12 short tags.\nReturn JSON ONLY: {"summary": "...", "keywords": ["..."]}\n\nCONTENT:\n`;
+  const head = `Analyze this file and return ONLY a JSON object (no markdown, no explanation, just the JSON):
+
+File: ${name}
+MIME: ${mime}
+
+Required JSON format:
+{
+  "summary": "One clear sentence describing the file content and purpose",
+  "keywords": ["keyword1", "keyword2", "keyword3"]
+}
+
+IMPORTANT: Return ONLY the JSON object, nothing else.
+
+FILE CONTENT:
+`;
   let guidance = "";
 
   const low = `${name} ${mime}`.toLowerCase();

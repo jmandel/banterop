@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
+import { Card, CardHeader, Button } from '../../ui';
 import { api } from '../utils/api';
 
 function encodeBase64Url(obj: unknown): string {
@@ -150,7 +151,8 @@ export function ScenarioRunPage() {
         <div className="text-sm text-slate-500">{scenario.config?.metadata?.id}</div>
       </div>
 
-      <div className="bg-white border rounded p-4 space-y-4">
+      <Card className="space-y-4">
+        <CardHeader title="Run Options" />
         <div className="grid grid-cols-3 gap-3">
           <div className={`p-3 border-2 rounded cursor-pointer ${runMode==='internal'?'border-blue-600 bg-blue-50':'border-gray-200 hover:border-gray-300'}`} onClick={() => setRunMode('internal')}>
             <div className="font-medium">Internal (Simulated)</div>
@@ -168,17 +170,17 @@ export function ScenarioRunPage() {
 
         <div>
           <label className="block text-sm text-slate-700 mb-1">Conversation Title</label>
-          <input className="w-full border rounded px-3 py-2" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <input className="w-full border border-[color:var(--border)] rounded-2xl px-3 py-2 bg-[color:var(--panel)] text-[color:var(--text)]" value={title} onChange={(e) => setTitle(e.target.value)} />
         </div>
 
         <div>
           <label className="block text-sm text-slate-700 mb-1">Description (optional)</label>
-          <textarea className="w-full border rounded px-3 py-2" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+          <textarea className="w-full border border-[color:var(--border)] rounded-2xl px-3 py-2 bg-[color:var(--panel)] text-[color:var(--text)]" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
 
         <div>
           <label className="block text-sm text-slate-700 mb-1">{runMode !== 'internal' ? (runMode === 'mcp' ? 'External Client Agent (MCP)' : 'External Client Agent (A2A)') : 'Starting Agent'}</label>
-          <select className="w-full border rounded px-3 py-2" value={startingAgentId} onChange={(e) => setStartingAgentId(e.target.value)}>
+          <select className="w-full border border-[color:var(--border)] rounded-2xl px-3 py-2 bg-[color:var(--panel)] text-[color:var(--text)]" value={startingAgentId} onChange={(e) => setStartingAgentId(e.target.value)}>
             {agentOptions.map((id: string) => (<option key={id} value={id}>{id}</option>))}
           </select>
         </div>
@@ -189,13 +191,13 @@ export function ScenarioRunPage() {
             <div className="text-sm font-medium">Agent Configuration</div>
             <div className="space-y-4">
               {(scenario?.config?.agents || []).filter((a: any) => !((runMode !== 'internal') && a.agentId === startingAgentId)).map((a: any) => (
-                <div key={a.agentId} className="border rounded p-2 space-y-2">
+                <Card key={a.agentId} className="space-y-2">
                   <div className="text-sm font-medium text-slate-700 break-all">{a.agentId}</div>
                   <div className="grid grid-cols-3 items-center gap-2">
                     <div className="col-span-1 text-xs text-slate-600">Model</div>
                     <div className="col-span-2">
                       <select
-                        className="w-full border rounded px-2 py-1 text-sm"
+                        className="w-full border border-[color:var(--border)] rounded-2xl px-2 py-1 text-sm bg-[color:var(--panel)] text-[color:var(--text)]"
                         value={agentModels[a.agentId] || modelOptions[0] || ''}
                         onChange={(e) => setAgentModels((m) => ({ ...m, [a.agentId]: e.target.value }))}
                       >
@@ -211,7 +213,7 @@ export function ScenarioRunPage() {
                     <label className="col-span-1 text-xs text-slate-600">Additional system prompt</label>
                     <div className="col-span-2">
                       <textarea
-                        className="w-full border rounded px-2 py-1 text-xs"
+                        className="w-full border border-[color:var(--border)] rounded-2xl px-2 py-1 text-xs bg-[color:var(--panel)] text-[color:var(--text)]"
                         rows={2}
                         placeholder="Optional text appended to this agent's system prompt"
                         value={agentSystemExtra[a.agentId] || ''}
@@ -223,7 +225,7 @@ export function ScenarioRunPage() {
                     <label className="col-span-1 text-xs text-slate-600">Initiating message extra</label>
                     <div className="col-span-2">
                       <textarea
-                        className="w-full border rounded px-2 py-1 text-xs"
+                        className="w-full border border-[color:var(--border)] rounded-2xl px-2 py-1 text-xs bg-[color:var(--panel)] text-[color:var(--text)]"
                         rows={2}
                         placeholder="Optional text appended to the initiating message for this agent"
                         value={agentInitiatingExtra[a.agentId] || ''}
@@ -231,7 +233,7 @@ export function ScenarioRunPage() {
                       />
                     </div>
                   </div>
-                </div>
+                </Card>
               ))}
             </div>
           </div>
@@ -241,18 +243,18 @@ export function ScenarioRunPage() {
 
         <div className="pt-2">
           {runMode === 'internal' ? (
-            <button className="w-full bg-blue-600 text-white rounded px-3 py-2 hover:bg-blue-700" onClick={continueInternal}>Start Conversation</button>
+            <Button variant="primary" className="w-full" onClick={continueInternal}>Start Conversation</Button>
           ) : runMode === 'mcp' ? (
-            <button className="w-full bg-blue-600 text-white rounded px-3 py-2 hover:bg-blue-700" onClick={continuePlugin}>Continue to MCP Configuration</button>
+            <Button variant="primary" className="w-full" onClick={continuePlugin}>Continue to MCP Configuration</Button>
           ) : (
-            <button className="w-full bg-blue-600 text-white rounded px-3 py-2 hover:bg-blue-700" onClick={() => {
+            <Button variant="primary" className="w-full" onClick={() => {
               const meta = buildMeta();
               const config64 = encodeBase64Url(meta);
               navigate(`/scenarios/${encodeURIComponent(scenarioId!)}/external-a2a-client/${config64}`);
-            }}>Continue to A2A Configuration</button>
+            }}>Continue to A2A Configuration</Button>
           )}
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

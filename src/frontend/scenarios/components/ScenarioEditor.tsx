@@ -1,4 +1,5 @@
 import React from 'react';
+import { Card, Button } from '../../ui';
 import { RawJsonEditor } from './RawJsonEditor';
 import { StructuredView } from './StructuredView';
 
@@ -22,8 +23,8 @@ export function ScenarioEditor({
   isEditMode?: boolean;
 }) {
   return (
-    <div className="rounded-md border border-slate-200 bg-white">
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b p-2 lg:p-3 flex items-center justify-between">
+    <Card>
+      <div className="sticky top-0 z-10 bg-[color:var(--panel)]/95 backdrop-blur border-b border-[color:var(--border)] p-2 lg:p-3 flex items-center justify-between">
         <div className="flex gap-1 p-0.5 bg-slate-100 rounded">
           <button className={`px-3 py-1 text-xs rounded transition ${viewMode === 'structured' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`} onClick={() => onViewModeChange('structured')}>Structured View</button>
           <button className={`px-3 py-1 text-xs rounded transition ${viewMode === 'rawJson' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`} onClick={() => onViewModeChange('rawJson')}>Raw JSON</button>
@@ -31,12 +32,12 @@ export function ScenarioEditor({
         {scenarioId && (
           <div className="flex gap-2">
             {isEditMode ? (
-              <a href={`#/scenarios/${scenarioId}`} className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">View</a>
+              <Button as="a" href={`#/scenarios/${scenarioId}`} size="sm" variant="secondary">View</Button>
             ) : (
               <>
-                <a href={`#/scenarios/${scenarioId}/edit`} className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">Edit</a>
-                <a href={`#/scenarios/${scenarioId}/run`} className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">Run</a>
-                <a href={`#/scenarios/${scenarioId}/run?mode=plugin`} className="px-3 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700">Plug In</a>
+                <Button as="a" href={`#/scenarios/${scenarioId}/edit`} size="sm" variant="secondary">Edit</Button>
+                <Button as="a" href={`#/scenarios/${scenarioId}/run`} size="sm" variant="primary">Run</Button>
+                <Button as="a" href={`#/scenarios/${scenarioId}/run?mode=plugin`} size="sm" className="bg-purple-600 text-white hover:opacity-90">Plug In</Button>
               </>
             )}
           </div>
@@ -49,7 +50,6 @@ export function ScenarioEditor({
           <RawJsonEditor config={config} onChange={onConfigChange} isReadOnly={isViewMode} />
         )}
       </div>
-    </div>
+    </Card>
   );
 }
-

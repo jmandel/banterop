@@ -4,19 +4,11 @@
   "description": "Language-First Interoperability: A Unified-Event Conversation Platform",
   "type": "module",
   "scripts": {
-    "dev": "bun --watch src/server/index.ts",
-    "dev:backend": "bun --watch src/server/index.ts",
-    "dev:frontend": "bun --port 3003 src/frontend/**/*.html src/frontends/**/*.html",
-    "dev:fullstack": "bun --watch src/dev/index.ts",
-    "frontend": "echo 'Available frontends:' && find src/frontend -name index.html | sed 's|src/frontend/||' | sed 's|/index.html||' | while read app; do echo \"  - $app: bunx --bun vite src/frontend/$app\"; done",
+    "dev": "bun --watch src/index.ts",
+    "fullstack": "NODE_ENV=production bun src/index.ts",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "typecheck": "tsc --noEmit",
-    "clean": "rm -rf data.db data.db-shm data.db-wal public",
-    "build:frontend": "bun scripts/build-frontend.ts",
-    "build:css:scenarios": "bunx --bun tailwindcss -i src/frontend/scenarios/input.css -o src/frontend/scenarios/output.css --minify --content 'src/frontend/scenarios/**/*.{ts,tsx,html}'",
-    "dev:css:scenarios": "bunx --bun tailwindcss -i src/frontend/scenarios/input.css -o src/frontend/scenarios/output.css --watch --content 'src/frontend/scenarios/**/*.{ts,tsx,html}'",
-    "start:prod": "bun src/prod/index.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@google/genai": "^1.13.0",
@@ -32,12 +24,14 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "tailwindcss": "^3.4.13",
+    "@tailwindcss/cli": "^4.0.9",
     "@types/bun": "^1.2.19",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@types/yargs": "^17.0.33",
+    "bun-plugin-tailwind": "^0.0.15",
     "bun-types": "^1.2.19",
-    "typescript": "^5.8.3"
+    "tailwindcss": "^4.1.12",
+    "typescript": "^5.9.2"
   }
 }

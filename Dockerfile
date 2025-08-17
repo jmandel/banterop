@@ -28,8 +28,7 @@ EXPOSE 3000
 # Volume for SQLite persistence
 VOLUME ["/data"]
 
-# Build frontends and start prod server (static + API under /api)
-# Build frontends at container startup using env (PUBLIC_*), then start prod server
-CMD ["bun", "src/prod/index.ts"]
+# Start unified server in production mode
+CMD ["bun", "src/index.ts"]
 
 

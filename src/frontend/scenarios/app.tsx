@@ -1,7 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
+import { AppLayout as SharedAppLayout } from '../ui';
 import { AppLayout } from './components/AppLayout';
+import { Button, Card, CardHeader } from '../ui';
 import { ScenarioLandingPage } from './components/ScenarioLandingPage';
 import { ScenarioBuilderPage } from './components/ScenarioBuilderPage.v2';
 import { ScenarioRunPage } from './components/ScenarioRunPage';
@@ -42,16 +44,17 @@ type ScenarioItem = { id: string; name: string; config: any; history: any[]; cre
 
 function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <div>
-      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', borderBottom: '1px solid #e5e7eb', background: '#fff' }}>
-        <div style={{ fontWeight: 600 }}>Scenario Builder</div>
-        <nav style={{ display: 'flex', gap: 12 }}>
+    <SharedAppLayout
+      title="Scenario Builder"
+      right={(
+        <nav className="flex items-center gap-3">
           <Link to="/scenarios">Scenarios</Link>
           <Link to="/scenarios/create">Create</Link>
         </nav>
-      </header>
-      <main className="container" style={{ padding: 16 }}>{children}</main>
-    </div>
+      )}
+    >
+      {children}
+    </SharedAppLayout>
   );
 }
 
@@ -71,23 +74,23 @@ function LandingPage() {
   }, []);
   return (
     <Layout>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-        <div style={{ fontWeight: 600 }}>Available Scenarios</div>
-        <button className="btn" onClick={() => navigate('/scenarios/create')}>New Scenario</button>
+      <div className="flex items-center justify-between mb-3">
+        <div className="font-semibold">Available Scenarios</div>
+        <Button variant="primary" onClick={() => navigate('/scenarios/create')}>New Scenario</Button>
       </div>
       {loading ? (
-        <div className="muted">Loading…</div>
+        <div className="text-xs text-[color:var(--muted)]">Loading…</div>
       ) : (
-        <div className="row" style={{ flexWrap: 'wrap' }}>
+        <div className="flex flex-wrap gap-3">
           {scenarios.map(sc => (
-            <div key={sc.id} className="card" style={{ width: 360 }}>
-              <div style={{ fontWeight: 600 }}>{sc.name}</div>
-              <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>{sc.id}</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn" onClick={() => navigate(`/scenarios/${encodeURIComponent(sc.id)}`)}>Edit</button>
-                <button className="btn" onClick={() => navigate(`/scenarios/${encodeURIComponent(sc.id)}/run`)}>Run</button>
+            <Card key={sc.id} style={{ width: 360 }}>
+              <div className="font-semibold">{sc.name}</div>
+              <div className="text-xs text-[color:var(--muted)] mt-1 mb-2">{sc.id}</div>
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" onClick={() => navigate(`/scenarios/${encodeURIComponent(sc.id)}`)}>Edit</Button>
+                <Button variant="secondary" onClick={() => navigate(`/scenarios/${encodeURIComponent(sc.id)}/run`)}>Run</Button>
               </div>
-            </div>
+            </Card>
           ))}
         </div>
       )}
@@ -156,28 +159,28 @@ function BuilderPage() {
 
   return (
     <Layout>
-      {loading ? (<div className="muted">Loading…</div>) : (
-        <div className="row" style={{ alignItems: 'flex-start' }}>
+      {loading ? (<div className="text-xs text-[color:var(--muted)]">Loading…</div>) : (
+        <div className="flex items-start gap-3">
           <div style={{ flex: 1 }}>
-            <div className="card">
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
-                <button className="btn" onClick={save}>{isCreate ? 'Create' : 'Save'}</button>
+            <Card>
+              <div className="flex items-center gap-2 mb-2">
+                <input className="flex-1 border border-[color:var(--border)] rounded-2xl px-3 py-2 bg-[color:var(--panel)] text-[color:var(--text)]" value={name} onChange={(e) => setName(e.target.value)} />
+                <Button variant="primary" onClick={save}>{isCreate ? 'Create' : 'Save'}</Button>
               </div>
-              <textarea className="input" style={{ height: 480 }} value={json} onChange={(e) => setJson(e.target.value)} />
-              {status && <div className="muted" style={{ marginTop: 8 }}>{status}</div>}
-            </div>
+              <textarea className="w-full border border-[color:var(--border)] rounded-2xl px-3 py-2 bg-[color:var(--panel)] text-[color:var(--text)]" style={{ height: 480 }} value={json} onChange={(e) => setJson(e.target.value)} />
+              {status && <div className="text-xs text-[color:var(--muted)] mt-2">{status}</div>}
+            </Card>
           </div>
           <div style={{ width: 360 }}>
-            <div className="card">
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>Quick Run (config64)</div>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Generates a base64 URL to launch a configured scenario run.</div>
-              <div className="muted" style={{ fontSize: 12, wordBreak: 'break-all' }}>{config64 || '(invalid config)'}</div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                <button className="btn" disabled={!config64} onClick={() => navigator.clipboard.writeText(`# /scenarios/configured/${config64}`)}>Copy Hash URL</button>
-                <Link className="btn" to={`/scenarios/configured/${config64}`}>Open</Link>
+            <Card>
+              <CardHeader title="Quick Run (config64)" />
+              <div className="text-xs text-[color:var(--muted)] mb-2">Generates a base64 URL to launch a configured scenario run.</div>
+              <div className="text-xs text-[color:var(--muted)] break-words">{config64 || '(invalid config)'}</div>
+              <div className="flex items-center gap-2 mt-2">
+                <Button variant="secondary" disabled={!config64} onClick={() => navigator.clipboard.writeText(`# /scenarios/configured/${config64}`)}>Copy Hash URL</Button>
+                <Link to={`/scenarios/configured/${config64}`} className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl text-sm border border-[color:var(--border)] bg-[color:var(--panel)]">Open</Link>
               </div>
-            </div>
+            </Card>
           </div>
         </div>
       )}
@@ -207,14 +210,14 @@ function ConfiguredPage() {
 
   return (
     <Layout>
-      {error && <div className="card" style={{ color: '#b91c1c' }}>Error: {error}</div>}
+      {error && <Card className="text-[color:var(--danger)]">Error: {error}</Card>}
       {!error && conversationId && (
-        <div className="card">
+        <Card>
           <div>Conversation created: #{conversationId}</div>
-          <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-            <a className="btn" href={`#/conversation/${conversationId}`} onClick={(e) => { e.preventDefault(); window.open(`/watch/#/conversation/${conversationId}`, '_blank'); }}>Open in Watch</a>
+          <div className="mt-2 flex items-center gap-2">
+            <Button variant="secondary" onClick={(e) => { e.preventDefault(); window.open(`/watch/#/conversation/${conversationId}`, '_blank'); }}>Open in Watch</Button>
           </div>
-        </div>
+        </Card>
       )}
       {!error && !conversationId && <div className="muted">Creating conversation…</div>}
     </Layout>
@@ -249,15 +252,15 @@ function RunPage() {
   };
   return (
     <Layout>
-      {error && <div className="card" style={{ color: '#b91c1c' }}>Error: {error}</div>}
+      {error && <Card className="text-[color:var(--danger)]">Error: {error}</Card>}
       {snap && (
-        <div className="card">
-          <div style={{ fontWeight: 600 }}>{snap.name}</div>
-          <div className="muted" style={{ margin: '4px 0 8px' }}>{snap.id}</div>
-          <button className="btn" onClick={launch} disabled={creating}>{creating ? 'Launching…' : 'Launch + Open Watch'}</button>
-        </div>
+        <Card>
+          <div className="font-semibold">{snap.name}</div>
+          <div className="text-xs text-[color:var(--muted)] mt-1 mb-2">{snap.id}</div>
+          <Button variant="primary" onClick={launch} disabled={creating}>{creating ? 'Launching…' : 'Launch + Open Watch'}</Button>
+        </Card>
       )}
-      {!error && !snap && <div className="muted">Loading…</div>}
+      {!error && !snap && <div className="text-xs text-[color:var(--muted)]">Loading…</div>}
     </Layout>
   );
 }

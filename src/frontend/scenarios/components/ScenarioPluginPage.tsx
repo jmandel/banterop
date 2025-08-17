@@ -168,12 +168,12 @@ export function ScenarioPluginPage() {
 
         <div className="p-4 border rounded space-y-2 bg-white">
           <div className="text-sm font-semibold">How To Use (MCP)</div>
-          <ul className="text-sm text-slate-700 space-y-1" style={{ listStyleType: 'disc', paddingLeft: 20 }}>
+          <ul className="text-sm text-slate-700 space-y-1 list-disc pl-5">
             <li><span className="font-medium">begin_chat_thread</span>: starts a new conversation from this template.</li>
             <li><span className="font-medium">send_message_to_chat_thread</span>: input — <code>conversationId</code>, <code>message</code>, optional <code>attachments[]</code>; output — <code>{`{ ok: true, guidance, status: 'waiting' }`}</code>.</li>
             <li>
               <span className="font-medium">check_replies</span>: input — <code>conversationId</code>, optional <code>waitMs</code> (default 10000); output includes:
-              <ul className="mt-1 space-y-1" style={{ listStyleType: 'disc', paddingLeft: 20 }}>
+              <ul className="mt-1 space-y-1 list-disc pl-5">
                 <li>
                   <code>messages</code>: array of objects with keys:
                   <span className="ml-1"><code>from</code>, <code>at</code> (ISO), <code>text</code>,</span>

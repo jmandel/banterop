@@ -7,6 +7,7 @@ type JSONPatchOperation = { op: 'add'|'remove'|'replace'|'copy'|'move'|'test'; p
 import { ChatPanel } from './ChatPanel';
 import { ScenarioEditor } from './ScenarioEditor';
 import { SaveBar } from './SaveBar';
+import { Button } from '../../ui';
 import { api } from '../utils/api';
 import { createDefaultScenario, createBlankScenario } from '../utils/defaults';
 import { buildScenarioBuilderPrompt } from '../utils/prompt-builder';
@@ -721,20 +722,10 @@ export function ScenarioBuilderPage() {
             You have unsaved changes
           </div>
           <div className="flex gap-2">
-            <button
-              className="px-3 py-1.5 text-sm border border-gray-300 bg-white rounded hover:bg-gray-50 disabled:opacity-50"
-              onClick={discardChanges}
-              disabled={state.isSaving}
-            >
-              Discard Changes
-            </button>
-            <button
-              className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-              onClick={saveChanges}
-              disabled={state.isSaving}
-            >
+            <Button variant="secondary" size="sm" onClick={discardChanges} disabled={state.isSaving}>Discard Changes</Button>
+            <Button variant="primary" size="sm" onClick={saveChanges} disabled={state.isSaving}>
               {state.isSaving ? 'Saving...' : (isCreateMode ? 'Create Scenario' : 'Save to Backend')}
-            </button>
+            </Button>
           </div>
         </div>
       )}

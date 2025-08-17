@@ -18,6 +18,7 @@ export type AttachmentRecord = {
 
 type PersistMeta = Pick<AttachmentRecord, "digest" | "summary" | "keywords" | "last_inspected">;
 const META_KEY = "a2a.attach.meta"; // localStorage: digest -> {summary, keywords, last_inspected}
+const ATTACHMENTS_KEY = "a2a.attachments"; // localStorage: full attachment records
 
 function loadMetaMap(): Record<string, PersistMeta> {
   try {
@@ -34,6 +35,33 @@ function saveMetaMap(map: Record<string, PersistMeta>) {
 export class AttachmentVault {
   private byName = new Map<string, AttachmentRecord>();
   private metaMap = loadMetaMap();
+
+  constructor() {
+    this.loadFromStorage();
+  }
+
+  private loadFromStorage() {
+    try {
+      const raw = localStorage.getItem(ATTACHMENTS_KEY);
+      if (raw) {
+        const attachments = JSON.parse(raw) as AttachmentRecord[];
+        attachments.forEach(att => {
+          this.byName.set(att.name, att);
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to load attachments from storage:', e);
+    }
+  }
+
+  private saveToStorage() {
+    try {
+      const attachments = Array.from(this.byName.values());
+      localStorage.setItem(ATTACHMENTS_KEY, JSON.stringify(attachments));
+    } catch (e) {
+      console.warn('Failed to save attachments to storage:', e);
+    }
+  }
 
   listDetailed(): AttachmentRecord[] {
     return [...this.byName.values()];
@@ -57,10 +85,12 @@ export class AttachmentVault {
 
   remove(name: string): void {
     this.byName.delete(name);
+    this.saveToStorage();
   }
 
   clear(): void {
     this.byName.clear();
+    this.saveToStorage();
   }
 
   async addFile(file: File): Promise<AttachmentRecord> {
@@ -85,6 +115,7 @@ export class AttachmentVault {
       base.last_inspected = persisted.last_inspected;
     }
     this.byName.set(base.name, base);
+    this.saveToStorage();
     return base;
   }
 
@@ -97,18 +128,32 @@ export class AttachmentVault {
     // synthetic: compute digest too
     sha256Hex(bytes).then(d => { rec.digest = d; });
     this.byName.set(name, rec);
+    this.saveToStorage();
     return rec;
   }
 
   // Add an attachment provided by an agent (bytes already base64-encoded)
   addFromAgent(name: string, mimeType: string, bytesBase64: string): AttachmentRecord {
+    // Handle duplicate names by appending a counter
+    let finalName = name;
+    let counter = 1;
+    while (this.byName.has(finalName)) {
+      const ext = name.lastIndexOf('.') >= 0 ? name.substring(name.lastIndexOf('.')) : '';
+      const base = name.lastIndexOf('.') >= 0 ? name.substring(0, name.lastIndexOf('.')) : name;
+      finalName = `${base}_${counter}${ext}`;
+      counter++;
+    }
+    
     const rec: AttachmentRecord = {
-      name, mimeType, bytes: bytesBase64, size: atob(bytesBase64).length,
+      name: finalName, mimeType, bytes: bytesBase64, size: bytesBase64 ? atob(bytesBase64).length : 0,
       digest: "", source: 'agent', private: false, priority: false, analysisPending: false
     };
     // compute digest asynchronously
-    sha256Hex(bytesBase64).then(d => { rec.digest = d; });
-    this.byName.set(name, rec);
+    if (bytesBase64) {
+      sha256Hex(bytesBase64).then(d => { rec.digest = d; });
+    }
+    this.byName.set(finalName, rec);
+    this.saveToStorage();
     return rec;
   }
 
@@ -116,12 +161,14 @@ export class AttachmentVault {
     const rec = this.byName.get(name);
     if (!rec) return;
     Object.assign(rec, flags);
+    this.saveToStorage();
   }
 
   markPending(name: string, on: boolean) {
     const rec = this.byName.get(name);
     if (!rec) return;
     rec.analysisPending = on;
+    this.saveToStorage();
   }
 
   updateSummary(name: string, summary: string, keywords: string[]) {
@@ -139,5 +186,6 @@ export class AttachmentVault {
       };
       saveMetaMap(this.metaMap);
     }
+    this.saveToStorage();
   }
 }

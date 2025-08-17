@@ -4,12 +4,14 @@
 import { mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+// Note: Tailwind is built via CLI in this script for reliability
 
 type AppDef = {
   outPath: string;          // path under public/
   entry: string;            // TS/TSX entry
   html: string;             // source HTML to transform and copy
-  extraAssets?: string[];   // additional files to copy (css, images)
+  css?: string;             // CSS entry (processed via Tailwind plugin)
+  extraAssets?: string[];   // additional files to copy (images, misc)
 };
 
 const apps: AppDef[] = [
@@ -17,8 +19,8 @@ const apps: AppDef[] = [
     outPath: '',
     entry: 'src/frontend/scenarios/app.tsx',
     html: 'src/frontend/scenarios/index.html',
+    css: 'src/frontend/ui/app.css',
     extraAssets: [
-      'src/frontend/scenarios/output.css',
       'src/frontend/scenarios/interlocked-speech-bubbles.png',
     ],
   },
@@ -26,13 +28,15 @@ const apps: AppDef[] = [
     outPath: 'watch',
     entry: 'src/frontend/watch/app.tsx',
     html: 'src/frontend/watch/index.html',
+    css: 'src/frontend/ui/app.css',
   },
   {
     outPath: 'a2a-client',
     entry: 'src/frontend/a2a-client/main.tsx',
     html: 'src/frontend/a2a-client/index.html',
+    css: 'src/frontend/ui/app.css',
     extraAssets: [
-      'src/frontend/a2a-client/styles.css',
+      // images or other static assets can be added here
     ],
   },
 ];
@@ -52,6 +56,8 @@ function transformHtml(content: string, entryFilename: string, apiBase: string):
   content = content.replace(/src="\.\/(app|main)\.(t|j)sx?"/g, (_m, name) => `src="./${name}.js"`);
   // Normalize API_BASE to relative '/api'
   content = content.replace(/API_BASE:\s*"http:\/\/localhost:3000\/api"/g, `API_BASE: ${JSON.stringify(apiBase)}`);
+  content = content.replace(/href=\"\.\.\/ui\/app\.css\"/g, 'href=\".\/app.css\"');
+  content = content.replace(/href=\"tailwindcss\"/g, 'href=\".\/app.css\"');
   return content;
 }
 
@@ -73,6 +79,30 @@ async function buildApp(app: AppDef, apiBase: string) {
     for (const m of build.logs) console.error(m);
     process.exitCode = 1;
     return;
+  }
+
+  // Build CSS via Tailwind CLI if provided
+  if (app.css) {
+    const proc = Bun.spawn({
+      cmd: [
+        'bunx',
+        '--bun',
+        '@tailwindcss/cli',
+        '-i',
+        app.css,
+        '-o',
+        join(outdir, 'app.css'),
+        '--minify',
+      ],
+      stdout: 'inherit',
+      stderr: 'inherit',
+    });
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      console.error('Tailwind build failed for', app.outPath);
+      process.exitCode = exitCode;
+      return;
+    }
   }
 
   // Transform and copy index.html
@@ -114,4 +144,3 @@ if (import.meta.main) {
     process.exit(1);
   });
 }
-

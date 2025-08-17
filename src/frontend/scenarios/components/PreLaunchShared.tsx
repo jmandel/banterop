@@ -121,7 +121,7 @@ export function PreLaunchShared({ heading, serverUrlLabel, serverUrl, onCopy, co
                 i
               </button>
               {showInfo && tipPos && (
-                <div className="fixed z-50 w-72 p-3 bg-white border rounded shadow-lg text-xs text-slate-700" style={{ left: tipPos.left, top: tipPos.top }}>
+                <div className="fixed z-50 w-72 p-3 bg-[color:var(--panel)] border border-[color:var(--border)] rounded shadow-lg text-xs text-[color:var(--text)]" style={{ left: tipPos.left, top: tipPos.top }}>
                   <div className="font-medium mb-1">Template hash</div>
                   <div className="mb-2">Used to stamp and discover conversations that match this pre‑launch config.</div>
                   <div className="font-mono break-all text-slate-600">{hash || '(computing…)'}

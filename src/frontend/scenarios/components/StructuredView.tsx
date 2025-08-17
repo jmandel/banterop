@@ -1,4 +1,5 @@
 import React from 'react';
+import { Card, CardHeader, Badge } from '../../ui';
 
 export function StructuredView({ config }: { config: any; onConfigChange?: (c: any) => void; isReadOnly?: boolean; scenarioId?: string; isEditMode?: boolean }) {
   const renderJsonPreview = (data: any, label: string) => {
@@ -34,19 +35,14 @@ export function StructuredView({ config }: { config: any; onConfigChange?: (c: a
               statusText = toolType.charAt(0).toUpperCase() + toolType.slice(1);
             }
           }
-          const chipClasses: Record<string,string> = {
-            success: 'bg-green-100 text-green-700',
-            failure: 'bg-rose-100 text-rose-700',
-            neutral: 'bg-amber-100 text-amber-700',
-            ongoing: 'bg-sky-100 text-sky-700'
-          };
+          const toVariant = (t: string): 'success'|'danger'|'warning'|'neutral' => (
+            t === 'success' ? 'success' : t === 'failure' ? 'danger' : t === 'neutral' ? 'warning' : 'neutral'
+          );
           return (
             <div key={index} className="pb-2 border-b border-gray-100 last:border-0">
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-sm font-medium">{tool.toolName}</span>
-                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${chipClasses[toolType]}`}>
-                  {isTerminal ? `Terminal (${statusText})` : 'Ongoing'}
-                </span>
+                <Badge variant={toVariant(toolType)}>{isTerminal ? `Terminal (${statusText})` : 'Ongoing'}</Badge>
               </div>
               {tool.description && (
                 <div className="text-xs text-gray-600 leading-relaxed">{tool.description}</div>
@@ -64,16 +60,16 @@ export function StructuredView({ config }: { config: any; onConfigChange?: (c: a
   };
 
   const AgentCard = ({ agentConfig }: { agentConfig: any }) => (
-    <div className="rounded-md border border-gray-200 bg-white p-4">
-      <h3 className="text-sm font-semibold text-slate-700 mb-3">Agent: {agentConfig.agentId}</h3>
+    <Card className="p-4">
+      <CardHeader title={`Agent: ${agentConfig.agentId}`} />
       <div className="space-y-3">
         <div>
           <div className="text-xs font-medium text-gray-600 mb-1">Principal</div>
           <div className="text-sm">{agentConfig.principal?.name} ({agentConfig.principal?.type})</div>
         </div>
         <div>
-          <div className="text-xs font-medium text-gray-600 mb-1">System Prompt</div>
-          <div className="text-sm whitespace-pre-wrap bg-gray-50 p-2 rounded">{agentConfig.systemPrompt}</div>
+          <div className="text-xs font-medium text-[color:var(--muted)] mb-1">System Prompt</div>
+          <div className="text-sm whitespace-pre-wrap bg-[color:var(--panel)] border border-[color:var(--border)] p-2 rounded">{agentConfig.systemPrompt}</div>
         </div>
         <div>
           <div className="text-xs font-medium text-gray-600 mb-1">Situation</div>
@@ -98,17 +94,17 @@ export function StructuredView({ config }: { config: any; onConfigChange?: (c: a
           {renderJsonPreview(agentConfig.knowledgeBase, 'knowledge base')}
         </div>
         <div>
-          <div className="text-xs font-medium text-gray-600 mb-1">Tools</div>
+          <div className="text-xs font-medium text-[color:var(--muted)] mb-1">Tools</div>
           {renderTools(agentConfig.tools)}
         </div>
       </div>
-    </div>
+    </Card>
   );
 
   return (
     <div className="space-y-4">
-      <div className="rounded-md border border-gray-200 bg-white p-4">
-        <h3 className="text-sm font-semibold text-slate-700 mb-3">Metadata</h3>
+      <Card className="p-4">
+        <CardHeader title="Metadata" />
         <div className="space-y-3">
           <div>
             <div className="text-xs font-medium text-gray-600 mb-1">Title</div>
@@ -119,21 +115,21 @@ export function StructuredView({ config }: { config: any; onConfigChange?: (c: a
             <div className="text-sm">{config?.metadata?.description || <span className="text-gray-500 italic">No description</span>}</div>
           </div>
           <div>
-            <div className="text-xs font-medium text-gray-600 mb-1">Tags</div>
+            <div className="text-xs font-medium text-[color:var(--muted)] mb-1">Tags</div>
             <div className="flex flex-wrap gap-2 items-center">
               {(config?.metadata?.tags || []).map((tag: string, i: number) => (
-                <span key={i} className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full">{tag}</span>
+                <Badge key={i} variant="neutral">{tag}</Badge>
               ))}
               {(!config?.metadata?.tags || config?.metadata?.tags.length === 0) && (
-                <span className="text-gray-500 italic text-xs">No tags</span>
+                <span className="text-[color:var(--muted)] italic text-xs">No tags</span>
               )}
             </div>
           </div>
         </div>
-      </div>
+      </Card>
 
-      <div className="rounded-md border border-gray-200 bg-white p-4">
-        <h3 className="text-sm font-semibold text-slate-700 mb-3">Narrative</h3>
+      <Card className="p-4">
+        <CardHeader title="Narrative" />
         <div className="space-y-3">
           <div>
             <div className="text-xs font-medium text-gray-600 mb-1">Background</div>
@@ -146,7 +142,7 @@ export function StructuredView({ config }: { config: any; onConfigChange?: (c: a
             </ul>
           </div>
         </div>
-      </div>
+      </Card>
 
       {(config?.agents || []).map((agent: any) => <AgentCard key={agent.agentId} agentConfig={agent} />)}
     </div>

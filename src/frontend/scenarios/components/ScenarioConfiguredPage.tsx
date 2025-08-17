@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Button } from '../../ui';
 import { useParams } from 'react-router-dom';
 import { BrowserAgentRegistry } from '$src/agents/clients/browser-agent-registry';
 import { BrowserAgentHost } from '$src/agents/clients/browser-agent-host';
@@ -395,31 +396,29 @@ export function ScenarioConfiguredPage() {
                 return (
                   <div
                     key={aid}
-                    style={{ display: 'grid', gridTemplateColumns: '1fr 80px 1fr', columnGap: 8, alignItems: 'center' }}
+                    className="grid [grid-template-columns:1fr_80px_1fr] gap-2 items-center"
                   >
                     <div className="font-mono text-xs px-2 py-1 border rounded bg-gray-50 truncate" title={aid}>{aid}</div>
-                    <div className="text-xs text-gray-700 text-center" style={{ width: 80 }}>{status}</div>
-                    <div style={{ height: 28, display: 'flex', alignItems: 'center' }}>
-                      <button
+                    <div className="text-xs text-gray-700 text-center w-[80px]">{status}</div>
+                    <div className="h-7 flex items-center gap-2">
+                      <Button
+                        variant="primary"
                         disabled={disableStart}
-                        className="px-2 py-1 text-xs bg-blue-600 text-white rounded disabled:opacity-40"
-                        style={{ width: 130 }}
+                        className="w-[130px]"
                         onClick={() => startBrowserAgent(aid)}
-                      >Start in Browser</button>
-                      <span style={{ display: 'inline-block', width: 8 }} />
-                      <button
+                      >Start in Browser</Button>
+                      <Button
+                        variant="primary"
                         disabled={disableStart}
-                        className="px-2 py-1 text-xs bg-blue-600 text-white rounded disabled:opacity-40"
-                        style={{ width: 130 }}
+                        className="w-[130px]"
                         onClick={() => startServerAgent(aid)}
-                      >Start on Server</button>
-                      <span style={{ display: 'inline-block', width: 8 }} />
-                      <button
+                      >Start on Server</Button>
+                      <Button
+                        variant="danger"
                         disabled={disableStop}
-                        className="px-2 py-1 text-xs bg-rose-600 text-white rounded disabled:opacity-40"
-                        style={{ width: 70 }}
+                        className="w-[70px]"
                         onClick={() => stopAgent(aid)}
-                      >Stop</button>
+                      >Stop</Button>
                     </div>
                   </div>
                 );

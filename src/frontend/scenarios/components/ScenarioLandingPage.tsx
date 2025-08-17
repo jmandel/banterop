@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Card } from '../../ui';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 
@@ -155,7 +156,7 @@ export function ScenarioLandingPage() {
             </div>
           ) : (
             filteredScenarios.map((scenario) => (
-              <div key={scenario.config.metadata.id} className="rounded-md border border-gray-200 p-3 hover:shadow-sm transition bg-white">
+              <Card key={scenario.config.metadata.id} className="hover:shadow-sm transition">
                 <div className="mb-3">
                   <h3 className="text-sm font-semibold text-gray-900 mb-1">
                     {scenario.config.metadata.title || scenario.name}
@@ -171,32 +172,12 @@ export function ScenarioLandingPage() {
                 </div>
 
                 <div className="flex gap-2">
-                  <a
-                    href={`#/scenarios/${scenario.config.metadata.id}`}
-                    className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 inline-block text-center"
-                  >
-                    View
-                  </a>
-                  <a
-                    href={`#/scenarios/${scenario.config.metadata.id}/edit`}
-                    className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 inline-block text-center"
-                  >
-                    Edit
-                  </a>
-                  <a
-                    href={`#/scenarios/${scenario.config.metadata.id}/run`}
-                    className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 inline-block text-center"
-                  >
-                    Run
-                  </a>
-                  <a
-                    href={`#/scenarios/${scenario.config.metadata.id}/run?mode=plugin`}
-                    className="px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 inline-block text-center"
-                  >
-                    Plug In
-                  </a>
+                  <a href={`#/scenarios/${scenario.config.metadata.id}`} className="inline-flex items-center gap-2 px-2 py-1 text-xs border border-[color:var(--border)] rounded-2xl bg-[color:var(--panel)]">View</a>
+                  <a href={`#/scenarios/${scenario.config.metadata.id}/edit`} className="inline-flex items-center gap-2 px-2 py-1 text-xs border border-[color:var(--border)] rounded-2xl bg-[color:var(--panel)]">Edit</a>
+                  <a href={`#/scenarios/${scenario.config.metadata.id}/run`} className="inline-flex items-center gap-2 px-2 py-1 text-xs rounded-2xl bg-[color:var(--primary)] text-[color:var(--primary-foreground)]">Run</a>
+                  <a href={`#/scenarios/${scenario.config.metadata.id}/run?mode=plugin`} className="inline-flex items-center gap-2 px-2 py-1 text-xs rounded-2xl bg-purple-600 text-white">Plug In</a>
                 </div>
-              </div>
+              </Card>
             ))
           )}
         </div>
@@ -220,20 +201,13 @@ export function ScenarioLandingPage() {
               rows={2}
             />
             <button 
-              className="flex items-center justify-center text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 flex-shrink-0 aspect-square" 
-              style={{ width: '68px', height: '68px' }}
+              className="flex items-center justify-center text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 flex-shrink-0 aspect-square w-[68px] h-[68px]" 
               onClick={handleDiceClick}
               onMouseEnter={triggerWiggle}
               title="Random scenario idea"
             >
               <span 
-                className="text-3xl leading-none" 
-                style={{ 
-                  fontSize: '2.5rem', 
-                  display: 'inline-block',
-                  transform: isWiggling ? 'rotate(-10deg)' : 'rotate(0deg)',
-                  transition: 'transform 0.15s ease-in-out'
-                }}
+                className={`text-[2.5rem] leading-none inline-block transition-transform duration-150 ease-in-out ${isWiggling ? 'rotate-[-10deg]' : 'rotate-0'}`}
               >
                 ⚄
               </span>

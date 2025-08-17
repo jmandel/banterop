@@ -390,7 +390,7 @@ All WS CLIs default to `ws://localhost:3000/api/ws`; override with `--url`.
 Lightweight watch/debug UI at `src/frontend/watch/`:
 
 ```bash
-bun run dev:frontend   # serves http://localhost:3001
+bun run dev   # serves all frontends at http://localhost:3000
 ```
 
 #### Keyboard Shortcuts (Watch)

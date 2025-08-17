@@ -299,12 +299,17 @@ export class Planner {
       if (!prevIds.has(m.messageId) && m.role === 'agent') {
         const text = String((m.parts || []).filter((p:any)=>p?.kind==='text').map((p:any)=>p.text).join('\n') || '');
         this.plannerEvents.push({ type: 'agent_message', at: new Date().toISOString(), text: text || undefined } as any);
-        const atts = (m.parts || []).filter((p:any)=>p?.kind==='file').map((p:any)=>({ name: p.file?.name, mimeType: p.file?.mimeType, bytes: p.file?.bytes }))
+        const atts = (m.parts || []).filter((p:any)=>p?.kind==='file').map((p:any)=>({ name: p.file?.name, mimeType: p.file?.mimeType, bytes: p.file?.bytes, uri: p.file?.uri }))
           .filter((a:any)=>a?.name && a?.mimeType);
         if (atts.length) {
           for (const a of atts) {
             this.plannerEvents.push({ type: 'agent_document_added', at: new Date().toISOString(), name: a.name, mimeType: a.mimeType } as any);
-            if (a.bytes) { try { this.opts.vault.addFromAgent(a.name, a.mimeType, a.bytes); } catch {} }
+            if (a.bytes) { 
+              try { this.opts.vault.addFromAgent(a.name, a.mimeType, a.bytes); } catch {} 
+            } else if (a.uri) {
+              // Add URI-based attachment to vault (without bytes for now)
+              try { this.opts.vault.addFromAgent(a.name, a.mimeType, ''); } catch {}
+            }
           }
         }
       }
