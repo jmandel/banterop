@@ -69,6 +69,7 @@ export class BrowsersideLLMProvider extends LLMProvider {
         temperature: request.temperature,
         maxTokens: request.maxTokens,
         tools: request.tools,
+        loggingMetadata: request.loggingMetadata,
       }),
     });
     

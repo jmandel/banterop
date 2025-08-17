@@ -40,8 +40,15 @@ export class AssistantAgent extends BaseAgent<ConversationSnapshot> {
       return;
     }
     
-    // Call the LLM provider
-    const response = await this.llmProvider.complete({ messages });
+    // Call the LLM provider with logging metadata
+    const response = await this.llmProvider.complete({ 
+      messages,
+      loggingMetadata: {
+        conversationId: String(ctx.conversationId),
+        agentName: ctx.agentId,
+        turnNumber: messages.filter(m => m.role === 'assistant').length + 1
+      }
+    });
 
     // Check if stopped after LLM call
     if (!this.running) {

@@ -163,6 +163,13 @@ export function createLLMRoutes(pm: LLMProviderManager) {
       const debugEnabled = debugFlag && !/^0|false|off$/i.test(debugFlag);
       let basePath: string | null = null;
       if (debugEnabled) {
+        // Log metadata for debugging
+        if (input.loggingMetadata) {
+          console.log(`[LLM Debug] Request has metadata:`, JSON.stringify(input.loggingMetadata));
+        } else {
+          console.log(`[LLM Debug] Request has NO metadata`);
+        }
+        
         basePath = generateDebugPath(input.loggingMetadata);
         // basePath is now a directory, not a file prefix
         if (!existsSync(basePath)) {
