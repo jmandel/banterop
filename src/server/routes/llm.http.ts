@@ -52,7 +52,11 @@ function generateDebugPath(metadata?: LLMLoggingMetadata): string {
   const baseDir = resolve(process.env.LLM_DEBUG_DIR || '/data/llm-debug');
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   
-  if (!metadata) {
+  if (!metadata || (!metadata.conversationId && !metadata.scenarioId)) {
+    // Log why we're using untagged
+    if (metadata) {
+      console.log(`[LLM Debug] Using untagged - metadata present but missing IDs:`, JSON.stringify(metadata));
+    }
     const rand = Math.random().toString(36).slice(2, 8);
     return join(baseDir, 'untagged', `${timestamp}-${rand}`);
   }
@@ -85,7 +89,10 @@ function generateDebugPath(metadata?: LLMLoggingMetadata): string {
   else if (metadata.scenarioId) {
     const safeScenarioId = sanitizePathComponent(metadata.scenarioId);
     parts.push('scenario_editor');
-    parts.push(`${safeScenarioId}_${timestamp}`);
+    // Use flat structure like conversations - timestamp first for sorting
+    let filename = `${timestamp}_${safeScenarioId}`;
+    if (metadata.stepDescriptor) filename += `_${sanitizePathComponent(metadata.stepDescriptor)}`;
+    parts.push(filename);
   } 
   // Partial metadata fallback
   else {

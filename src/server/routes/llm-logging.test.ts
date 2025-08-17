@@ -130,14 +130,14 @@ describe('LLM Logging with Metadata', () => {
     expect(logDir).toContain('_tool_synthesis_synthesize_search_weather');
   });
 
-  it('creates scenario editor logs in separate folder', async () => {
+  it('creates scenario editor logs in flat structure', async () => {
     const request = {
       messages: [
         { role: 'user', content: 'Create a scenario' }
       ],
       loggingMetadata: {
         scenarioId: 'weather-app',
-        stepDescriptor: 'scenario_editor'
+        stepDescriptor: 'create_initial'
       }
     };
 
@@ -158,9 +158,16 @@ describe('LLM Logging with Metadata', () => {
     const entries = readdirSync(editorDir);
     expect(entries.length).toBeGreaterThan(0);
 
-    const logDir = entries[0];
-    expect(logDir).toContain('weather-app_');
-    expect(logDir).toMatch(/\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}/);
+    const logDir = entries[0] as string;
+    // Should start with timestamp for chronological sorting
+    expect(logDir).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}/);
+    expect(logDir).toContain('_weather-app_create_initial');
+    
+    // Check that it's a directory with the standard files
+    const logPath = join(editorDir, logDir);
+    expect(existsSync(join(logPath, 'request.txt'))).toBe(true);
+    expect(existsSync(join(logPath, 'response.txt'))).toBe(true);
+    expect(existsSync(join(logPath, 'metadata.json'))).toBe(true);
   });
 
   it('maintains chronological order within conversation', async () => {

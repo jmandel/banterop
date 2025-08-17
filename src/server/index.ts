@@ -166,7 +166,7 @@ export const app = server;
     
     if (publishEnabled) {
       const baseUrl = process.env.PUBLIC_API_BASE_URL || `http://localhost:${port}/api`;
-      const debugUrl = baseUrl.replace(/\/api$/, '') + '/debug-logs';
+      const debugUrl = baseUrl.replace(/\/api$/, '') + '/api/debug-logs';
       console.log(`[LLM Debug] 🌐 Debug logs publicly accessible at: ${debugUrl}`);
     } else {
       console.log(`[LLM Debug] 🔒 Debug logs NOT publicly accessible (PUBLISH_LLM_DEBUG_LOGS_OPENLY is not enabled)`);
