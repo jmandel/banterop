@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { LLMProvider, type LLMProviderConfig, type LLMProviderMetadata, type LLMRequest, type LLMResponse, type LLMMessage } from '$src/types/llm.types';
+import { getLLMDebugLogger } from '$src/llm/services/debug-logger';
 
 export class GoogleLLMProvider extends LLMProvider {
   static isAvailable(env?: { googleApiKey?: string }): boolean {
@@ -30,6 +31,10 @@ export class GoogleLLMProvider extends LLMProvider {
     
     const modelName = request.model || this.config.model || this.getMetadata().defaultModel;
     
+    // Log request before sending
+    const logger = getLLMDebugLogger();
+    const logPath = await logger.logRequest(request, request.loggingMetadata);
+    
     // Convert messages to Google format
     const contents = this.convertMessagesToGoogleFormat(request.messages);
     
@@ -45,9 +50,14 @@ export class GoogleLLMProvider extends LLMProvider {
     
     const text = response.text || '';
     
-    return {
+    const result: LLMResponse = {
       content: text,
     };
+
+    // Log response after receiving
+    await logger.logResponse(result, logPath);
+
+    return result;
   }
   
   private convertMessagesToGoogleFormat(messages: LLMMessage[]) {

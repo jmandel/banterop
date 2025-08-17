@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { LLMProvider, type LLMProviderConfig, type LLMProviderMetadata, type LLMRequest, type LLMResponse } from '$src/types/llm.types';
+import { getLLMDebugLogger } from '$src/llm/services/debug-logger';
 
 export class OpenRouterLLMProvider extends LLMProvider {
   private client: OpenAI;
@@ -39,6 +40,10 @@ export class OpenRouterLLMProvider extends LLMProvider {
   async complete(request: LLMRequest): Promise<LLMResponse> {
     const modelName = request.model || this.config.model || this.getMetadata().defaultModel;
     
+    // Log request before sending
+    const logger = getLLMDebugLogger();
+    const logPath = await logger.logRequest(request, request.loggingMetadata);
+    
     const completion = await this.client.chat.completions.create({
       model: modelName,
       messages: request.messages,
@@ -50,10 +55,8 @@ export class OpenRouterLLMProvider extends LLMProvider {
     if (!choice?.message?.content) {
       throw new Error('No response from OpenRouter');
     }
-
-    console.log(request, choice);
     
-    return {
+    const result: LLMResponse = {
       content: choice.message.content,
       ...(completion.usage ? {
         usage: {
@@ -62,5 +65,10 @@ export class OpenRouterLLMProvider extends LLMProvider {
         }
       } : {}),
     };
+
+    // Log response after receiving
+    await logger.logResponse(result, logPath);
+    
+    return result;
   }
 }
