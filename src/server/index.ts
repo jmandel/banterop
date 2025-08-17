@@ -136,6 +136,46 @@ process.on('SIGTERM', async () => {
 // Export both the Hono app and the server config
 export const app = server;
 
+// Log debug configuration on startup
+(() => {
+  const port = Number(process.env.PORT ?? 3000);
+  console.log(`[Server] Starting on port ${port}`);
+  
+  // Check LLM debug logging configuration
+  const debugFlag = (process.env.DEBUG_LLM_REQUESTS || '').toString().trim();
+  const debugEnabled = debugFlag && !/^0|false|off$/i.test(debugFlag);
+  const debugDir = process.env.LLM_DEBUG_DIR || '/data/llm-debug';
+  const publishFlag = (process.env.PUBLISH_LLM_DEBUG_LOGS_OPENLY || '').toString().trim();
+  const publishEnabled = publishFlag && !/^0|false|off$/i.test(publishFlag);
+  
+  if (debugEnabled) {
+    console.log(`[LLM Debug] ✅ Debug logging ENABLED`);
+    console.log(`[LLM Debug] 📁 Writing logs to: ${debugDir}`);
+    
+    // Check if directory exists and is writable
+    try {
+      const stats = statSync(debugDir);
+      if (stats.isDirectory()) {
+        console.log(`[LLM Debug] ✅ Directory exists and is accessible`);
+      } else {
+        console.log(`[LLM Debug] ⚠️  Path exists but is not a directory`);
+      }
+    } catch (err) {
+      console.log(`[LLM Debug] ⚠️  Directory does not exist or is not accessible:`, err);
+    }
+    
+    if (publishEnabled) {
+      const baseUrl = process.env.PUBLIC_API_BASE_URL || `http://localhost:${port}/api`;
+      const debugUrl = baseUrl.replace(/\/api$/, '') + '/debug-logs';
+      console.log(`[LLM Debug] 🌐 Debug logs publicly accessible at: ${debugUrl}`);
+    } else {
+      console.log(`[LLM Debug] 🔒 Debug logs NOT publicly accessible (PUBLISH_LLM_DEBUG_LOGS_OPENLY is not enabled)`);
+    }
+  } else {
+    console.log(`[LLM Debug] ❌ Debug logging DISABLED (set DEBUG_LLM_REQUESTS=true to enable)`);
+  }
+})();
+
 export default {
   port: Number(process.env.PORT ?? 3000),
   fetch: server.fetch,

@@ -4,12 +4,22 @@ export interface LLMMessage {
   content: string;
 }
 
+export interface LLMLoggingMetadata {
+  conversationId?: string;
+  agentName?: string;
+  turnNumber?: number;
+  scenarioId?: string;
+  stepDescriptor?: string;
+  requestId?: string;
+}
+
 export interface LLMRequest {
   messages: LLMMessage[];
   model?: string;
   temperature?: number;
   maxTokens?: number;
   tools?: LLMTool[];
+  loggingMetadata?: LLMLoggingMetadata;
 }
 
 export interface LLMTool {

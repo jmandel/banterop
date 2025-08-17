@@ -54,9 +54,17 @@ export const api = {
     return { success: true, data: res };
   },
 
-  async generateLLM(request: any, signal?: AbortSignal) {
+  async generateLLM(request: any, signal?: AbortSignal, scenarioId?: string) {
+    // Add logging metadata for scenario editor calls
+    const requestWithMetadata = {
+      ...request,
+      loggingMetadata: scenarioId ? {
+        scenarioId,
+        stepDescriptor: 'scenario_editor'
+      } : undefined
+    };
     const item = await http<any>(`/llm/complete`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), signal
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestWithMetadata), signal
     });
     return { success: true, data: item };
   },

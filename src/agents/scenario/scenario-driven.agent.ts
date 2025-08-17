@@ -61,6 +61,7 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
   private systemPromptExtra?: string; // Conversation-level extra prompt from runtime config
   private initiatingMessageExtra?: string; // Conversation-level extra initiating message text
   private isFirstTurnOfConversation: boolean = false;
+  private currentTurnNumber: number = 0;
 
   constructor(
     transport: IAgentTransport,
@@ -75,6 +76,12 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
     
     // Use the snapshot from context (stable view at turn start)
     const snapshot = ctx.snapshot;
+    
+    // Count turn number based on messages from this agent
+    const agentMessages = snapshot.events.filter(e => 
+      e.type === 'message' && e.agentId === agentId
+    );
+    this.currentTurnNumber = agentMessages.length + 1;
     
     // Only log essential info, not the full objects
     console.log(`[${agentId}] takeTurn - has scenario: ${!!snapshot.scenario}, has runtimeMeta: ${!!snapshot.runtimeMeta}`);
@@ -187,7 +194,7 @@ export class ScenarioDrivenAgent extends BaseAgent<ConversationSnapshot> {
         
         let result: ParsedResponse;
         try {
-          result = await this.extractToolCallsFromLLMResponse(prompt);
+          result = await this.extractToolCallsFromLLMResponse(prompt, ctx, stepCount);
           console.log("REQ", prompt)
           console.log("RES", result);
           logLine(ctx.agentId, 'info', `LLM response received: ${result.message}`);
@@ -491,7 +498,7 @@ Your response MUST follow this EXACT format:
     return `• ${tool.toolName}(${params})${terminalMarker}\n  └─ ${tool.description}`;
   }
 
-  private async extractToolCallsFromLLMResponse(prompt: string): Promise<ParsedResponse> {
+  private async extractToolCallsFromLLMResponse(prompt: string, ctx: TurnContext<ConversationSnapshot>, stepNumber?: number): Promise<ParsedResponse> {
     // Split the prompt into system and user parts
     // Everything up to and including AVAILABLE_TOOLS is system prompt
     // Everything after that is user prompt
@@ -512,7 +519,15 @@ Your response MUST follow this EXACT format:
         ]
       : [{ role: 'user', content: prompt }];
     
-    const request: LLMRequest = { messages };
+    const request: LLMRequest = { 
+      messages,
+      loggingMetadata: {
+        conversationId: String(ctx.conversationId),
+        agentName: this.agentConfig?.agentId || 'scenario_agent',
+        turnNumber: this.currentTurnNumber,
+        stepDescriptor: stepNumber !== undefined ? `step_${stepNumber}` : undefined
+      }
+    };
 
     // Check if stopped before making LLM call
     if (!this.running) {
@@ -730,7 +745,8 @@ Your response MUST follow this EXACT format:
               goals: this.agentConfig!.goals,
             },
             scenario: this.scenario!,
-            conversationHistory: fullHistory
+            conversationHistory: fullHistory,
+            conversationId: String(ctx.conversationId)
           });
           
           toolOutput = synthesisResult.output;

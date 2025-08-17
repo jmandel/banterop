@@ -405,7 +405,7 @@ export function ScenarioBuilderPage() {
           messages: [{ role: 'user', content: prompt }],
           model: state.selectedModel,
           temperature: 0.2
-        }, controller.signal);
+        }, controller.signal, state.scenarioConfig?.metadata?.id);
       } catch (llmError: any) {
         // Check if it was aborted
         if (llmError.name === 'AbortError') {

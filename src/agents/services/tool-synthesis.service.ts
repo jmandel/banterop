@@ -67,6 +67,7 @@ export interface ToolExecutionInput {
   agent: OracleAgentPersona;
   scenario: ScenarioConfiguration;
   conversationHistory: string; // include recent window for realism
+  conversationId?: string; // For logging metadata
 }
 
 export interface ToolExecutionOutput {
@@ -115,7 +116,15 @@ export class ToolSynthesisService {
     const messages: LLMMessage[] = [{ role: 'user', content: prompt }];
 
     const attempt = async (msgs: LLMMessage[], temp: number) => {
-      const resp = await this.llm.complete({ messages: msgs, temperature: temp });
+      const resp = await this.llm.complete({ 
+        messages: msgs, 
+        temperature: temp,
+        loggingMetadata: {
+          conversationId: input.conversationId,
+          agentName: 'tool_synthesis',
+          stepDescriptor: `synthesize_${input.tool.toolName}`
+        }
+      });
       return this.parseOracleResponse(resp.content || '');
     };
 
