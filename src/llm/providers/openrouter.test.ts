@@ -63,7 +63,7 @@ describe('OpenRouterLLMProvider', () => {
       { role: 'user' as const, content: 'Hello' }
     ];
     
-    await provider.complete({ messages });
+    await provider.complete({ messages, loggingMetadata: {} });
     
     const expectedModel = provider.getMetadata().defaultModel;
     expect(mockCreate).toHaveBeenCalledWith({
@@ -95,7 +95,8 @@ describe('OpenRouterLLMProvider', () => {
     await provider.complete({ 
       messages: [{ role: 'user' as const, content: 'test' }],
       temperature: 0.7,
-      maxTokens: 150
+      maxTokens: 150,
+      loggingMetadata: {}
     });
     
     const expectedModel = provider.getMetadata().defaultModel;
@@ -126,7 +127,8 @@ describe('OpenRouterLLMProvider', () => {
     };
     
     const response = await provider.complete({
-      messages: [{ role: 'user' as const, content: 'test' }]
+      messages: [{ role: 'user' as const, content: 'test' }],
+      loggingMetadata: {}
     });
     
     expect(response.content).toBe('Response without usage');
@@ -150,7 +152,8 @@ describe('OpenRouterLLMProvider', () => {
     };
     
     await expect(provider.complete({
-      messages: [{ role: 'user' as const, content: 'test' }]
+      messages: [{ role: 'user' as const, content: 'test' }],
+      loggingMetadata: {}
     })).rejects.toThrow('No response from OpenRouter');
   });
 
@@ -176,7 +179,8 @@ describe('OpenRouterLLMProvider', () => {
     };
     
     await provider.complete({
-      messages: [{ role: 'user' as const, content: 'test' }]
+      messages: [{ role: 'user' as const, content: 'test' }],
+      loggingMetadata: {}
     });
     
     expect(mockCreate).toHaveBeenCalledWith({

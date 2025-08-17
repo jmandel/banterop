@@ -19,7 +19,8 @@ describe('MockLLMProvider', () => {
       messages: [
         { role: 'system', content: 'You are a test assistant' },
         { role: 'user', content: 'Hello, mock!' }
-      ]
+      ],
+      loggingMetadata: {}
     });
     
     expect(response.content).toBe('Mock response to: "Hello, mock!"');
@@ -37,7 +38,8 @@ describe('MockLLMProvider', () => {
         { role: 'user', content: 'First question' },
         { role: 'assistant', content: 'First answer' },
         { role: 'user', content: 'Second question' }
-      ]
+      ],
+      loggingMetadata: {}
     });
     
     expect(response.content).toBe('Mock response to: "Second question"');
@@ -47,7 +49,8 @@ describe('MockLLMProvider', () => {
     const provider = new MockLLMProvider({ provider: 'mock' });
     
     const response = await provider.complete({
-      messages: []
+      messages: [],
+      loggingMetadata: {}
     });
     
     expect(response.content).toBe('Mock response with no user input');
@@ -59,7 +62,8 @@ describe('MockLLMProvider', () => {
     const response = await provider.complete({
       messages: [{ role: 'user', content: 'Test' }],
       temperature: 0.5,
-      maxTokens: 100
+      maxTokens: 100,
+      loggingMetadata: {}
     });
     
     // Mock provider doesn't actually use these, but should accept them

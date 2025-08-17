@@ -42,9 +42,9 @@ export type TracePayload =
   | { type: 'turn_cleared'; abortedBy: string; timestamp: string; reason?: string };
 
 export interface SystemPayload {
-  kind: 'idle_timeout' | 'note' | 'meta_created' | 'meta_updated' | 'turn_started' | 'turn_phase_changed';
+  kind: 'idle_timeout' | 'note' | 'meta_created';
   data?: unknown;
-  metadata?: unknown;  // For meta_created/meta_updated events
+  metadata?: unknown;
 }
 
 export interface AppendEventInput<T = unknown> {

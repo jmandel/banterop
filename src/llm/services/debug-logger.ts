@@ -72,15 +72,13 @@ function generateDebugPath(metadata?: LLMLoggingMetadata): string {
 }
 
 export class LLMDebugLogger {
-  private enabled: boolean;
-
-  constructor() {
+  private isEnabled(): boolean {
     const debugFlag = (process.env.DEBUG_LLM_REQUESTS || '').toString().trim();
-    this.enabled = Boolean(debugFlag && !/^0|false|off$/i.test(debugFlag));
+    return Boolean(debugFlag && !/^0|false|off$/i.test(debugFlag));
   }
 
   private async ensureLogDirectory(metadata?: LLMLoggingMetadata): Promise<string | null> {
-    if (!this.enabled) return null;
+    if (!this.isEnabled()) return null;
 
     if (metadata) {
       console.log(`[LLM Debug] Request has metadata:`, JSON.stringify(metadata));
@@ -134,7 +132,7 @@ export class LLMDebugLogger {
   }
 
   async logResponse(response: LLMResponse, basePath: string | null): Promise<void> {
-    if (!this.enabled || !basePath) return;
+    if (!this.isEnabled() || !basePath) return;
 
     const resText = (response?.content ?? '').toString();
     try { 

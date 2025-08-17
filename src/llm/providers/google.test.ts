@@ -14,7 +14,8 @@ describe('GoogleLLMProvider', () => {
     const provider = new GoogleLLMProvider({ provider: 'google' });
     
     await expect(provider.complete({
-      messages: [{ role: 'user', content: 'test' }]
+      messages: [{ role: 'user', content: 'test' }],
+      loggingMetadata: {}
     })).rejects.toThrow('Google AI client not initialized - API key required');
   });
 
@@ -86,7 +87,8 @@ describe('GoogleLLMProvider', () => {
     };
     
     await provider.complete({
-      messages: [{ role: 'user', content: 'test' }]
+      messages: [{ role: 'user', content: 'test' }],
+      loggingMetadata: {}
     });
     
     expect(mockGenerateContent).toHaveBeenCalledWith({

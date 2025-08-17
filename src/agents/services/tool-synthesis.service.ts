@@ -115,15 +115,17 @@ export class ToolSynthesisService {
     const prompt = this.buildOraclePrompt(input);
     const messages: LLMMessage[] = [{ role: 'user', content: prompt }];
 
+    const loggingMetadata = {
+      conversationId: input.conversationId,
+      agentName: 'tool_synthesis',
+      stepDescriptor: `synthesize_${input.tool.toolName}`
+    };
+
     const attempt = async (msgs: LLMMessage[], temp: number) => {
       const resp = await this.llm.complete({ 
         messages: msgs, 
         temperature: temp,
-        loggingMetadata: {
-          conversationId: input.conversationId,
-          agentName: 'tool_synthesis',
-          stepDescriptor: `synthesize_${input.tool.toolName}`
-        }
+        loggingMetadata
       });
       return this.parseOracleResponse(resp.content || '');
     };

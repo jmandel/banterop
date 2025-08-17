@@ -519,18 +519,13 @@ Your response MUST follow this EXACT format:
         ]
       : [{ role: 'user', content: prompt }];
     
-    // Log if conversation ID is missing
-    if (!ctx.conversationId) {
-      console.warn(`[ScenarioDrivenAgent] Missing conversationId in context for ${this.agentConfig?.agentId}`);
-    }
-    
     const request: LLMRequest = { 
       messages,
       loggingMetadata: {
-        conversationId: ctx.conversationId ? String(ctx.conversationId) : undefined,
+        conversationId: String(ctx.conversationId),
         agentName: this.agentConfig?.agentId || 'scenario_agent',
         turnNumber: this.currentTurnNumber,
-        stepDescriptor: stepNumber !== undefined ? `step_${stepNumber}` : undefined
+        stepDescriptor: stepNumber ? `step_${stepNumber}` : undefined
       }
     };
 

@@ -2,7 +2,6 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { LLMProviderManager } from '$src/llm/provider-manager';
 import type { LLMRequest, LLMResponse, SupportedProvider, LLMLoggingMetadata } from '$src/types/llm.types';
-import { getLLMDebugLogger } from '$src/llm/services/debug-logger';
 
 const LLMMessageSchema = z.object({
   role: z.enum(['system', 'user', 'assistant']),
@@ -69,28 +68,15 @@ export function createLLMRoutes(pm: LLMProviderManager) {
       // Build LLMRequest for the provider
       const req: LLMRequest = {
         messages: input.messages,
+        loggingMetadata: input.loggingMetadata || {},
         ...(input.model ? { model: input.model } : {}),
         ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
         ...(input.maxTokens !== undefined ? { maxTokens: input.maxTokens } : {}),
         ...(input.tools ? { tools: input.tools } : {}),
       };
 
-      // For browserside calls coming through HTTP, we need to log here
-      // Server-side providers (google, openrouter) handle their own logging
-      const isBrowsersideCall = !input.provider || input.provider === 'browserside';
-      
-      let logPath: string | null = null;
-      if (isBrowsersideCall) {
-        const logger = getLLMDebugLogger();
-        logPath = await logger.logRequest(req, input.loggingMetadata);
-      }
-
+      // All providers handle their own logging - just pass through
       const result: LLMResponse = await provider.complete(req);
-
-      if (isBrowsersideCall && logPath) {
-        const logger = getLLMDebugLogger();
-        await logger.logResponse(result, logPath);
-      }
       return c.json(result, 200);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Provider error';

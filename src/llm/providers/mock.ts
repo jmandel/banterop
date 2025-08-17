@@ -1,4 +1,5 @@
 import { LLMProvider, type LLMProviderConfig, type LLMProviderMetadata, type LLMRequest, type LLMResponse } from '$src/types/llm.types';
+import { getLLMDebugLogger } from '$src/llm/services/debug-logger';
 
 export class MockLLMProvider extends LLMProvider {
   static isAvailable(): boolean { return true; }
@@ -16,6 +17,10 @@ export class MockLLMProvider extends LLMProvider {
   }
   
   async complete(request: LLMRequest): Promise<LLMResponse> {
+    // Log request before processing
+    const logger = getLLMDebugLogger();
+    const logPath = await logger.logRequest(request, request.loggingMetadata);
+    
     // Check if this is a ScenarioDrivenAgent prompt by looking for specific markers
     const lastUserMessage = [...request.messages].reverse().find(m => m.role === 'user');
     const lastContent = lastUserMessage?.content || '';
@@ -48,12 +53,17 @@ The other agent said hello, so I should send a greeting back.
     // Simulate some delay
     await new Promise(resolve => setTimeout(resolve, 100));
     
-    return {
+    const result: LLMResponse = {
       content,
       usage: {
         promptTokens: request.messages.reduce((acc, m) => acc + m.content.length, 0),
         completionTokens: content.length,
       },
     };
+    
+    // Log response after generating
+    await logger.logResponse(result, logPath);
+    
+    return result;
   }
 }

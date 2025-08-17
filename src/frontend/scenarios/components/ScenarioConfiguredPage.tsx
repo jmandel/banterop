@@ -150,8 +150,8 @@ export function ScenarioConfiguredPage() {
             try {
               const payload = (ev as any).payload || {};
               const outcome = payload.outcome || {};
-              const status = outcome.status || 'completed';
-              const reason = outcome.reason || payload.text || '';
+              const status = outcome.status || 'unknown';
+              const reason = outcome.reason || '';
               setFinalStatus(status as any);
               setFinalReason(String(reason || '').trim());
             } catch {}

@@ -34,3 +34,4 @@ dashboard/public
 # Ignore top-level debug folder, but keep source debug routes
 /debug
 /public
+k8s/data

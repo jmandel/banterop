@@ -19,7 +19,7 @@ export interface LLMRequest {
   temperature?: number;
   maxTokens?: number;
   tools?: LLMTool[];
-  loggingMetadata?: LLMLoggingMetadata;
+  loggingMetadata: LLMLoggingMetadata;
 }
 
 export interface LLMTool {
