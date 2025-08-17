@@ -86,7 +86,12 @@ export interface ScenarioConfigAgentDetails {
   /** FOR THE CONVERSATIONAL AGENT: The agent's pre-interaction internal state. */
   situation: string;
 
-  /** FOR THE CONVERSATIONAL AGENT: The agent's core persona and mandate. */
+  /** 
+   * FOR THE CONVERSATIONAL AGENT: The agent's core persona and mandate.
+   * Frame as an agent representing the principal, not as the principal themselves.
+   * ✅ "You are an agent representing Dr. Chen..."
+   * ❌ "You are Dr. Chen..."
+   */
   systemPrompt: string;
 
   /** FOR THE CONVERSATIONAL AGENT: The agent's high-level objectives. */
@@ -99,11 +104,13 @@ export interface ScenarioConfigAgentDetails {
    * information, NOT submit forms or requests. The conversation itself IS the medium 
    * of exchange - agents communicate their needs directly through dialogue.
    * 
-   * GOOD tool examples (information retrieval):
-   * - search_ehr_clinical_notes: Retrieve patient's clinical documentation
-   * - lookup_insurance_policy: Access policy requirements and criteria
-   * - check_lab_results: Get specific test results from the EHR
-   * - calculate_treatment_duration: Compute how long a therapy was tried
+   * GOOD tool examples (information retrieval/computation):
+   * - retrieve_clinical_notes: Get patient's clinical documentation
+   * - lookup_policy_criteria: Access insurance requirements
+   * - check_lab_results: Get specific test results
+   * - calculate_treatment_duration: Compute therapy duration
+   * 
+   * Use prefixes like retrieve_, lookup_, check_, calculate_ for non-terminal tools
    * 
    * BAD tool examples (form submission anti-patterns):
    * - submit_prior_auth_request: NO! The conversation IS the request
@@ -157,12 +164,13 @@ export interface Tool {
    * what character to play and what information to reveal (or withhold) to be
    * realistic and to advance the story.
    *
-   * GOOD EXAMPLE (Leveraging omniscience):
-   * "Act as the insurer's policy engine. Your source of truth is the Payer's `knowledgeBase`.
-   *  Because you can also see the Provider's `knowledgeBase`, you can make your audit
-   *  findings hyper-specific. Instead of saying 'trial duration not met,' say 'Policy
-   *  requires 6-month trial; provider's record confirms a 5-month trial was administered.'
-   *  This specificity is key to a realistic interaction."
+   * GOOD EXAMPLE:
+   * "Return policy details in formal medical review language. Include specific
+   *  criteria numbers and thresholds from the knowledgeBase. Format as a
+   *  structured assessment with clear pass/fail indicators."
+   * 
+   * The synthesisGuidance shapes HOW to present information (style, format, detail),
+   * while the knowledgeBase provides WHAT information to present.
    */
   synthesisGuidance: string;
 
@@ -177,8 +185,10 @@ export interface Tool {
    * - Temporary pauses or holds
    * - Any action that expects a response from the other party
    * 
-   * Good examples: approve_authorization, deny_request, no_appointments_available
-   * Bad examples: request_more_info, put_on_hold, ask_for_clarification
+   * Good terminal tools: approve_authorization, deny_request, confirm_appointment
+   * Bad terminal tools: suggest_alternative, recommend_action, request_more_info
+   * 
+   * Terminal tools represent final decisions, not intermediate recommendations
    */
   endsConversation?: boolean;
 

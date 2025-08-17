@@ -75,9 +75,118 @@ curl -s https://chitchat.fhir.me/api/health
 - Apply again: `kubectl apply -f k8s/app.yaml`.
 
 ## Notes
-- SQLite data is persisted in `convo-db` PVC. To reset, delete the PVC (will delete data).
 - To restrict OpenRouter models, set:
   `LLM_MODELS_OPENROUTER_INCLUDE="openai/gpt-oss-120b:nitro,qwen/qwen3-235b-a22b-2507:nitro"` in the Deployment env.
 - WebSocket endpoint is `/api/ws` under the same host.
 
+## Reset / Wipe Data
+
+SQLite state is stored on the `convo-db` PersistentVolumeClaim (PVC) mounted at `/data` in the container (DB file at `/data/data.db`). If you used `app-with-debug.yaml`, LLM debug logs are on a separate `debug-logs` PVC mounted at `/debug`.
+
+Choose one of the approaches below depending on whether you want to keep the PVC(s) or fully delete and re-create them.
+
+### Option A: Delete PVC(s) to fully reset
+
+This removes the volume and all data. A new, empty volume is created on the next apply. On most clusters with a default StorageClass, deleting the PVC will delete the backing PV and data. If your StorageClass uses a `Retain` reclaim policy, also delete the PV or wipe it manually.
+
+1) Delete the conversation DB PVC (and debug logs PVC if present):
+
+```bash
+kubectl -n interop delete pvc convo-db
+# If using app-with-debug.yaml
+kubectl -n interop delete pvc debug-logs
+```
+
+2) Recreate from manifests (choose the manifest you use):
+
+```bash
+kubectl apply -f k8s/app.yaml
+# or
+kubectl apply -f k8s/app-with-debug.yaml
+```
+
+3) Verify the app rolls out and binds new volumes:
+
+```bash
+kubectl -n interop rollout status deploy/interop-api
+kubectl -n interop get pvc
+```
+
+Check reclaim policy if you need to confirm deletion behavior:
+
+```bash
+kubectl get sc
+kubectl get pv | grep convo-db
+```
+
+### Option B: Wipe files but keep PVC(s)
+
+If you want to preserve the claim itself but clear the data inside, run a short-lived Job that mounts the PVC and removes files. This avoids re-provisioning storage and keeps any StorageClass settings the same.
+
+Wipe the conversation DB file(s):
+
+```bash
+kubectl apply -f - <<'YAML'
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wipe-convo-db
+  namespace: interop
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: convo-db
+      containers:
+        - name: wipe
+          image: busybox:1.36
+          command: ["/bin/sh","-lc","rm -f /data/data.db /data/data.db-* && echo 'DB removed'"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  backoffLimit: 0
+YAML
+
+# Wait for completion, then clean up the Job (optional)
+kubectl -n interop wait --for=condition=complete job/wipe-convo-db --timeout=60s || true
+kubectl -n interop delete job wipe-convo-db
+```
+
+Wipe debug logs (only if using `app-with-debug.yaml`):
+
+```bash
+kubectl apply -f - <<'YAML'
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wipe-debug-logs
+  namespace: interop
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      volumes:
+        - name: debug
+          persistentVolumeClaim:
+            claimName: debug-logs
+      containers:
+        - name: wipe
+          image: busybox:1.36
+          command: ["/bin/sh","-lc","rm -rf /debug/llm-debug/* && echo 'Logs removed'"]
+          volumeMounts:
+            - name: debug
+              mountPath: /debug
+  backoffLimit: 0
+YAML
+
+kubectl -n interop wait --for=condition=complete job/wipe-debug-logs --timeout=60s || true
+kubectl -n interop delete job wipe-debug-logs
+```
+
+Notes:
+- The Deployment uses `strategy: Recreate` and a single replica; you do not need to scale down to wipe files, but active writes may briefly fail during deletion. For a perfectly clean reset, perform the wipe during a quiet period.
+- The server recreates and migrates the SQLite schema automatically on startup or first access when the DB file is missing.
 

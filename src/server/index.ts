@@ -133,6 +133,9 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
+// Export both the Hono app and the server config
+export const app = server;
+
 export default {
   port: Number(process.env.PORT ?? 3000),
   fetch: server.fetch,

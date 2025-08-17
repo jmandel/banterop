@@ -489,6 +489,11 @@ The lookback period determines how old a conversation's last activity can be bef
 - Prefer synthetic data; avoid real PHI/PII.
 - Use `bun run clean` to reset local state quickly.
 
+## ☸️ Kubernetes
+
+- Deployment manifests live in `k8s/`. See `k8s/README.md` for ingress, secrets, PVCs, and image guidance.
+- Reset/Wipe data in Kubernetes: follow `k8s/README.md` → “Reset / Wipe Data” to either delete the PVC(s) for a full reset or run short-lived Jobs that wipe files while keeping the PVC(s).
+
 ## ✅ Testing & Guarantees
 
 - Tests validate millisecond timestamp precision and idempotency keys `(conversation, agentId, clientRequestId)`.
