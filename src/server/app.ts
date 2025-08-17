@@ -7,6 +7,7 @@ import type { ScenarioConfiguration } from '$src/types/scenario-configuration.ty
 import { AgentHost } from './agent-host';
 import { ServerAgentRegistry } from './control/server-agent-registry';
 import { ServerAgentLifecycleManager } from './control/server-agent-lifecycle';
+import { ConversationWatchdog, STARTUP_DELAY_MS } from './watchdog/conversation-watchdog';
 import kneeMriScenario from '$src/db/fixtures/knee-mri-scenario.json';
 import visionScreeningScenario from '$src/db/fixtures/vision-screening-scenario.json';
 
@@ -21,6 +22,7 @@ export class App {
   readonly llmProviderManager: LLMProviderManager;
   readonly agentHost: AgentHost;
   readonly lifecycleManager: ServerAgentLifecycleManager;
+  private watchdog?: ConversationWatchdog;
 
   constructor(options?: AppOptions) {
     const { policy, ...configOverrides } = options || {};
@@ -45,6 +47,23 @@ export class App {
     
     // Seed default scenarios on startup (no-op if already present)
     this.seedDefaultScenarios();
+    
+    // Initialize watchdog if enabled
+    if (config.watchdogEnabled) {
+      this.watchdog = new ConversationWatchdog(
+        this.storage,
+        this.orchestrator,
+        this.lifecycleManager,
+        config.watchdogIntervalMs,
+        config.watchdogStalledThresholdMs
+      );
+      
+      // Delay startup to let system stabilize
+      setTimeout(() => {
+        console.log('[Watchdog] Starting conversation watchdog');
+        this.watchdog?.start();
+      }, STARTUP_DELAY_MS);
+    }
     
     // Resume any server-local ensured agents post-restart
     try {
@@ -90,8 +109,25 @@ export class App {
   }
 
   // No per-App resume method; handled by AgentHost resume helper
+  
+  getWatchdogStats() {
+    return this.watchdog?.getStats() || null;
+  }
 
   async shutdown() {
+    console.log('[App] Shutting down...');
+    
+    // Stop watchdog first to prevent new cancellations during shutdown
+    if (this.watchdog) {
+      console.log('[Watchdog] Stopping watchdog');
+      this.watchdog.stop();
+      
+      // Log final stats
+      const stats = this.watchdog.getStats();
+      console.log('[Watchdog] Final stats:', stats);
+    }
+    
+    // Then shutdown other services
     await this.orchestrator.shutdown();
     this.storage.close();
   }

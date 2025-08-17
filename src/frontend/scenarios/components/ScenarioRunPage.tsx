@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { Card, CardHeader, Button } from '../../ui';
 import { api } from '../utils/api';
+import { RUN_MODES, RunModeKey } from '../constants/runModes';
 
 function encodeBase64Url(obj: unknown): string {
   const json = JSON.stringify(obj);
@@ -15,14 +16,17 @@ export function ScenarioRunPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scenario, setScenario] = useState<any | null>(null);
-  const [runMode, setRunMode] = useState<'internal'|'mcp'|'a2a'>(() => {
+  const [runMode, setRunMode] = useState<RunModeKey>(() => {
     try {
       const params = new URLSearchParams(location.hash.split('?')[1] || '');
       const mode = params.get('mode');
-      if (mode === 'plugin' || mode === 'mcp') return 'mcp';
-      if (mode === 'a2a') return 'a2a';
-      const lt = localStorage.getItem('scenarioLauncher.launchType');
-      return (lt === 'mcp' || lt === 'plugin') ? 'mcp' : 'internal';
+      // Handle different plugin modes
+      if (mode === 'plugin' || mode === 'mcp' || mode === 'mcp-client') return 'mcp-client';
+      if (mode === 'mcp-server') return 'mcp-server';
+      if (mode === 'a2a' || mode === 'a2a-client') return 'a2a-client';
+      if (mode === 'a2a-server') return 'a2a-server';
+      // If no mode in URL, default to 'internal' (when coming from "Run" button)
+      return 'internal';
     } catch { return 'internal'; }
   });
   const [title, setTitle] = useState('');
@@ -45,7 +49,13 @@ export function ScenarioRunPage() {
           setScenario(s);
           const cfg = s.config || s;
           const defaultTitle = cfg?.metadata?.title || s.name || '';
-          const modeLabel = runMode === 'internal' ? 'Internal' : (runMode === 'mcp' ? 'External MCP Client' : 'External A2A Client');
+          const modeLabel = {
+            'internal': 'Internal',
+            'mcp-client': 'External MCP Client',
+            'mcp-server': 'External MCP Server',
+            'a2a-client': 'External A2A Client',
+            'a2a-server': 'External A2A Server'
+          }[runMode] || 'Unknown';
           setTitle(defaultTitle ? `${defaultTitle} - ${modeLabel}` : (runMode === 'internal' ? 'Internal Run' : (runMode === 'mcp' ? 'MCP Client Run' : 'A2A Client Run')));
           const firstId = (cfg?.agents?.[0]?.agentId) || '';
           setStartingAgentId(firstId);
@@ -86,14 +96,23 @@ export function ScenarioRunPage() {
     if (!scenario) return;
     const cfg = scenario.config || scenario;
     const base = cfg?.metadata?.title || scenario.name || '';
-    const modeLabel = runMode === 'internal' ? 'Internal' : (runMode === 'mcp' ? 'External MCP Client' : 'External A2A Client');
-    setTitle(base ? `${base} - ${modeLabel}` : (runMode === 'internal' ? 'Internal Run' : (runMode === 'mcp' ? 'MCP Client Run' : 'A2A Client Run')));
+    const modeLabel = {
+      'internal': 'Internal',
+      'mcp-client': 'External MCP Client',
+      'mcp-server': 'External MCP Server',
+      'a2a-client': 'External A2A Client',
+      'a2a-server': 'External A2A Server'
+    }[runMode] || 'Unknown';
+    setTitle(base ? `${base} - ${modeLabel}` : `${modeLabel} Run`);
   }, [runMode, scenario]);
 
   const agentOptions = useMemo(() => (scenario?.config?.agents || []).map((a: any) => a.agentId), [scenario]);
 
   useEffect(() => {
-    try { localStorage.setItem('scenarioLauncher.launchType', runMode === 'mcp' ? 'mcp' : 'watch'); } catch {}
+    try { 
+      const launchType = runMode.includes('mcp') ? 'mcp' : runMode.includes('a2a') ? 'a2a' : 'watch';
+      localStorage.setItem('scenarioLauncher.launchType', launchType); 
+    } catch {}
   }, [runMode]);
 
   const buildMeta = () => {
@@ -136,8 +155,26 @@ export function ScenarioRunPage() {
 
   const continuePlugin = () => {
     const meta = buildMeta();
-    const config64 = encodeBase64Url(meta); // MCP bridge expects ConversationMeta directly
-    navigate(`/scenarios/${encodeURIComponent(scenarioId!)}/external-mcp-client/${config64}`);
+    const config64 = encodeBase64Url(meta);
+    
+    switch(runMode) {
+      case 'mcp-client':
+        navigate(`/scenarios/${encodeURIComponent(scenarioId!)}/external-mcp-client/${config64}`);
+        break;
+      case 'mcp-server':
+        // TODO: Implement MCP server mode
+        navigate(`/scenarios/${encodeURIComponent(scenarioId!)}/external-mcp-server/${config64}`);
+        break;
+      case 'a2a-client':
+        navigate(`/scenarios/${encodeURIComponent(scenarioId!)}/external-a2a-client/${config64}`);
+        break;
+      case 'a2a-server':
+        // TODO: Implement A2A server mode
+        navigate(`/scenarios/${encodeURIComponent(scenarioId!)}/external-a2a-server/${config64}`);
+        break;
+      default:
+        alert('Unknown mode: ' + runMode);
+    }
   };
 
   if (isLoading) return <div className="p-6 text-slate-600">Loading…</div>;
@@ -153,19 +190,34 @@ export function ScenarioRunPage() {
 
       <Card className="space-y-4">
         <CardHeader title="Run Options" />
-        <div className="grid grid-cols-3 gap-3">
-          <div className={`p-3 border-2 rounded cursor-pointer ${runMode==='internal'?'border-blue-600 bg-blue-50':'border-gray-200 hover:border-gray-300'}`} onClick={() => setRunMode('internal')}>
-            <div className="font-medium">Internal (Simulated)</div>
-            <div className="text-xs text-slate-600">Run with internal agents</div>
-          </div>
-          <div className={`p-3 border-2 rounded cursor-pointer ${runMode==='mcp'?'border-blue-600 bg-blue-50':'border-gray-200 hover:border-gray-300'}`} onClick={() => setRunMode('mcp')}>
-            <div className="font-medium">External (MCP Client)</div>
-            <div className="text-xs text-slate-600">Connect an external MCP client</div>
-          </div>
-          <div className={`p-3 border-2 rounded cursor-pointer ${runMode==='a2a'?'border-blue-600 bg-blue-50':'border-gray-200 hover:border-gray-300'}`} onClick={() => setRunMode('a2a')}>
-            <div className="font-medium">External (A2A Client)</div>
-            <div className="text-xs text-slate-600">Connect an external A2A client</div>
-          </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          {Object.entries(RUN_MODES).map(([key, mode]) => (
+            <div 
+              key={key}
+              className={`p-3 border-2 rounded ${
+                mode.disabled 
+                  ? 'border-gray-200 bg-gray-50 opacity-50 cursor-not-allowed' 
+                  : runMode===key
+                    ? 'border-blue-600 bg-blue-50 cursor-pointer'
+                    : 'border-gray-200 hover:border-gray-300 cursor-pointer'
+              }`} 
+              onClick={() => !mode.disabled && setRunMode(key as RunModeKey)}
+            >
+              <div className={`font-medium ${mode.disabled ? 'text-gray-500' : ''}`}>
+                {mode.label} {mode.disabled && '(Coming soon)'}
+              </div>
+              <div className="text-xs text-slate-600">{mode.description}</div>
+            </div>
+          ))}
+        </div>
+        
+        {/* Mode description */}
+        <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
+          {runMode === 'internal' && "Both agents will be simulated internally by the server. You'll watch the conversation unfold between simulated agents using the models you configure below."}
+          {runMode === 'mcp-client' && "Plug in an external MCP client (like Claude Desktop) to act as one agent. The server will simulate the other agent and provide an MCP server for your client to connect to."}
+          {runMode === 'mcp-server' && "Plug in an external MCP server. The server will simulate an MCP client that connects to your external MCP server."}
+          {runMode === 'a2a-client' && "Plug in an external A2A client to act as one agent. The server will simulate the other agent and provide an A2A endpoint for your client to connect to."}
+          {runMode === 'a2a-server' && "Plug in an external A2A server. The server will simulate an A2A client that connects to your external A2A endpoint."}
         </div>
 
         <div>
@@ -179,7 +231,7 @@ export function ScenarioRunPage() {
         </div>
 
         <div>
-          <label className="block text-sm text-slate-700 mb-1">{runMode !== 'internal' ? (runMode === 'mcp' ? 'External Client Agent (MCP)' : 'External Client Agent (A2A)') : 'Starting Agent'}</label>
+          <label className="block text-sm text-slate-700 mb-1">{runMode !== 'internal' ? `External Agent (${runMode.toUpperCase().replace('-', ' ')})` : 'Starting Agent'}</label>
           <select className="w-full border border-[color:var(--border)] rounded-2xl px-3 py-2 bg-[color:var(--panel)] text-[color:var(--text)]" value={startingAgentId} onChange={(e) => setStartingAgentId(e.target.value)}>
             {agentOptions.map((id: string) => (<option key={id} value={id}>{id}</option>))}
           </select>
@@ -190,7 +242,7 @@ export function ScenarioRunPage() {
           <div className="space-y-2">
             <div className="text-sm font-medium">Agent Configuration</div>
             <div className="space-y-4">
-              {(scenario?.config?.agents || []).filter((a: any) => !((runMode !== 'internal') && a.agentId === startingAgentId)).map((a: any) => (
+              {(scenario?.config?.agents || []).filter((a: any) => !(runMode !== 'internal' && a.agentId === startingAgentId)).map((a: any) => (
                 <Card key={a.agentId} className="space-y-2">
                   <div className="text-sm font-medium text-slate-700 break-all">{a.agentId}</div>
                   <div className="grid grid-cols-3 items-center gap-2">
@@ -244,14 +296,10 @@ export function ScenarioRunPage() {
         <div className="pt-2">
           {runMode === 'internal' ? (
             <Button variant="primary" className="w-full" onClick={continueInternal}>Start Conversation</Button>
-          ) : runMode === 'mcp' ? (
-            <Button variant="primary" className="w-full" onClick={continuePlugin}>Continue to MCP Configuration</Button>
           ) : (
-            <Button variant="primary" className="w-full" onClick={() => {
-              const meta = buildMeta();
-              const config64 = encodeBase64Url(meta);
-              navigate(`/scenarios/${encodeURIComponent(scenarioId!)}/external-a2a-client/${config64}`);
-            }}>Continue to A2A Configuration</Button>
+            <Button variant="primary" className="w-full" onClick={continuePlugin}>
+              Continue to {runMode.includes('mcp') ? 'MCP' : 'A2A'} {runMode.includes('server') ? 'Server' : 'Client'} Configuration
+            </Button>
           )}
         </div>
       </Card>

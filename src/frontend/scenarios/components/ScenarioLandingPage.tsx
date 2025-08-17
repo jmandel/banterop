@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Card } from '../../ui';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
+import { DropdownButton } from './DropdownButton';
+import { RUN_MODES } from '../constants/runModes';
 
 const SCENARIO_IDEAS = [
   "[Imaging coverage] A primary care agent shares knee instability notes while a payer policy agent verifies therapy criteria to approve imaging that shortens time to diagnosis.",
@@ -171,11 +173,22 @@ export function ScenarioLandingPage() {
                   </p>
                 </div>
 
-                <div className="flex gap-2">
-                  <a href={`#/scenarios/${scenario.config.metadata.id}`} className="inline-flex items-center gap-2 px-2 py-1 text-xs border border-[color:var(--border)] rounded-2xl bg-[color:var(--panel)]">View</a>
-                  <a href={`#/scenarios/${scenario.config.metadata.id}/edit`} className="inline-flex items-center gap-2 px-2 py-1 text-xs border border-[color:var(--border)] rounded-2xl bg-[color:var(--panel)]">Edit</a>
-                  <a href={`#/scenarios/${scenario.config.metadata.id}/run`} className="inline-flex items-center gap-2 px-2 py-1 text-xs rounded-2xl bg-[color:var(--primary)] text-[color:var(--primary-foreground)]">Run</a>
-                  <a href={`#/scenarios/${scenario.config.metadata.id}/run?mode=plugin`} className="inline-flex items-center gap-2 px-2 py-1 text-xs rounded-2xl bg-purple-600 text-white">Plug In</a>
+                <div className="flex gap-2 items-center">
+                  <a href={`#/scenarios/${scenario.config.metadata.id}`} className="inline-flex items-center justify-center gap-2 px-2 py-1 text-xs border border-[color:var(--border)] rounded-2xl bg-[color:var(--panel)]" style={{ minHeight: '28px' }}>View</a>
+                  <a href={`#/scenarios/${scenario.config.metadata.id}/edit`} className="inline-flex items-center justify-center gap-2 px-2 py-1 text-xs border border-[color:var(--border)] rounded-2xl bg-[color:var(--panel)]" style={{ minHeight: '28px' }}>Edit</a>
+                  <DropdownButton
+                    label="Run"
+                    buttonClassName="bg-[color:var(--primary)] text-[color:var(--primary-foreground)]"
+                    options={Object.values(RUN_MODES).map(mode => ({
+                      label: mode.label,
+                      value: mode.value,
+                      description: mode.description,
+                      disabled: mode.disabled
+                    }))}
+                    onSelect={(mode) => {
+                      navigate(`/scenarios/${scenario.config.metadata.id}/run?mode=${mode}`);
+                    }}
+                  />
                 </div>
               </Card>
             ))

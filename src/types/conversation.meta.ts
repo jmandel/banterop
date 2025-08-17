@@ -19,6 +19,12 @@ export interface ConversationMeta {
   config?: Record<string, unknown>;
   custom?: Record<string, unknown>;        // namespaced ext
   
+  // Watchdog configuration
+  watchdog?: {
+    disabled?: boolean;                     // Disable watchdog for this conversation
+    stalledThresholdMs?: number;           // Custom timeout for this conversation
+  };
+  
   // Versioning
   metaVersion?: number;                    // defaults to 1 if not specified
 }

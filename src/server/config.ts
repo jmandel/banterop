@@ -23,6 +23,11 @@ const ConfigSchema = z.object({
   
   // Environment
   nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
+  
+  // Watchdog
+  watchdogEnabled: z.boolean().default(true),
+  watchdogIntervalMs: z.number().int().positive().default(5 * 60 * 1000),
+  watchdogStalledThresholdMs: z.number().int().positive().default(10 * 60 * 1000),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -54,6 +59,11 @@ export class ConfigManager {
       
       // Environment
       nodeEnv: process.env.NODE_ENV as Config['nodeEnv'],
+      
+      // Watchdog (only set if env var exists)
+      watchdogEnabled: process.env.WATCHDOG_ENABLED ? process.env.WATCHDOG_ENABLED !== 'false' : undefined,
+      watchdogIntervalMs: process.env.WATCHDOG_INTERVAL_MS ? Number(process.env.WATCHDOG_INTERVAL_MS) : undefined,
+      watchdogStalledThresholdMs: process.env.WATCHDOG_STALLED_THRESHOLD_MS ? Number(process.env.WATCHDOG_STALLED_THRESHOLD_MS) : undefined,
       
       // Apply overrides
       ...overrides,
@@ -120,6 +130,7 @@ export class ConfigManager {
       dbPath: ':memory:',
       nodeEnv: 'test',
       logLevel: 'error',
+      watchdogEnabled: false
     });
   }
 }

@@ -195,7 +195,7 @@ describe('ScenarioDrivenAgent', () => {
     expect(systemPrompt).toContain('Testing scenario-driven agents');
   });
 
-  it('includes knowledge base in system prompt', async () => {
+  it('does not include knowledge base in system prompt', async () => {
     const originalComplete = mockProvider.complete.bind(mockProvider);
     let capturedMessages: any[] = [];
     mockProvider.complete = mock(async (request) => {
@@ -206,8 +206,8 @@ describe('ScenarioDrivenAgent', () => {
     await triggerTurn(1, 'test-agent');
     
     const systemPrompt = capturedMessages[0].content;
-    expect(systemPrompt).toContain('testFact');
-    expect(systemPrompt).toContain('This is test knowledge');
+    expect(systemPrompt).not.toContain('testFact');
+    expect(systemPrompt).not.toContain('This is test knowledge');
   });
 
   it('includes tool descriptions in system prompt', async () => {
