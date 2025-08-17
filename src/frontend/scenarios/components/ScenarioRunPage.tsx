@@ -213,11 +213,11 @@ export function ScenarioRunPage() {
         
         {/* Mode description */}
         <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
-          {runMode === 'internal' && "Both agents will be simulated internally by the server. You'll watch the conversation unfold between simulated agents using the models you configure below."}
-          {runMode === 'mcp-client' && "Plug in an external MCP client (like Claude Desktop) to act as one agent. The server will simulate the other agent and provide an MCP server for your client to connect to."}
-          {runMode === 'mcp-server' && "Plug in an external MCP server. The server will simulate an MCP client that connects to your external MCP server."}
-          {runMode === 'a2a-client' && "Plug in an external A2A client to act as one agent. The server will simulate the other agent and provide an A2A endpoint for your client to connect to."}
-          {runMode === 'a2a-server' && "Plug in an external A2A server. The server will simulate an A2A client that connects to your external A2A endpoint."}
+          {runMode === 'internal' && "Both agents will be simulated internally by this platform. You'll watch the conversation unfold between simulated agents using the models you configure below."}
+          {runMode === 'mcp-client' && "Plug in an external MCP client (like Claude Desktop) to act as one agent. This platform will simulate the other agent and provide an MCP server for your client to connect to."}
+          {runMode === 'mcp-server' && "Plug in an external MCP server. This platform will simulate an MCP client that connects to your external MCP server."}
+          {runMode === 'a2a-client' && "Plug in an external A2A client to act as one agent. This platform will simulate the other agent and provide an A2A endpoint for your client to connect to."}
+          {runMode === 'a2a-server' && "Plug in an external A2A server. This platform will simulate an A2A client that connects to your external A2A endpoint."}
         </div>
 
         <div>

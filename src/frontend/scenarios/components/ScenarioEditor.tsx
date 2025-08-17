@@ -2,6 +2,9 @@ import React from 'react';
 import { Card, Button } from '../../ui';
 import { RawJsonEditor } from './RawJsonEditor';
 import { StructuredView } from './StructuredView';
+import { DropdownButton } from './DropdownButton';
+import { RUN_MODES } from '../constants/runModes';
+import { useNavigate } from 'react-router-dom';
 
 export function ScenarioEditor({
   config,
@@ -22,6 +25,8 @@ export function ScenarioEditor({
   isViewMode?: boolean;
   isEditMode?: boolean;
 }) {
+  const navigate = useNavigate();
+  
   return (
     <Card>
       <div className="sticky top-0 z-10 bg-[color:var(--panel)]/95 backdrop-blur border-b border-[color:var(--border)] p-2 lg:p-3 flex items-center justify-between">
@@ -36,8 +41,19 @@ export function ScenarioEditor({
             ) : (
               <>
                 <Button as="a" href={`#/scenarios/${scenarioId}/edit`} size="sm" variant="secondary">Edit</Button>
-                <Button as="a" href={`#/scenarios/${scenarioId}/run`} size="sm" variant="primary">Run</Button>
-                <Button as="a" href={`#/scenarios/${scenarioId}/run?mode=plugin`} size="sm" className="bg-purple-600 text-white hover:opacity-90">Plug In</Button>
+                <DropdownButton
+                  label="Run"
+                  buttonClassName="bg-[color:var(--primary)] text-[color:var(--primary-foreground)] text-xs"
+                  options={Object.values(RUN_MODES).map(mode => ({
+                    label: mode.label,
+                    value: mode.value,
+                    description: mode.description,
+                    disabled: mode.disabled
+                  }))}
+                  onSelect={(mode) => {
+                    navigate(`/scenarios/${scenarioId}/run?mode=${mode}`);
+                  }}
+                />
               </>
             )}
           </div>

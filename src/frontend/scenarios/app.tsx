@@ -5,7 +5,7 @@ import { AppLayout as SharedAppLayout } from '../ui';
 import { AppLayout } from './components/AppLayout';
 import { Button, Card, CardHeader } from '../ui';
 import { ScenarioLandingPage } from './components/ScenarioLandingPage';
-import { ScenarioBuilderPage } from './components/ScenarioBuilderPage.v2';
+import { ScenarioBuilderPage } from './components/ScenarioBuilderPage';
 import { ScenarioRunPage } from './components/ScenarioRunPage';
 import { ScenarioPluginPage } from './components/ScenarioPluginPage';
 import { ScenarioA2APreLaunchPage } from './components/ScenarioA2APreLaunchPage';
