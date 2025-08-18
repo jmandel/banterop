@@ -85,7 +85,7 @@ export function buildScenarioAgentCard(baseUrlToA2A: URL, config64: string, orch
   return {
     protocolVersion: '0.2.9',
     name: `A2A Scenario Tester: ${title}`,
-    description: 'Open conversation for connectathon testing.',
+    description: 'For Connectathon Testing',
     url: baseUrlToA2A.toString(),
     preferredTransport: 'JSONRPC',
     capabilities: {

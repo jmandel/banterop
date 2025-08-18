@@ -35,6 +35,18 @@ interface StepFlowProps {
   
   // Scenario loading
   onLoadScenario?: (goals: string, instructions: string) => void;
+
+  // Attachments (moved inside planner configuration)
+  attachments?: {
+    vault: import("../../attachments-vault").AttachmentVault;
+    onFilesSelect: (files: FileList | null) => void;
+    onAnalyze: (name: string) => void;
+    onOpenAttachment?: (name: string, mimeType: string, bytes?: string, uri?: string) => void;
+    summarizeOnUpload: boolean;
+    onToggleSummarize: (value: boolean) => void;
+    summarizerModel: string;
+    onSummarizerModelChange: (model: string) => void;
+  };
 }
 
 export const StepFlow: React.FC<StepFlowProps> = (props) => {
@@ -107,6 +119,8 @@ export const StepFlow: React.FC<StepFlowProps> = (props) => {
             card={props.card}
             cardLoading={props.cardLoading}
             onCancelTask={props.onCancelTask}
+            goals={props.goals}
+            instructions={props.instructions}
             onLoadScenario={props.onLoadScenario}
           />
         </div>
@@ -124,21 +138,22 @@ export const StepFlow: React.FC<StepFlowProps> = (props) => {
           </div>
         </div>
         <div className="pl-12">
-          <ConfigurationStep
-            goals={props.goals}
-            onGoalsChange={props.onGoalsChange}
-            instructions={props.instructions}
-            onInstructionsChange={props.onInstructionsChange}
-            plannerMode={props.plannerMode}
-            onPlannerModeChange={props.onPlannerModeChange}
-            selectedModel={props.selectedModel}
-            onModelChange={props.onModelChange}
-            providers={props.providers}
-            plannerStarted={props.plannerStarted}
-            onStartPlanner={props.onStartPlanner}
-            onStopPlanner={props.onStopPlanner}
-            connected={props.connected}
-          />
+        <ConfigurationStep
+          goals={props.goals}
+          onGoalsChange={props.onGoalsChange}
+          instructions={props.instructions}
+          onInstructionsChange={props.onInstructionsChange}
+          plannerMode={props.plannerMode}
+          onPlannerModeChange={props.onPlannerModeChange}
+          selectedModel={props.selectedModel}
+          onModelChange={props.onModelChange}
+          providers={props.providers}
+          plannerStarted={props.plannerStarted}
+          onStartPlanner={props.onStartPlanner}
+          onStopPlanner={props.onStopPlanner}
+          connected={props.connected}
+          attachments={props.attachments}
+        />
         </div>
       </div>
 

@@ -52,6 +52,7 @@ type Act =
   | { type: "setPlannerMode"; mode: PlannerMode }
   | { type: "setPlannerStarted"; started: boolean }
   | { type: "toggleSummarizeOnUpload"; on: boolean }
+  | { type: "clearConversation" }
   | { type: "reset" };
 
 const initModel = (endpoint: string): Model => ({
@@ -87,6 +88,16 @@ function reducer(m: Model, a: Act): Model {
       return { ...m, plannerStarted: a.started };
     case "toggleSummarizeOnUpload":
       return { ...m, summarizeOnUpload: a.on };
+    case "clearConversation":
+      return {
+        ...m,
+        taskId: undefined,
+        status: "initializing",
+        front: [],
+        plannerStarted: false,
+        busy: false,
+        error: undefined,
+      };
     case "reset":
       return { ...initModel(m.endpoint) };
     default:
@@ -126,6 +137,7 @@ export default function App() {
   const summarizerRef = useRef<AttachmentSummarizer | null>(null);
   const summarizerModelRef = useRef<string>(summarizerModel);
   const plannerModeRef = useRef<PlannerMode>("autostart");
+  const plannerStartedRef = useRef<boolean>(false);
   const mirroredAgentIdsRef = useRef<Set<string>>(new Set());
 
   const [agentLog, setAgentLog] = useState<AgentLogEntry[]>([]);
@@ -164,6 +176,21 @@ export default function App() {
   // Front-stage composer
   const [frontInput, setFrontInput] = useState("");
   const [attachmentUpdateTrigger, setAttachmentUpdateTrigger] = useState(0);
+  // Persist front state as user types while task is active
+  useEffect(() => {
+    const tid = taskRef.current?.getTaskId();
+    const st = lastStatusRef.current;
+    if (endpoint && tid && st && !['completed','failed','canceled'].includes(String(st))) {
+      saveSession(endpoint, {
+        taskId: tid,
+        status: st,
+        plannerStarted: plannerStartedRef.current,
+        front: frontMsgsRef.current,
+        frontDraft: frontInput,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model.front, frontInput]);
 
   useEffect(() => {
     localStorage.setItem("a2a.endpoint", endpoint);
@@ -177,7 +204,35 @@ export default function App() {
   // Sync planner settings to localStorage
   useEffect(() => { try { localStorage.setItem("a2a.planner.mode", model.plannerMode); } catch {} }, [model.plannerMode]);
   useEffect(() => { plannerModeRef.current = model.plannerMode; }, [model.plannerMode]);
+  useEffect(() => { plannerStartedRef.current = model.plannerStarted; }, [model.plannerStarted]);
   useEffect(() => { try { localStorage.setItem("a2a.planner.summarizeOnUpload", String(model.summarizeOnUpload)); } catch {} }, [model.summarizeOnUpload]);
+
+  // Per-endpoint session persistence for resuming open tasks
+  type SessionState = {
+    taskId?: string;
+    status?: A2AStatus | "initializing";
+    plannerStarted?: boolean;
+    front?: FrontMsg[];
+    frontDraft?: string;
+  };
+  const sessionKey = (ep: string) => {
+    try { return `a2a.session.${btoa(unescape(encodeURIComponent(ep || '')))}`; } catch { return `a2a.session.${ep}`; }
+  };
+  const saveSession = (ep: string, state: SessionState) => {
+    try { localStorage.setItem(sessionKey(ep), JSON.stringify(state)); } catch {}
+  };
+  const removeSession = (ep: string) => {
+    try { localStorage.removeItem(sessionKey(ep)); } catch {}
+  };
+  const loadSession = (ep: string): SessionState | null => {
+    try {
+      const raw = localStorage.getItem(sessionKey(ep));
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || typeof obj !== 'object') return null;
+      return obj as SessionState;
+    } catch { return null; }
+  };
 
   // Auto-connect when debounced endpoint changes
   useEffect(() => {
@@ -279,7 +334,6 @@ export default function App() {
       if (st && lastStatusRef.current !== st) {
         lastStatusRef.current = st;
         dispatch({ type: 'status', status: st });
-        if (st === 'input-required') dispatch({ type: 'system', text: '— your turn now —' });
         if (st === 'completed') {
           dispatch({ type: 'system', text: '— conversation completed —' });
           // Stop the planner when task is completed
@@ -319,6 +373,14 @@ export default function App() {
           } catch {}
           ptSendInFlight.current = false;
         }
+        // Persist session on status changes
+        saveSession(endpointUrl, {
+          taskId: taskRef.current?.getTaskId(),
+          status: st,
+          plannerStarted: plannerStartedRef.current,
+          front: frontMsgsRef.current,
+          frontDraft: frontInput,
+        });
       }
     });
 
@@ -337,11 +399,28 @@ export default function App() {
       }
     })();
 
-    // Resume task if provided
-    if (resumeTask.trim()) {
+    // Resume task if provided or stored in session
+    let targetTask = resumeTask.trim();
+    if (!targetTask) {
+      const sess = loadSession(endpointUrl);
+      if (sess?.taskId && sess.status && !['completed','failed','canceled'].includes(String(sess.status))) {
+        targetTask = sess.taskId;
+        // Preload front UI from session
+        const savedFront = Array.isArray(sess.front) ? sess.front : [];
+        for (const msg of savedFront) dispatch({ type: 'frontAppend', msg });
+        if (typeof sess.frontDraft === 'string') setFrontInput(sess.frontDraft);
+      }
+    }
+
+    if (targetTask) {
       try {
-        await taskClient.resume(resumeTask.trim());
-        dispatch({ type: "setTask", taskId: resumeTask.trim() });
+        await taskClient.resume(targetTask);
+        dispatch({ type: "setTask", taskId: targetTask });
+        const sess = loadSession(endpointUrl);
+        if (sess?.plannerStarted) {
+          // Defer to allow initial snapshot to land
+          setTimeout(() => { try { startPlanner(); } catch {} }, 0);
+        }
       } catch (e: any) {
         dispatch({ type: "error", error: String(e?.message ?? e) });
       }
@@ -404,23 +483,55 @@ export default function App() {
     orch.start();
     signalEvent('planner-start');
     dispatch({ type: "setPlannerStarted", started: true });
+    // Persist session snapshot
+    saveSession(endpoint, {
+      taskId: taskRef.current?.getTaskId(),
+      status: lastStatusRef.current,
+      plannerStarted: true,
+      front: frontMsgsRef.current,
+      frontDraft: frontInput,
+    });
   };
 
   const stopPlanner = () => {
     plannerRef.current?.stop();
     plannerRef.current = null;
     dispatch({ type: 'setPlannerStarted', started: false });
+    saveSession(endpoint, {
+      taskId: taskRef.current?.getTaskId(),
+      status: lastStatusRef.current,
+      plannerStarted: false,
+      front: frontMsgsRef.current,
+      frontDraft: frontInput,
+    });
   };
 
   const cancelTask = async () => {
     const client = clientRef.current;
     const task = taskRef.current;
-    if (!client || !task?.getTaskId()) return;
-    try {
-      await client.tasksCancel(task.getTaskId()!);
-    } catch (e: any) {
-      dispatch({ type: "error", error: String(e?.message ?? e) });
+    if (client && task?.getTaskId()) {
+      try {
+        await client.tasksCancel(task.getTaskId()!);
+      } catch (e: any) {
+        // Best-effort: still proceed to local cleanup
+        dispatch({ type: "error", error: String(e?.message ?? e) });
+      }
     }
+
+    // Stop planner and cleanup streams
+    try { plannerRef.current?.stop(); } catch {}
+    plannerRef.current = null;
+    try { ptStreamAbort.current?.abort(); ptStreamAbort.current = null; } catch {}
+    ptSendInFlight.current = false;
+    
+    // Clear task client local state
+    try { taskRef.current?.clearLocal(); } catch {}
+
+    // Clear session persistence and local UI state
+    removeSession(endpoint);
+    dispatch({ type: "clearConversation" });
+    setAgentLog([]);
+    setFrontInput("");
   };
 
   const sendFrontMessage = async (text: string) => {
@@ -554,21 +665,16 @@ export default function App() {
               onStartPlanner={startPlanner}
               onStopPlanner={stopPlanner}
               onLoadScenario={handleLoadScenario}
-            />
-          </div>
-
-          {/* Attachments Section */}
-          <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 mb-6">
-            <AttachmentBar
-              vault={vaultRef.current}
-              onFilesSelect={onAttachFiles}
-              onAnalyze={onAnalyzeAttachment}
-              onOpenAttachment={openBase64Attachment}
-              summarizeOnUpload={model.summarizeOnUpload}
-              onToggleSummarize={(on) => dispatch({ type: "toggleSummarizeOnUpload", on })}
-              summarizerModel={summarizerModel}
-              onSummarizerModelChange={setSummarizerModel}
-              providers={providers}
+              attachments={{
+                vault: vaultRef.current,
+                onFilesSelect: onAttachFiles,
+                onAnalyze: onAnalyzeAttachment,
+                onOpenAttachment: openBase64Attachment,
+                summarizeOnUpload: model.summarizeOnUpload,
+                onToggleSummarize: (on) => dispatch({ type: "toggleSummarizeOnUpload", on }),
+                summarizerModel,
+                onSummarizerModelChange: setSummarizerModel,
+              }}
             />
           </div>
 
@@ -583,6 +689,7 @@ export default function App() {
               onSendMessage={sendFrontMessage}
               connected={model.connected}
               busy={model.busy}
+              yourTurn={model.status === 'input-required'}
             />
       </div>
     </AppLayout>

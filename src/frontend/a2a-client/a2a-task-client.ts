@@ -30,6 +30,19 @@ export class A2ATaskClient {
     this.debounceInterval = debounceInterval;
   }
 
+  // Clear local state and abort any active streams/resubscriptions.
+  // Does not call the server; caller should cancel remotely if desired.
+  clearLocal() {
+    try { this.streamAbort?.abort(); } catch {}
+    try { this.resubAbort?.abort(); } catch {}
+    this.streamAbort = null;
+    this.resubAbort = null;
+    this.taskId = undefined;
+    this.currentTask = null;
+    this.status = 'initializing';
+    this.canonicalState = undefined;
+  }
+
   on<T = any>(eventType: A2AEventType, cb: (ev: T) => void): () => void {
     if (!this.listeners.has(eventType)) this.listeners.set(eventType, new Set());
     const set = this.listeners.get(eventType)!;

@@ -1,5 +1,6 @@
 import React from "react";
 import { Button } from "../../../ui";
+import { AttachmentBar } from "../Attachments/AttachmentBar";
 
 type PlannerMode = "passthrough" | "autostart" | "approval";
 
@@ -17,6 +18,17 @@ interface ConfigurationStepProps {
   onStartPlanner: () => void;
   onStopPlanner: () => void;
   connected: boolean;
+  // Attachments
+  attachments?: {
+    vault: import("../../attachments-vault").AttachmentVault;
+    onFilesSelect: (files: FileList | null) => void;
+    onAnalyze: (name: string) => void;
+    onOpenAttachment?: (name: string, mimeType: string, bytes?: string, uri?: string) => void;
+    summarizeOnUpload: boolean;
+    onToggleSummarize: (value: boolean) => void;
+    summarizerModel: string;
+    onSummarizerModelChange: (model: string) => void;
+  };
 }
 
 export const ConfigurationStep: React.FC<ConfigurationStepProps> = ({
@@ -33,10 +45,11 @@ export const ConfigurationStep: React.FC<ConfigurationStepProps> = ({
   onStartPlanner,
   onStopPlanner,
   connected,
+  attachments,
 }) => {
   return (
     <div className="space-y-4">
-      <div className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Background & Goals
@@ -51,7 +64,6 @@ export const ConfigurationStep: React.FC<ConfigurationStepProps> = ({
 - The planner may lead, optionally asking before the first send per policy."
           />
         </div>
-        
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Planner Instructions
@@ -65,6 +77,21 @@ export const ConfigurationStep: React.FC<ConfigurationStepProps> = ({
           />
         </div>
       </div>
+
+      {/* Moved Attachments inside the planner box, above planner mode */}
+      {attachments && (
+        <AttachmentBar
+          vault={attachments.vault}
+          onFilesSelect={attachments.onFilesSelect}
+          onAnalyze={attachments.onAnalyze}
+          onOpenAttachment={attachments.onOpenAttachment}
+          summarizeOnUpload={attachments.summarizeOnUpload}
+          onToggleSummarize={attachments.onToggleSummarize}
+          summarizerModel={attachments.summarizerModel}
+          onSummarizerModelChange={attachments.onSummarizerModelChange}
+          providers={providers}
+        />
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
@@ -107,21 +134,13 @@ export const ConfigurationStep: React.FC<ConfigurationStepProps> = ({
         )}
       </div>
 
-      <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-        <div>
-          <p className="text-sm font-medium text-gray-700">
-            {plannerStarted ? "Planner is running" : "Planner is not running"}
-          </p>
-          <p className="text-xs text-gray-500 mt-1">
-            {plannerStarted
-              ? "The planner is actively managing the conversation"
-              : "Start the planner to begin the conversation workflow"}
-          </p>
-        </div>
+      <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
         <div>
           {!plannerStarted ? (
             <Button
               variant="primary"
+              size="lg"
+              className="px-6 py-3 text-lg rounded-full shadow-lg ring-2 ring-indigo-300"
               onClick={onStartPlanner}
               disabled={!connected}
               title={!connected ? "Not connected" : "Start planner"}
@@ -133,6 +152,16 @@ export const ConfigurationStep: React.FC<ConfigurationStepProps> = ({
               Stop Planner
             </Button>
           )}
+        </div>
+        <div>
+          <p className="text-sm font-medium text-gray-700">
+            {plannerStarted ? "Planner is running" : "Planner is not running"}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            {plannerStarted
+              ? "The planner is actively managing the conversation"
+              : "Start the planner to begin the conversation workflow"}
+          </p>
         </div>
       </div>
     </div>

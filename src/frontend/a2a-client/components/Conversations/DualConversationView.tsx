@@ -26,6 +26,7 @@ interface DualConversationViewProps {
   onSendMessage: (text: string) => void;
   connected: boolean;
   busy: boolean;
+  yourTurn?: boolean;
 }
 
 export const DualConversationView: React.FC<DualConversationViewProps> = ({
@@ -38,6 +39,7 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
   onSendMessage,
   connected,
   busy,
+  yourTurn,
 }) => {
   const frontLogRef = useRef<HTMLDivElement | null>(null);
   const agentLogRef = useRef<HTMLDivElement | null>(null);
@@ -150,6 +152,13 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
         
         {/* Message Input */}
         <div className="border-t border-gray-200 p-4 bg-white">
+          {yourTurn && (
+            <div className="mb-2 text-center">
+              <span className="inline-block px-2 py-1 text-xs font-medium rounded-full bg-orange-100 text-orange-700 border border-orange-200">
+                — your turn now —
+              </span>
+            </div>
+          )}
           <div className="flex gap-2">
             <input
               type="text"

@@ -69,10 +69,7 @@ export const AttachmentBar: React.FC<AttachmentBarProps> = ({
     <div className="space-y-4">
       {/* Upload Section */}
       <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex-1">
-            <label className="text-sm font-medium text-gray-700">Upload files for the planner to reference</label>
-          </div>
+        <div className="flex items-center gap-4">
           <label className="cursor-pointer">
             <input
               type="file"
@@ -84,6 +81,9 @@ export const AttachmentBar: React.FC<AttachmentBarProps> = ({
               Upload Files
             </Button>
           </label>
+          <div className="flex-1">
+            <label className="text-sm font-medium text-gray-700">Upload files for the planner to reference</label>
+          </div>
         </div>
 
         {/* Settings Row */}

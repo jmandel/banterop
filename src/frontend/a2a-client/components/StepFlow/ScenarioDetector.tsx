@@ -3,6 +3,8 @@ import { Button } from '../../../ui';
 
 interface ScenarioDetectorProps {
   endpoint: string;
+  goals: string;
+  instructions: string;
   onLoadScenario: (goals: string, instructions: string) => void;
 }
 
@@ -29,12 +31,14 @@ function isOurBridgeEndpoint(url: string): { isOurs: boolean; config64?: string;
   };
 }
 
-export const ScenarioDetector: React.FC<ScenarioDetectorProps> = ({ endpoint, onLoadScenario }) => {
+export const ScenarioDetector: React.FC<ScenarioDetectorProps> = ({ endpoint, goals, instructions, onLoadScenario }) => {
   const [canLoad, setCanLoad] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [scenarioData, setScenarioData] = useState<{ config64: string; apiBase: string } | null>(null);
+  const [preview, setPreview] = useState<{ goals: string; instructions: string } | null>(null);
+  const [willChange, setWillChange] = useState<boolean>(false);
 
   useEffect(() => {
     setDismissed(false);
@@ -49,6 +53,87 @@ export const ScenarioDetector: React.FC<ScenarioDetectorProps> = ({ endpoint, on
       setScenarioData(null);
     }
   }, [endpoint]);
+
+  // Prefetch and compute whether applying would change current fields
+  useEffect(() => {
+    (async () => {
+      setPreview(null);
+      setWillChange(false);
+      setError(null);
+      if (!scenarioData) return;
+      try {
+        const meta = parseConversationMetaFromConfig64(scenarioData.config64);
+        if (!meta?.scenarioId || !meta?.startingAgentId) return;
+        const response = await fetch(`${scenarioData.apiBase}/scenarios/${meta.scenarioId}`);
+        if (!response.ok) return;
+        const scenario = await response.json();
+        const externalAgent = scenario?.config?.agents?.find((a: any) => a.agentId === meta.startingAgentId);
+        const internalAgents = scenario?.config?.agents?.filter((a: any) => a.agentId !== meta.startingAgentId) || [];
+        if (!externalAgent) return;
+
+        const proposedGoals = [
+          `# Scenario: ${scenario.config.metadata.title}`,
+          '',
+          '## Your Identity',
+          `You are agent "${meta.startingAgentId}" acting on behalf of:`,
+          `Principal: ${externalAgent.principal?.name || 'Unknown'}`,
+          `Principal Type: ${externalAgent.principal?.type || 'Unknown'}`,
+          `Principal Description: ${externalAgent.principal?.description || 'Not specified'}`,
+          '',
+          'As this agent, you:',
+          '- Have access to your knowledge base and can reference it when making decisions',
+          '- Can act autonomously within your defined capabilities',
+          '- May consult with your principal when decisions exceed your authority',
+          '- Should maintain consistency with your principal\'s interests and goals',
+          '',
+          '## Your Situation',
+          externalAgent.situation || 'No specific situation provided',
+          '',
+          '## Your Goals',
+          ...(externalAgent.goals || []).map((g: string, i: number) => `${i + 1}. ${g}`),
+          '',
+          '## Your Counterpart(s)',
+          ...internalAgents.map((agent: any) => [
+            `Agent: "${agent.agentId}"`,
+            `Acting for: ${agent.principal?.name || 'Unknown'} (${agent.principal?.type || 'Unknown type'})`,
+            `Description: ${agent.principal?.description || 'Not specified'}`,
+            ''
+          ].join('\n')),
+          '',
+          '## Scenario Background',
+          scenario.config.metadata.background || 'No background provided',
+        ].join('\n');
+
+        const proposedInstructions = [
+          `You are agent "${meta.startingAgentId}" acting on behalf of "${externalAgent.principal?.name}".`,
+          '',
+          'Your available tools and capabilities:',
+          ...(externalAgent.tools?.length > 0 
+            ? externalAgent.tools.map((t: any) => `- ${t.name}: ${t.description}`)
+            : ['- No specific tools configured']),
+          '',
+          'Key points from your knowledge base:',
+          ...(externalAgent.knowledgeBase && Object.keys(externalAgent.knowledgeBase).length > 0
+            ? Object.entries(externalAgent.knowledgeBase).slice(0, 5).map(([key, value]) => 
+                `- ${key}: ${JSON.stringify(value).substring(0, 100)}...`)
+            : ['- No knowledge base entries']),
+          '',
+          'Scenario challenges to address:',
+          ...(scenario.config.metadata.challenges?.length > 0
+            ? scenario.config.metadata.challenges.map((c: string) => `- ${c}`)
+            : ['- No specific challenges identified']),
+          '',
+          'Remember: You have autonomous decision-making capability within these parameters,',
+          'but should consult your principal for decisions outside your defined scope.'
+        ].join('\n');
+
+        setPreview({ goals: proposedGoals, instructions: proposedInstructions });
+        setWillChange((proposedGoals !== goals) || (proposedInstructions !== instructions));
+      } catch {
+        // ignore; best-effort only
+      }
+    })();
+  }, [scenarioData, goals, instructions]);
 
   const loadScenario = async () => {
     if (!scenarioData) return;
@@ -71,25 +156,28 @@ export const ScenarioDetector: React.FC<ScenarioDetectorProps> = ({ endpoint, on
         throw new Error('No starting agent specified');
       }
       
-      // Fetch scenario
-      const response = await fetch(`${scenarioData.apiBase}/scenarios/${meta.scenarioId}`);
-      if (!response.ok) {
-        throw new Error(`Cannot fetch scenario: ${response.statusText}`);
+      // Fetch scenario only if not prefetched
+      let fetchedScenario: any = null;
+      if (!preview) {
+        const response = await fetch(`${scenarioData.apiBase}/scenarios/${meta.scenarioId}`);
+        if (!response.ok) {
+          throw new Error(`Cannot fetch scenario: ${response.statusText}`);
+        }
+        fetchedScenario = await response.json();
       }
       
-      const scenario = await response.json();
-      
       // Find agents
-      const externalAgent = scenario?.config?.agents?.find((a: any) => a.agentId === meta.startingAgentId);
+      const scenarioObj = fetchedScenario || null;
+      const externalAgent = preview ? true : scenarioObj?.config?.agents?.find((a: any) => a.agentId === meta.startingAgentId);
       if (!externalAgent) {
         throw new Error(`Cannot find agent "${meta.startingAgentId}" in scenario`);
       }
       
-      const internalAgents = scenario?.config?.agents?.filter((a: any) => a.agentId !== meta.startingAgentId);
+      const internalAgents = scenarioObj?.config?.agents?.filter((a: any) => a.agentId !== meta.startingAgentId);
       
       // Build goals and instructions
-      const goals = [
-        `# Scenario: ${scenario.config.metadata.title}`,
+      const goals = preview?.goals ?? [
+        `# Scenario: ${scenarioObj?.config?.metadata?.title}`,
         '',
         '## Your Identity',
         `You are agent "${meta.startingAgentId}" acting on behalf of:`,
@@ -118,10 +206,10 @@ export const ScenarioDetector: React.FC<ScenarioDetectorProps> = ({ endpoint, on
         ].join('\n')),
         '',
         '## Scenario Background',
-        scenario.config.metadata.background || 'No background provided',
+        scenarioObj?.config?.metadata?.background || 'No background provided',
       ].join('\n');
       
-      const instructions = [
+      const instructions = preview?.instructions ?? [
         `You are agent "${meta.startingAgentId}" acting on behalf of "${externalAgent.principal?.name}".`,
         '',
         'Your available tools and capabilities:',
@@ -136,8 +224,8 @@ export const ScenarioDetector: React.FC<ScenarioDetectorProps> = ({ endpoint, on
           : ['- No knowledge base entries']),
         '',
         'Scenario challenges to address:',
-        ...(scenario.config.metadata.challenges?.length > 0
-          ? scenario.config.metadata.challenges.map((c: string) => `- ${c}`)
+        ...(scenarioObj?.config?.metadata?.challenges?.length > 0
+          ? scenarioObj.config.metadata.challenges.map((c: string) => `- ${c}`)
           : ['- No specific challenges identified']),
         '',
         'Remember: You have autonomous decision-making capability within these parameters,',
@@ -154,7 +242,7 @@ export const ScenarioDetector: React.FC<ScenarioDetectorProps> = ({ endpoint, on
     }
   };
 
-  if (!canLoad || dismissed) return null;
+  if (!canLoad || dismissed || !willChange) return null;
 
   return (
     <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
@@ -164,7 +252,7 @@ export const ScenarioDetector: React.FC<ScenarioDetectorProps> = ({ endpoint, on
             Scenario Configuration Detected
           </h4>
           <p className="text-xs text-blue-700 mt-1">
-            This endpoint has a pre-configured scenario. Load it to automatically populate your agent configuration.
+            This endpoint has a pre-configured scenario. Load it to replace your current goals and instructions.
           </p>
           {error && (
             <p className="text-xs text-red-600 mt-2">

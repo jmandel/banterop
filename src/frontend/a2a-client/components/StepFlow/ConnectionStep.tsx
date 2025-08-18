@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Button, Badge } from "../../../ui";
 import type { A2AStatus } from "../../a2a-types";
 import { ScenarioDetector } from "./ScenarioDetector";
@@ -14,6 +14,8 @@ interface ConnectionStepProps {
   cardLoading?: boolean;
   onCancelTask: () => void;
   onLoadScenario?: (goals: string, instructions: string) => void;
+  goals?: string;
+  instructions?: string;
 }
 
 export const ConnectionStep: React.FC<ConnectionStepProps> = ({
@@ -27,10 +29,20 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
   cardLoading,
   onCancelTask,
   onLoadScenario,
+  goals,
+  instructions,
 }) => {
+  // Detect our reference stack (same logic as ScenarioDetector)
+  const canOpenWatch = useMemo(() => {
+    try {
+      if (!taskId) return false;
+      const match = endpoint.match(/^(https?:\/\/[^\/]+)(\/api)?\/bridge\/([^\/]+)\/a2a/);
+      return !!(match && match[3]);
+    } catch { return false; }
+  }, [endpoint, taskId]);
   const getStatusPill = () => {
     const map: Record<A2AStatus | "initializing", { label: string; className: string }> = {
-      initializing: { label: "initializing…", className: "bg-gray-100 text-gray-700" },
+      initializing: { label: "Not yet started", className: "bg-gray-100 text-gray-700" },
       submitted: { label: "submitted", className: "bg-blue-100 text-blue-700" },
       working: { label: "working…", className: "bg-yellow-100 text-yellow-700" },
       "input-required": { label: "your turn", className: "bg-orange-100 text-orange-700" },
@@ -71,14 +83,26 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
               <Badge>{taskId}</Badge>
             </>
           )}
+          {canOpenWatch && (
+            <a
+              className="ml-2 text-sm text-indigo-600 hover:underline"
+              href={`/watch/#/conversation/${taskId}`}
+              target="_blank"
+              rel="noreferrer"
+              title="Open this task in Watch"
+            >
+              Open in Watch
+            </a>
+          )}
+          {taskId && !['canceled','completed','failed'].includes(String(status)) && (
+            <Button
+              variant="secondary"
+              onClick={onCancelTask}
+            >
+              Reset client for new task
+            </Button>
+          )}
         </div>
-        <Button
-          variant="secondary"
-          onClick={onCancelTask}
-          disabled={!taskId || status === 'canceled' || status === 'completed' || status === 'failed'}
-        >
-          Cancel Task
-        </Button>
       </div>
 
       {connected && (
@@ -112,15 +136,12 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
       {onLoadScenario && (
         <ScenarioDetector
           endpoint={endpoint}
+          goals={goals || ''}
+          instructions={instructions || ''}
           onLoadScenario={onLoadScenario}
         />
       )}
       
-      <div className="p-3 bg-blue-50 rounded-lg">
-        <p className="text-xs text-blue-700">
-          Endpoint URL is auto-saved and will connect automatically when changed
-        </p>
-      </div>
     </div>
   );
 };

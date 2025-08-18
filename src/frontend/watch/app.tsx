@@ -47,28 +47,61 @@ async function wsRpcCall<T>(method: string, params?: any): Promise<T> {
 
 // Color palette (colorblind‑friendly variety with distinct accents)
 type PaletteColor = { bg: string; left: string; dot: string; text: string };
-const AGENT_PALETTE: PaletteColor[] = [
-  { bg: 'bg-sky-50', left: 'border-sky-600', dot: 'bg-sky-700', text: 'text-sky-800' },
-  { bg: 'bg-amber-50', left: 'border-amber-600', dot: 'bg-amber-700', text: 'text-amber-800' },
-  { bg: 'bg-emerald-50', left: 'border-emerald-600', dot: 'bg-emerald-700', text: 'text-emerald-800' },
-  { bg: 'bg-blue-50', left: 'border-blue-700', dot: 'bg-blue-800', text: 'text-blue-800' },
-  { bg: 'bg-fuchsia-50', left: 'border-fuchsia-600', dot: 'bg-fuchsia-700', text: 'text-fuchsia-800' },
-  { bg: 'bg-orange-50', left: 'border-orange-600', dot: 'bg-orange-700', text: 'text-orange-800' },
-  { bg: 'bg-lime-50', left: 'border-lime-600', dot: 'bg-lime-700', text: 'text-lime-800' },
-  { bg: 'bg-rose-50', left: 'border-rose-600', dot: 'bg-rose-700', text: 'text-rose-800' },
-  { bg: 'bg-teal-50', left: 'border-teal-600', dot: 'bg-teal-700', text: 'text-teal-800' },
-  { bg: 'bg-violet-50', left: 'border-violet-600', dot: 'bg-violet-700', text: 'text-violet-800' },
-  { bg: 'bg-cyan-50', left: 'border-cyan-600', dot: 'bg-cyan-700', text: 'text-cyan-800' },
-  { bg: 'bg-yellow-50', left: 'border-yellow-500', dot: 'bg-yellow-600', text: 'text-yellow-800' },
+// TEMP toggle: set to false to use full palette
+const FORCE_BW = false;
+const BW_COLOR: PaletteColor = { bg: 'bg-white', left: 'border-black', dot: 'bg-black', text: 'text-black' };
+// Colorblind-friendly, maximally distinct accents (approximate Okabe–Ito mapping to Tailwind)
+const BASE_PALETTE: PaletteColor[] = [
+  // Light yellow (more distinct and readable)
+  { bg: 'bg-yellow-50',  left: 'border-yellow-500',  dot: 'bg-yellow-600',  text: 'text-yellow-800' },
+  // Light blue (cyan family, distinct from starting blue)
+  { bg: 'bg-cyan-50',    left: 'border-cyan-500',    dot: 'bg-cyan-600',    text: 'text-cyan-800' },
+  // Salmon (rose family, avoid too-dark tones)
+  { bg: 'bg-rose-50',    left: 'border-rose-500',    dot: 'bg-rose-600',    text: 'text-rose-800' },
+  // White with neutral (non-slate) accents
+  { bg: 'bg-white',      left: 'border-gray-500',    dot: 'bg-gray-600',    text: 'text-gray-800' },
+  // Light red
+  { bg: 'bg-red-50',     left: 'border-red-500',     dot: 'bg-red-600',     text: 'text-red-800' },
 ];
-function colorForAgent(agentId?: string): PaletteColor {
-  const id = agentId ?? '';
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = id.charCodeAt(i) + ((hash << 5) - hash);
+const SYSTEM_COLOR: PaletteColor   = { bg: 'bg-gray-50',    left: 'border-gray-500',   dot: 'bg-gray-600',   text: 'text-gray-800' };
+const STARTING_COLOR: PaletteColor = { bg: 'bg-blue-50',    left: 'border-blue-700',   dot: 'bg-blue-800',   text: 'text-blue-800' };
+
+function isSystemAgent(agentId?: string) {
+  if (!agentId) return true;
+  const id = agentId.toLowerCase();
+  return id === 'system' || id.startsWith('system-');
+}
+// Deterministic color assignment per agent (conversation-agnostic), with overrides
+function buildColorMap(meta: any, agentIds: string[]): Map<string, PaletteColor> {
+  // System → gray, starting → blue, remaining → ordered assignment from BASE_PALETTE (starting with yellow)
+  const map = new Map<string, PaletteColor>();
+  if (FORCE_BW) {
+    agentIds.forEach((a) => map.set(a, BW_COLOR));
+    return map;
   }
-  const idx = Math.abs(hash) % AGENT_PALETTE.length;
-  return AGENT_PALETTE[idx]!;
+  const startingId = meta?.metadata?.startingAgentId as string | undefined;
+  // Assign system + starting first
+  for (const aid of agentIds) if (isSystemAgent(aid)) map.set(aid, SYSTEM_COLOR);
+  if (startingId) map.set(startingId, STARTING_COLOR);
+  const remaining = agentIds.filter((a) => !map.has(a));
+  let idx = 0;
+  for (const aid of remaining) {
+    map.set(aid, BASE_PALETTE[idx % BASE_PALETTE.length]!);
+    idx++;
+  }
+  return map;
+}
+
+// Keep the order from metadata.agents; append any new agents as they appear in turns
+function getOrderedAgents(meta: any, turns: TurnView[]): string[] {
+  const ordered: string[] = [];
+  const add = (aid?: string) => { if (!aid) return; if (!ordered.includes(aid)) ordered.push(aid); };
+  const metaAgents: string[] = Array.isArray(meta?.metadata?.agents)
+    ? (meta.metadata.agents as any[]).map((a) => a?.id).filter(Boolean)
+    : [];
+  metaAgents.forEach((id) => add(id));
+  for (const t of turns) add(t.agentId);
+  return ordered;
 }
 
 interface TurnView {
@@ -720,11 +753,10 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
               </div>
               <div className="flex items-center gap-1">
                 {(() => {
-                  const ids = new Set<string>();
-                  meta?.metadata?.agents?.forEach?.((a: any) => ids.add(a.id));
-                  turns.forEach((t) => { if (t.agentId) ids.add(t.agentId); });
-                  return Array.from(ids).map((aid) => {
-                    const c = colorForAgent(aid);
+                  const ordered = getOrderedAgents(meta, turns);
+                  const cmap = buildColorMap(meta, ordered);
+                  return ordered.map((aid) => {
+                    const c = cmap.get(aid) || BW_COLOR;
                     return (
                       <span key={aid} className="inline-flex items-center gap-1 px-1 py-0.5 border rounded bg-white">
                         <span className={`inline-block w-2.5 h-2.5 rounded-full ${c.dot}`} aria-hidden />
@@ -749,8 +781,8 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
             )}
           </div>
         )}
-        {turns.map((t, i) => {
-          const color = colorForAgent(t.agentId);
+        {(() => { const ordered = getOrderedAgents(meta, turns); const cmap = buildColorMap(meta, ordered); return turns.map((t, i) => {
+          const color = (t.agentId && cmap.get(t.agentId)) || BW_COLOR;
           return (
             <div key={`turn-${typeof t.turn === 'number' ? t.turn : i}`} className={`border rounded-lg p-2 border-l-4 ${color.bg} ${color.left}`}>
               <div className={`flex justify-between text-xs font-semibold mb-1`}>
@@ -963,7 +995,7 @@ function ConversationView({ id, focusRef, requestFocusKey, onConnStateChange }: 
               })}
             </div>
           );
-        })}
+        }); })()}
         {isThinking && (
           <div className="sticky bottom-0 pt-1">
             <div className="text-[0.75rem] text-gray-400 italic animate-pulse select-none">thinking …</div>
