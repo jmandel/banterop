@@ -10,7 +10,13 @@ interface ScenarioDetectorProps {
 
 function parseConversationMetaFromConfig64(config64: string) {
   try {
-    const json = atob(config64.replace(/-/g, '+').replace(/_/g, '/'));
+    const normalized = config64.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
+    const base64 = normalized + pad;
+    const bin = atob(base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const json = new TextDecoder().decode(bytes);
     return JSON.parse(json);
   } catch {
     return null;

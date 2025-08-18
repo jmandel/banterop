@@ -395,8 +395,17 @@ export class A2ABridgeServer {
       const name = f.name || 'upload';
       const contentType = f.mimeType || 'application/octet-stream';
       if (f.bytes) {
-        // Decode base64 bytes from A2A to plaintext for internal storage
-        const plaintext = atob(f.bytes);
+        // Decode base64 bytes → UTF‑8 text using Web APIs
+        let plaintext = '';
+        try {
+          const bin = atob(f.bytes);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          plaintext = new TextDecoder('utf-8').decode(bytes);
+        } catch {
+          // Fallback: raw atob
+          try { plaintext = atob(f.bytes); } catch { plaintext = ''; }
+        }
         out.push({ name, contentType, content: plaintext });
       } else if (f.uri) {
         // store reference or copy; for now, keep URI as content for later fetchers (optional)

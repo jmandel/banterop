@@ -15,8 +15,18 @@ export function createAttachmentRoutes(orchestrator: OrchestratorService) {
     const id = c.req.param('id');
     const attachment = orchestrator.getAttachment(id);
     if (!attachment) return c.json({ error: 'Attachment not found' }, 404);
-    // Use original content type; default to text/plain when absent
-    const contentType = attachment.contentType || 'text/plain; charset=utf-8';
+    // Use original content type; ensure UTF-8 for human-readable types
+    // In our test platform, some producers mislabel plaintext/markdown as PDF or omit charset.
+    // Treat the following as textual and force charset=utf-8 when missing:
+    //   - text/*
+    //   - application/json, application/ld+json, application/x-ndjson
+    //   - application/markdown, text/markdown
+    //   - application/pdf (some producers actually send markdown/plaintext)
+    let contentType = attachment.contentType || 'text/plain; charset=utf-8';
+    const needsCharset = /^(text\/)$/i.test('text/') || /^(text\/)/i.test(contentType) || /^(application\/(json|ld\+json|x-ndjson|markdown|pdf))$/i.test('application/json') || /(application\/(json|ld\+json|x-ndjson|markdown|pdf))/i.test(contentType) || /^(text\/markdown)$/i.test('text/markdown');
+    if ((/^text\//i.test(contentType) || /(application\/(json|ld\+json|x-ndjson|markdown|pdf))/i.test(contentType) || /^text\/markdown$/i.test(contentType)) && !/charset=/i.test(contentType)) {
+      contentType = contentType + '; charset=utf-8';
+    }
     c.header('Content-Type', contentType);
 
     // Build a safe Content-Disposition value:

@@ -705,7 +705,7 @@ Your response MUST follow this EXACT format:
       
       // For v3, we'll simulate the user response since we don't have queryUser
       // In production, this would need to be implemented with actual user interaction
-      const userResponse = `[Simulated response from ${this.agentConfig!.principal.name}]: I understand your question "${text}". Please proceed with available information.`;
+      const userResponse = `[Simulated response from ${this.agentConfig!.principal.name}]: I understand your question "${text}". Please look up all relevant information using the available query tools.`;
       
       // Add tool result trace
       await this.addToolResult(ctx, toolCallId, userResponse);
@@ -771,12 +771,9 @@ Your response MUST follow this EXACT format:
             throw new Error(`Refusing to synthesize document '${refId}' that was authored by another agent (${sourceAgentId}).`);
           }
         }
-        const historyString = this.buildConversationHistory(ctx.snapshot.events, ctx.agentId);
+        // Build process string (retain for local context if needed), but omit
+        // conversation history from the tool synthesis prompt per policy.
         const currentProcessString = this.formatCurrentProcess(this.currentTurnTrace);
-        const fullHistory = historyString + (historyString ? '\n\n' : '') + 
-                           `From: ${ctx.agentId} (IN PROGRESS)\n` +
-                           `Timestamp: ${new Date().toISOString()}\n\n` +
-                           currentProcessString;
         
         try {
           const synthesisResult = await this.toolSynthesis!.execute({
@@ -797,7 +794,8 @@ Your response MUST follow this EXACT format:
               goals: this.agentConfig!.goals,
             },
             scenario: this.scenario!,
-            conversationHistory: fullHistory,
+            conversationHistory: '',
+            omitHistory: true,
             conversationId: String(ctx.conversationId)
           });
           

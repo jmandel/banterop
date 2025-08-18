@@ -198,7 +198,13 @@ function ConfiguredPage() {
     (async () => {
       try {
         if (!config64) throw new Error('Missing config');
-        const json = atob(config64.replace(/-/g, '+').replace(/_/g, '/'));
+        const normalized = config64.replace(/-/g, '+').replace(/_/g, '/');
+        const pad = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
+        const base64 = normalized + pad;
+        const bin = atob(base64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const json = new TextDecoder().decode(bytes);
         const payload = JSON.parse(json);
         const result = await wsRpcCall<{ conversationId: number }>('createConversation', payload);
         setConversationId(result.conversationId);

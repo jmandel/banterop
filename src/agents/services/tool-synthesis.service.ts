@@ -68,6 +68,7 @@ export interface ToolExecutionInput {
   scenario: ScenarioConfiguration;
   conversationHistory: string; // include recent window for realism
   conversationId?: string; // For logging metadata
+  omitHistory?: boolean; // When true, do not include conversation history in the prompt
 }
 
 export interface ToolExecutionOutput {
@@ -203,103 +204,121 @@ export class ToolSynthesisService {
       ? `This tool is TERMINAL (endsConversation=true). Your output should help conclude the conversation. outcome="${tool.conversationEndStatus ?? 'neutral'}".`
       : `This tool is NOT terminal. Produce output to advance the conversation.`;
 
-    // Document guidance
-    const documentGuidance = `
-DOCUMENT OUTPUT FORMATS:
+    // Document vs JSON output guidance (XML-tagged)
+    const documentGuidance = [
+      '<OUTPUT_FORMATS>',
+      'Choose exactly one top-level style for the value of "output":',
+      '- Document style: use <DOCUMENT_OUTPUT> when the natural result is a narrative, letter, note, summary, or other document meant for humans to read.',
+      '- JSON style: use <JSON_OBJECT_OUTPUT> when the natural result is structured data (records, statuses, parameters, computed results).',
+      'Do not mix both at the top level. If you choose JSON style, you may include a nested field like "document" that follows <DOCUMENT_OUTPUT> to attach a readable artifact when helpful.',
+      '',
+      '  <DOCUMENT_OUTPUT>',
+      '  {',
+      '    "docId": "unique-document-id",',
+      '    "contentType": "text/markdown",',
+      '    "content": "The document content...",',
+      '    "name": "Optional display name",',
+      '    "summary": "Optional short summary"',
+      '  }',
+      '  </DOCUMENT_OUTPUT>',
+      '',
+      '  <JSON_OBJECT_OUTPUT>',
+      '  {',
+      '    // Idiomatic fields for the tool\'s output',
+      '    // Rich and detailed, lifelike, structured cleanly',           
+      //'    // To include a document, add a nested field (e.g., "document") using the <DOCUMENT_OUTPUT> shape',
+      '  }',
+      '  </JSON_OBJECT_OUTPUT>',
+      '',
+      '</OUTPUT_FORMATS>'
+    ].join('\n');
 
-1) Document Output (Preferred when the tool's output is a report/document):
-{
-  "docId": "unique-document-id",
-  "contentType": "text/markdown",
-  "content": "The document content...",
-  "name": "Optional display name",
-  "summary": "Optional short summary"
-}
 
-2) JSON Object Output (when the tool's output is naturally a JSON object):
-{
-  // Idiomatic fields for the tool's output
-  // If you need to embed a document, use the Document Output format (at any nested level)
-}`;
-
-// 3) Document Reference (when pointing to a resolvable reference only):
-// {
-//   "refToDocId": "unique-logical-identifier",
-//   "name": "Document name",
-//   "type": "Document type",
-//   "contentType": "text/markdown",
-//   "summary": "Brief summary",
-//   "details": { ...context for future resolution... }
-// }
-
-// `;
 
     // Interop constraints
-    const interopConstraints = `
-CONVERSATIONAL INTEROPERABILITY CONSTRAINTS:
-- The conversation thread is the sole channel of exchange.
-- Do NOT suggest portals, emails, fax, or separate submission flows.
-- Encourage sharing documents via conversation attachments (by docId) when appropriate.
-- Reveal only what the specific tool would plausibly know, even though you are omniscient.
-`;
+    const interopConstraints = [
+      '<CONSTRAINTS>',
+      '- The conversation thread is the sole channel of exchange.',
+      '- Do NOT suggest portals, emails, fax, or separate submission flows.',
+      '- Encourage sharing documents via conversation attachments (by docId) when appropriate.',
+      '- Reveal only what the specific tool would plausibly know, even though you are omniscient.',
+      '</CONSTRAINTS>'
+    ].join('\n');
 
     // Output contract
-    const outputContract = `
-OUTPUT CONTRACT:
-- Return exactly one JSON code block.
-- The JSON MUST have keys: "reasoning" (string) and "output" (any JSON).
-- No extra text outside the code block.
-
-EXAMPLE:
-\`\`\`json
-{
-  "reasoning": "How you derived the output from context & tool intent.",
-  "output": {
-    "docId": "doc_policy_123",
-    "contentType": "text/markdown",
-    "content": "# Policy ...",
-    "summary": "Highlights the specific criteria and applicability to this case."
-  }
-}
-\`\`\`
-`;
+    const outputContract = [
+      '<OUTPUT_CONTRACT>',
+      '- Return exactly one framing JSON code block.',
+      '- The framing JSON MUST have keys: "reasoning" (string) and "output" (a DOCUMENT_OUTPUT or JSON_OUTPUT).',
+      '- No extra text outside the code block.',
+      '',
+      '  <EXAMPLE>',
+      '  ```json',
+      '  {',
+      '    "reasoning": "How you derived the output from context & tool intent.",',
+      '    "output": {',
+      '      "docId": "doc_policy_123",',
+      '      "contentType": "text/markdown",',
+      '      "content": "# Policy ...",',
+      '      "summary": "Highlights the specific criteria and applicability to this case."',
+      '    }',
+      '  }',
+      '  ```',
+      '  </EXAMPLE>',
+      '</OUTPUT_CONTRACT>'
+    ].join('\n');
 
     return [
+      '<SYSTEM_ROLE>',
       'You are an omniscient Oracle / World Simulator for a scenario-driven, multi-agent conversation.',
       'Your role: execute a tool call with realistic, in-character results.',
+      '</SYSTEM_ROLE>',
       '',
+      '<SCENARIO>',
       scenarioHeader,
+      '</SCENARIO>',
       '',
+      '<AGENT_PROFILE>',
       agentProfile,
+      '</AGENT_PROFILE>',
       '',
-      'CALLING AGENT KNOWLEDGEBASE (liberal embedding):',
+      '<CALLING_AGENT_KB>',
       myKbTrunc || '(none)',
+      '</CALLING_AGENT_KB>',
       '',
-      otherKbBlock,
-      '',
+      '<SCENARIO_KNOWLEDGE>',
       scenarioKnowledge,
+      '</SCENARIO_KNOWLEDGE>',
       '',
-      'SCENARIO METADATA (JSON):',
+      '<SCENARIO_METADATA>',
       metadataBlock,
+      '</SCENARIO_METADATA>',
       '',
-      'TOOL INVOCATION:',
+      '<TOOL_INVOCATION>',
       `- name: ${tool.toolName}`,
       `- description: ${tool.description || '(no description provided)'}`,
       `- inputSchema: ${this.safeJson(tool.inputSchema ?? { type: 'object' })}`,
       `- arguments: ${this.safeJson(args)}`,
+      '</TOOL_INVOCATION>',
       '',
-      'DIRECTOR_NOTE_FOR_ORACLE:',
+      '<DIRECTORS_NOTE>',
       directorsNote,
+      '</DIRECTORS_NOTE>',
       '',
+      '<TERMINAL_NOTE>',
       terminalNote,
+      '</TERMINAL_NOTE>',
       interopConstraints,
       documentGuidance,
       '',
-      'CONVERSATION HISTORY (liberal embedding):',
-      history || '(none)',
-      '',
+      ...(input.omitHistory ? [] : [
+        '<CONVERSATION_HISTORY>',
+        history || '(none)',
+        '</CONVERSATION_HISTORY>',
+        ''
+      ]),
       outputContract,
-      'Now produce your response.',
+      `Now produce your response to "${tool.toolName}" and remember the synthesis guidance: ${directorsNote}`,
     ].join('\n');
   }
 

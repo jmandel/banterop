@@ -41,6 +41,23 @@
  *    knowledgeBase: Contains the actual data, detailed enough to sketch out a realistic rich scenario
  *    synthesisGuidance: Describes HOW to format/present that data
  *
+ * --- AUTHORING CHECKLIST (POSITIVE BEHAVIORS) ---
+ *
+ * 1) Initiation message: be brief and purposeful
+ *    - Identify representation and objective: "I am an agent representing [principal], seeking to [goal]."
+ *    - Defer details to the conversation and tools; do not include a full clinical narrative.
+ *
+ * 2) System prompt: minimal entry point + use tools for details
+ *    - Include only tiny entry info when needed (e.g., patient name/DOB/MRN).
+ *    - Explicitly rely on tools to retrieve all clinical/policy data; do not embed those details in the system prompt.
+ *
+ * 3) Tool design: flexible inputs and clear synthesis outputs
+ *    - Prefer natural-language inputs over rigid parameter lists; invite free-text queries.
+ *    - Use synthesisGuidance to steer outputs to either:
+ *        a) a human-readable document (e.g., markdown), or
+ *        b) a rich, well-structured JSON object.
+ *      Be explicit about the top-level choice; avoid mixing formats at the top level.
+ *
  * Remember: Agents don't know they're in a simulation. Design tools as plausible
  * interfaces to real systems they would actually use.
  */

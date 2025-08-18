@@ -41,7 +41,11 @@ export function decodeBase64Url<T = unknown>(b64url: string): T {
   const normalized = b64url.replace(/-/g, '+').replace(/_/g, '/');
   const pad = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
   const base64 = normalized + pad;
-  const json = atob(base64);
+  // Decode base64 to bytes, then UTF‑8 string (avoid Latin‑1 mojibake)
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const json = new TextDecoder('utf-8').decode(bytes);
   return JSON.parse(json) as T;
 }
 
