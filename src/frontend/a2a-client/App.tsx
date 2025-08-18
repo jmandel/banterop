@@ -280,9 +280,45 @@ export default function App() {
         lastStatusRef.current = st;
         dispatch({ type: 'status', status: st });
         if (st === 'input-required') dispatch({ type: 'system', text: '— your turn now —' });
-        if (st === 'completed') dispatch({ type: 'system', text: '— conversation completed —' });
-        if (st === 'failed') dispatch({ type: 'system', text: '— conversation failed —' });
-        if (st === 'canceled') dispatch({ type: 'system', text: '— conversation canceled —' });
+        if (st === 'completed') {
+          dispatch({ type: 'system', text: '— conversation completed —' });
+          // Stop the planner when task is completed
+          plannerRef.current?.stop();
+          plannerRef.current = null;
+          dispatch({ type: 'setPlannerStarted', started: false });
+          // Abort any active streams
+          try {
+            ptStreamAbort.current?.abort();
+            ptStreamAbort.current = null;
+          } catch {}
+          ptSendInFlight.current = false;
+        }
+        if (st === 'failed') {
+          dispatch({ type: 'system', text: '— conversation failed —' });
+          // Stop the planner when task fails
+          plannerRef.current?.stop();
+          plannerRef.current = null;
+          dispatch({ type: 'setPlannerStarted', started: false });
+          // Abort any active streams
+          try {
+            ptStreamAbort.current?.abort();
+            ptStreamAbort.current = null;
+          } catch {}
+          ptSendInFlight.current = false;
+        }
+        if (st === 'canceled') {
+          dispatch({ type: 'system', text: '— conversation canceled —' });
+          // Stop the planner when task is canceled
+          plannerRef.current?.stop();
+          plannerRef.current = null;
+          dispatch({ type: 'setPlannerStarted', started: false });
+          // Abort any active streams
+          try {
+            ptStreamAbort.current?.abort();
+            ptStreamAbort.current = null;
+          } catch {}
+          ptSendInFlight.current = false;
+        }
       }
     });
 

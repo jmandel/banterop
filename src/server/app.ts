@@ -44,6 +44,12 @@ export class App {
     this.agentHost = new AgentHost(this.orchestrator, this.llmProviderManager);
     const registry = new ServerAgentRegistry(this.storage.db);
     this.lifecycleManager = new ServerAgentLifecycleManager(registry, this.agentHost);
+    // Initialize lifecycle auto-shutdown subscription
+    try {
+      void this.lifecycleManager.initialize(this.orchestrator);
+    } catch (err) {
+      console.error('[App] Failed to initialize lifecycle manager', err);
+    }
     
     // Seed default scenarios on startup (no-op if already present)
     this.seedDefaultScenarios();
@@ -127,7 +133,8 @@ export class App {
       console.log('[Watchdog] Final stats:', stats);
     }
     
-    // Then shutdown other services
+    // Unsubscribe lifecycle and then shutdown other services
+    try { await this.lifecycleManager.shutdown(); } catch {}
     await this.orchestrator.shutdown();
     this.storage.close();
   }

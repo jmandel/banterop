@@ -49,7 +49,7 @@ export interface SystemPayload {
 
 export interface AppendEventInput<T = unknown> {
   conversation: number;
-  turn?: number; // optional for message starting a new turn
+  turn: number; // REQUIRED - must be explicit for all events
   type: EventType;
   payload: T;
   finality: Finality;

@@ -519,6 +519,7 @@ export class OrchestratorService {
             // Append a system-authored message to close the conversation
             this.appendEvent<import('$src/types/event.types').MessagePayload>({
               conversation: e.conversation,
+              turn: e.turn, // Use the same turn that hit the limit
               type: 'message',
               payload: {
                 text: `Auto-closed: reached maxTurns=${maxTurns}.`,
@@ -570,9 +571,10 @@ export class OrchestratorService {
     if (this.isShuttingDown) return;
     
     try {
-      // With EventStore routing, no turn is required; system events will go to turn 0
+      // System events always use turn 0
       const res = this.storage.events.appendEvent({
         conversation,
+        turn: 0,
         type: 'system',
         payload: systemPayload,
         finality: 'none',

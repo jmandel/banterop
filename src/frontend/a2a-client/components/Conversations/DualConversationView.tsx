@@ -185,11 +185,11 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
       <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
         <div className="bg-gradient-to-r from-blue-500 to-cyan-500 text-white p-4">
           <div className="flex items-center justify-between">
-            <h3 className="font-bold text-lg">Planner ↔ Agent</h3>
+            <h3 className="font-bold text-lg">Planner ↔ Remote Agent</h3>
             <div className="flex items-center gap-2">
               <span className="px-2 py-1 bg-white/20 rounded-full text-xs font-medium">Planner</span>
               <span className="text-white/60">→</span>
-              <span className="px-2 py-1 bg-white/20 rounded-full text-xs font-medium">Agent</span>
+              <span className="px-2 py-1 bg-white/20 rounded-full text-xs font-medium">Remote Agent</span>
             </div>
           </div>
         </div>

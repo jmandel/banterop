@@ -1,7 +1,50 @@
 import type { IAgentLifecycleManager, IAgentRegistry, IAgentHost } from '$src/control/agent-lifecycle.interfaces';
+import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
+import type { UnifiedEvent } from '$src/types/event.types';
 
 export class ServerAgentLifecycleManager implements IAgentLifecycleManager {
+  private orchestrator?: OrchestratorService;
+  private subId?: string;
+
   constructor(private registry: IAgentRegistry, private host: IAgentHost) {}
+
+  // Subscribe to conversation events to auto-stop agents on terminal messages
+  async initialize(orchestrator: OrchestratorService) {
+    this.orchestrator = orchestrator;
+    try {
+      this.subId = orchestrator.subscribeAll(async (evt: UnifiedEvent | any) => {
+        try {
+          if (evt && evt.type === 'message' && evt.finality === 'conversation') {
+            const conversationId = (evt as UnifiedEvent).conversation;
+            try {
+              await this.stop(conversationId);
+              // Optional: console.log(`[Lifecycle] Auto-stopped agents for conversation ${conversationId}`);
+            } catch (e) {
+              console.error('[Lifecycle] Auto-stop failed for conversation', conversationId, e);
+            }
+          }
+        } catch (e) {
+          // best-effort; do not throw from subscription
+          console.error('[Lifecycle] Subscription handler error', e);
+        }
+      }, false);
+    } catch (e) {
+      console.error('[Lifecycle] Failed to initialize subscription', e);
+    }
+  }
+
+  async shutdown() {
+    try {
+      if (this.orchestrator && this.subId) {
+        this.orchestrator.unsubscribe(this.subId);
+      }
+    } catch (e) {
+      console.error('[Lifecycle] Failed to unsubscribe during shutdown', e);
+    } finally {
+      this.subId = undefined;
+      this.orchestrator = undefined;
+    }
+  }
 
   async ensure(conversationId: number, agentIds: string[]) {
     await this.registry.register(conversationId, agentIds);

@@ -148,12 +148,7 @@ export class ConversationWatchdog {
     console.log(`[Watchdog] Canceling stalled conversation ${conversationId}`);
 
     try {
-      try {
-        await this.lifecycleManager.stop(conversationId);
-        console.log(`[Watchdog] Stopped agents for conversation ${conversationId}`);
-      } catch (error) {
-        console.error(`[Watchdog] Failed to stop agents for ${conversationId}:`, error);
-      }
+      // No explicit lifecycle stop here; auto-shutdown will handle agent cleanup
 
       const head = this.storage.events.getHead(conversationId);
       let lastEventTs: string | undefined;
@@ -165,8 +160,10 @@ export class ConversationWatchdog {
         }
       }
 
+      // System events always use turn 0
       await this.orchestrator.appendEvent({
         type: 'system',
+        turn: 0,
         finality: 'none',
         agentId: 'system-watchdog',
         payload: {
@@ -176,8 +173,11 @@ export class ConversationWatchdog {
         conversation: conversationId
       });
 
+      // Watchdog starts a new turn to cancel the conversation
+      const cancelTurn = head.hasOpenTurn ? head.lastTurn : head.lastTurn + 1;
       await this.orchestrator.appendEvent({
         type: 'message',
+        turn: cancelTurn,
         finality: 'conversation',
         agentId: 'system-watchdog',
         payload: {

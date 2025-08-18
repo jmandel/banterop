@@ -325,41 +325,38 @@ export class EventStore {
 
   // Get conversation head metadata for CAS preconditions
   getHead(conversation: number): { lastTurn: number; lastClosedSeq: number; hasOpenTurn: boolean } {
-    // Get the last event in the conversation
-    const lastEvent = this.db
+    // Determine the highest non-system turn seen (messages or traces only)
+    const lastTurnRow = this.db
       .prepare(`
-        SELECT turn, seq, type, finality 
-        FROM conversation_events 
-        WHERE conversation = ? 
-        ORDER BY seq DESC 
-        LIMIT 1
+        SELECT COALESCE(MAX(turn), 0) AS lastTurn
+        FROM conversation_events
+        WHERE conversation = ? AND type IN ('message','trace') AND turn > 0
       `)
-      .get(conversation) as { turn: number; seq: number; type: string; finality: string } | undefined;
-    
-    if (!lastEvent) {
-      return { lastTurn: 0, lastClosedSeq: 0, hasOpenTurn: false };
-    }
-    
-    // Get the last message with finality !== 'none'
+      .get(conversation) as { lastTurn: number } | undefined;
+
+    const lastTurn = lastTurnRow?.lastTurn || 0;
+
+    // Get the last message with finality !== 'none' (used as the authoritative close marker)
     const lastClosedMessage = this.db
       .prepare(`
-        SELECT seq 
-        FROM conversation_events 
+        SELECT seq, turn
+        FROM conversation_events
         WHERE conversation = ? AND type = 'message' AND finality != 'none'
-        ORDER BY seq DESC 
+        ORDER BY seq DESC
         LIMIT 1
       `)
-      .get(conversation) as { seq: number } | undefined;
-    
+      .get(conversation) as { seq: number; turn: number } | undefined;
+
     const lastClosedSeq = lastClosedMessage?.seq || 0;
-    
-    // Check if the current turn is open (no closing message on this turn)
-    const hasOpenTurn = lastEvent.turn > 0 && !this.isTurnClosed(conversation, lastEvent.turn);
-    
+
+    // A turn is considered open if we have any non-system activity on that turn
+    // and there is no closing message for that turn.
+    const hasOpenTurn = lastTurn > 0 && !this.isTurnClosed(conversation, lastTurn);
+
     return {
-      lastTurn: lastEvent.turn,
+      lastTurn,
       lastClosedSeq,
-      hasOpenTurn
+      hasOpenTurn,
     };
   }
 

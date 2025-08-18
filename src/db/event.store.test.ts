@@ -126,6 +126,7 @@ describe('EventStore append invariants and retrieval', () => {
     expect(() =>
       events.appendEvent({
         conversation: 1,
+        turn: 0,
         type: 'system',
         payload: { kind: 'note' },
         finality: 'conversation',
@@ -180,6 +181,7 @@ describe('EventStore append invariants and retrieval', () => {
     // System event can be appended without any existing turn
     const sys1 = events.appendEvent({
       conversation: 1,
+      turn: 0,
       type: 'system',
       payload: { kind: 'meta_created', data: { title: 'New conversation' } },
       finality: 'none',
@@ -191,6 +193,7 @@ describe('EventStore append invariants and retrieval', () => {
     // Another system event also goes to turn 0
     const sys2 = events.appendEvent({
       conversation: 1,
+      turn: 0,
       type: 'system',
       payload: { kind: 'note', data: { message: 'System note' } },
       finality: 'none',
@@ -214,6 +217,7 @@ describe('EventStore append invariants and retrieval', () => {
     // More system events still go to turn 0
     const sys3 = events.appendEvent({
       conversation: 1,
+      turn: 0,
       type: 'system',
       payload: { kind: 'turn_claimed', data: { agentId: 'assistant' } },
       finality: 'none',
@@ -229,6 +233,56 @@ describe('EventStore append invariants and retrieval', () => {
     expect(systemEvents.every(e => e.turn === 0)).toBe(true);
   });
 
+  it('getHead ignores system events when computing lastTurn and hasOpenTurn', () => {
+    // Close turn 1
+    events.appendEvent({
+      conversation: 1,
+      turn: 1,
+      type: 'message',
+      payload: { text: 'turn1 done' } as MessagePayload,
+      finality: 'turn',
+      agentId: 'user',
+    });
+
+    // Add a system event after closing turn 1
+    events.appendEvent({
+      conversation: 1,
+      turn: 0,
+      type: 'system',
+      payload: { kind: 'note', data: { msg: 'after t1' } },
+      finality: 'none',
+      agentId: 'system',
+    });
+
+    const head1 = events.getHead(1);
+    expect(head1.lastTurn).toBe(1);
+    expect(head1.hasOpenTurn).toBe(false);
+
+    // Start turn 2 but do not close it
+    events.appendEvent({
+      conversation: 1,
+      turn: 2,
+      type: 'message',
+      payload: { text: 'turn2 in progress' } as MessagePayload,
+      finality: 'none',
+      agentId: 'user',
+    });
+
+    // Add another system event
+    events.appendEvent({
+      conversation: 1,
+      turn: 0,
+      type: 'system',
+      payload: { kind: 'note', data: { msg: 'after t2 partial' } },
+      finality: 'none',
+      agentId: 'system',
+    });
+
+    const head2 = events.getHead(1);
+    expect(head2.lastTurn).toBe(2);
+    expect(head2.hasOpenTurn).toBe(true);
+  });
+
   it('requires explicit turn numbers for traces', () => {
     // Traces MUST have explicit turn numbers
     expect(() => events.appendEvent({
@@ -237,7 +291,7 @@ describe('EventStore append invariants and retrieval', () => {
       payload: { type: 'thought', content: 'starting work' } as TracePayload,
       finality: 'none',
       agentId: 'assistant',
-    })).toThrow(/Turn number is REQUIRED/);
+    } as any)).toThrow(/Turn number is REQUIRED/);
 
     // With explicit turn, trace works
     const trace1 = events.appendEvent({

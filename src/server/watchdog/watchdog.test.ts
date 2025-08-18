@@ -86,8 +86,8 @@ describe('ConversationWatchdog', () => {
       
       await (watchdog as any).checkStalled();
       
-      expect(mockLifecycleManager.stop).toHaveBeenCalledWith(1);
-      expect(mockOrchestrator.appendEvent).toHaveBeenCalled();
+      // Should append system + terminal message events
+      expect(mockOrchestrator.appendEvent).toHaveBeenCalledTimes(2);
     });
 
     it('should respect disabled flag in conversation metadata', async () => {
@@ -165,7 +165,8 @@ describe('ConversationWatchdog', () => {
       
       await (watchdog as any).checkStalled();
       
-      expect(mockLifecycleManager.stop).toHaveBeenCalledTimes(10);
+      const stats = watchdog.getStats();
+      expect(stats.conversationsCanceled).toBe(10);
     });
   });
 

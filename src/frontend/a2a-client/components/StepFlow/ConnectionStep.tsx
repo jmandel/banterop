@@ -75,7 +75,7 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
         <Button
           variant="secondary"
           onClick={onCancelTask}
-          disabled={!taskId}
+          disabled={!taskId || status === 'canceled' || status === 'completed' || status === 'failed'}
         >
           Cancel Task
         </Button>

@@ -16,16 +16,8 @@ export function createWebSocketServer(orchestrator: OrchestratorService, agentHo
 
   const connectionSubs = new WeakMap<WSContext, Set<string>>();
 
-  // Global cleanup hook: when a conversation is finalized, stop and de‑ensure agents
-  orchestrator.subscribeAll((e: UnifiedEvent | GuidanceEvent) => {
-    if ('type' in e && e.type === 'message') {
-      const m = e as UnifiedEvent;
-      if (m.finality === 'conversation') {
-        // Best-effort; ignore errors to avoid disrupting bus
-        lifecycle.stop(m.conversation).catch(() => {});
-      }
-    }
-  }, false);
+  // Cleanup-on-completion is centralized in ServerAgentLifecycleManager.
+  // No extra subscription here to avoid duplicate stops.
 
   app.get(
     '/api/ws',

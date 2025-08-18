@@ -192,36 +192,37 @@ export class A2ABridgeServer {
       throw this.rpcErr(-32001, 'Task not found');
     }
 
-    try {
+    // try {
       // Preferred helper
       await (this.deps.orchestrator as any).endConversation(taskNum, {
         authorId: 'system',
         text: 'Conversation canceled by client.',
         outcome: 'canceled',
       });
-    } catch {
-      // Fallback: write a terminal message directly
-      try {
-        // Get the current state to determine turn number
-        const head = (this.deps.orchestrator as any).storage.events.getHead(taskNum);
-        const closingTurn = head.hasOpenTurn ? head.lastTurn : head.lastTurn + 1;
+    // } catch (e) {
+      // console.error('Error ending conversation:', e);
+      // // Fallback: write a terminal message directly
+      // try {
+      //   // Get the current state to determine turn number
+      //   const head = (this.deps.orchestrator as any).storage.events.getHead(taskNum);
+      //   const closingTurn = head.hasOpenTurn ? head.lastTurn : head.lastTurn + 1;
         
-        this.deps.orchestrator.sendMessage(
-          taskNum,
-          closingTurn,
-          'system',
-          { text: 'Conversation canceled by client.', outcome: { status: 'canceled' } },
-          'conversation'
-        );
-      } catch {
-        throw this.rpcErr(
-          -32004,
-          'Cancellation not supported by underlying orchestrator yet'
-        );
-      }
-    }
+      //   this.deps.orchestrator.sendMessage(
+      //     taskNum,
+      //     closingTurn,
+      //     'system',
+      //     { text: 'Conversation canceled by client.', outcome: { status: 'canceled' } },
+      //     'conversation'
+      //   );
+      // } catch (e: any) {
+      //   throw this.rpcErr(
+      //     -32004,
+      //     'Cancellation error in the orchestrator' + e.message
+      //   );
+      // }
+    // }
 
-    try { await this.deps.lifecycle.stop(taskNum); } catch {}
+    // No explicit lifecycle.stop() needed here; auto-shutdown subscription will stop agents
 
     const meta = parseConversationMetaFromConfig64(this.config64);
     const externalId = getStartingAgentId(meta);
