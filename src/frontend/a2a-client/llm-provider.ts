@@ -94,6 +94,14 @@ export class ServerLLMProvider implements LLMProvider {
     lines.push("</VOICE>");
     lines.push("");
 
+    // General guidance for user-facing updates
+    lines.push("<GENERAL_GUIDANCE>");
+    lines.push("Proactively report important progress, outcomes, or blockers to the user via sendMessageToUser.");
+    lines.push("Examples: milestone reached, decision made, error encountered, expected delay, or completion.");
+    lines.push("Keep updates concise and non-technical; include clear next steps when relevant.");
+    lines.push("</GENERAL_GUIDANCE>");
+    lines.push("");
+
     // Remove policy and allowed-actions prose; the tool schema above already constrains allowed actions.
 
     lines.push("<SESSION_BACKGROUND_AND_GOALS>");

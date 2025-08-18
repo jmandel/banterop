@@ -274,6 +274,24 @@ export class ScenarioPlannerV2 {
         lines.push(`<tool_result at="${ev.timestamp}">${JSON.stringify(ev.payload?.result ?? {})}</tool_result>`);
       }
     }
+    // One-off hint: if we haven't contacted the remote agent yet and the scenario
+    // includes a suggested initiating message for our agent, surface it here.
+    try {
+      const hasPlannerContact = this.eventLog.some(ev =>
+        (ev.type === 'agent_message' && ev.agentId === 'planner') ||
+        (ev.type === 'tool_call' && (String(ev.payload?.name) === 'sendMessage' || String(ev.payload?.name) === 'sendMessageToRemoteAgent'))
+      );
+      if (!hasPlannerContact) {
+        const sc: any = this.scenario;
+        const plannerId = this.deps.getPlannerAgentId?.() || this.myAgentId || '';
+        const me = Array.isArray(sc?.agents) ? sc.agents.find((a: any) => a?.agentId === plannerId) : null;
+        const suggested: string | undefined = me?.messageToUseWhenInitiatingConversation || me?.initialMessage || undefined;
+        if (suggested && String(suggested).trim()) {
+          const now = new Date().toISOString();
+          lines.push(`<trace at="${now}">A suggested starting message is: ${String(suggested).trim()}</trace>`);
+        }
+      }
+    } catch {}
     return lines.join("\n");
   }
 
@@ -356,6 +374,14 @@ export class ScenarioPlannerV2 {
       parts.push("</ADDITIONAL_INSTRUCTIONS>");
       parts.push("");
     }
+
+    // General guidance for user-facing updates
+    parts.push("<GENERAL_GUIDANCE>");
+    parts.push("Proactively report important progress, outcomes, or blockers to the user using sendMessageToUser.");
+    parts.push("Examples: milestone reached, decision made, error encountered, delay expected, or conversation completed.");
+    parts.push("Keep updates concise, actionable, and free of internal jargon.");
+    parts.push("</GENERAL_GUIDANCE>");
+    parts.push("");
 
     parts.push("<EVENT_LOG>");
     parts.push(this.buildXmlHistory() || "<!-- none -->");
