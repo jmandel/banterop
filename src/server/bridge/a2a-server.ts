@@ -14,6 +14,21 @@ type Deps = {
 export class A2ABridgeServer {
   constructor(private deps: Deps, private config64: string) {}
 
+  private utf8ToBase64(s: string): string {
+    try {
+      const bytes = new TextEncoder().encode(s ?? '');
+      let binary = '';
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+      }
+      return btoa(binary);
+    } catch {
+      // Last-resort fallback: empty
+      return '';
+    }
+  }
+
   async handleJsonRpc(c: any, body: any) {
     const { id, method, params } = body || {};
     const ok = (result: any, status = 200) => c.json({ jsonrpc: '2.0', id, result }, status);
@@ -474,8 +489,8 @@ export class A2ABridgeServer {
           if (a?.id && a?.contentType) {
             const row = this.deps.orchestrator.getAttachment(a.id);
             const c = (row as any)?.content as string;
-            // Internal content is always plaintext, encode to base64 for A2A
-            const bytes = btoa(c);
+            // Internal content is UTF-8 plaintext; encode to base64 for A2A safely
+            const bytes = this.utf8ToBase64(c ?? '');
             parts.push({ kind: 'file', file: { name: a.name ?? 'attachment', mimeType: a.contentType, bytes } });
           }
         }
@@ -509,8 +524,8 @@ export class A2ABridgeServer {
           if (a?.id && a?.contentType) {
             const row = this.deps.orchestrator.getAttachment(a.id);
             const c = (row as any)?.content as string;
-            // Internal content is always plaintext, encode to base64 for A2A
-            const bytes = btoa(c);
+            // Internal content is UTF-8 plaintext; encode to base64 for A2A safely
+            const bytes = this.utf8ToBase64(c ?? '');
             parts.push({ kind: 'file', file: { name: a.name ?? 'attachment', mimeType: a.contentType, bytes } });
           }
         }

@@ -30,27 +30,23 @@ export class ServerLLMProvider implements LLMProvider {
     const attachmentsAvailable = (ctx.available_files?.length || 0) > 0;
     const allowSendToAgent = (ctx.status === 'input-required') || (!ctx.policy?.has_task);
     const TOOL_SPEC = (() => {
-      const sendToAgent = allowSendToAgent
-        ? `  | { "tool": "send_to_agent",      "args": { "text"?: string${attachmentsAvailable ? ", \"attachments\"?: Array<{ \"name\": string, \"mimeType\"?: string, \"bytes\"?: string, \"uri\"?: string, \"summary\"?: string, \"docId\"?: string }>" : ""} } }\n`
+      const toRemote = allowSendToAgent
+        ? `  | { "tool": "sendMessageToRemoteAgent", "args": { "text"?: string${attachmentsAvailable ? ", \"attachments\"?: Array<{ \"docId\"?: string, \"name\"?: string }]>" : ""}, "finality"?: 'none'|'turn'|'conversation' } }\n`
         : ``;
-      const read = attachmentsAvailable
-        ? `  | { "tool": "read_attachment", "args": { "name": string, "purpose"?: string } }\n`
-        : ``;
+      const toUser = `  | { "tool": "sendMessageToUser",       "args": { "text": string${attachmentsAvailable ? ", \"attachments\"?: Array<{ \"docId\"?: string, \"name\"?: string }]>" : ""} } }\n`;
       return (
         `Respond with EXACTLY ONE JSON object (no commentary) matching:\n\n` +
         `type ToolCall =\n` +
-        `${sendToAgent}` +
-        `${read}` +
-        `  | { "tool": "send_to_local_user", "args": { "text": string } }\n` +
-        `  | { "tool": "sleep",              "args": { } }\n` +
-        `  | { "tool": "done",               "args": { "summary": string } };\n\n` +
+        `${toRemote}` +
+        `${toUser}` +
+        `  | { "tool": "sleep",                "args": { } }\n` +
+        `  | { "tool": "done",                 "args": { "summary"?: string } };\n\n` +
         `Rules:\n` +
         `- You are event-driven: the host wakes you when NEW info arrives (agent reply, user input, status change, file changes, or tool results).\n` +
-        (attachmentsAvailable ? `- Use \"read_attachment\" to examine a file when appropriate.\n` : ``) +
-        (allowSendToAgent ? `- Prefer \"send_to_agent\" with concise text. When attaching, choose ONLY from AVAILABLE_FILES by NAME; do not invent files.\n` : ``) +
-        `- Use \"send_to_local_user\" to report progress or ask questions when you need information/approval or when the agent requests info from the user.\n` +
+        (allowSendToAgent ? `- Prefer \"sendMessageToRemoteAgent\" with concise text. When attaching, use AVAILABLE_FILES by NAME or docId.\n` : ``) +
+        `- Use \"sendMessageToUser\" to report progress or ask questions when you need information/approval or when the agent requests info from the user.\n` +
         `- Use \"sleep\" to wait for the next event (you'll be woken when something happens).\n` +
-        `- Finish with \"done\" when the objective is achieved.\n` +
+        `- Finish with \"done\" when the overall objective is achieved and nothing else remains.\n` +
         `- Output ONLY the JSON (no backticks, no extra prose).\n`
       );
     })();
@@ -64,13 +60,16 @@ export class ServerLLMProvider implements LLMProvider {
     lines.push("</TOOLS_SPEC>");
     lines.push("");
 
-    if (ctx.counterpartHint) {
-      lines.push("<COUNTERPART>");
-      // ctx.counterpartHint is already a concise sentence tailored by the host
-      lines.push(ctx.counterpartHint.trim());
-      lines.push("</COUNTERPART>");
-      lines.push("");
+    // Minimal scenario framing
+    lines.push("<SCENARIO>");
+    lines.push("<YOUR_ROLE>");
+    lines.push("You are the planner coordinating a conversation between the user and a counterpart agent.");
+    if (ctx.counterpartHint?.trim()) {
+      lines.push(`Counterpart: ${ctx.counterpartHint.trim()}`);
     }
+    lines.push("</YOUR_ROLE>");
+    lines.push("</SCENARIO>");
+    lines.push("");
 
     // Voice and audience: speak directly to the counterpart as the user's agent
     lines.push("<VOICE>");
@@ -131,8 +130,8 @@ export class ServerLLMProvider implements LLMProvider {
     if (ctx.tool_events_recent.length) {
       lines.push("<RECENT_TOOL_EVENTS>");
       for (const ev of ctx.tool_events_recent.slice(-8)) {
-        lines.push(`- TOOL: ${ev.tool} @ ${ev.at}`);
-        lines.push(`  args: { "name": "${ev.args.name}"${ev.args.purpose ? `, "purpose": "${ev.args.purpose}"` : ""} }`);
+        const body = { reasoning: ev.result?.description || '', action: { tool: ev.tool, args: ev.args || {} } };
+        lines.push(`<tool_call at="${ev.at}">${JSON.stringify(body)}</tool_call>`);
         const r = ev.result;
         let desc = r.ok
           ? (r.description || (r.text_excerpt ? `text_excerpt(${r.text_excerpt.length} chars)${r.truncated ? " [truncated]" : ""}` : "ok"))
