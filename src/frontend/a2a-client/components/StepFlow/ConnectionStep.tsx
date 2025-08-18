@@ -2,10 +2,13 @@ import React, { useMemo } from "react";
 import { Button, Badge } from "../../../ui";
 import type { A2AStatus } from "../../a2a-types";
 import { ScenarioDetector } from "./ScenarioDetector";
+import { parseBridgeEndpoint } from "../../bridge-endpoint";
 
 interface ConnectionStepProps {
   endpoint: string;
   onEndpointChange: (value: string) => void;
+  protocol: "auto" | "a2a" | "mcp";
+  onProtocolChange: (p: "auto" | "a2a" | "mcp") => void;
   status: A2AStatus | "initializing";
   taskId?: string;
   connected: boolean;
@@ -21,6 +24,8 @@ interface ConnectionStepProps {
 export const ConnectionStep: React.FC<ConnectionStepProps> = ({
   endpoint,
   onEndpointChange,
+  protocol,
+  onProtocolChange,
   status,
   taskId,
   connected,
@@ -36,9 +41,17 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
   const canOpenWatch = useMemo(() => {
     try {
       if (!taskId) return false;
-      const match = endpoint.match(/^(https?:\/\/[^\/]+)(\/api)?\/bridge\/([^\/]+)\/a2a/);
-      return !!(match && match[3]);
+      const { isOurs, config64 } = parseBridgeEndpoint(endpoint);
+      return !!(isOurs && config64);
     } catch { return false; }
+  }, [endpoint, taskId]);
+
+  const watchHref = useMemo(() => {
+    try {
+      const parsed = parseBridgeEndpoint(endpoint);
+      if (!parsed.isOurs || !parsed.serverBase || !taskId) return undefined;
+      return `${parsed.serverBase}/watch/#/conversation/${taskId}`;
+    } catch { return undefined; }
   }, [endpoint, taskId]);
   const getStatusPill = () => {
     const map: Record<A2AStatus | "initializing", { label: string; className: string }> = {
@@ -62,15 +75,31 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
     <div className="space-y-4">
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          A2A Endpoint URL
+          Endpoint URL
         </label>
         <input
           type="text"
           value={endpoint}
           onChange={(e) => onEndpointChange(e.target.value)}
-          placeholder="http://localhost:3000/api/bridge/<config64>/a2a"
+          placeholder="http://localhost:3000/api/bridge/<config64>/(a2a|mcp)"
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
         />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Protocol</label>
+          <select
+            value={protocol}
+            onChange={(e) => onProtocolChange(e.target.value as any)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+          >
+            <option value="auto">Auto (by URL)</option>
+            <option value="a2a">A2A</option>
+            <option value="mcp">MCP</option>
+          </select>
+          <p className="text-xs text-gray-500 mt-1">Auto detects by suffix: /a2a or /mcp.</p>
+        </div>
       </div>
 
       <div className="flex items-center justify-between">
@@ -83,10 +112,10 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
               <Badge>{taskId}</Badge>
             </>
           )}
-          {canOpenWatch && (
+          {canOpenWatch && watchHref && (
             <a
               className="ml-2 text-sm text-indigo-600 hover:underline"
-              href={`/watch/#/conversation/${taskId}`}
+              href={watchHref}
               target="_blank"
               rel="noreferrer"
               title="Open this task in Watch"
@@ -94,12 +123,12 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
               Open in Watch
             </a>
           )}
-          {taskId && !['canceled','completed','failed'].includes(String(status)) && (
+          {(connected || taskId) && (
             <Button
               variant="secondary"
               onClick={onCancelTask}
             >
-              Reset client for new task
+              Reset client state
             </Button>
           )}
         </div>
@@ -121,6 +150,19 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
               </p>
               {card.description && (
                 <p className="text-sm text-gray-600 mt-1">{card.description}</p>
+              )}
+              {card.mcp && (
+                <div className="mt-2 text-xs text-gray-700">
+                  <div>Tools available: {Array.isArray(card.mcp.toolNames) ? card.mcp.toolNames.length : 0}</div>
+                  <div>
+                    Required tools: {Array.isArray(card.mcp.required) ? card.mcp.required.join(', ') : ''}
+                  </div>
+                  {Array.isArray(card.mcp.missing) && card.mcp.missing.length > 0 ? (
+                    <div className="text-red-600">Missing: {card.mcp.missing.join(', ')}</div>
+                  ) : (
+                    <div className="text-green-600">All required tools available</div>
+                  )}
+                </div>
               )}
             </div>
           ) : null}

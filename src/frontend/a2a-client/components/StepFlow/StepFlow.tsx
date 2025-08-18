@@ -9,6 +9,8 @@ interface StepFlowProps {
   // Connection props
   endpoint: string;
   onEndpointChange: (value: string) => void;
+  protocol: "auto" | "a2a" | "mcp";
+  onProtocolChange: (p: "auto" | "a2a" | "mcp") => void;
   status: A2AStatus | "initializing";
   taskId?: string;
   connected: boolean;
@@ -106,7 +108,7 @@ export const StepFlow: React.FC<StepFlowProps> = (props) => {
           <div className="flex-1">
             <h3 className="text-lg font-bold text-gray-900">Step 1: Connect to Agent</h3>
             <p className="text-sm text-gray-600 mt-1">
-              {props.connected ? "✓ Connected successfully" : "Enter your A2A endpoint URL"}
+              {props.connected ? "✓ Connected successfully" : "Enter your endpoint URL and protocol"}
             </p>
           </div>
         </div>
@@ -114,6 +116,8 @@ export const StepFlow: React.FC<StepFlowProps> = (props) => {
           <ConnectionStep
             endpoint={props.endpoint}
             onEndpointChange={props.onEndpointChange}
+            protocol={props.protocol}
+            onProtocolChange={props.onProtocolChange}
             status={props.status}
             taskId={props.taskId}
             connected={props.connected}

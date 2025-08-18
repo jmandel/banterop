@@ -25,8 +25,7 @@ export const AttachmentBar: React.FC<AttachmentBarProps> = ({
   onSummarizerModelChange,
   providers,
 }) => {
-  const localAttachments = vault.listBySource("local");
-  const agentAttachments = vault.listBySource("agent");
+  const allAttachments = vault.listDetailed();
   const [forceUpdate, setForceUpdate] = React.useState(0);
 
   const fileIcon = (mime: string): string => {
@@ -52,10 +51,8 @@ export const AttachmentBar: React.FC<AttachmentBarProps> = ({
       vault.updateFlags(name, { priority: updates.priority });
     }
     if (updates.summary !== undefined || updates.keywords !== undefined) {
-      const att = vault.listBySource("local").find(a => a.name === name);
-      if (att) {
-        vault.updateSummary(name, updates.summary ?? att.summary ?? "", updates.keywords ?? att.keywords ?? []);
-      }
+      const att = vault.getByName(name);
+      if (att) vault.updateSummary(name, updates.summary ?? att.summary ?? "", updates.keywords ?? att.keywords ?? []);
     }
     setForceUpdate(prev => prev + 1); // Force re-render
   };
@@ -119,19 +116,20 @@ export const AttachmentBar: React.FC<AttachmentBarProps> = ({
         </div>
       </div>
 
-      {/* Local Attachments */}
-      {localAttachments.length > 0 && (
+      {/* Clear All placed close to file list */}
+      {/* (moved) Clear All now appears under the Attachments header */}
+
+      {/* Unified Attachments */}
+      {allAttachments.length > 0 && (
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-medium text-gray-700">Your Files</h4>
+          <h4 className="text-sm font-medium text-gray-700">Attachments</h4>
+          <div className="flex items-center justify-start">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => {
-                if (confirm('Remove all local attachments?')) {
-                  localAttachments.forEach(att => vault.remove(att.name));
-                  setForceUpdate(prev => prev + 1);
-                }
+                vault.clear();
+                setForceUpdate(prev => prev + 1);
               }}
               className="text-red-600 hover:text-red-700"
             >
@@ -139,7 +137,7 @@ export const AttachmentBar: React.FC<AttachmentBarProps> = ({
             </Button>
           </div>
           <div className="grid gap-2">
-            {localAttachments.map((att) => (
+            {allAttachments.map((att) => (
               <div
                 key={`${att.name}:${att.digest}`}
                 className="p-3 bg-white rounded-lg border border-gray-200 hover:border-gray-300 transition-colors"
@@ -168,7 +166,7 @@ export const AttachmentBar: React.FC<AttachmentBarProps> = ({
                     <div className="text-xs text-gray-500 mt-1">
                       {att.mimeType} • {att.size.toLocaleString()} bytes
                       {att.last_inspected && (
-                        <> • Last inspected: {att.last_inspected}</>
+                        <> • Last inspected: {new Date(att.last_inspected).toLocaleString()}</>
                       )}
                     </div>
                     
@@ -228,79 +226,7 @@ export const AttachmentBar: React.FC<AttachmentBarProps> = ({
         </div>
       )}
 
-      {/* Agent Attachments */}
-      {agentAttachments.length > 0 && (
-        <div className="space-y-2">
-          <h4 className="text-sm font-medium text-gray-700">From Agent</h4>
-          <div className="grid gap-2">
-            {agentAttachments.map((att) => (
-              <div
-                key={`agent:${att.name}:${att.digest}`}
-                className="p-3 bg-blue-50 rounded-lg border border-blue-200"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <button
-                        onClick={() => {
-                          if (onOpenAttachment) {
-                            onOpenAttachment(att.name, att.mimeType, att.bytes, undefined);
-                          }
-                        }}
-                        className="inline-flex items-center gap-1 px-2 py-1 bg-white rounded-lg border border-blue-200 hover:bg-blue-50 text-xs font-medium text-blue-700 cursor-pointer transition-colors"
-                        title={`Open ${att.name} (${att.mimeType})`}
-                      >
-                        <span>{fileIcon(att.mimeType)}</span>
-                        <span>{att.name}</span>
-                      </button>
-                      <span className="text-xs text-blue-600">from agent</span>
-                      {att.analysisPending && (
-                        <span className="text-xs text-gray-500">Analyzing...</span>
-                      )}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      {att.mimeType} • {att.size.toLocaleString()} bytes
-                      {att.last_inspected && (
-                        <> • Analyzed: {new Date(att.last_inspected).toLocaleDateString()}</>
-                      )}
-                    </div>
-                    
-                    {/* Summary - single line */}
-                    <div className="mt-2">
-                      <input
-                        type="text"
-                        value={att.summary || ""}
-                        onChange={(e) => updateAttachment(att.name, { summary: e.target.value })}
-                        placeholder="Add a one-line summary..."
-                        className="w-full px-2 py-1 text-xs border border-gray-200 rounded"
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => onAnalyze(att.name)}
-                      title="Analyze with AI"
-                    >
-                      🤖
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeAttachment(att.name)}
-                      title="Remove"
-                    >
-                      ✕
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      
     </div>
   );
 };

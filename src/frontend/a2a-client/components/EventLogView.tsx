@@ -3,7 +3,7 @@ import React from 'react';
 export type UnifiedEvent = {
   seq: number;
   timestamp: string;
-  type: 'agent_message' | 'trace' | 'planner_ask_user' | 'user_reply' | 'tool_call' | 'tool_result';
+  type: 'agent_message' | 'trace' | 'planner_ask_user' | 'user_reply' | 'tool_call' | 'tool_result' | 'send_to_remote_agent' | 'send_to_user' | 'read_attachment';
   agentId: string;
   payload: any;
 };
@@ -52,6 +52,38 @@ export const EventLogView: React.FC<{ events: UnifiedEvent[] }>
                     <div className="mt-1 text-xs text-gray-600">args: {JSON.stringify(e.payload?.args ?? {})}</div>
                   </>
                 )}
+                {e.type === 'send_to_remote_agent' && (
+                  <>
+                    <div className="font-mono">Send to remote agent</div>
+                    {typeof e.payload?.reasoning === 'string' && e.payload.reasoning && (
+                      <div className="mt-1 text-xs text-gray-700">Reasoning: {e.payload.reasoning}</div>
+                    )}
+                    {e.payload?.text && (
+                      <div className="mt-1 text-sm text-gray-800 whitespace-pre-wrap">{e.payload.text}</div>
+                    )}
+                    {Array.isArray(e.payload?.attachments) && e.payload.attachments.length > 0 && (
+                      <div className="mt-1 text-xs text-gray-600">Attachments: {e.payload.attachments.map((a: any)=>a?.docId || a?.name).filter(Boolean).join(', ')}</div>
+                    )}
+                  </>
+                )}
+                {e.type === 'send_to_user' && (
+                  <>
+                    <div className="font-mono">Send to user</div>
+                    {typeof e.payload?.reasoning === 'string' && e.payload.reasoning && (
+                      <div className="mt-1 text-xs text-gray-700">Reasoning: {e.payload.reasoning}</div>
+                    )}
+                    <div className="mt-1 text-sm text-gray-800 whitespace-pre-wrap">{String(e.payload?.text || '')}</div>
+                  </>
+                )}
+                {e.type === 'read_attachment' && (
+                  <>
+                    <div className="font-mono">Read attachment</div>
+                    <div className="mt-1 text-xs text-gray-600">args: {JSON.stringify(e.payload?.args ?? {})}</div>
+                    {e.payload?.result && (
+                      <div className="mt-1 text-xs text-gray-600">result: {JSON.stringify(e.payload?.result ?? {})}</div>
+                    )}
+                  </>
+                )}
                 {e.type === 'tool_result' && (
                   <div className="text-xs text-gray-600">result: {JSON.stringify(e.payload?.result ?? {})}</div>
                 )}
@@ -66,4 +98,3 @@ export const EventLogView: React.FC<{ events: UnifiedEvent[] }>
     </div>
   );
 };
-

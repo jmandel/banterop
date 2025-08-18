@@ -65,7 +65,8 @@ export class McpBridgeServer {
     // begin_chat_thread: no idempotency; returns { conversationId: string }
     s.registerTool('begin_chat_thread', { inputSchema: {}, description: toolDoc.begin }, async () => {
       const conversationId = await this.beginChatThread(convMeta);
-      return { content: [{ type: 'text', text: JSON.stringify({ conversationId: String(conversationId) }) }] };
+      const obj = { conversationId: String(conversationId) };
+      return { content: [{ type: 'text', text: JSON.stringify(obj) }], structuredContent: obj } as any;
     });
 
     // send_message_to_chat_thread: post message and opportunistically return reply events
@@ -81,7 +82,6 @@ export class McpBridgeServer {
               contentType: z.string(),
               content: z.string(),
               summary: z.string().optional(),
-              docId: z.string().optional(),
             })
           ).optional(),
         },
@@ -110,7 +110,8 @@ export class McpBridgeServer {
         // Send-only: no polling here; advise caller to check for replies next
         const guidance = 'Message sent. Check for replies by calling check_replies (waitMs=10000 recommended).';
         const status: 'waiting' = 'waiting';
-        return { content: [{ type: 'text', text: JSON.stringify({ ok: true, guidance, status }) }] };
+        const obj = { ok: true, guidance, status } as const;
+        return { content: [{ type: 'text', text: JSON.stringify(obj) }], structuredContent: obj } as any;
       }
     );
 
@@ -138,9 +139,10 @@ export class McpBridgeServer {
         const last = msgs.length ? msgs[msgs.length - 1] : null;
         const ended = snapshot.status === 'completed' || (last && last.finality === 'conversation');
 
-        let status: 'input_required' | 'waiting' = 'waiting';
+        let status: 'input_required' | 'waiting' | 'completed' = 'waiting';
         let guidance = '';
         if (ended) {
+          status = 'completed';
           guidance = 'Conversation ended. No further input is expected.';
         } else if (!last) {
           status = 'input_required';
@@ -174,7 +176,8 @@ export class McpBridgeServer {
           guidance = 'No new replies yet. Keep checking for replies (call check_replies again).';
         }
 
-        return { content: [{ type: 'text', text: JSON.stringify({ messages: simplified.messages, guidance, status, conversation_ended: ended }) }] };
+        const obj = { messages: simplified.messages, guidance, status, conversation_ended: ended } as const;
+        return { content: [{ type: 'text', text: JSON.stringify(obj) }], structuredContent: obj } as any;
       }
     );
 
@@ -368,7 +371,13 @@ export class McpBridgeServer {
           from: e.agentId,
           at: e.ts,
           text: String(payload.text ?? ''),
-          attachments: atts.map((a: any) => ({ name: a.name, contentType: a.contentType, ...(a.summary ? { summary: a.summary } : {}), ...(a.docId ? { docId: a.docId } : {} ) }))
+          // Do not expose internal ids/docIds. Include inline content for textual types per design.
+          attachments: atts.map((a: any) => {
+            const base: any = { name: a.name, contentType: a.contentType };
+            if (a.summary) base.summary = a.summary;
+            base.content = a.content;
+            return base;
+          })
         };
       });
     const parts: string[] = [];
@@ -403,7 +412,8 @@ export class McpBridgeServer {
           if (!a?.id) continue;
           const att = orchestrator.getAttachment(a.id);
           if (att) {
-            atts.push({ id: att.id, name: att.name, contentType: att.contentType, content: att.content, ...(att.summary ? { summary: att.summary } : {}), ...(att.docId ? { docId: att.docId } : {}) });
+            // Keep id/content internally if needed, but do not attach docId in any outward-facing structures
+            atts.push({ id: att.id, name: att.name, contentType: att.contentType, content: att.content, ...(att.summary ? { summary: att.summary } : {}) });
           }
         }
         expanded.push({ ...e, payload: { ...payload, attachments: atts } });

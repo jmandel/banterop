@@ -7,6 +7,8 @@ import { AttachmentVault } from "./attachments-vault";
 // import { ServerLLMProvider } from "./llm-provider";
 import { ScenarioPlannerV2 } from "./planner-scenario";
 import { A2ATaskClient } from "./a2a-task-client";
+import type { TaskClientLike } from "./protocols/task-client";
+import { createTaskClient, detectProtocolFromUrl, type Protocol } from "./protocols";
 import { AttachmentSummarizer } from "./attachment-summaries";
 import { useDebounce } from "./useDebounce";
 import { StepFlow } from "./components/StepFlow/StepFlow";
@@ -34,6 +36,7 @@ type PlannerMode = "passthrough" | "autostart" | "approval";
 type Model = {
   connected: boolean;
   endpoint: string;
+  protocol: Protocol;
   taskId?: string;
   status: A2AStatus | "initializing";
   front: FrontMsg[];
@@ -45,7 +48,7 @@ type Model = {
 };
 
 type Act =
-  | { type: "connect"; endpoint: string }
+  | { type: "connect"; endpoint: string; protocol: Protocol }
   | { type: "setTask"; taskId?: string }
   | { type: "status"; status: A2AStatus | "initializing" }
   | { type: "frontAppend"; msg: FrontMsg }
@@ -58,9 +61,10 @@ type Act =
   | { type: "clearConversation" }
   | { type: "reset" };
 
-const initModel = (endpoint: string): Model => ({
+const initModel = (endpoint: string, protocol: Protocol): Model => ({
   connected: false,
   endpoint,
+  protocol,
   status: "initializing",
   front: [],
   plannerMode: (localStorage.getItem("a2a.planner.mode") as PlannerMode) || "autostart",
@@ -72,7 +76,7 @@ const initModel = (endpoint: string): Model => ({
 function reducer(m: Model, a: Act): Model {
   switch (a.type) {
     case "connect":
-      return { ...m, connected: true, endpoint: a.endpoint, error: undefined };
+      return { ...m, connected: true, endpoint: a.endpoint, protocol: a.protocol, error: undefined };
     case "setTask":
       return { ...m, taskId: a.taskId };
     case "status":
@@ -102,7 +106,7 @@ function reducer(m: Model, a: Act): Model {
         error: undefined,
       };
     case "reset":
-      return { ...initModel(m.endpoint) };
+      return { ...initModel(m.endpoint, m.protocol) };
     default:
       return m;
   }
@@ -125,7 +129,10 @@ export default function App() {
     } catch { return s; }
   };
   const initialEndpoint = localStorage.getItem("a2a.endpoint") || "";
+  const inferredProto = (detectProtocolFromUrl(initialEndpoint) ? "auto" : ("a2a" as Protocol));
+  const initialProto = (localStorage.getItem("a2a.protocol") as Protocol) || inferredProto;
   const [endpoint, setEndpoint] = useState(initialEndpoint);
+  const [protocol, setProtocol] = useState<Protocol>(initialProto);
   const debouncedEndpoint = useDebounce(endpoint, 500);
   const [resumeTask, setResumeTask] = useState("");
   const [instructions, setInstructions] = useState(
@@ -138,12 +145,12 @@ export default function App() {
   const [selectedModel, setSelectedModel] = useState<string>(() => localStorage.getItem("a2a.planner.model") || "");
   const [summarizerModel, setSummarizerModel] = useState<string>(() => localStorage.getItem("a2a.attach.model") || "");
 
-  const [model, dispatch] = useReducer(reducer, initModel(initialEndpoint));
+  const [model, dispatch] = useReducer(reducer, initModel(initialEndpoint, initialProto));
 
   const clientRef = useRef<A2AClient | null>(null);
   const vaultRef = useRef(new AttachmentVault());
   // const providerRef = useRef<ServerLLMProvider | null>(null);
-  const taskRef = useRef<A2ATaskClient | null>(null);
+  const taskRef = useRef<TaskClientLike | null>(null);
   // const plannerRef = useRef<Planner | null>(null);
   const scenarioPlannerRef = useRef<ScenarioPlannerV2 | null>(null);
   const scenarioPlannerOffRef = useRef<(() => void) | null>(null);
@@ -165,6 +172,7 @@ export default function App() {
   const [card, setCard] = useState<any | null>(null);
   const [cardLoading, setCardLoading] = useState(false);
   const [eventLog, setEventLog] = useState<PlannerUnifiedEvent[]>([]);
+  const preloadedEventsRef = useRef<PlannerUnifiedEvent[] | null>(null);
 
   // Live ref of front messages to avoid stale-closure reads in Planner
   const frontMsgsRef = useRef<FrontMsg[]>([]);
@@ -217,6 +225,7 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("a2a.endpoint", endpoint);
   }, [endpoint]);
+  useEffect(() => { try { localStorage.setItem("a2a.protocol", protocol); } catch {} }, [protocol]);
 
   useEffect(() => { try { localStorage.setItem("a2a.planner.instructions", instructions); } catch {} }, [instructions]);
   // No longer persisting background/goals by default
@@ -285,11 +294,20 @@ export default function App() {
     } catch { return null; }
   };
 
-  // Auto-connect when debounced endpoint changes
+  // Auto-connect when debounced endpoint or protocol changes
   useEffect(() => {
-    if (debouncedEndpoint !== model.endpoint || !model.connected) {
-      console.log("[App] Auto-connecting to:", debouncedEndpoint);
-      handleConnect(debouncedEndpoint);
+    if (debouncedEndpoint !== model.endpoint || !model.connected || protocol !== model.protocol) {
+      console.log("[App] Auto-connecting to:", debouncedEndpoint, 'protocol=', protocol);
+      handleConnect(debouncedEndpoint, protocol);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedEndpoint, protocol]);
+
+  // Auto-detect protocol from URL and update selector if needed
+  useEffect(() => {
+    const detected = detectProtocolFromUrl(debouncedEndpoint);
+    if (detected && protocol !== detected) {
+      setProtocol(detected as Protocol);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedEndpoint]);
@@ -324,7 +342,7 @@ export default function App() {
   // Keep summarizer model ref in sync
   useEffect(() => { summarizerModelRef.current = summarizerModel; }, [summarizerModel]);
 
-  const handleConnect = async (endpointUrl: string) => {
+  const handleConnect = async (endpointUrl: string, proto: Protocol) => {
     // Cancel any ongoing tasks when endpoint changes
     if (taskRef.current?.getTaskId()) {
       try {
@@ -346,12 +364,10 @@ export default function App() {
     dispatch({ type: "reset" });
     lastStatusRef.current = "submitted";
     lastTaskIdRef.current = undefined;
-    dispatch({ type: "connect", endpoint: endpointUrl });
+    dispatch({ type: "connect", endpoint: endpointUrl, protocol: proto });
 
-    const client = new A2AClient(endpointUrl);
-    clientRef.current = client;
-
-    const taskClient = new A2ATaskClient(endpointUrl);
+    clientRef.current = new A2AClient(endpointUrl);
+    const taskClient = createTaskClient(proto, endpointUrl);
     taskRef.current = taskClient;
 
     // Attachment summarizer (background)
@@ -418,10 +434,7 @@ export default function App() {
         dispatch({ type: 'status', status: st });
         if (st === 'completed') {
           dispatch({ type: 'system', text: '— conversation completed —' });
-          // Stop the planner when task is completed
-          try { scenarioPlannerRef.current?.stop(); } catch {}
-          scenarioPlannerRef.current = null;
-          dispatch({ type: 'setPlannerStarted', started: false });
+          // Do not stop planner automatically; allow final user communication
           // Abort any active streams
           try {
             ptStreamAbort.current?.abort();
@@ -466,20 +479,37 @@ export default function App() {
       }
     });
 
-    // Fetch agent card
-    (async () => {
-      setCardLoading(true);
-      try {
-        const base = endpointUrl.replace(/\/+$/, "");
-        const res = await fetch(`${base}/.well-known/agent-card.json`, { credentials: "include" });
-        if (!res.ok) throw new Error(`Agent card fetch failed: ${res.status}`);
-        setCard(await res.json());
-      } catch (e: any) {
-        setCard({ error: String(e?.message ?? e) });
-      } finally {
-        setCardLoading(false);
-      }
-    })();
+    // Fetch agent info: A2A uses agent-card; MCP lists tools
+    if (proto === 'a2a') {
+      (async () => {
+        setCardLoading(true);
+        try {
+          const base = endpointUrl.replace(/\/+$/, "");
+          const res = await fetch(`${base}/.well-known/agent-card.json`, { credentials: "include" });
+          if (!res.ok) throw new Error(`Agent card fetch failed: ${res.status}`);
+          setCard(await res.json());
+        } catch (e: any) {
+          setCard({ error: String(e?.message ?? e) });
+        } finally {
+          setCardLoading(false);
+        }
+      })();
+    } else {
+      (async () => {
+        setCardLoading(true);
+        try {
+          const { listMcpTools } = await import('./protocols/mcp-utils');
+          const names = await listMcpTools(endpointUrl);
+          const required = ['begin_chat_thread','send_message_to_chat_thread','check_replies'];
+          const missing = required.filter(n => !names.includes(n));
+          setCard({ name: 'MCP Endpoint', mcp: { toolNames: names, required, missing } });
+        } catch (e: any) {
+          setCard({ error: String(e?.message ?? e) });
+        } finally {
+          setCardLoading(false);
+        }
+      })();
+    }
 
     // Resume task if provided or stored in session
     let targetTask = resumeTask.trim();
@@ -491,6 +521,12 @@ export default function App() {
         const savedFront = Array.isArray(sess.front) ? sess.front : [];
         for (const msg of savedFront) dispatch({ type: 'frontAppend', msg });
         if (typeof sess.frontDraft === 'string') setFrontInput(sess.frontDraft);
+        // Preload planner events into UI and ref for later start
+        const savedEvents = Array.isArray(sess.plannerEvents) ? (sess.plannerEvents as any) : [];
+        if (savedEvents.length) {
+          setEventLog(savedEvents);
+          preloadedEventsRef.current = savedEvents as any;
+        }
       }
     }
 
@@ -526,9 +562,13 @@ export default function App() {
       onAskUser: (q) => dispatch({ type: "frontAppend", msg: { id: crypto.randomUUID(), role: "planner", text: q } }),
     });
     scenarioPlannerRef.current = orch;
-    if (preloadedEvents && preloadedEvents.length) {
+    const preload = (preloadedEvents && preloadedEvents.length)
+      ? preloadedEvents
+      : (preloadedEventsRef.current && preloadedEventsRef.current.length ? preloadedEventsRef.current : []);
+    if (preload && preload.length) {
       try { (orch as any).loadEvents(preloadedEvents as any); } catch {}
     }
+    preloadedEventsRef.current = null;
     setEventLog(orch.getEvents() as any);
     const off = orch.onEvent((ev) => {
       setEventLog((prev) => {
@@ -564,27 +604,23 @@ export default function App() {
     try { scenarioPlannerOffRef.current?.(); } catch {}
     scenarioPlannerOffRef.current = null;
     scenarioPlannerRef.current = null;
-    setEventLog([]);
     dispatch({ type: 'setPlannerStarted', started: false });
+    // Persist existing event log (do not clear) so it survives reloads
     saveSession(endpoint, {
       taskId: taskRef.current?.getTaskId(),
       status: lastStatusRef.current,
       plannerStarted: false,
       front: frontMsgsRef.current,
       frontDraft: frontInput,
-      plannerEvents: [],
+      plannerEvents: (eventLog as any) || [],
     });
   };
 
   const cancelTask = async () => {
     const task = taskRef.current;
-    if (clientRef.current && task?.getTaskId()) {
-      try {
-        await clientRef.current.tasksCancel(task.getTaskId()!);
-      } catch (e: any) {
-        // Best-effort: still proceed to local cleanup
-        dispatch({ type: "error", error: String(e?.message ?? e) });
-      }
+    if (task?.getTaskId()) {
+      try { await task.cancel(); }
+      catch (e: any) { dispatch({ type: "error", error: String(e?.message ?? e) }); }
     }
 
     // Stop planner and cleanup streams
@@ -793,6 +829,8 @@ const onAttachFiles = async (files: FileList | null) => {
             // Connection props
             endpoint={endpoint}
             onEndpointChange={setEndpoint}
+            protocol={protocol}
+            onProtocolChange={setProtocol}
             status={model.status}
             taskId={model.taskId}
             connected={model.connected}

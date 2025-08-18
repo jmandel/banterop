@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '../../../ui';
+import { parseBridgeEndpoint } from '../../bridge-endpoint';
 
 interface ScenarioDetectorProps {
   endpoint: string;
@@ -23,19 +24,6 @@ function parseConversationMetaFromConfig64(config64: string) {
   }
 }
 
-function isOurBridgeEndpoint(url: string): { isOurs: boolean; config64?: string; apiBase?: string } {
-  const match = url.match(/^(https?:\/\/[^\/]+)(\/api)?\/bridge\/([^\/]+)\/a2a/);
-  if (!match || !match[3]) {
-    return { isOurs: false };
-  }
-  
-  const apiBase = match[2] ? match[1] + match[2] : match[1] + '/api';
-  return { 
-    isOurs: true, 
-    config64: match[3],
-    apiBase 
-  };
-}
 
 export const ScenarioDetector: React.FC<ScenarioDetectorProps> = ({ endpoint, goals, instructions, onLoadScenario }) => {
   const [canLoad, setCanLoad] = useState(false);
@@ -49,7 +37,7 @@ export const ScenarioDetector: React.FC<ScenarioDetectorProps> = ({ endpoint, go
   useEffect(() => {
     setDismissed(false);
     setError(null);
-    const { isOurs, config64, apiBase } = isOurBridgeEndpoint(endpoint);
+    const { isOurs, config64, apiBase } = parseBridgeEndpoint(endpoint);
     
     if (isOurs && config64 && apiBase) {
       setCanLoad(true);
