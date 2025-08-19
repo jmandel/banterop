@@ -1,21 +1,17 @@
-import React, { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import React, { useEffect, useReducer, useRef, useState } from "react";
 import { AppLayout } from "../ui";
-import type { A2AStatus } from "./a2a-types";
 import { A2AClient } from "./a2a-client";
+import type { A2AStatus } from "./a2a-types";
 import { AttachmentVault } from "./attachments-vault";
-// import { Planner } from "./planner";
-// import { ServerLLMProvider } from "./llm-provider";
-import { ScenarioPlannerV2 } from "./planner-scenario";
-import { A2ATaskClient } from "./a2a-task-client";
-import type { TaskClientLike } from "./protocols/task-client";
-import { createTaskClient, detectProtocolFromUrl, type Protocol } from "./protocols";
 import { AttachmentSummarizer } from "./attachment-summaries";
-import { useDebounce } from "./useDebounce";
-import { StepFlow } from "./components/StepFlow/StepFlow";
-import { EventLogView } from "./components/EventLogView";
-import type { UnifiedEvent as PlannerUnifiedEvent } from "./components/EventLogView";
 import { DualConversationView } from "./components/Conversations/DualConversationView";
-import { AttachmentBar } from "./components/Attachments/AttachmentBar";
+import type { UnifiedEvent as PlannerUnifiedEvent } from "./components/EventLogView";
+import { EventLogView } from "./components/EventLogView";
+import { StepFlow } from "./components/StepFlow/StepFlow";
+import { ScenarioPlannerV2 } from "./planner-scenario";
+import { createTaskClient, detectProtocolFromUrl, type Protocol } from "./protocols";
+import type { TaskClientLike } from "./protocols/task-client";
+import { useDebounce } from "./useDebounce";
 
 type AgentLogEntry = { 
   id: string; 
@@ -820,7 +816,7 @@ const onAttachFiles = async (files: FileList | null) => {
   // Deprecated: external scenario detector is no longer used to populate instructions
 
   return (
-    <AppLayout title="A2A Client">
+    <AppLayout title="Conversational Interop Client">
       <div className="w-full">
           
           {/* Main Step Flow Section */}

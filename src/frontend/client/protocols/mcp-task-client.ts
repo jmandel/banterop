@@ -155,7 +155,7 @@ export class McpTaskClient implements TaskClientLike {
         return fetch(input, init);
       }
     } as any);
-    const client = new Client({ name: "a2a-client-browser", version: "1.0.0" });
+    const client = new Client({ name: "conversational-interop-client", version: "1.0.0" });
     await client.connect(transport);
     this.client = client;
   }

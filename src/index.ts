@@ -5,7 +5,7 @@ import { serveStatic } from 'hono/bun';
 // HTML routes for dev mode (Bun will bundle client assets referenced by these)
 import scenarios from '$src/frontend/scenarios/index.html';
 import watch from '$src/frontend/watch/index.html';
-import a2aClient from '$src/frontend/a2a-client/index.html';
+import clientHtml from '$src/frontend/client/index.html';
 
 // Determine if we're in dev or prod mode
 // Bun supports NODE_ENV for Node.js compatibility
@@ -26,7 +26,7 @@ if (isDev) {
       '/': scenarios,
       '/scenarios/': scenarios,
       '/watch/': watch,
-      '/a2a-client/': a2aClient,
+      '/client/': clientHtml,
     },
     async fetch(req, srv) {
       const url = new URL(req.url);

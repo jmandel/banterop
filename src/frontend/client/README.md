@@ -15,17 +15,11 @@ This is a lightweight browser client for Agent‑to‑Agent (A2A) conversations.
 bun run dev
 ```
 
-2) Serve frontends (including this one):
+2) Open the A2A Planner client:
 
-```
-bun run dev:frontend
-```
+- Navigate to `http://localhost:3000/client/index.html` (served by the script above)
 
-3) Open the A2A Planner client:
-
-- Navigate to `http://localhost:3003/src/frontend/a2a-client/index.html` (served by the script above)
-
-4) Enter the A2A endpoint URL:
+3) Enter the A2A endpoint URL:
 
 - Format: `http://localhost:3000/api/bridge/<config64>/a2a`
 - The `<config64>` is a base64‑url payload that encodes the conversation meta (agents, starting agent, etc.).
@@ -81,7 +75,3 @@ The client saves non‑sensitive UI state (endpoint, Planner mode, models, goals
 - If you only need raw relaying, choose Passthrough and skip picking a model.
 - Large first messages may briefly show a browser “network error” when the initial stream is aborted on purpose after the task id is established — the UI already flips to resubscribe and continues receiving.
 - You can stop and re‑start the Planner at any time without losing the current task.
-
-## Screenshots
-
-You can add real screenshots or GIFs later (e.g., under `public/a2a-client/`) and link them here. For now, this section is intentionally left blank to avoid confusion.

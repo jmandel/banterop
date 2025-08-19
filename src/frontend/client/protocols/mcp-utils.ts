@@ -8,7 +8,7 @@ function toUrl(endpointUrl: string): URL {
 
 export async function listMcpTools(endpointUrl: string): Promise<string[]> {
   const transport = new StreamableHTTPClientTransport(toUrl(endpointUrl) as any);
-  const client = new Client({ name: "a2a-client-browser", version: "1.0.0" });
+  const client = new Client({ name: "conversational-interop-client", version: "1.0.0" });
   await client.connect(transport);
   try {
     const tools = await client.listTools({});
