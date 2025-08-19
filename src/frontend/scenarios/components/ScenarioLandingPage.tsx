@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { DropdownButton } from './DropdownButton';
 import { RUN_MODES } from '../constants/runModes';
+import { getShowMode, setShowMode, isPublished } from '../utils/locks';
 
 const SCENARIO_IDEAS = [
   "[Imaging coverage] A primary care agent shares knee instability notes while a payer policy agent verifies therapy criteria to approve imaging that shortens time to diagnosis.",
@@ -41,6 +42,8 @@ export function ScenarioLandingPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [newScenarioIdea, setNewScenarioIdea] = useState('');
   const [isWiggling, setIsWiggling] = useState(false);
+  const [showMode, _setShowMode] = useState<'published' | 'all'>(getShowMode());
+  const [showingFallbackNote, setShowingFallbackNote] = useState(false);
   
   const getRandomIdea = () => {
     return SCENARIO_IDEAS[Math.floor(Math.random() * SCENARIO_IDEAS.length)];
@@ -61,7 +64,17 @@ export function ScenarioLandingPage() {
     try {
       const response = await api.getScenarios();
       if (response.success) {
-        setScenarios(response.data.scenarios);
+        const list = response.data.scenarios;
+        setScenarios(list);
+        if (getShowMode() === 'published') {
+          const onlyPublished = list.filter(s => isPublished(s.config));
+          if (onlyPublished.length === 0) {
+            // Auto-fallback once to All and show note
+            _setShowMode('all');
+            setShowMode('all');
+            setShowingFallbackNote(true);
+          }
+        }
       } else {
         throw new Error(response.error || 'Failed to load scenarios');
       }
@@ -94,7 +107,8 @@ export function ScenarioLandingPage() {
     }
   };
 
-  const filteredScenarios = scenarios.filter(scenario =>
+  const byMode = showMode === 'published' ? scenarios.filter(s => isPublished(s.config)) : scenarios;
+  const filteredScenarios = byMode.filter(scenario =>
     scenario.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     scenario.config.metadata.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (scenario.config.metadata.description || '').toLowerCase().includes(searchTerm.toLowerCase())
@@ -135,6 +149,18 @@ export function ScenarioLandingPage() {
   return (
     <div className="container mx-auto px-4 py-4 space-y-4">
       <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex gap-2">
+            <button
+              className={`px-3 py-1 text-xs rounded ${showMode === 'published' ? 'bg-blue-600 text-white' : 'border border-gray-300 text-gray-700'}`}
+              onClick={() => { _setShowMode('published'); setShowMode('published'); setShowingFallbackNote(false); }}
+            >Published</button>
+            <button
+              className={`px-3 py-1 text-xs rounded ${showMode === 'all' ? 'bg-blue-600 text-white' : 'border border-gray-300 text-gray-700'}`}
+              onClick={() => { _setShowMode('all'); setShowMode('all'); setShowingFallbackNote(false); }}
+            >All</button>
+          </div>
+        </div>
         <input
           type="text"
           className="w-full px-4 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -146,6 +172,11 @@ export function ScenarioLandingPage() {
         {error && (
           <div className="p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md">
             {error}
+          </div>
+        )}
+        {showingFallbackNote && (
+          <div className="p-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md">
+            No published scenarios yet — showing All.
           </div>
         )}
 
@@ -163,6 +194,12 @@ export function ScenarioLandingPage() {
                   <h3 className="text-sm font-semibold text-gray-900 mb-1">
                     {scenario.config.metadata.title || scenario.name}
                   </h3>
+                  {isPublished(scenario.config) && (
+                    <div className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200 mb-1">
+                      <span>🔒</span>
+                      <span>Published</span>
+                    </div>
+                  )}
                   
                   <div className="text-xs text-blue-600 mb-2">
                     {getAgentNames(scenario)}

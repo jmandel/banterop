@@ -20,4 +20,3 @@ export async function listMcpTools(endpointUrl: string): Promise<string[]> {
     try { await (client as any).close?.(); } catch {}
   }
 }
-

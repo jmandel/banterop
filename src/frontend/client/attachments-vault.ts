@@ -141,12 +141,9 @@ export class AttachmentVault {
 
   // Add an attachment provided by the remote agent (bytes already base64-encoded)
   addFromAgent(name: string, mimeType: string, bytesBase64: string): AttachmentRecord {
-    // Demo policy: filenames are unique. If it already exists, do not re-add.
-    if (this.byName.has(name)) {
-      return this.byName.get(name)!;
-    }
+    // Filename-authoritative upsert: replace any existing entry with this name
     const finalName = name;
-    
+
     const rec: AttachmentRecord = {
       name: finalName, mimeType, bytes: bytesBase64, size: bytesBase64 ? atob(bytesBase64).length : 0,
       digest: "", source: 'remote-agent', private: false, priority: false, analysisPending: false

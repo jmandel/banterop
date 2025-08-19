@@ -7,6 +7,8 @@ import { AttachmentVault } from "./attachments-vault";
 import { ToolSynthesisService } from '$src/agents/services/tool-synthesis.service';
 import { parseBridgeEndpoint } from './bridge-endpoint';
 import { BrowsersideLLMProvider } from '$src/llm/providers/browserside';
+import type { UnifiedEvent as StrictEvent, EventType, AttachmentLite } from './types/events';
+import { makeEvent, assertEvent } from './types/events';
 
 // Minimal types to keep this self-contained on the browser side
 type ScenarioConfiguration = {
@@ -21,7 +23,8 @@ type ScenarioConfiguration = {
   }>;
 };
 
-export type UnifiedEvent = {
+// Legacy event type kept only for replay during migration
+export type LegacyEvent = {
   seq: number;
   timestamp: string;
   type: "agent_message" | "trace" | "planner_ask_user" | "user_reply" | "tool_call" | "tool_result" | "send_to_remote_agent" | "send_to_user" | "read_attachment";
@@ -71,12 +74,12 @@ export class ScenarioPlannerV2 {
   private running = false;
   private busy = false;
   private pendingTick = false;
-  private eventLog: UnifiedEvent[] = [];
+  private eventLog: StrictEvent[] = [];
   private turnScratch: IntraTurnState = { thoughts: [], toolCalls: [] };
   private scenario: ScenarioConfiguration | null = null;
   private myAgentId: string | null = null;
   private seq = 0;
-  private listeners = new Set<(e: UnifiedEvent) => void>();
+  private listeners = new Set<(e: StrictEvent) => void>();
   private documents = new Map<string, { name: string; contentType: string; content?: string; summary?: string }>();
   private oracle: ToolSynthesisService | null = null;
   private llmProvider: BrowsersideLLMProvider | null = null;
@@ -85,14 +88,53 @@ export class ScenarioPlannerV2 {
   constructor(private deps: ScenarioPlannerDeps) {}
 
   // Preload a prior event log (e.g., from persistence) before start()
-  loadEvents(events: UnifiedEvent[]) {
+  loadEvents(events: any[]) {
     try {
-      // Restore prior event log as-is without re-processing documents.
-      // Attachments from any previous run should already be in the vault.
-      this.eventLog = Array.isArray(events) ? [...events] : [];
+      // Accept strict events only; legacy events are ignored for the unified log but used to rebuild vault
+      const stricts: StrictEvent[] = Array.isArray(events)
+        ? (events as any[]).filter(e => e && typeof e === 'object' && typeof (e as any).channel === 'string')
+        : [];
+      this.eventLog = [...stricts];
       // Set sequence to the max existing seq to avoid collisions
       const maxSeq = this.eventLog.reduce((m, e) => Math.max(m, Number(e?.seq || 0)), 0);
       this.seq = Number.isFinite(maxSeq) ? maxSeq : this.seq;
+      // Rebuild vault/doc index deterministically by replaying events in order
+      for (const ev of this.eventLog) {
+        if (ev.type === 'tool_result') {
+          try { this.indexDocumentsFromResult((ev as any)?.payload?.result); } catch {}
+        }
+        if (ev.type === 'message' && ev.channel === 'planner-agent' && ev.author === 'agent') {
+          const atts = Array.isArray((ev as any)?.payload?.attachments) ? (ev as any).payload.attachments : [];
+          for (const a of atts) {
+            try {
+              const name = String(a?.name || '');
+              const mime = String(a?.mimeType || 'application/octet-stream');
+              const bytes = typeof a?.bytes === 'string' ? a.bytes : '';
+              if (name) this.deps.vault.addFromAgent(name, mime, bytes);
+            } catch {}
+          }
+        }
+      }
+      // Also consider legacy events for vault rebuild in case older sessions are loaded
+      const legacy: LegacyEvent[] = Array.isArray(events)
+        ? (events as any[]).filter(e => e && typeof e === 'object' && typeof (e as any).agentId === 'string' && !(e as any).channel)
+        : [];
+      for (const ev of legacy) {
+        if (ev.type === 'tool_result') {
+          try { this.indexDocumentsFromResult((ev as any)?.payload?.result); } catch {}
+        }
+        if (ev.type === 'agent_message') {
+          const atts = Array.isArray((ev as any)?.payload?.attachments) ? (ev as any).payload.attachments : [];
+          for (const a of atts) {
+            try {
+              const name = String(a?.name || '');
+              const mime = String(a?.mimeType || (a as any).contentType || 'application/octet-stream');
+              const bytes = typeof a?.bytes === 'string' ? a.bytes : '';
+              if (name) this.deps.vault.addFromAgent(name, mime, bytes);
+            } catch {}
+          }
+        }
+      }
     } catch {}
   }
 
@@ -114,31 +156,31 @@ export class ScenarioPlannerV2 {
     this.pendingTick = false;
   }
 
+  // Strict helper: create+validate+push
+  private emit<T extends EventType>(partial: Omit<StrictEvent & { type: T }, 'seq' | 'timestamp'>): StrictEvent {
+    const ev = makeEvent(++this.seq, partial as any);
+    assertEvent(ev);
+    this.eventLog.push(ev);
+    // Side-effect: index tool docs
+    if (ev.type === 'tool_result') {
+      try { this.indexDocumentsFromResult((ev as any).payload?.result); } catch {}
+    }
+    for (const cb of this.listeners) cb(ev);
+    return ev;
+  }
+
   recordUserReply(text: string) {
     if (!text?.trim()) return;
-    this.pushEvent({ type: "user_reply", agentId: "user", payload: { text } });
+    this.emit({ type: 'message', channel: 'user-planner', author: 'user', payload: { text: String(text).trim() } } as any);
     this.maybeTick();
   }
 
-  onEvent(cb: (e: UnifiedEvent) => void): () => void {
+  onEvent(cb: (e: StrictEvent) => void): () => void {
     this.listeners.add(cb);
     return () => this.listeners.delete(cb);
   }
 
-  getEvents(): UnifiedEvent[] { return [...this.eventLog]; }
-
-  private pushEvent(ev: Omit<UnifiedEvent, "seq" | "timestamp">) {
-    const event: UnifiedEvent = { ...ev, seq: ++this.seq, timestamp: new Date().toISOString() };
-    this.eventLog.push(event);
-    try {
-      // Observe tool_result to index documents by docId
-      if (event.type === 'tool_result') {
-        this.indexDocumentsFromResult(event.payload?.result);
-      }
-      // Notify listeners
-      for (const cb of this.listeners) cb(event);
-    } catch {}
-  }
+  getEvents(): StrictEvent[] { return [...this.eventLog]; }
 
   // Seeding removed: rely on persisted plannerEvents only
 
@@ -153,20 +195,30 @@ export class ScenarioPlannerV2 {
     }
     this.taskOff = task.on("new-task", () => {
       const t = task.getTask?.();
+      // Emit status event if changed (from remote)
+      try {
+        const st = String(t?.status?.state || '');
+        if (st) {
+          const lastSt = [...this.eventLog].reverse().find(e => e.type === 'status') as any;
+          const prev = String(lastSt?.payload?.state || '');
+          if (st !== prev) this.emit({ type: 'status', channel: 'status', author: 'system', payload: { state: st as any } } as any);
+        }
+      } catch {}
       const last = (t?.history || []).slice(-1)[0];
       if (!last) return;
       if (String(last.role) === 'user') return; // avoid duplicating planner sends
-      const text = (last.parts || []).filter((p: any) => p?.kind === "text").map((p: any) => p.text).join("\n");
-      const attachments = (last.parts || []).filter((p: any) => p?.kind === "file").map((p: any) => ({
-        name: p.file?.name,
-        contentType: p.file?.mimeType,
-        bytes: p.file?.bytes,
-        uri: p.file?.uri,
-      }));
-      const myId = this.deps.getPlannerAgentId();
-      const otherId = this.deps.getCounterpartAgentId();
-      const agentId = last.role === "user" ? (myId || "planner") : (otherId || "remote_agent");
-      this.pushEvent({ type: "agent_message", agentId, payload: { text, attachments } });
+      const text = (last.parts || []).filter((p: any) => p?.kind === "text").map((p: any) => p.text).join("\n") || '';
+      const attachments: AttachmentLite[] = (last.parts || [])
+        .filter((p: any) => p?.kind === 'file' && p?.file)
+        .map((p: any) => ({ name: p.file.name, mimeType: p.file.mimeType, bytes: p.file.bytes, uri: p.file.uri }))
+        .filter((a: any) => a?.name && a?.mimeType);
+      // Upsert into vault first
+      for (const a of attachments) {
+        try { this.deps.vault.addFromAgent(a.name, a.mimeType, a.bytes || ''); } catch {}
+      }
+      if (text || attachments.length) {
+        this.emit({ type: 'message', channel: 'planner-agent', author: 'agent', payload: { text, attachments: attachments.length ? attachments : undefined } } as any);
+      }
       this.maybeTick();
     });
   }
@@ -197,14 +249,11 @@ export class ScenarioPlannerV2 {
   }
 
   private canActNow(): boolean {
-    // Require a bound task client before acting
-    const task = this.deps.task;
-    if (!task) return false;
-    // Allow if no task yet (first contact) or when status is input-required
-    const st = task.getStatus?.() ?? 'initializing';
-    const hasTask = !!task.getTaskId?.();
-    // Also allow a final local message even if the remote thread is completed
-    return !hasTask || st === "input-required" || st === 'completed';
+    // Derive from Event Log: if no status yet → allow initial; else allow when input-required or completed
+    const last = [...this.eventLog].reverse().find(e => e.type === 'status') as any;
+    if (!last) return true;
+    const st = String(last?.payload?.state || '');
+    return st === 'input-required' || st === 'completed';
   }
 
   private maybeTick() {
@@ -233,12 +282,8 @@ export class ScenarioPlannerV2 {
           const msg = String(e?.message || e || 'Planner error');
           const stack = String(e?.stack || '');
           console.error('[PlannerTick] error:', e);
-          // Record an internal trace event with structured error details (shown in Event Log)
-          this.pushEvent({
-            type: 'trace',
-            agentId: this.deps.getPlannerAgentId() || this.myAgentId || 'planner',
-            payload: { type: 'error', message: msg, stack: stack.slice(0, 2000) }
-          });
+          // Record an internal trace event (strict)
+          this.emit({ type: 'trace', channel: 'system', author: 'system', payload: { text: `Planner error: ${msg}` } } as any);
         } catch {}
       } finally {
         this.busy = false;
@@ -255,55 +300,41 @@ export class ScenarioPlannerV2 {
   private buildXmlHistory(): string {
     const lines: string[] = [];
     for (const ev of this.eventLog) {
-      if (ev.type === "agent_message") {
-        const text = String(ev.payload?.text || "");
-        const from = ev.agentId === "planner" ? "planner" : ev.agentId === "remote_agent" ? "agent" : ev.agentId;
-        lines.push(`<message from="${from}">${text}</message>`);
-        const atts = Array.isArray(ev.payload?.attachments) ? ev.payload.attachments : [];
-        for (const a of atts) {
-          if (a?.name && a?.contentType) lines.push(`<attachment name="${a.name}" mimeType="${a.contentType}" />`);
+      if (ev.type === 'message') {
+        const rawText = String((ev as any).payload?.text || '');
+        const safeText = rawText.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const atts = Array.isArray((ev as any).payload?.attachments) ? (ev as any).payload.attachments : [];
+        if (ev.channel === 'user-planner') {
+          const from = ev.author === 'user' ? 'user' : 'planner';
+          lines.push(`<message from="${from}">`);
+          if (safeText) lines.push(safeText);
+          for (const a of atts) {
+            const name = String(a?.name || 'attachment');
+            const mime = String(a?.mimeType || 'application/octet-stream');
+            lines.push(`<attachment name="${name}" mimeType="${mime}" />`);
+          }
+          lines.push(`</message>`);
+        } else if (ev.channel === 'planner-agent') {
+          const from = ev.author === 'planner' ? 'planner' : 'agent';
+          lines.push(`<message from="${from}">`);
+          if (safeText) lines.push(safeText);
+          for (const a of atts) {
+            const name = String(a?.name || 'attachment');
+            const mime = String(a?.mimeType || 'application/octet-stream');
+            lines.push(`<attachment name="${name}" mimeType="${mime}" />`);
+          }
+          lines.push(`</message>`);
         }
-      } else if (ev.type === "user_reply") {
-        const text = String(ev.payload?.text || "");
-        lines.push(`<message from="user">${text}</message>`);
-      } else if (ev.type === "planner_ask_user" || ev.type === 'send_to_user') {
-        const q = String(ev.payload?.text || ev.payload?.question || "");
-        lines.push(`<message from="planner" kind="ask_user">${q}</message>`);
-      } else if (ev.type === "trace") {
-        if (ev.payload?.type === "thought") lines.push(`<thought>${ev.payload.content}</thought>`);
-      } else if (ev.type === "send_to_remote_agent") {
-        const text = String(ev.payload?.text || "");
-        if (text) lines.push(`<message from="planner">${text}</message>`);
-        const atts = Array.isArray(ev.payload?.attachments) ? ev.payload.attachments : [];
-        for (const a of atts) {
-          const name = String(a?.name || 'attachment');
-          const mime = String(a?.mimeType || a?.contentType || 'application/octet-stream');
-          lines.push(`<attachment name="${name}" mimeType="${mime}" />`);
-        }
-      } else if (ev.type === "tool_call") {
-        const name = String(ev.payload?.name || '');
-        const args = ev.payload?.args ?? {};
-        const reasoning = typeof ev.payload?.reasoning === 'string' ? ev.payload.reasoning : '';
-        const body = { reasoning, action: { tool: name, args } };
+      } else if (ev.type === 'tool_call') {
+        const name = String((ev as any).payload?.name || '');
+        const args = (ev as any).payload?.args ?? {};
+        const body = { action: { tool: name, args } };
         lines.push(`<tool_call>${JSON.stringify(body)}</tool_call>`);
-      } else if (ev.type === "tool_result") {
-        // Prefer showing synthesized file contents if present; otherwise JSON body
-        const res = ev.payload?.result;
-        const names: string[] = Array.isArray(ev.payload?.filenames) ? ev.payload.filenames : [];
+      } else if (ev.type === 'tool_result') {
+        const res = (ev as any).payload?.result;
+        // Render synthesized texts if available
         let rendered = false;
         try {
-          if (names.length) {
-            for (const name of names) {
-              const doc = this.documents.get(String(name));
-              const body = typeof doc?.content === 'string' ? doc!.content : undefined;
-              if (body) {
-                const safe = body.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                lines.push(`<tool_result filename="${name}">\n${safe}\n</tool_result>`);
-                rendered = true;
-              }
-            }
-          }
-          // Common shapes: { documents: [{ name, contentType, content|text }] } or flat { docId, name, content }
           const docs: any[] = Array.isArray(res?.documents) ? res.documents : [];
           const single = (res && typeof res === 'object' && (res.name || res.docId)) ? [res] : [];
           const all = (docs.length ? docs : single) as any[];
@@ -317,46 +348,38 @@ export class ScenarioPlannerV2 {
             }
           }
         } catch {}
-        if (!rendered) {
-          lines.push(`<tool_result>${JSON.stringify(res ?? {})}</tool_result>`);
-        }
+        if (!rendered) lines.push(`<tool_result>${JSON.stringify(res ?? {})}</tool_result>`);
       } else if (ev.type === 'read_attachment') {
-        const res = ev.payload?.result || {};
-        const args = ev.payload?.args || {};
-        const fname = String(res?.name || args?.name || '').trim();
-        if (!fname) throw new Error('read_attachment event missing filename');
-        if (res?.ok === false) throw new Error(`read_attachment failed: ${res?.reason || 'unknown reason'}`);
-
-        // Synthesize a tool_call for readAttachment before showing the result
-        try {
-          const reasoning = typeof ev.payload?.reasoning === 'string' ? ev.payload.reasoning : '';
-          const callBody = { reasoning, action: { tool: 'readAttachment', args: { name: fname } } };
-          lines.push(`<tool_call>${JSON.stringify(callBody)}</tool_call>`);
-        } catch {}
-
+        const name = String((ev as any).payload?.name || '').trim();
+        if (!name) continue;
+        // synthesize a call + result
+        const callBody = { action: { tool: 'readAttachment', args: { name } } };
+        lines.push(`<tool_call>${JSON.stringify(callBody)}</tool_call>`);
         let content: string | undefined;
-        const doc = this.documents.get(fname);
+        const doc = this.documents.get(name);
         if (doc && typeof doc.content === 'string') content = doc.content;
         if (!content) {
-          const rec = (this.deps.vault as any).getByName?.(fname);
-          if (!rec || typeof rec.bytes !== 'string') throw new Error(`Attachment not found in vault: ${fname}`);
-          const bin = atob(rec.bytes);
-          const bytes = new Uint8Array(bin.length);
-          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-          content = new TextDecoder('utf-8').decode(bytes);
+          const rec = (this.deps.vault as any).getByName?.(name);
+          if (rec && typeof rec.bytes === 'string') {
+            const bin = atob(rec.bytes);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            content = new TextDecoder('utf-8').decode(bytes);
+          }
         }
-        if (!content || !content.trim()) throw new Error(`Attachment has no decodable content: ${fname}`);
-        const safe = content.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        lines.push(`<tool_result filename="${fname}">\n${safe}\n</tool_result>`);
+        if (typeof content === 'string' && content.trim()) {
+          const safe = content.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          lines.push(`<tool_result filename="${name}">\n${safe}\n</tool_result>`);
+        } else {
+          lines.push(`<tool_result filename="${name}">"(unavailable)"</tool_result>`);
+        }
       }
     }
     // One-off hint: if we haven't contacted the remote agent yet and the scenario
     // includes a suggested initiating message for our agent, surface it here.
     try {
       const hasPlannerContact = this.eventLog.some(ev =>
-        (ev.type === 'agent_message' && ev.agentId === 'planner') ||
-        (ev.type === 'send_to_remote_agent') ||
-        (ev.type === 'tool_call' && (String(ev.payload?.name) === 'sendMessage' || String(ev.payload?.name) === 'sendMessageToRemoteAgent'))
+        (ev.type === 'message' && ev.channel === 'planner-agent' && ev.author === 'planner')
       );
       if (!hasPlannerContact) {
         const sc: any = this.scenario;
@@ -555,21 +578,37 @@ export class ScenarioPlannerV2 {
   }
 
   private async callLLM(prompt: string): Promise<{ content: string }> {
-    // Route completions through the shared Browserside provider
+    // Route completions through the shared Browserside provider with simple retries
     const api = this.deps.getApiBase();
     const serverUrl = api.replace(/\/api$/, '');
     if (!this.llmProvider) {
       this.llmProvider = new BrowsersideLLMProvider({ provider: 'browserside', serverUrl });
     }
-    const resp = await this.llmProvider.complete({
-      messages: [
-        { role: 'system', content: 'You are a turn-based agent planner. Respond with JSON only.' },
-        { role: 'user', content: prompt },
-      ],
-      temperature: 0.2,
-      loggingMetadata: {},
-    } as any);
-    return { content: String(resp?.content ?? '') };
+    const maxAttempts = 3;
+    let lastErr: any = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const resp = await this.llmProvider.complete({
+          messages: [
+            { role: 'system', content: 'You are a turn-based agent planner. Respond with JSON only.' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.2,
+          loggingMetadata: {},
+        } as any);
+        return { content: String(resp?.content ?? '') };
+      } catch (e: any) {
+        lastErr = e;
+        if (attempt < maxAttempts) {
+          // Exponential backoff with a little jitter
+          const base = 200;
+          const delay = base * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 50);
+          try { await new Promise(res => setTimeout(res, delay)); } catch {}
+          continue;
+        }
+      }
+    }
+    throw lastErr ?? new Error('LLM call failed');
   }
 
   private parseAction(text: string): { reasoning: string; tool: string; args: any } {
@@ -677,8 +716,9 @@ export class ScenarioPlannerV2 {
       setThinking(false);
     }
     const { reasoning, tool, args } = this.parseAction(content);
-    const statusNow = this.deps.task?.getStatus?.() ?? 'initializing';
-    const canSendRemote = !!this.deps.task && (statusNow === 'input-required' || !this.deps.task.getTaskId?.());
+    const lastSt = [...this.eventLog].reverse().find(e => e.type === 'status') as any;
+    const statusNow = String(lastSt?.payload?.state || '');
+    const canSendRemote = !lastSt || statusNow === 'input-required';
 
     if (tool === "sleep") {
       // No args; wait briefly and rely on event-driven wakeups
@@ -687,38 +727,40 @@ export class ScenarioPlannerV2 {
     }
 
     if (tool === "sendMessageToUser" || tool === "askUser") {
-      const q = String(args?.text || "").trim();
-      if (q) this.deps.onAskUser(q);
-      this.pushEvent({ type: "send_to_user", agentId: this.deps.getPlannerAgentId() || this.myAgentId || "planner", payload: { text: q, args, reasoning } });
+      const q = String(args?.text || args?.question || "").trim();
+      if (q) {
+        this.emit({ type: 'message', channel: 'user-planner', author: 'planner', payload: { text: q } } as any);
+        try { this.deps.onAskUser(q); } catch {}
+      }
       return;
     }
 
     if (tool === "readAttachment") {
-      const name = String(args?.name || "");
-      const a = this.deps.vault.getByName(name);
+      const name = String(args?.name || "").trim();
+      const a = name ? this.deps.vault.getByName(name) : undefined;
       const ok = !!a && !a.private;
-      const callId = `call_${Date.now()}`;
-      const result = ok ? { ok: true, name: a!.name, mimeType: a!.mimeType, size: a!.size, text_excerpt: a!.summary || undefined } : { ok: false, reason: "not found or private" };
-      this.turnScratch.toolCalls.push({ callId, name: "readAttachment", args, result });
-      this.pushEvent({ type: "read_attachment", agentId: this.deps.getPlannerAgentId() || this.myAgentId || "planner", payload: { args, result, callId, reasoning } });
-      // Reconsider now that a result is available
+      const payload = ok
+        ? { name, ok: true, size: a!.size, truncated: !!a!.summary, text_excerpt: a!.summary || undefined }
+        : { name, ok: false };
+      this.emit({ type: 'read_attachment', channel: 'tool', author: 'planner', payload } as any);
       this.maybeTick();
       return;
     }
 
     if (tool === "done") {
-      const summary = String(args?.summary || "");
-      if (summary) this.deps.onSystem(`Planner done: ${summary}`);
-      this.pushEvent({ type: "tool_call", agentId: this.deps.getPlannerAgentId() || this.myAgentId || "planner", payload: { name: "done", args, callId: `call_${Date.now()}`, reasoning } });
+      const summary = String(args?.summary || "").trim();
+      if (summary) {
+        try { this.deps.onSystem(`Planner done: ${summary}`); } catch {}
+        // Also surface as trace in the log
+        this.emit({ type: 'trace', channel: 'system', author: 'system', payload: { text: `Planner done: ${summary}` } } as any);
+      }
       return;
     }
 
     if (tool === "sendMessage" || tool === "sendMessageToRemoteAgent") {
       if (!canSendRemote) {
-        const callId = `call_${Date.now()}`;
-        const err = { ok: false, error: 'Conversation is not accepting remote messages (completed or not your turn). You may send a final message to the user instead.' };
-        this.turnScratch.toolCalls.push({ callId, name: tool, args, result: err });
-        this.pushEvent({ type: 'tool_result', agentId: this.deps.getPlannerAgentId() || this.myAgentId || 'planner', payload: { result: err, callId } });
+        const err = { ok: false, error: 'Conversation is not accepting remote messages (completed or not your turn). You may send a final message to the user instead.' } as any;
+        this.emit({ type: 'tool_result', channel: 'tool', author: 'planner', payload: { result: err } } as any);
         return;
       }
       const text = String(args?.text || "");
@@ -736,14 +778,12 @@ export class ScenarioPlannerV2 {
         }
       }
       if (unresolved.length) {
-        const callId = `call_${Date.now()}`;
-        const err = { ok: false, error: `Unknown attachment name(s): ${unresolved.join(', ')}` };
-        this.turnScratch.toolCalls.push({ callId, name: "sendMessage", args, result: err });
-        this.pushEvent({ type: "tool_result", agentId: this.deps.getPlannerAgentId() || this.myAgentId || "planner", payload: { result: err, callId } });
+        const err = { ok: false, error: `Unknown attachment name(s): ${unresolved.join(', ')}` } as any;
+        this.emit({ type: 'tool_result', channel: 'tool', author: 'planner', payload: { result: err } } as any);
         return;
       }
-      const callId = `call_${Date.now()}`;
-      this.pushEvent({ type: "send_to_remote_agent", agentId: this.deps.getPlannerAgentId() || this.myAgentId || "planner", payload: { text, attachments: atts, finality, reasoning, callId } });
+      // Emit unified message event to planner-agent channel (author planner)
+      this.emit({ type: 'message', channel: 'planner-agent', author: 'planner', payload: { text, attachments: atts && atts.length ? atts.map((a: any)=>({ name: String(a.name), mimeType: String(a.mimeType || 'application/octet-stream') })) : undefined } } as any);
       if (this.deps.task) {
         if (!this.deps.task.getTaskId?.()) await (this.deps.task as any).startNew?.(parts as any);
         else await (this.deps.task as any).send?.(parts as any);
@@ -756,7 +796,7 @@ export class ScenarioPlannerV2 {
     const enabledNames = enabledDefs.map(t => t.name);
     if (enabledNames.includes(tool)) {
       const callId = `call_${Date.now()}`;
-      this.pushEvent({ type: "tool_call", agentId: this.deps.getPlannerAgentId() || this.myAgentId || "planner", payload: { name: tool, args, callId, reasoning } });
+      this.emit({ type: 'tool_call', channel: 'tool', author: 'planner', payload: { name: tool, args } } as any);
       try {
         setThinking(true);
         if (!this.oracle) {
@@ -793,11 +833,11 @@ export class ScenarioPlannerV2 {
         // Log tool_result and index any returned documents
         const filenames = this.indexDocumentsFromResult(result?.output, { toolName: tool });
         this.turnScratch.toolCalls.push({ callId, name: tool, args, result: result?.output });
-        this.pushEvent({ type: "tool_result", agentId: this.deps.getPlannerAgentId() || this.myAgentId || "planner", payload: { result: result?.output, callId, filenames } });
+        this.emit({ type: 'tool_result', channel: 'tool', author: 'planner', payload: { result: result?.output } } as any);
       } catch (e: any) {
         const err = { ok: false, error: String(e?.message ?? e) };
         this.turnScratch.toolCalls.push({ callId, name: tool, args, result: err });
-        this.pushEvent({ type: "tool_result", agentId: this.deps.getPlannerAgentId() || this.myAgentId || "planner", payload: { result: err, callId } });
+        this.emit({ type: 'tool_result', channel: 'tool', author: 'planner', payload: { result: err } } as any);
       } finally { setThinking(false); }
       // Reconsider planning after any tool_result
       this.maybeTick();

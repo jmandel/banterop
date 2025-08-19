@@ -66,6 +66,13 @@ export class HonoServerResponse extends Writable {
     }
     return this;
   }
+
+  // Some libraries chain writeHead(...).flushHeaders() to send headers early for streaming.
+  // In this adapter, we capture headers and status and apply them when the response finalizes.
+  // Providing a no-op flushHeaders() keeps compatibility with such code paths.
+  flushHeaders(): void {
+    // no-op: headers are buffered and applied in _final()
+  }
   
   // Override end() to match Node.js Writable signature
   end(cb?: () => void): this;

@@ -13,6 +13,7 @@ import { createDefaultScenario, createBlankScenario } from '../utils/defaults';
 import { buildScenarioBuilderPrompt } from '../utils/prompt-builder';
 import { parseBuilderLLMResponse } from '../utils/response-parser';
 import { getCuratedSchemaText, getExampleScenarioText } from '../utils/schema-loader';
+import { isPublished, isUnlockedFor, setUnlocked, getEditToken, setEditToken, clearEditToken, clearUnlocked } from '../utils/locks';
 
 interface ChatMessage {
   id: string;
@@ -96,6 +97,9 @@ export function ScenarioBuilderPage() {
   const abortControllerRef = React.useRef<AbortController | null>(null);
   const hasAutoSubmittedRef = React.useRef(false);
   const [initialInput, setInitialInput] = React.useState<string | undefined>(undefined);
+  const [unlockModalOpen, setUnlockModalOpen] = React.useState(false);
+  const [pendingToken, setPendingToken] = React.useState('');
+  const [unlockError, setUnlockError] = React.useState<string | null>(null);
 
   // Load scenarios and schema on mount
   useEffect(() => {
@@ -615,6 +619,8 @@ export function ScenarioBuilderPage() {
   const currentConfig = React.useMemo(() => {
     return state.pendingConfig || activeScenario?.config || null;
   }, [state.pendingConfig, activeScenario?.config]);
+  const currentScenarioId = currentConfig?.metadata?.id as string | undefined;
+  const isLocked = !!(currentConfig && isPublished(currentConfig) && !isUnlockedFor(currentScenarioId));
   // Show unsaved changes when there's pending config with meaningful content
   const hasUnsavedChanges = state.pendingConfig !== null && (
     // Has a metadata.id (even if empty string initially)
@@ -640,9 +646,21 @@ export function ScenarioBuilderPage() {
                   onConfigChange={updateConfigFromEditor}
                   scenarioName={activeScenario?.name || 'New Scenario'}
                   scenarioId={isCreateMode ? undefined : state.activeScenarioId}
-                  isViewMode={isViewMode}
+                  isViewMode={isViewMode || isLocked}
                   isEditMode={isEditMode}
                 />
+                {isLocked && (
+                  <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        This scenario is Published and protected against accidental edits.
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button size="sm" variant="secondary" onClick={() => { setUnlockModalOpen(true); setPendingToken(getEditToken()); setUnlockError(null); }}>Unlock to edit</Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </main>
               {(isEditMode || isCreateMode) && (
                 <aside className="lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)]">
@@ -656,6 +674,7 @@ export function ScenarioBuilderPage() {
                       wascanceled={state.wascanceled}
                       selectedModel={state.selectedModel}
                       initialInput={initialInput}
+                      disabled={isLocked}
                       onModelChange={(model) => {
                         // Save to localStorage
                         try {
@@ -681,7 +700,7 @@ export function ScenarioBuilderPage() {
         </div>
       )}
 
-      {hasUnsavedChanges && (
+      {hasUnsavedChanges && !isLocked && (
         <div className="fixed bottom-0 left-0 lg:w-[66%] right-0 lg:right-auto bg-amber-50 border-t border-amber-200 p-3 flex justify-between items-center shadow-lg z-20">
           <div className="text-sm text-amber-800">
             You have unsaved changes
@@ -698,6 +717,45 @@ export function ScenarioBuilderPage() {
       {state.error && (
         <div className="fixed bottom-4 right-4 p-3 bg-red-50 text-red-700 border border-red-200 rounded-md shadow-lg">
           {state.error}
+        </div>
+      )}
+
+      {unlockModalOpen && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-30">
+          <div className="bg-white rounded-lg shadow-lg p-4 w-full max-w-sm">
+            <div className="text-sm font-semibold mb-2">Unlock to Edit</div>
+            <div className="text-xs text-gray-600 mb-3">Enter edit token (if required). Unlock persists for 24 hours.</div>
+            <input
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm mb-2"
+              placeholder="Edit token (optional)"
+              value={pendingToken}
+              onChange={(e) => setPendingToken(e.target.value)}
+            />
+            {unlockError && (
+              <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2 mb-2">{unlockError}</div>
+            )}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" size="sm" onClick={() => { setUnlockModalOpen(false); setUnlockError(null); }}>Cancel</Button>
+                <Button variant="primary" size="sm" onClick={() => {
+                  try { setEditToken(pendingToken || ''); } catch {}
+                  if (currentScenarioId) setUnlocked(currentScenarioId, true);
+                  setUnlockModalOpen(false);
+                  setUnlockError(null);
+                }}>Unlock</Button>
+              </div>
+              {(isUnlockedFor(currentScenarioId) || getEditToken()) && (
+                <div className="flex items-center gap-2">
+                  {isUnlockedFor(currentScenarioId) && (
+                    <Button size="sm" variant="secondary" onClick={() => { clearUnlocked(currentScenarioId); setUnlockModalOpen(false); }}>Lock again</Button>
+                  )}
+                  {getEditToken() && (
+                    <button className="text-xs text-gray-500 underline" onClick={(e) => { e.preventDefault(); clearEditToken(); setPendingToken(''); }}>Forget token</button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

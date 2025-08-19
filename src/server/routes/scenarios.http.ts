@@ -5,6 +5,16 @@ import type { ScenarioConfiguration } from '$src/types/scenario-configuration.ty
 export function createScenarioRoutes(scenarioStore: ScenarioStore) {
   const app = new Hono();
 
+  const checkGuard = (c: any, scenario: any) => {
+    const tags: string[] = scenario?.config?.metadata?.tags || [];
+    if (!tags.includes('published')) return { ok: true };
+    const tokenEnv = (process.env.PUBLISHED_EDIT_TOKEN || '').toString();
+    if (!tokenEnv) return { ok: true };
+    const hdr = c.req.header('X-Edit-Token') || '';
+    if (hdr === tokenEnv) return { ok: true };
+    return { ok: false, code: 423, msg: 'Locked published scenario. Invalid or missing token.' };
+  };
+
   // List all scenarios
   app.get('/', (c) => {
     const scenarios = scenarioStore.listScenarios();
@@ -68,6 +78,10 @@ export function createScenarioRoutes(scenarioStore: ScenarioStore) {
     if (!existing) {
       return c.json({ error: `Scenario '${id}' not found` }, 404);
     }
+
+    // Guard edits for published scenarios when token is required
+    const guard = checkGuard(c, existing);
+    if (!guard.ok) { c.status(423); return c.json({ error: guard.msg }); }
     
     scenarioStore.updateScenario(id, body);
     const updated = scenarioStore.findScenarioById(id);
@@ -82,6 +96,10 @@ export function createScenarioRoutes(scenarioStore: ScenarioStore) {
     if (!existing) {
       return c.json({ error: `Scenario '${id}' not found` }, 404);
     }
+
+    // Guard deletes for published scenarios when token is required
+    const guard = checkGuard(c, existing);
+    if (!guard.ok) { c.status(423); return c.json({ error: guard.msg }); }
     
     scenarioStore.deleteScenario(id);
     return c.json({ success: true, deleted: id });

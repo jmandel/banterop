@@ -7,7 +7,11 @@ const API_BASE: string =
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const url = `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
-  const res = await fetch(url, init);
+  // Inject X-Edit-Token if available (harmless if server ignores it)
+  const token = (() => { try { return localStorage.getItem('scenario.edit.token') || ''; } catch { return ''; } })();
+  const headers = new Headers(init?.headers || {});
+  if (token) headers.set('X-Edit-Token', token);
+  const res = await fetch(url, { ...init, headers });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }

@@ -5,7 +5,8 @@ import type { A2AStatus } from "./a2a-types";
 import { AttachmentVault } from "./attachments-vault";
 import { AttachmentSummarizer } from "./attachment-summaries";
 import { DualConversationView } from "./components/Conversations/DualConversationView";
-import type { UnifiedEvent as PlannerUnifiedEvent } from "./components/EventLogView";
+import type { UnifiedEvent as PlannerUnifiedEvent } from "./types/events";
+import { selectFrontMessages, selectAgentLog, selectLastStatus } from "./selectors/transcripts";
 import { EventLogView } from "./components/EventLogView";
 import { StepFlow } from "./components/StepFlow/StepFlow";
 import { ScenarioPlannerV2 } from "./planner-scenario";
@@ -15,20 +16,6 @@ import { createTaskClient, detectProtocolFromUrl, type Protocol } from "./protoc
 import type { TaskClientLike } from "./protocols/task-client";
 import { useDebounce } from "./useDebounce";
 
-type AgentLogEntry = { 
-  id: string; 
-  role: "planner" | "agent"; 
-  text: string; 
-  partial?: boolean; 
-  attachments?: Array<{ 
-    name: string; 
-    mimeType: string; 
-    bytes?: string; 
-    uri?: string;
-  }>; 
-};
-
-type FrontMsg = { id: string; role: "you" | "planner" | "system"; text: string };
 type PlannerMode = "passthrough" | "autostart" | "approval";
 
 type Model = {
@@ -37,7 +24,6 @@ type Model = {
   protocol: Protocol;
   taskId?: string;
   status: A2AStatus | "initializing";
-  front: FrontMsg[];
   plannerMode: PlannerMode;
   plannerStarted: boolean;
   busy: boolean;
@@ -49,8 +35,6 @@ type Act =
   | { type: "connect"; endpoint: string; protocol: Protocol }
   | { type: "setTask"; taskId?: string }
   | { type: "status"; status: A2AStatus | "initializing" }
-  | { type: "frontAppend"; msg: FrontMsg }
-  | { type: "system"; text: string }
   | { type: "busy"; busy: boolean }
   | { type: "error"; error?: string }
   | { type: "setPlannerMode"; mode: PlannerMode }
@@ -64,7 +48,6 @@ const initModel = (endpoint: string, protocol: Protocol): Model => ({
   endpoint,
   protocol,
   status: "initializing",
-  front: [],
   plannerMode: (localStorage.getItem("a2a.planner.mode") as PlannerMode) || "autostart",
   plannerStarted: false,
   busy: false,
@@ -79,10 +62,6 @@ function reducer(m: Model, a: Act): Model {
       return { ...m, taskId: a.taskId };
     case "status":
       return { ...m, status: a.status };
-    case "frontAppend":
-      return { ...m, front: [...m.front, a.msg] };
-    case "system":
-      return { ...m, front: [...m.front, { id: crypto.randomUUID(), role: "system", text: a.text }] };
     case "busy":
       return { ...m, busy: a.busy };
     case "error":
@@ -98,7 +77,6 @@ function reducer(m: Model, a: Act): Model {
         ...m,
         taskId: undefined,
         status: "initializing",
-        front: [],
         plannerStarted: false,
         busy: false,
         error: undefined,
@@ -137,27 +115,26 @@ export default function App() {
       const sp = new URLSearchParams(q);
       return {
         protocol: (sp.get('protocol') || '').toLowerCase(),
+        endpoint: sp.get('endpoint') || '',
         scenarioUrl: sp.get('scenarioUrl') || '',
         plannerAgentId: sp.get('plannerAgentId') || '',
         counterpartAgentId: sp.get('counterpartAgentId') || '',
         defaultModel: sp.get('defaultModel') || ''
       };
     } catch {
-      return { protocol: '', scenarioUrl: '', plannerAgentId: '', counterpartAgentId: '', defaultModel: '' };
+      return { protocol: '', endpoint: '', scenarioUrl: '', plannerAgentId: '', counterpartAgentId: '', defaultModel: '' };
     }
   };
   const prefill = parsePrefillParams();
-  const initialEndpoint = localStorage.getItem("a2a.endpoint") || "";
+  const initialEndpoint = prefill.endpoint || localStorage.getItem("a2a.endpoint") || "";
   const initialProto: Protocol = (() => {
     const ep = (initialEndpoint || '').trim();
     const detected = detectProtocolFromUrl(ep);
-    // If endpoint contains explicit /a2a or /mcp, prefer Auto so detection drives requests
+    // If endpoint declares a protocol, prefer Auto so detection drives requests
     if (detected) return 'auto';
-    // With no endpoint, default to Auto regardless of persisted or prefill
+    // With no endpoint, default to Auto
     if (!ep) return 'auto';
-    // If endpoint does not declare, honor explicit prefill if present
-    if (prefill.protocol === 'a2a' || prefill.protocol === 'mcp') return prefill.protocol as Protocol;
-    // Otherwise honor persisted user selection
+    // Otherwise honor persisted user selection; ignore any URL prefill
     const persisted = (localStorage.getItem('a2a.protocol') as Protocol) || 'auto';
     return (persisted === 'a2a' || persisted === 'mcp' || persisted === 'auto') ? persisted : 'auto';
   })();
@@ -189,11 +166,36 @@ export default function App() {
   const summarizerModelRef = useRef<string>(summarizerModel);
   const plannerModeRef = useRef<PlannerMode>("autostart");
   const plannerStartedRef = useRef<boolean>(false);
-  const mirroredAgentIdsRef = useRef<Set<string>>(new Set());
-
-  const [agentLog, setAgentLog] = useState<AgentLogEntry[]>([]);
+  // no-op placeholders removed; unified event log drives UI
   // Scenario URL + agent selection
   const [scenarioUrl, setScenarioUrl] = useState<string>(() => prefill.scenarioUrl || localStorage.getItem("a2a.scenario.url") || "");
+
+  // When the user edits Endpoint or Scenario URL, scrub those params from the URL so reloads don't override
+  const clearHashParams = (keys: string[]) => {
+    try {
+      if (typeof window === 'undefined') return;
+      const u = new URL(window.location.href);
+      const hash = u.hash || '';
+      let prefix = hash && hash.includes('?') ? hash.slice(0, hash.indexOf('?')) : (hash || '#/');
+      const qs = hash && hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : (u.search ? u.search.slice(1) : '');
+      const sp = new URLSearchParams(qs);
+      keys.forEach(k => sp.delete(k));
+      const newHash = prefix + (sp.toString() ? `?${sp.toString()}` : '');
+      const newUrl = `${u.origin}${u.pathname}${newHash}`;
+      if (newUrl !== window.location.href) {
+        history.replaceState(null, '', newUrl);
+      }
+    } catch {}
+  };
+
+  const handleEndpointChange = (v: string) => {
+    setEndpoint(v);
+    clearHashParams(['endpoint','protocol','defaultModel']);
+  };
+  const handleScenarioUrlChange = (v: string) => {
+    setScenarioUrl(v);
+    clearHashParams(['scenarioUrl','protocol','defaultModel']);
+  };
   const debouncedScenarioUrl = useDebounce(scenarioUrl, 500);
   const [scenarioAgents, setScenarioAgents] = useState<string[]>([]);
   const [scenarioConfig, setScenarioConfig] = useState<any | null>(null);
@@ -206,6 +208,11 @@ export default function App() {
   const preloadedEventsRef = useRef<PlannerUnifiedEvent[] | null>(null);
   const eventLogRef = useRef<PlannerUnifiedEvent[]>([]);
   useEffect(() => { eventLogRef.current = eventLog; }, [eventLog]);
+  // Derive transcripts and status from unified Event Log
+  const derivedFront = React.useMemo(() => selectFrontMessages(eventLog as any), [eventLog]);
+  const derivedAgent = React.useMemo(() => selectAgentLog(eventLog as any), [eventLog]);
+  const lastStatusStr = React.useMemo(() => selectLastStatus(eventLog as any), [eventLog]);
+  const yourTurn = lastStatusStr ? lastStatusStr === 'input-required' : true; // allow initial send pre-status
 
   // Persist event log whenever it changes (scoped by endpoint + taskId)
   useEffect(() => {
@@ -218,7 +225,6 @@ export default function App() {
         taskId: tid,
         status: st,
         plannerStarted: plannerStartedRef.current,
-        front: frontMsgsRef.current,
         frontDraft: frontInput,
         plannerEvents: (eventLog as any) || [],
       });
@@ -226,10 +232,6 @@ export default function App() {
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventLog]);
-
-  // Live ref of front messages to avoid stale-closure reads in Planner
-  const frontMsgsRef = useRef<FrontMsg[]>([]);
-  useEffect(() => { frontMsgsRef.current = model.front; }, [model.front]);
 
   // Event queue with monotonic counter to avoid missed wakeups
   const eventCounterRef = useRef(0);
@@ -272,14 +274,13 @@ export default function App() {
           taskId: tid,
           status: st,
           plannerStarted: plannerStartedRef.current,
-          front: frontMsgsRef.current,
           frontDraft: frontInput,
           plannerEvents: (eventLog as any) || [],
         });
       } catch {}
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model.front, frontInput]);
+  }, [frontInput]);
 
   useEffect(() => {
     localStorage.setItem("a2a.endpoint", endpoint);
@@ -329,7 +330,6 @@ export default function App() {
             taskId: tid,
             status: st,
             plannerStarted: plannerStartedRef.current,
-            front: frontMsgsRef.current,
             frontDraft: frontInput,
             plannerEvents: (eventLogRef.current as any) || [],
           });
@@ -375,7 +375,6 @@ export default function App() {
     taskId?: string;
     status?: A2AStatus | "initializing";
     plannerStarted?: boolean;
-    front?: FrontMsg[];
     frontDraft?: string;
     plannerEvents?: PlannerUnifiedEvent[];
   };
@@ -522,88 +521,13 @@ export default function App() {
       setAttachmentUpdateTrigger(prev => prev + 1);
     });
 
-    const updateAgentLogFromTask = () => {
-      const t = taskRef.current?.getTask();
-      const hist = t?.history || [];
-      // Detect duplicate messageIds in a single snapshot to surface upstream data issues
-      try {
-        const seen = new Map<string, number[]>();
-        hist.forEach((m: any, idx: number) => {
-          const id = String(m?.messageId || '');
-          if (!id) return;
-          const arr = seen.get(id) || [];
-          arr.push(idx);
-          seen.set(id, arr);
-        });
-        const dups = Array.from(seen.entries()).filter(([, idxs]) => idxs.length > 1);
-        if (dups.length) {
-          const detail = dups.map(([id, idxs]) => ({ id, positions: idxs, roles: idxs.map(i => hist[i]?.role) }));
-          console.error('[AgentLog] Duplicate messageId(s) detected in task history', { taskId: t?.id, duplicates: detail, historyLen: hist.length });
-          // Throw to make this loud during development; React error overlay + console captures context
-          throw new Error(`Duplicate messageId detected in task ${t?.id}: ${detail.map(d => d.id).join(', ')}`);
-        }
-      } catch (e) {
-        // Intentionally rethrow after logging for visibility
-        throw e;
-      }
-
-      const entries: AgentLogEntry[] = hist.map((m) => {
-        const text = (m.parts || []).filter((p: any) => p?.kind === 'text').map((p: any) => p.text).join('\n') || '';
-        const atts = (m.parts || []).filter((p:any)=>p?.kind==='file' && p?.file).map((p:any)=>({ name: String(p.file.name||'attachment'), mimeType: String(p.file.mimeType||'application/octet-stream'), bytes: p.file.bytes, uri: p.file.uri }));
-        return { id: m.messageId, role: m.role === 'user' ? 'planner' : 'agent', text, attachments: atts };
-      });
-      setAgentLog(entries);
-    };
+    const updateAgentLogFromTask = () => { /* unified log drives UI; no-op */ };
     taskClient.on('new-task', () => {
       const curTask = taskRef.current?.getTaskId();
       if (lastTaskIdRef.current !== curTask) {
         lastTaskIdRef.current = curTask;
         dispatch({ type: "setTask", taskId: curTask });
       }
-      updateAgentLogFromTask();
-      // Mirror any new agent attachments into the vault for planner availability
-      try {
-        const t = taskRef.current?.getTask();
-        const hist = t?.history || [];
-        for (const m of hist) {
-          if (m.role !== 'agent') continue;
-          const msgId = String(m.messageId || '');
-          if (!msgId || mirroredAgentIdsRef.current.has(msgId)) continue;
-          const parts = Array.isArray(m.parts) ? m.parts : [];
-          try {
-            const attNames = parts
-              .filter((p: any) => p?.kind === 'file' && p?.file)
-              .map((p: any) => String(p.file?.name || 'attachment'));
-            if (attNames.length) {
-              console.log('[AgentMessage] Received agent message', { taskId: t?.id, messageId: msgId, attachmentCount: attNames.length, attachments: attNames });
-            }
-          } catch {}
-          let mirrored = false;
-          for (const p of parts) {
-            if (p?.kind === 'file' && p?.file) {
-              const name = String(p.file.name || 'attachment');
-              const mimeType = String(p.file.mimeType || 'application/octet-stream');
-              const bytes = typeof p.file.bytes === 'string' ? p.file.bytes : '';
-              try {
-                const rec = vaultRef.current.addFromAgent(name, mimeType, bytes || '');
-                try {
-                  const size = bytes ? atob(bytes).length : 0;
-                  console.log('[Vault] Mirrored agent attachment into vault', { name: rec.name, mimeType: rec.mimeType, size });
-                } catch {}
-                mirrored = true;
-                // Auto-summarize new agent attachments if no summary present
-                if (!rec.summary) {
-                  summarizerRef.current?.queueAnalyze(rec.name, { priority: true });
-                }
-              } catch {}
-            }
-          }
-          if (mirrored) {
-            mirroredAgentIdsRef.current.add(msgId);
-            setAttachmentUpdateTrigger(prev => prev + 1);
-          }
-        }
-      } catch {}
       signalEvent('store');
     });
     taskClient.on('new-task', () => {
@@ -611,42 +535,6 @@ export default function App() {
       if (st && lastStatusRef.current !== st) {
         lastStatusRef.current = st;
         dispatch({ type: 'status', status: st });
-        if (st === 'completed') {
-          dispatch({ type: 'system', text: '— conversation completed —' });
-          // Do not stop planner automatically; allow final user communication
-          // Abort any active streams
-          try {
-            ptStreamAbort.current?.abort();
-            ptStreamAbort.current = null;
-          } catch {}
-          ptSendInFlight.current = false;
-        }
-        if (st === 'failed') {
-          dispatch({ type: 'system', text: '— conversation failed —' });
-          // Stop the planner when task fails
-          try { scenarioPlannerRef.current?.stop(); } catch {}
-          scenarioPlannerRef.current = null;
-          dispatch({ type: 'setPlannerStarted', started: false });
-          // Abort any active streams
-          try {
-            ptStreamAbort.current?.abort();
-            ptStreamAbort.current = null;
-          } catch {}
-          ptSendInFlight.current = false;
-        }
-        if (st === 'canceled') {
-          dispatch({ type: 'system', text: '— conversation canceled —' });
-          // Stop the planner when task is canceled
-          try { scenarioPlannerRef.current?.stop(); } catch {}
-          scenarioPlannerRef.current = null;
-          dispatch({ type: 'setPlannerStarted', started: false });
-          // Abort any active streams
-          try {
-            ptStreamAbort.current?.abort();
-            ptStreamAbort.current = null;
-          } catch {}
-          ptSendInFlight.current = false;
-        }
         // Persist per-task session on status changes
         try {
           const tid = taskRef.current?.getTaskId();
@@ -656,7 +544,6 @@ export default function App() {
               taskId: tid,
               status: st,
               plannerStarted: plannerStartedRef.current,
-              front: frontMsgsRef.current,
               frontDraft: frontInput,
               plannerEvents: (eventLog as any) || [],
             });
@@ -710,8 +597,6 @@ export default function App() {
       try {
         const preSess = loadTaskSession(endpointUrl, targetTask);
         if (preSess) {
-          const savedFront = Array.isArray(preSess.front) ? preSess.front : [];
-          for (const msg of savedFront) dispatch({ type: 'frontAppend', msg });
           if (typeof preSess.frontDraft === 'string') setFrontInput(preSess.frontDraft);
           const savedEvents = Array.isArray(preSess.plannerEvents) ? (preSess.plannerEvents as any) : [];
           if (savedEvents.length) {
@@ -756,8 +641,8 @@ export default function App() {
       getScenarioConfig: () => scenarioConfig,
       getEnabledTools: () => (currentTools.filter((t: { name: string; description?: string }) => enabledTools.includes(t.name))),
       getAdditionalInstructions: () => instructions,
-      onSystem: (text) => dispatch({ type: "system", text }),
-      onAskUser: (q) => dispatch({ type: "frontAppend", msg: { id: crypto.randomUUID(), role: "planner", text: q } }),
+      onSystem: (_text) => {},
+      onAskUser: (_q) => {},
       onPlannerThinking: (b) => setPlannerThinking(b),
     });
     scenarioPlannerRef.current = orch;
@@ -780,7 +665,6 @@ export default function App() {
               taskId: tid,
               status: lastStatusRef.current,
               plannerStarted: true,
-              front: frontMsgsRef.current,
               frontDraft: frontInput,
               plannerEvents: next as any,
             });
@@ -802,7 +686,6 @@ export default function App() {
           taskId: tid,
           status: lastStatusRef.current,
           plannerStarted: true,
-          front: frontMsgsRef.current,
           frontDraft: frontInput,
           plannerEvents: (scenarioPlannerRef.current?.getEvents() as any) || [],
         });
@@ -826,7 +709,6 @@ export default function App() {
           taskId: tid,
           status: lastStatusRef.current,
           plannerStarted: false,
-          front: frontMsgsRef.current,
           frontDraft: frontInput,
           plannerEvents: (eventLog as any) || [],
         });
@@ -863,7 +745,6 @@ export default function App() {
     preloadedEventsRef.current = null;
     setEventLog([]);
     dispatch({ type: "clearConversation" });
-    setAgentLog([]);
     setFrontInput("");
     // Reset endpoint card state to avoid stale UI
     setCard(null);
@@ -889,7 +770,6 @@ export default function App() {
   const sendFrontMessage = async (text: string) => {
     if (!text.trim()) return;
     console.log("Sending front message:", text);
-    dispatch({ type: "frontAppend", msg: { id: crypto.randomUUID(), role: "you", text } });
     try { scenarioPlannerRef.current?.recordUserReply(text); } catch {}
     setFrontInput("");
     signalEvent('front-send');
@@ -945,9 +825,7 @@ export default function App() {
           setEnabledTools(allTools);
         }
       } catch {}
-    } catch (e: any) {
-      dispatch({ type: 'system', text: `Scenario load error: ${String(e?.message ?? e)}` });
-    }
+    } catch (e: any) { console.error('Scenario load error', e); }
   };
 
   const onSelectPlannerAgentId = (id: string) => {
@@ -963,6 +841,8 @@ export default function App() {
     if (scenarioUrl.trim()) {
       try { localStorage.setItem(scenarioKey(scenarioUrl), JSON.stringify({ planner: id, counterpart: nextCounter })); } catch {}
     }
+    // Scrub prefill params so reloads don't override user selection
+    try { clearHashParams(['plannerAgentId','counterpartAgentId']); } catch {}
     // Update enabled tools default for selected agent
     try {
       const cfg = scenarioConfig as any;
@@ -1037,6 +917,18 @@ const onAttachFiles = async (files: FileList | null) => {
 
   const openBase64Attachment = (name: string, mimeType: string, bytes?: string, uri?: string) => {
     try {
+      // Fallback: if no bytes/uri provided by the button, try to resolve from vault by name
+      if (!bytes && !uri && name) {
+        try {
+          const rec = vaultRef.current.getByName(name);
+          if (rec) {
+            bytes = rec.bytes;
+            // Always prefer the vault's recorded MIME type for accurate rendering
+            mimeType = rec.mimeType;
+          }
+        } catch {}
+      }
+
       if (bytes) {
         let safeMime = mimeType || 'application/octet-stream';
         // Ensure text types specify UTF-8 so browsers render correctly
@@ -1063,6 +955,8 @@ const onAttachFiles = async (files: FileList | null) => {
         window.open(full, '_blank');
         return;
       }
+      // Nothing to open; optionally surface a console note for debugging
+      try { console.warn('[AttachmentOpen] No bytes/uri available for', name); } catch {}
     } catch (e) {
       try { console.warn('[AttachmentOpen] error', e); } catch {}
     }
@@ -1079,7 +973,7 @@ const onAttachFiles = async (files: FileList | null) => {
           <StepFlow
             // Connection props
             endpoint={endpoint}
-            onEndpointChange={setEndpoint}
+            onEndpointChange={handleEndpointChange}
             protocol={protocol}
             onProtocolChange={setProtocol}
             status={model.status}
@@ -1094,7 +988,7 @@ const onAttachFiles = async (files: FileList | null) => {
             instructions={instructions}
             onInstructionsChange={setInstructions}
             scenarioUrl={scenarioUrl}
-            onScenarioUrlChange={setScenarioUrl}
+            onScenarioUrlChange={handleScenarioUrlChange}
             // Manual load is redundant; auto-load via URL change
             scenarioAgents={scenarioAgents}
             selectedPlannerAgentId={selectedPlannerAgentId}
@@ -1123,8 +1017,8 @@ const onAttachFiles = async (files: FileList | null) => {
 
           {/* Conversations Section */}
           <DualConversationView
-              frontMessages={model.front}
-              agentLog={agentLog}
+              frontMessages={derivedFront}
+              agentLog={derivedAgent}
               plannerStarted={model.plannerStarted}
               onOpenAttachment={openBase64Attachment}
               input={frontInput}
@@ -1132,7 +1026,7 @@ const onAttachFiles = async (files: FileList | null) => {
               onSendMessage={sendFrontMessage}
               connected={model.connected}
               busy={model.busy}
-              yourTurn={model.status === 'input-required'}
+              yourTurn={yourTurn}
             />
 
           {/* Event Log Section */}

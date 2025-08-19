@@ -36,7 +36,11 @@ async function wsRpcCall<T>(method: string, params?: any): Promise<T> {
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const url = `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
-  const res = await fetch(url, init);
+  // Inject edit token header if present
+  const token = (() => { try { return localStorage.getItem('scenario.edit.token') || ''; } catch { return ''; } })();
+  const headers = new Headers(init?.headers || {});
+  if (token) headers.set('X-Edit-Token', token);
+  const res = await fetch(url, { ...init, headers });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }
@@ -99,6 +103,8 @@ function LandingPage() {
   );
 }
 
+import { isPublished, isUnlockedFor, setUnlocked, getEditToken, setEditToken } from './utils/locks';
+
 function BuilderPage() {
   const params = useParams<{ scenarioId?: string }>();
   const [name, setName] = useState('');
@@ -128,6 +134,10 @@ function BuilderPage() {
       }
     })();
   }, [params.scenarioId]);
+
+  const parsedConfig = useMemo(() => { try { return JSON.parse(json); } catch { return null; } }, [json]);
+  const scenarioId = parsedConfig?.metadata?.id as string | undefined;
+  const locked = !!(parsedConfig && isPublished(parsedConfig) && !isUnlockedFor(scenarioId));
 
   const save = async () => {
     try {
@@ -166,10 +176,16 @@ function BuilderPage() {
             <Card>
               <div className="flex items-center gap-2 mb-2">
                 <input className="flex-1 border border-[color:var(--border)] rounded-2xl px-3 py-2 bg-[color:var(--panel)] text-[color:var(--text)]" value={name} onChange={(e) => setName(e.target.value)} />
-                <Button variant="primary" onClick={save}>{isCreate ? 'Create' : 'Save'}</Button>
+                {locked && (
+                  <Button variant="secondary" onClick={() => { setPendingToken(getEditToken()); setUnlockOpen(true); }}>Unlock to edit</Button>
+                )}
+                <Button variant="primary" onClick={save} disabled={locked}>{isCreate ? 'Create' : 'Save'}</Button>
               </div>
-              <textarea className="w-full border border-[color:var(--border)] rounded-2xl px-3 py-2 bg-[color:var(--panel)] text-[color:var(--text)]" style={{ height: 480 }} value={json} onChange={(e) => setJson(e.target.value)} />
+              <textarea className="w-full border border-[color:var(--border)] rounded-2xl px-3 py-2 bg-[color:var(--panel)] text-[color:var(--text)]" style={{ height: 480 }} value={json} onChange={(e) => setJson(e.target.value)} readOnly={locked} />
               {status && <div className="text-xs text-[color:var(--muted)] mt-2">{status}</div>}
+              {locked && (
+                <div className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">Published scenario is locked. Unlock to edit.</div>
+              )}
             </Card>
           </div>
           <div style={{ width: 360 }}>
@@ -185,6 +201,13 @@ function BuilderPage() {
           </div>
         </div>
       )}
+      <UnlockModal
+        open={unlockOpen}
+        token={pendingToken}
+        setToken={setPendingToken}
+        onClose={() => setUnlockOpen(false)}
+        onUnlock={() => { try { setEditToken(pendingToken || ''); } catch {} if (scenarioId) setUnlocked(scenarioId, true); setUnlockOpen(false); }}
+      />
     </Layout>
   );
 }
@@ -231,6 +254,24 @@ function ConfiguredPage() {
   );
 }
 
+function UnlockModal({ open, onClose, onUnlock, token, setToken }: { open: boolean; onClose: () => void; onUnlock: () => void; token: string; setToken: (t: string) => void }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-30">
+      <div className="bg-white rounded-lg shadow-lg p-4 w-full max-w-sm">
+        <div className="text-sm font-semibold mb-2">Unlock to Edit</div>
+        <div className="text-xs text-gray-600 mb-3">Enter edit token (if required). Unlock persists for 24 hours.</div>
+        <input className="w-full border border-gray-300 rounded px-3 py-2 text-sm mb-3" placeholder="Edit token (optional)" value={token} onChange={(e) => setToken(e.target.value)} />
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" size="sm" onClick={onUnlock}>Unlock</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function RunPage() {
   const params = useParams<{ scenarioId: string }>();
   const [snap, setSnap] = useState<any | null>(null);
@@ -267,6 +308,8 @@ function RunPage() {
           <Button variant="primary" onClick={launch} disabled={creating}>{creating ? 'Launching…' : 'Launch + Open Watch'}</Button>
         </Card>
       )}
+  const [unlockOpen, setUnlockOpen] = useState(false);
+  const [pendingToken, setPendingToken] = useState('');
       {!error && !snap && <div className="text-xs text-[color:var(--muted)]">Loading…</div>}
     </Layout>
   );

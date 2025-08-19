@@ -200,7 +200,7 @@ export class McpTaskClient implements TaskClientLike {
     try {
       const res = await this.client.callTool({
         name: "check_replies",
-        arguments: { conversationId: this.conversationId, waitMs: 1000 }
+        arguments: { conversationId: this.conversationId, waitMs: 10000 }
       });
       const content = (res as any)?.content || [];
       const text = (Array.isArray(content) ? content.find((c: any) => c?.type === 'text')?.text : undefined) || '';
@@ -251,7 +251,8 @@ export class McpTaskClient implements TaskClientLike {
 
       this.emitIfChanged(appended > 0);
       // Stop polling while waiting for user input; restart when we send next message
-      if (this.status === "input-required") {
+      // Also stop when conversation is complete or otherwise terminal.
+      if (this.status === "input-required" || this.status === "completed" || this.status === "failed" || this.status === "canceled") {
         this.stopPolling();
       }
     } catch (e: any) {
@@ -261,6 +262,8 @@ export class McpTaskClient implements TaskClientLike {
 
   private ensurePolling() {
     if (this.pollTimer || this.dead) return;
+    // Do not start polling if already in a terminal state
+    if (this.status === "completed" || this.status === "failed" || this.status === "canceled") return;
     this.pollTimer = setInterval(() => {
       if (this.dead || !this.conversationId) {
         this.stopPolling();

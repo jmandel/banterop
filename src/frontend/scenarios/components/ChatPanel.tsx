@@ -14,6 +14,7 @@ export function ChatPanel({
   onModelChange,
   availableProviders,
   initialInput,
+  disabled,
 }: {
   messages: ChatMessage[];
   onSendMessage: (m: string) => void;
@@ -25,6 +26,7 @@ export function ChatPanel({
   onModelChange: (m: string) => void;
   availableProviders: Array<{ name: string; models: string[] }>;
   initialInput?: string;
+  disabled?: boolean;
 }) {
   const [input, setInput] = useState(initialInput || '');
   const endRef = useRef<HTMLDivElement>(null);
@@ -38,7 +40,11 @@ export function ChatPanel({
       setInput(initialInput);
     }
   }, [initialInput]);
-  const submit = (e: React.FormEvent) => { e.preventDefault(); if (input.trim() && !isLoading) { onSendMessage(input.trim()); setInput(''); } };
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (disabled) return;
+    if (input.trim() && !isLoading) { onSendMessage(input.trim()); setInput(''); }
+  };
   const fmt = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   return (
     <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--panel)] flex flex-col h-full overflow-hidden">
@@ -84,11 +90,18 @@ export function ChatPanel({
         <div ref={endRef} />
       </div>
       <form onSubmit={submit} className="border-t border-[color:var(--border)] p-2 flex gap-2">
-        <input className="flex-1 border border-[color:var(--border)] rounded-2xl px-3 py-2 text-sm bg-[color:var(--panel)] text-[color:var(--text)] focus:outline-none" placeholder="Ask me to modify the scenario..." value={input} onChange={(e) => setInput(e.target.value)} disabled={isLoading} />
+        <input
+          className="flex-1 border border-[color:var(--border)] rounded-2xl px-3 py-2 text-sm bg-[color:var(--panel)] text-[color:var(--text)] focus:outline-none disabled:opacity-60"
+          placeholder={disabled ? "Published scenario is locked. Unlock to propose edits." : "Ask me to modify the scenario..."}
+          title={disabled ? "Published scenario is locked. Unlock to propose edits." : undefined}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          disabled={isLoading || disabled}
+        />
         {isLoading && onStop ? (
           <Button variant="danger" size="sm" onClick={onStop}>Stop</Button>
         ) : (
-          <Button variant="primary" size="sm" as="button" disabled={!input.trim() || isLoading} type="submit">Send</Button>
+          <Button variant="primary" size="sm" as="button" disabled={!input.trim() || isLoading || !!disabled} type="submit">Send</Button>
         )}
       </form>
     </div>

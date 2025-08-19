@@ -19,17 +19,21 @@ export function RunWizardPage() {
   const [error, setError] = useState<string | null>(null);
   const [scenario, setScenario] = useState<any | null>(null);
 
-  // Step 1: Choose your role
+  // Step 1: Choose your role or internal simulation
   const [role, setRole] = useState<string>('');
+  const [internalSim, setInternalSim] = useState<boolean>(false);
 
   // Step 2: Choose connection pattern
   const [hasClient, setHasClient] = useState<boolean>(true);
   const [protocol, setProtocol] = useState<Protocol>('a2a');
 
-  // Step 3: Configure simulated agent
+  // Step 3/4: Configure simulated agent(s)
   const [providers, setProviders] = useState<Array<{ name: string; models: string[] }>>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [instructions, setInstructions] = useState<string>('');
+  const [agentInstructions, setAgentInstructions] = useState<Record<string, string>>({});
+  const [startFirst, setStartFirst] = useState<string>('');
+  const [generatedConfig64, setGeneratedConfig64] = useState<string>('');
 
   useEffect(() => {
     (async () => {
@@ -42,6 +46,12 @@ export function RunWizardPage() {
         const cfg = s.config || s;
         const firstId = (cfg?.agents?.[0]?.agentId) || '';
         setRole(firstId);
+        setStartFirst(firstId);
+        try {
+          const initInstr: Record<string, string> = {};
+          for (const a of (cfg?.agents || [])) initInstr[a.agentId] = '';
+          setAgentInstructions(initInstr);
+        } catch {}
         try {
           const p = await api.getLLMConfig();
           if (p.success) {
@@ -61,6 +71,30 @@ export function RunWizardPage() {
     })();
   }, [scenarioId]);
 
+  // Persist selected model globally so it defaults across scenarios
+  useEffect(() => {
+    const key = `scenario.run.model.default`;
+    try {
+      // Load saved model once providers are available
+      if (!providers.length) return;
+      const saved = localStorage.getItem(key) || '';
+      if (saved) {
+        const available = providers.flatMap(p => p.models || []);
+        if (available.includes(saved)) {
+          setSelectedModel(saved);
+        }
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providers.length, scenarioId]);
+
+  useEffect(() => {
+    const key = `scenario.run.model.default`;
+    try {
+      if (selectedModel) localStorage.setItem(key, selectedModel);
+    } catch {}
+  }, [selectedModel]);
+
   const agentIds: string[] = useMemo(
     () => (scenario?.config?.agents || []).map((a: any) => a.agentId),
     [scenario]
@@ -74,6 +108,26 @@ export function RunWizardPage() {
   }, [agentIds, role]);
 
   const onLaunch = () => {
+    if (internalSim) {
+      const cfg = scenario?.config || scenario;
+      const sid = cfg?.metadata?.id || scenarioId;
+      const agents = (cfg?.agents || []).map((a: any) => {
+        const conf: Record<string, unknown> = {};
+        if (selectedModel) conf.model = selectedModel;
+        const extra = (agentInstructions[a.agentId] || '').trim();
+        if (extra) conf.systemPromptExtra = extra;
+        return Object.keys(conf).length ? { id: a.agentId, config: conf } : { id: a.agentId };
+      });
+      const meta = {
+        title: `Run: ${cfg?.metadata?.title || scenario?.name || ''}`,
+        scenarioId: sid,
+        agents,
+        startingAgentId: startFirst || agents[0]?.id || '',
+      };
+      const c64 = encodeBase64Url(meta);
+      setGeneratedConfig64(c64);
+      return;
+    }
     const cfg = scenario?.config || scenario;
     const title = cfg?.metadata?.title || scenario?.name || '';
     const sid = cfg?.metadata?.id || scenarioId;
@@ -106,11 +160,9 @@ export function RunWizardPage() {
       const base = api.getBaseUrl();
       const scenarioUrl = `${base}/api/scenarios/${encodeURIComponent(String(sid))}`;
       const params = new URLSearchParams({
-        protocol,
         scenarioUrl,
         plannerAgentId: simulatedAgentId || '',
         counterpartAgentId: role || '',
-        defaultModel: selectedModel || '',
       });
       window.open(`/client/#/?${params.toString()}`, '_blank');
     }
@@ -143,7 +195,7 @@ export function RunWizardPage() {
               return (
                 <label key={id} className={`p-3 rounded-lg border-2 cursor-pointer ${role === id ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}>
                   <div className="flex items-center gap-2">
-                    <input type="radio" name="role" checked={role === id} onChange={() => setRole(id)} />
+                    <input type="radio" name="role" checked={!internalSim && role === id} onChange={() => { setInternalSim(false); setRole(id); }} />
                     <div className="font-medium">{id}</div>
                   </div>
                   {principalLine && (
@@ -161,36 +213,40 @@ export function RunWizardPage() {
               );
             })}
           </div>
+          <label className="flex items-center gap-2 text-xs text-slate-700 mt-2">
+            <input type="checkbox" checked={internalSim} onChange={(e) => { setInternalSim(e.target.checked); if (e.target.checked) setRole(''); }} />
+            I won’t provide an agent; I just want to run a simulation.
+          </label>
         </Card>
 
         {/* Step 2: Connection */}
-        <Card className="space-y-3">
+        <Card className={`space-y-3 ${internalSim ? 'opacity-50' : ''}`}>
           <CardHeader title="Step 2: Choose Your Connection Pattern" />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4" role="radiogroup" aria-label="Connection pattern">
             <div
-              className={`rounded-lg p-4 border-2 ${hasClient ? 'border-blue-600 bg-blue-50' : 'border-gray-200'} cursor-pointer`}
+              className={`rounded-lg p-4 border-2 ${!internalSim && hasClient ? 'border-blue-600 bg-blue-50' : 'border-gray-200'} ${internalSim ? 'cursor-default' : 'cursor-pointer'}`}
               role="radio"
-              aria-checked={hasClient}
-              tabIndex={0}
-              onClick={() => setHasClient(true)}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setHasClient(true); } }}
+              aria-checked={!internalSim && hasClient}
+              tabIndex={internalSim ? -1 : 0}
+              onClick={() => { if (!internalSim) setHasClient(true); }}
+              onKeyDown={(e) => { if (!internalSim && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setHasClient(true); } }}
             >
               <label className="font-bold flex items-center gap-2">
-                <input type="radio" name="pattern" checked={hasClient} onChange={() => setHasClient(true)} />
+                <input type="radio" name="pattern" checked={!internalSim && hasClient} onChange={() => setHasClient(true)} disabled={internalSim} />
                 I have a Client
               </label>
               <p className="text-sm text-slate-600 mt-1">Platform provides a server endpoint for your client.</p>
             </div>
             <div
-              className={`rounded-lg p-4 border-2 ${!hasClient ? 'border-blue-600 bg-blue-50' : 'border-gray-200'} cursor-pointer`}
+              className={`rounded-lg p-4 border-2 ${!internalSim && !hasClient ? 'border-blue-600 bg-blue-50' : 'border-gray-200'} ${internalSim ? 'cursor-default' : 'cursor-pointer'}`}
               role="radio"
-              aria-checked={!hasClient}
-              tabIndex={0}
-              onClick={() => setHasClient(false)}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setHasClient(false); } }}
+              aria-checked={!internalSim && !hasClient}
+              tabIndex={internalSim ? -1 : 0}
+              onClick={() => { if (!internalSim) setHasClient(false); }}
+              onKeyDown={(e) => { if (!internalSim && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setHasClient(false); } }}
             >
               <label className="font-bold flex items-center gap-2">
-                <input type="radio" name="pattern" checked={!hasClient} onChange={() => setHasClient(false)} />
+                <input type="radio" name="pattern" checked={!internalSim && !hasClient} onChange={() => setHasClient(false)} disabled={internalSim} />
                 I have a Server
               </label>
               <p className="text-sm text-slate-600 mt-1">Platform launches a client to connect to you.</p>
@@ -221,8 +277,10 @@ export function RunWizardPage() {
 
         {/* Step 4: Simulated agent config */}
         <Card className="space-y-3">
-          <CardHeader title="Step 4: Configure the Simulated Agent" />
-          <div className="text-sm text-slate-600">Platform will simulate: <span className="font-mono">{simulatedAgentId || '(choose role first)'}</span></div>
+          <CardHeader title={internalSim ? "Step 4: Configure Simulated Agents" : "Step 4: Configure the Simulated Agent"} />
+          {!internalSim && (
+            <div className="text-sm text-slate-600">Platform will simulate: <span className="font-mono">{simulatedAgentId || '(choose role first)'}</span></div>
+          )}
           <div className="space-y-3">
             <div className="space-y-1">
               <label htmlFor="run-llm-model" className="text-sm text-slate-600">LLM Model</label>
@@ -234,25 +292,85 @@ export function RunWizardPage() {
                 className="w-full border rounded px-2 py-1 bg-white"
               />
             </div>
-            <div className="space-y-1">
-              <label htmlFor="run-additional-instructions" className="text-sm text-slate-600">Additional Instructions</label>
-              <textarea
-                id="run-additional-instructions"
-                className="w-full border rounded px-2 py-2 text-sm bg-white"
-                rows={3}
-                placeholder="Optional guidance for the simulated agent"
-                value={instructions}
-                onChange={(e) => setInstructions(e.target.value)}
-              />
-            </div>
+            {!internalSim ? (
+              <div className="space-y-1">
+                <label htmlFor="run-additional-instructions" className="text-sm text-slate-600">Additional Instructions</label>
+                <textarea
+                  id="run-additional-instructions"
+                  className="w-full border rounded px-2 py-2 text-sm bg-white"
+                  rows={3}
+                  placeholder="Optional guidance for the simulated agent"
+                  value={instructions}
+                  onChange={(e) => setInstructions(e.target.value)}
+                />
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {agentIds.map((id) => (
+                  <div key={id} className="space-y-1">
+                    <div className="text-sm text-slate-700 font-medium">{id} Instructions</div>
+                    <textarea
+                      className="w-full border rounded px-2 py-2 text-sm bg-white"
+                      rows={4}
+                      placeholder={`Optional guidance for ${id}`}
+                      value={agentInstructions[id] || ''}
+                      onChange={(e) => setAgentInstructions((prev) => ({ ...prev, [id]: e.target.value }))}
+                    />
+                  </div>
+                ))}
+                <div className="space-y-1 md:col-span-2">
+                  <div className="text-sm text-slate-700 font-medium">Starting Agent</div>
+                  <div className="flex gap-4 text-sm text-slate-700">
+                    {agentIds.map((id) => (
+                      <label key={`start-${id}`} className="flex items-center gap-2">
+                        <input type="radio" name="start-first" checked={startFirst === id} onChange={() => setStartFirst(id)} />
+                        {id}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </Card>
 
-        {/* Step 4: Launch */}
-        <div>
+        {/* Launch / Generate Links */}
+        <div className="space-y-2">
           <Button variant="primary" className="w-full" onClick={onLaunch}>
-            {hasClient ? 'Generate Server Endpoint & Start' : 'Open Client and Connect'}
+            {internalSim ? 'Generate Links' : (hasClient ? 'Generate Server Endpoint & Start' : 'Open Client and Connect')}
           </Button>
+          {internalSim && generatedConfig64 && (
+            <Card className="space-y-2 p-3">
+              <CardHeader title="Simulation Links" />
+              <div className="text-xs text-slate-700">
+                <div className="font-medium mb-1">A2A Server URL</div>
+                <div className="break-all border rounded p-2 bg-white">{`${api.getBaseUrl()}/api/bridge/${generatedConfig64}/a2a`}</div>
+              </div>
+              <div className="flex gap-2 text-sm">
+                {(() => {
+                  const base = api.getBaseUrl();
+                  const sid = encodeURIComponent(String(scenarioId!));
+                  const serverUrl = `${base}/api/bridge/${generatedConfig64}/a2a`;
+                  const cfg = (scenario?.config || scenario);
+                  const agents: string[] = (cfg?.agents || []).map((a: any) => a.agentId);
+                  const plannerId = startFirst || agents[0] || '';
+                  const counterpart = agents.find(a => a !== plannerId) || '';
+                  const params = new URLSearchParams({
+                    scenarioUrl: `${base}/api/scenarios/${encodeURIComponent(String(scenarioId!))}`,
+                    plannerAgentId: plannerId,
+                    counterpartAgentId: counterpart,
+                    endpoint: serverUrl,
+                  });
+                  const href = `/client/#/?${params.toString()}`;
+                  return (
+                    <Button as="a" href={href} target="_blank" rel="noreferrer" variant="secondary">
+                      Open Client to start interaction
+                    </Button>
+                  );
+                })()}
+              </div>
+            </Card>
+          )}
         </div>
       </div>
   );
