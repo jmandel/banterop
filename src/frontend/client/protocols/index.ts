@@ -12,7 +12,8 @@ export function detectProtocolFromUrl(url: string): Exclude<Protocol, "auto"> | 
     if (/\/(mcp)(?:\/?$)/i.test(path)) return 'mcp';
     // Fallback: conservative regex on path only
     const m = path.match(/\/(a2a|mcp)(?:\/|$)/i);
-    return (m ? (m[1].toLowerCase() as any) : null);
+    if (m && m[1]) return (m[1].toLowerCase() as any);
+    return null;
   } catch { return null; }
 }
 

@@ -35,7 +35,8 @@ type IntraTurnState = {
 };
 
 type ScenarioPlannerDeps = {
-  task: TaskClientLike;
+  // Task client may be temporarily null during resets
+  task: TaskClientLike | null;
   vault: AttachmentVault;
 
   // Fetch API base used by server LLM proxy and scenario endpoints
@@ -47,6 +48,8 @@ type ScenarioPlannerDeps = {
   getPlannerAgentId: () => string | undefined;
   getCounterpartAgentId: () => string | undefined;
   getAdditionalInstructions?: () => string | undefined;
+  // Explicit scenario config from UI (preferred)
+  getScenarioConfig?: () => any;
   // Enabled tools for synthesis (from UI)
   getEnabledTools?: () => Array<{
     name: string;
@@ -60,6 +63,8 @@ type ScenarioPlannerDeps = {
   // UI hooks
   onSystem: (text: string) => void;
   onAskUser: (q: string) => void;
+  // UI hint: show "Thinking…" only during local LLM calls
+  onPlannerThinking?: (busy: boolean) => void;
 };
 
 export class ScenarioPlannerV2 {
@@ -74,6 +79,7 @@ export class ScenarioPlannerV2 {
   private listeners = new Set<(e: UnifiedEvent) => void>();
   private documents = new Map<string, { name: string; contentType: string; content?: string; summary?: string }>();
   private oracle: ToolSynthesisService | null = null;
+  private taskOff: (() => void) | null = null;
 
   constructor(private deps: ScenarioPlannerDeps) {}
 
@@ -100,6 +106,11 @@ export class ScenarioPlannerV2 {
 
   stop() {
     this.running = false;
+    try { this.taskOff?.(); } catch {}
+    this.taskOff = null;
+    // Reset transient tick state so a restarted planner begins cleanly
+    this.busy = false;
+    this.pendingTick = false;
   }
 
   recordUserReply(text: string) {
@@ -131,8 +142,16 @@ export class ScenarioPlannerV2 {
   // Seeding removed: rely on persisted plannerEvents only
 
   private subscribeTask() {
-    this.deps.task.on("new-task", () => {
-      const t = this.deps.task.getTask();
+    // Ensure prior subscription (if any) is removed before attaching a new one
+    try { this.taskOff?.(); } catch {}
+    this.taskOff = null;
+    const task = this.deps.task as any;
+    if (!task || typeof task.on !== 'function') {
+      try { console.warn('[Planner] subscribeTask skipped: no task bound'); } catch {}
+      return;
+    }
+    this.taskOff = task.on("new-task", () => {
+      const t = task.getTask?.();
       const last = (t?.history || []).slice(-1)[0];
       if (!last) return;
       if (String(last.role) === 'user') return; // avoid duplicating planner sends
@@ -151,62 +170,45 @@ export class ScenarioPlannerV2 {
     });
   }
 
+  // Deprecated: do not auto-extract scenario from endpoint config64; only provide apiBase
   private decodeConfig64FromEndpoint(): { scenarioId?: string; startingAgentId?: string; apiBase: string } | null {
     try {
       const url = this.deps.getEndpoint();
       const parsed = parseBridgeEndpoint(url);
-      const api = parsed.apiBase || this.deps.getApiBase();
-      const encoded = parsed.config64;
-      if (!encoded) return { apiBase: api };
-      const normalized = encoded.replace(/-/g, "+").replace(/_/g, "/");
-      const pad = normalized.length % 4 === 0 ? "" : "=".repeat(4 - (normalized.length % 4));
-      const bin = atob(normalized + pad);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      const json = new TextDecoder().decode(bytes);
-      const meta = JSON.parse(json);
-      return { scenarioId: meta?.meta?.scenarioId || meta?.scenarioId, startingAgentId: meta?.meta?.startingAgentId || meta?.startingAgentId, apiBase: api };
-    } catch { return { apiBase: this.deps.getApiBase() }; }
+      const api = (parsed?.apiBase) || this.deps.getApiBase();
+      return { apiBase: api };
+    } catch {
+      return { apiBase: this.deps.getApiBase() };
+    }
   }
 
   private async ensureScenarioLoaded() {
-    const info = this.decodeConfig64FromEndpoint();
-    const api = info?.apiBase || this.deps.getApiBase();
-    if (!info?.scenarioId) return;
-    // Prefer explicit selection
-    const explicit = this.deps.getPlannerAgentId();
-    this.myAgentId = explicit || info?.startingAgentId || null;
     try {
-      const res = await fetch(`${api}/scenarios/${encodeURIComponent(info.scenarioId)}`);
-      if (res.ok) {
-        const j = await res.json();
-        // Accept either a full object with config, or a bare config
-        this.scenario = (j && j.config && j.config.agents) ? j.config : j;
-      }
+      // Prefer explicit scenario config from UI state if provided
+      const cfg = this.deps.getScenarioConfig?.();
+      if (cfg && typeof cfg === 'object') this.scenario = cfg;
+      // Capture preferred starting agent if defined in config
+      const explicit = this.deps.getPlannerAgentId?.();
+      const starting = (cfg?.metadata?.startingAgentId) || undefined;
+      this.myAgentId = explicit || starting || this.myAgentId;
     } catch {}
-    // After loading scenario, attempt a tick
     this.maybeTick();
   }
 
   private canActNow(): boolean {
+    // Require a bound task client before acting
+    const task = this.deps.task;
+    if (!task) return false;
     // Allow if no task yet (first contact) or when status is input-required
-    const st = this.deps.task.getStatus();
-    const hasTask = !!this.deps.task.getTaskId();
+    const st = task.getStatus?.() ?? 'initializing';
+    const hasTask = !!task.getTaskId?.();
     // Also allow a final local message even if the remote thread is completed
     return !hasTask || st === "input-required" || st === 'completed';
   }
 
   private maybeTick() {
     const canAct = this.canActNow();
-    // If a scenarioId is embedded in the endpoint, wait until scenario is loaded
-    try {
-      const needScenario = !!this.decodeConfig64FromEndpoint()?.scenarioId;
-      if (needScenario && !this.scenario) {
-        // ensure loader is running and defer until it completes
-        void this.ensureScenarioLoaded();
-        return;
-      }
-    } catch {}
+    // Do not delay on external scenario; rely on explicit UI-provided config
     const decision = !this.running
       ? 'skip:not_running'
       : this.busy
@@ -216,7 +218,7 @@ export class ScenarioPlannerV2 {
           : 'proceed';
     try {
       // Log full events object for expandable console inspection
-      console.log('[PlannerTick] consider', { events: this.eventLog, running: this.running, busy: this.busy, status: this.deps.task.getStatus(), hasTask: !!this.deps.task.getTaskId() }, 'decision', decision);
+      console.log('[PlannerTick] consider', { events: this.eventLog, running: this.running, busy: this.busy, status: this.deps.task?.getStatus?.(), hasTask: !!this.deps.task?.getTaskId?.() }, 'decision', decision);
     } catch {}
     if (!this.running) return;
     if (this.busy) { this.pendingTick = true; return; }
@@ -249,22 +251,22 @@ export class ScenarioPlannerV2 {
       if (ev.type === "agent_message") {
         const text = String(ev.payload?.text || "");
         const from = ev.agentId === "planner" ? "planner" : ev.agentId === "remote_agent" ? "agent" : ev.agentId;
-        lines.push(`<message from="${from}" at="${ev.timestamp}">${text}</message>`);
+        lines.push(`<message from="${from}">${text}</message>`);
         const atts = Array.isArray(ev.payload?.attachments) ? ev.payload.attachments : [];
         for (const a of atts) {
           if (a?.name && a?.contentType) lines.push(`<attachment name="${a.name}" mimeType="${a.contentType}" />`);
         }
       } else if (ev.type === "user_reply") {
         const text = String(ev.payload?.text || "");
-        lines.push(`<message from="user" at="${ev.timestamp}">${text}</message>`);
+        lines.push(`<message from="user">${text}</message>`);
       } else if (ev.type === "planner_ask_user" || ev.type === 'send_to_user') {
         const q = String(ev.payload?.text || ev.payload?.question || "");
-        lines.push(`<message from="planner" kind="ask_user" at="${ev.timestamp}">${q}</message>`);
+        lines.push(`<message from="planner" kind="ask_user">${q}</message>`);
       } else if (ev.type === "trace") {
-        if (ev.payload?.type === "thought") lines.push(`<thought at="${ev.timestamp}">${ev.payload.content}</thought>`);
+        if (ev.payload?.type === "thought") lines.push(`<thought>${ev.payload.content}</thought>`);
       } else if (ev.type === "send_to_remote_agent") {
         const text = String(ev.payload?.text || "");
-        if (text) lines.push(`<message from="planner" at="${ev.timestamp}">${text}</message>`);
+        if (text) lines.push(`<message from="planner">${text}</message>`);
         const atts = Array.isArray(ev.payload?.attachments) ? ev.payload.attachments : [];
         for (const a of atts) {
           const name = String(a?.name || 'attachment');
@@ -276,7 +278,7 @@ export class ScenarioPlannerV2 {
         const args = ev.payload?.args ?? {};
         const reasoning = typeof ev.payload?.reasoning === 'string' ? ev.payload.reasoning : '';
         const body = { reasoning, action: { tool: name, args } };
-        lines.push(`<tool_call at="${ev.timestamp}">${JSON.stringify(body)}</tool_call>`);
+        lines.push(`<tool_call>${JSON.stringify(body)}</tool_call>`);
       } else if (ev.type === "tool_result") {
         // Prefer showing synthesized file contents if present; otherwise JSON body
         const res = ev.payload?.result;
@@ -346,8 +348,7 @@ export class ScenarioPlannerV2 {
         const me = Array.isArray(sc?.agents) ? sc.agents.find((a: any) => a?.agentId === plannerId) : null;
         const suggested: string | undefined = me?.messageToUseWhenInitiatingConversation || me?.initialMessage || undefined;
         if (suggested && String(suggested).trim()) {
-          const now = new Date().toISOString();
-          lines.push(`<trace at="${now}">A suggested starting message is: ${String(suggested).trim()}</trace>`);
+          lines.push(`<trace>A suggested starting message is: ${String(suggested).trim()}</trace>`);
         }
       }
     } catch {}
@@ -657,11 +658,25 @@ export class ScenarioPlannerV2 {
   }
 
   private async tickOnce() {
+    // Signal local LLM thinking window
+    let thinking = false;
+    const setThinking = (b: boolean) => {
+      if (thinking === b) return;
+      thinking = b;
+      try { this.deps.onPlannerThinking?.(b); } catch {}
+    };
     const prompt = this.buildPrompt();
-    const { content } = await this.callLLM(prompt);
+    let content: string = '';
+    try {
+      setThinking(true);
+      const res = await this.callLLM(prompt);
+      content = res.content;
+    } finally {
+      setThinking(false);
+    }
     const { reasoning, tool, args } = this.parseAction(content);
-    const statusNow = this.deps.task.getStatus();
-    const canSendRemote = statusNow === 'input-required' || !this.deps.task.getTaskId();
+    const statusNow = this.deps.task?.getStatus?.() ?? 'initializing';
+    const canSendRemote = !!this.deps.task && (statusNow === 'input-required' || !this.deps.task.getTaskId?.());
 
     if (tool === "sleep") {
       // No args; wait briefly and rely on event-driven wakeups
@@ -727,8 +742,10 @@ export class ScenarioPlannerV2 {
       }
       const callId = `call_${Date.now()}`;
       this.pushEvent({ type: "send_to_remote_agent", agentId: this.deps.getPlannerAgentId() || this.myAgentId || "planner", payload: { text, attachments: atts, finality, reasoning, callId } });
-      if (!this.deps.task.getTaskId()) await this.deps.task.startNew(parts as any);
-      else await this.deps.task.send(parts as any);
+      if (this.deps.task) {
+        if (!this.deps.task.getTaskId?.()) await (this.deps.task as any).startNew?.(parts as any);
+        else await (this.deps.task as any).send?.(parts as any);
+      }
       if (finality === "conversation") this.deps.onSystem("Planner requested conversation end");
       return;
     }
@@ -739,6 +756,7 @@ export class ScenarioPlannerV2 {
       const callId = `call_${Date.now()}`;
       this.pushEvent({ type: "tool_call", agentId: this.deps.getPlannerAgentId() || this.myAgentId || "planner", payload: { name: tool, args, callId, reasoning } });
       try {
+        setThinking(true);
         if (!this.oracle) this.oracle = new ToolSynthesisService(new BrowserLLMProvider({ provider: 'browserside' }));
         const sc: any = this.scenario;
         const plannerId = this.deps.getPlannerAgentId?.() || this.myAgentId || '';
@@ -773,7 +791,7 @@ export class ScenarioPlannerV2 {
         const err = { ok: false, error: String(e?.message ?? e) };
         this.turnScratch.toolCalls.push({ callId, name: tool, args, result: err });
         this.pushEvent({ type: "tool_result", agentId: this.deps.getPlannerAgentId() || this.myAgentId || "planner", payload: { result: err, callId } });
-      }
+      } finally { setThinking(false); }
       // Reconsider planning after any tool_result
       this.maybeTick();
       return;

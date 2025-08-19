@@ -1,7 +1,6 @@
 import React, { useMemo } from "react";
 import { Button, Badge } from "../../../ui";
 import type { A2AStatus } from "../../a2a-types";
-import { ScenarioDetector } from "./ScenarioDetector";
 import { parseBridgeEndpoint } from "../../bridge-endpoint";
 
 interface ConnectionStepProps {
@@ -175,14 +174,7 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
         </div>
       )}
 
-      {onLoadScenario && (
-        <ScenarioDetector
-          endpoint={endpoint}
-          goals={goals || ''}
-          instructions={instructions || ''}
-          onLoadScenario={onLoadScenario}
-        />
-      )}
+      {/* ScenarioDetector disabled: rely only on explicit scenario URL */}
       
     </div>
   );

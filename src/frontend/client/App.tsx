@@ -170,6 +170,7 @@ export default function App() {
   // Deprecated: goals/background not used; kept for compatibility
   const [goals, setGoals] = useState<string>("");
   const [providers, setProviders] = useState<Array<{ name: string; models: string[] }>>([]);
+  const [plannerThinking, setPlannerThinking] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string>(() => prefill.defaultModel || localStorage.getItem("a2a.planner.model") || "");
   const [summarizerModel, setSummarizerModel] = useState<string>(() => localStorage.getItem("a2a.attach.model") || "");
 
@@ -717,10 +718,12 @@ export default function App() {
       getEndpoint: () => endpoint,
       getPlannerAgentId: () => selectedPlannerAgentId,
       getCounterpartAgentId: () => selectedCounterpartAgentId,
+      getScenarioConfig: () => scenarioConfig,
       getEnabledTools: () => (currentTools.filter((t: { name: string; description?: string }) => enabledTools.includes(t.name))),
       getAdditionalInstructions: () => instructions,
       onSystem: (text) => dispatch({ type: "system", text }),
       onAskUser: (q) => dispatch({ type: "frontAppend", msg: { id: crypto.randomUUID(), role: "planner", text: q } }),
+      onPlannerThinking: (b) => setPlannerThinking(b),
     });
     scenarioPlannerRef.current = orch;
     const preload = (preloadedEvents && preloadedEvents.length)
@@ -777,6 +780,7 @@ export default function App() {
     try { scenarioPlannerOffRef.current?.(); } catch {}
     scenarioPlannerOffRef.current = null;
     scenarioPlannerRef.current = null;
+    setPlannerThinking(false);
     dispatch({ type: 'setPlannerStarted', started: false });
     // Persist existing event log per-task (do not clear)
     try {
@@ -795,10 +799,10 @@ export default function App() {
     } catch {}
   };
 
-  const cancelTask = async () => {
+  const cancelTask = async (opts?: { reconnect?: boolean }) => {
     const task = taskRef.current;
     const tidBefore = task?.getTaskId();
-    if (tidBefore) {
+    if (tidBefore && task) {
       try { await task.cancel(); }
       catch (e: any) { dispatch({ type: "error", error: String(e?.message ?? e) }); }
     }
@@ -829,7 +833,23 @@ export default function App() {
     // Reset endpoint card state to avoid stale UI
     setCard(null);
     setCardLoading(false);
+
+    // Mark as disconnected to force a clean reconnect with a new task client
+    // The auto-connect effect will recreate clients using the current endpoint/protocol
+    dispatch({ type: 'reset' });
+
+    // If explicitly requested (user action), immediately reconnect to current endpoint/protocol
+    // to avoid relying on debounce timing or other effects
+    if (opts?.reconnect) {
+      const ep = (endpoint || '').trim();
+      if (ep) {
+        try { await handleConnect(ep, protocol); } catch {}
+      }
+    }
   };
+
+  // UI handler for the Reset button: clear + immediate reconnect for a fresh planner
+  const onResetClient = () => { void cancelTask({ reconnect: true }); };
 
   const sendFrontMessage = async (text: string) => {
     if (!text.trim()) return;
@@ -1033,7 +1053,7 @@ const onAttachFiles = async (files: FileList | null) => {
             error={model.error}
             card={card}
             cardLoading={cardLoading}
-            onCancelTask={cancelTask}
+            onCancelTask={onResetClient}
             
             // Configuration props
             instructions={instructions}
@@ -1082,7 +1102,7 @@ const onAttachFiles = async (files: FileList | null) => {
 
           {/* Event Log Section */}
           <div className="mt-8">
-            <EventLogView events={eventLog} busy={model.status === 'working'} />
+            <EventLogView events={eventLog} busy={plannerThinking} />
           </div>
       </div>
     </AppLayout>

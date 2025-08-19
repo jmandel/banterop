@@ -19,6 +19,18 @@ function utf8ToBase64(s: string): string {
   }
 }
 
+function base64ToUtf8(b64: string): string {
+  try {
+    const bin = atob(b64 || '');
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  } catch {
+    // Fallback: attempt naive atob to string
+    try { return atob(b64 || ''); } catch { return ''; }
+  }
+}
+
 function normalizePartsForMcp(parts: A2APart[]): { text: string; attachments: any[] } {
   const texts = (Array.isArray(parts) ? parts : [])
     .filter((p: any) => p?.kind === 'text')
@@ -28,9 +40,10 @@ function normalizePartsForMcp(parts: A2APart[]): { text: string; attachments: an
     .map((p: any) => {
       const name = String(p.file?.name || 'attachment');
       const contentType = String(p.file?.mimeType || 'application/octet-stream');
-      const content = typeof p.file?.bytes === 'string' ? p.file.bytes : undefined;
-      // Do not expose internal docId over the wire; use filename only
-      if (!content) return null; // server requires content
+      const bytes = typeof p.file?.bytes === 'string' ? p.file.bytes : undefined;
+      if (!bytes) return null;
+      // Always decode base64 bytes to UTF-8 text for MCP tool APIs requiring plain string "content"
+      const content = base64ToUtf8(bytes);
       return { name, contentType, content };
     })
     .filter(Boolean) as any[];

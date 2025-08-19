@@ -169,7 +169,12 @@ export const ConfigurationStep: React.FC<ConfigurationStepProps> = ({
               Start Agent
             </Button>
           ) : (
-            <Button variant="ghost" onClick={onStopPlanner}>
+            <Button
+              variant="ghost"
+              size="lg"
+              className="px-6 py-3 text-lg rounded-full shadow-lg ring-2 ring-indigo-300"
+              onClick={onStopPlanner}
+            >
               Stop Agent
             </Button>
           )}
