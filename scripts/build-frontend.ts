@@ -31,9 +31,9 @@ const apps: AppDef[] = [
     css: 'src/frontend/ui/app.css',
   },
   {
-    outPath: 'a2a-client',
-    entry: 'src/frontend/a2a-client/main.tsx',
-    html: 'src/frontend/a2a-client/index.html',
+    outPath: 'client',
+    entry: 'src/frontend/client/main.tsx',
+    html: 'src/frontend/client/index.html',
     css: 'src/frontend/ui/app.css',
     extraAssets: [
       // images or other static assets can be added here
@@ -122,13 +122,7 @@ async function buildApp(app: AppDef, apiBase: string) {
 export async function buildAllFrontends(apiBase: string) {
   // Copy a simple home landing page
   await ensureDir('public');
-  const home = await Bun.file('src/dev/home.html').text();
   const siteOrigin = apiBase.startsWith('http') ? apiBase.replace(/\/?api$/, '') : '';
-  // Just copy the home page as-is - the relative URLs work fine in production
-  const landing = home
-    .replace('Dev Home', 'Home')
-    .replace('Language-Track Dev Server', 'Language Track');
-  await Bun.write('public/index.html', landing);
 
   for (const app of apps) {
     console.log('Building', app.outPath);
