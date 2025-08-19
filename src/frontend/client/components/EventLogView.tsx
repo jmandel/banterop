@@ -8,16 +8,23 @@ export type UnifiedEvent = {
   payload: any;
 };
 
-export const EventLogView: React.FC<{ events: UnifiedEvent[] }>
-  = ({ events }) => {
+export const EventLogView: React.FC<{ events: UnifiedEvent[]; busy?: boolean }>
+  = ({ events, busy = false }) => {
   return (
     <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
-      <div className="bg-gradient-to-r from-slate-500 to-slate-600 text-white p-4">
+      <div className={`relative bg-gradient-to-r from-slate-500 to-slate-600 text-white p-4`}>
         <div className="flex items-center justify-between">
-          <h3 className="font-bold text-lg">Planner Event Log (read-only)</h3>
-          <span className="px-2 py-1 bg-white/20 rounded-full text-xs font-medium">
-            {events.length} events
-          </span>
+          <h3 className="font-bold text-lg">Agent Event Log (read-only)</h3>
+          <div className="flex items-center gap-2">
+            {busy && (
+              <span className="px-2 py-1 bg-white/20 rounded-full text-xs font-medium" title="Completions in progress">
+                Thinking…
+              </span>
+            )}
+            <span className="px-2 py-1 bg-white/20 rounded-full text-xs font-medium">
+              {events.length} events
+            </span>
+          </div>
         </div>
       </div>
       <div className="max-h-[320px] overflow-y-auto p-4 bg-gray-50">
@@ -84,9 +91,50 @@ export const EventLogView: React.FC<{ events: UnifiedEvent[] }>
                     )}
                   </>
                 )}
-                {e.type === 'tool_result' && (
-                  <div className="text-xs text-gray-600">result: {JSON.stringify(e.payload?.result ?? {})}</div>
-                )}
+                {e.type === 'tool_result' && (() => {
+                  const filenames: string[] = Array.isArray((e as any)?.payload?.filenames)
+                    ? (e as any).payload.filenames
+                    : [];
+                  if (filenames.length) {
+                    return (
+                      <div className="text-xs text-gray-700 space-y-1">
+                        {filenames.map((name, i) => (
+                          <pre key={i} className="bg-white border border-gray-200 rounded p-2 overflow-auto">
+{`<tool_result filename="${name}">
+…
+</tool_result>`}
+                          </pre>
+                        ))}
+                      </div>
+                    );
+                  }
+                  // Fallback: if result contains documents, render their filenames
+                  const res: any = (e as any)?.payload?.result;
+                  const docs: any[] = Array.isArray(res?.documents) ? res.documents : [];
+                  const single = (res && typeof res === 'object' && (res.name || res.docId)) ? [res] : [];
+                  const all = docs.length ? docs : single;
+                  if (all.length) {
+                    return (
+                      <div className="text-xs text-gray-700 space-y-1">
+                        {all.map((d: any, i: number) => {
+                          const name = String(d?.name || d?.docId || `result_${i+1}`);
+                          const hasContent = typeof d?.content === 'string' || typeof d?.text === 'string';
+                          return (
+                            <pre key={i} className="bg-white border border-gray-200 rounded p-2 overflow-auto">
+{`<tool_result filename="${name}">
+${hasContent ? '…' : ''}
+</tool_result>`}
+                            </pre>
+                          );
+                        })}
+                      </div>
+                    );
+                  }
+                  // Last resort: show raw JSON
+                  return (
+                    <div className="text-xs text-gray-600">result: {JSON.stringify(res ?? {})}</div>
+                  );
+                })()}
                 {e.type === 'trace' && (
                   <div className="text-xs text-gray-600">{JSON.stringify(e.payload)}</div>
                 )}

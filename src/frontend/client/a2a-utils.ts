@@ -19,13 +19,21 @@ export async function* readSSE(resp: Response): AsyncGenerator<string> {
     if (done) break;
     buf += decoder.decode(value, { stream: true });
     for (;;) {
-      // Normalize CRLF
-      const sepIdx = buf.indexOf("\n\n");
-      const sepCR = buf.indexOf("\r\n\r\n");
-      const idx = sepIdx === -1 ? (sepCR === -1 ? -1 : sepCR + 2) : sepIdx; // allow either delimiter
+      // Support both LF and CRLF record delimiters and advance by the actual length
+      const lfIdx = buf.indexOf("\n\n");
+      const crlfIdx = buf.indexOf("\r\n\r\n");
+      let idx = -1;
+      let delimLen = 0;
+      if (lfIdx !== -1 && (crlfIdx === -1 || lfIdx < crlfIdx)) {
+        idx = lfIdx;
+        delimLen = 2;
+      } else if (crlfIdx !== -1) {
+        idx = crlfIdx;
+        delimLen = 4;
+      }
       if (idx === -1) break;
       const raw = buf.slice(0, idx);
-      buf = buf.slice(idx + 2);
+      buf = buf.slice(idx + delimLen);
       const lines = raw.replace(/\r/g, "").split("\n");
       for (const line of lines) {
         if (!line) continue;

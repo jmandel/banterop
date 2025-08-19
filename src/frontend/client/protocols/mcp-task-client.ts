@@ -6,7 +6,17 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 type McpReply = { role?: string; text?: string; attachments?: any[] };
 
 function utf8ToBase64(s: string): string {
-  try { return btoa(unescape(encodeURIComponent(s))); } catch { return btoa(s); }
+  try {
+    const enc = new TextEncoder().encode(s ?? "");
+    let bin = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < enc.length; i += chunk) {
+      bin += String.fromCharCode(...enc.subarray(i, i + chunk));
+    }
+    return btoa(bin);
+  } catch {
+    return btoa(encodeURIComponent(s).replace(/%([0-9A-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16))));
+  }
 }
 
 function normalizePartsForMcp(parts: A2APart[]): { text: string; attachments: any[] } {
@@ -137,6 +147,18 @@ export class McpTaskClient implements TaskClientLike {
     this.history = [];
     this.seenHashes.clear();
     this.stopPolling();
+  }
+
+  // Hard shutdown: stop polling and close underlying MCP client/transport
+  destroy(): void {
+    try { this.stopPolling(); } catch {}
+    this.dead = true;
+    this.conversationId = undefined;
+    this.status = "initializing";
+    this.history = [];
+    this.seenHashes.clear();
+    try { (this.client as any)?.close?.(); } catch {}
+    this.client = null;
   }
 
   // ---- internals ----

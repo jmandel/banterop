@@ -74,10 +74,10 @@ export const ConfigurationStep: React.FC<ConfigurationStepProps> = ({
               </Button>
             )}
           </div>
-          <p className="text-xs text-gray-500 mt-1">Paste a scenario endpoint to drive planner context.</p>
+          <p className="text-xs text-gray-500 mt-1">Paste a scenario endpoint to drive your agent's context.</p>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Planner Agent</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Your Role</label>
           <select
             value={selectedPlannerAgentId || ''}
             onChange={(e) => onSelectPlannerAgentId(e.target.value)}
@@ -131,7 +131,7 @@ export const ConfigurationStep: React.FC<ConfigurationStepProps> = ({
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Additional Planner Instructions (optional)</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Additional Instructions for Your Agent (optional)</label>
         <textarea
           rows={6}
           value={instructions}
@@ -164,24 +164,24 @@ export const ConfigurationStep: React.FC<ConfigurationStepProps> = ({
               className="px-6 py-3 text-lg rounded-full shadow-lg ring-2 ring-indigo-300"
               onClick={onStartPlanner}
               disabled={!connected}
-              title={!connected ? "Not connected" : "Start planner"}
+              title={!connected ? "Not connected" : "Start agent"}
             >
-              Begin Planner
+              Start Agent
             </Button>
           ) : (
             <Button variant="ghost" onClick={onStopPlanner}>
-              Stop Planner
+              Stop Agent
             </Button>
           )}
         </div>
         <div>
           <p className="text-sm font-medium text-gray-700">
-            {plannerStarted ? "Planner is running" : "Planner is not running"}
+            {plannerStarted ? "Agent is running" : "Agent is not running"}
           </p>
           <p className="text-xs text-gray-500 mt-1">
             {plannerStarted
-              ? "The planner is actively managing the conversation"
-              : "Start the planner to begin the conversation workflow"}
+              ? "Your agent is actively managing the conversation"
+              : "Activate your agent to begin the conversation"}
           </p>
         </div>
       </div>

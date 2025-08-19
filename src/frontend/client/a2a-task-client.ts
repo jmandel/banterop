@@ -43,6 +43,19 @@ export class A2ATaskClient {
     this.canonicalState = undefined;
   }
 
+  // Hard shutdown: abort any active streams and clear state
+  destroy() {
+    try { this.streamAbort?.abort(); } catch {}
+    try { this.resubAbort?.abort(); } catch {}
+    this.streamAbort = null;
+    this.resubAbort = null;
+    this.taskId = undefined;
+    this.currentTask = null;
+    this.status = 'initializing';
+    this.canonicalState = undefined;
+    this.listeners.clear();
+  }
+
   on<T = any>(eventType: A2AEventType, cb: (ev: T) => void): () => void {
     if (!this.listeners.has(eventType)) this.listeners.set(eventType, new Set());
     const set = this.listeners.get(eventType)!;
@@ -156,15 +169,37 @@ export class A2ATaskClient {
     }
     const ac = new AbortController();
     this.resubAbort = ac;
-    (async () => {
-      try {
-        for await (const frame of this.a2a.tasksResubscribe(this.taskId!, ac.signal)) {
-          this.processFrame(frame);
+    const shouldContinue = () => (
+      !!this.taskId &&
+      this.status !== 'completed' &&
+      this.status !== 'failed' &&
+      (this as any).status !== 'canceled'
+    );
+    const loop = async () => {
+      while (shouldContinue() && !ac.signal.aborted) {
+        try {
+          for await (const frame of this.a2a.tasksResubscribe(this.taskId!, ac.signal)) {
+            this.processFrame(frame);
+            if (!shouldContinue() || ac.signal.aborted) break;
+          }
+          // Stream ended naturally; if still active, short backoff and retry
+          if (shouldContinue() && !ac.signal.aborted) {
+            await new Promise(r => setTimeout(r, 500));
+            continue;
+          }
+          break;
+        } catch (e: any) {
+          // Network hiccup; if still active, retry with backoff
+          this.emit("error", { error: String(e?.message ?? e) });
+          if (shouldContinue() && !ac.signal.aborted) {
+            await new Promise(r => setTimeout(r, 800));
+            continue;
+          }
+          break;
         }
-      } catch (e: any) {
-        this.emit("error", { error: String(e?.message ?? e) });
       }
-    })();
+    };
+    void loop();
   }
 
   // Canonicalization + Diff

@@ -7,7 +7,7 @@ export type AttachmentRecord = {
   bytes: string; // base64
   size: number;
   digest: string; // sha256 of bytes
-  source?: 'local' | 'agent';
+  source?: 'user' | 'agent' | 'remote-agent';
   summary?: string;
   keywords?: string[];
   last_inspected?: string; // ISO timestamp
@@ -75,8 +75,8 @@ export class AttachmentVault {
     }));
   }
 
-  listBySource(src: 'local' | 'agent'): AttachmentRecord[] {
-    return this.listDetailed().filter(a => (a.source || 'local') === src);
+  listBySource(src: 'user' | 'agent' | 'remote-agent'): AttachmentRecord[] {
+    return this.listDetailed().filter(a => (a.source || 'user') === src);
   }
 
   getByName(name: string): AttachmentRecord | undefined {
@@ -102,7 +102,7 @@ export class AttachmentVault {
       bytes,
       size: file.size,
       digest,
-      source: 'local',
+      source: 'user',
       private: false,
       priority: false,
       analysisPending: false,
@@ -120,10 +120,17 @@ export class AttachmentVault {
   }
 
   addSynthetic(name: string, mimeType: string, contentUtf8: string): AttachmentRecord {
-    const bytes = btoa(unescape(encodeURIComponent(contentUtf8)));
+    // Encode UTF-8 content deterministically to base64
+    const utf8 = new TextEncoder().encode(contentUtf8 ?? "");
+    let bin = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < utf8.length; i += chunk) {
+      bin += String.fromCharCode(...utf8.subarray(i, i + chunk));
+    }
+    const bytes = btoa(bin);
     const rec: AttachmentRecord = {
-      name, mimeType, bytes, size: contentUtf8.length,
-      digest: "", source: 'local', private: false, priority: false, analysisPending: false
+      name, mimeType, bytes, size: utf8.length,
+      digest: "", source: 'agent', private: false, priority: false, analysisPending: false
     };
     // synthetic: compute digest too
     sha256Hex(bytes).then(d => { rec.digest = d; });
@@ -132,21 +139,17 @@ export class AttachmentVault {
     return rec;
   }
 
-  // Add an attachment provided by an agent (bytes already base64-encoded)
+  // Add an attachment provided by the remote agent (bytes already base64-encoded)
   addFromAgent(name: string, mimeType: string, bytesBase64: string): AttachmentRecord {
-    // Handle duplicate names by appending a counter
-    let finalName = name;
-    let counter = 1;
-    while (this.byName.has(finalName)) {
-      const ext = name.lastIndexOf('.') >= 0 ? name.substring(name.lastIndexOf('.')) : '';
-      const base = name.lastIndexOf('.') >= 0 ? name.substring(0, name.lastIndexOf('.')) : name;
-      finalName = `${base}_${counter}${ext}`;
-      counter++;
+    // Demo policy: filenames are unique. If it already exists, do not re-add.
+    if (this.byName.has(name)) {
+      return this.byName.get(name)!;
     }
+    const finalName = name;
     
     const rec: AttachmentRecord = {
       name: finalName, mimeType, bytes: bytesBase64, size: bytesBase64 ? atob(bytesBase64).length : 0,
-      digest: "", source: 'agent', private: false, priority: false, analysisPending: false
+      digest: "", source: 'remote-agent', private: false, priority: false, analysisPending: false
     };
     // compute digest asynchronously
     if (bytesBase64) {
@@ -155,6 +158,17 @@ export class AttachmentVault {
     this.byName.set(finalName, rec);
     this.saveToStorage();
     return rec;
+  }
+
+  // Remove any attachments matching the provided sources (e.g., ['agent','remote-agent'])
+  purgeBySource(sources: Array<'user' | 'agent' | 'remote-agent'>) {
+    const toDelete: string[] = [];
+    for (const [name, rec] of this.byName.entries()) {
+      const src = rec.source || 'user';
+      if (sources.includes(src)) toDelete.push(name);
+    }
+    for (const name of toDelete) this.byName.delete(name);
+    this.saveToStorage();
   }
 
   updateFlags(name: string, flags: Partial<Pick<AttachmentRecord, "private" | "priority">>) {

@@ -7,6 +7,7 @@ import { Button, Card, CardHeader } from '../ui';
 import { ScenarioLandingPage } from './components/ScenarioLandingPage';
 import { ScenarioBuilderPage } from './components/ScenarioBuilderPage';
 import { ScenarioRunPage } from './components/ScenarioRunPage';
+import { RunWizardPage } from './components/RunWizardPage';
 import { ScenarioPluginPage } from './components/ScenarioPluginPage';
 import { ScenarioA2APreLaunchPage } from './components/ScenarioA2APreLaunchPage';
 import { ScenarioConfiguredPage } from './components/ScenarioConfiguredPage';
@@ -281,7 +282,7 @@ function App() {
           <Route path="/scenarios/create" element={<ScenarioBuilderPage />} />
           <Route path="/scenarios/:scenarioId" element={<ScenarioBuilderPage />} />
           <Route path="/scenarios/:scenarioId/edit" element={<ScenarioBuilderPage />} />
-          <Route path="/scenarios/:scenarioId/run" element={<ScenarioRunPage />} />
+          <Route path="/scenarios/:scenarioId/run" element={<RunWizardPage />} />
           <Route path="/scenarios/:scenarioId/external-mcp-client/:config64" element={<ScenarioPluginPage />} />
           <Route path="/scenarios/:scenarioId/external-a2a-client/:config64" element={<ScenarioA2APreLaunchPage />} />
           <Route path="/scenarios/configured/:config64" element={<ScenarioConfiguredPage />} />

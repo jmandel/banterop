@@ -106,7 +106,7 @@ export const StepFlow: React.FC<StepFlowProps> = (props) => {
         <div className="flex items-start gap-4 mb-4">
           {getStepIcon(1)}
           <div className="flex-1">
-            <h3 className="text-lg font-bold text-gray-900">Step 1: Connect to Agent</h3>
+            <h3 className="text-lg font-bold text-gray-900">Step 1: Configure Remote Agent</h3>
             <p className="text-sm text-gray-600 mt-1">
               {props.connected ? "✓ Connected successfully" : "Enter your endpoint URL and protocol"}
             </p>
@@ -135,8 +135,8 @@ export const StepFlow: React.FC<StepFlowProps> = (props) => {
         <div className="flex items-start gap-4 mb-4">
           {getStepIcon(2)}
           <div className="flex-1">
-            <h3 className="text-lg font-bold text-gray-900">Step 2: Configure Planner</h3>
-            <p className="text-sm text-gray-600 mt-1">{props.plannerStarted ? "✓ Planner is running" : props.connected ? "Set up your planner" : "Connect first to configure"}</p>
+            <h3 className="text-lg font-bold text-gray-900">Step 2: Configure Your Agent</h3>
+            <p className="text-sm text-gray-600 mt-1">{props.plannerStarted ? "✓ Agent is running" : props.connected ? "Set up your agent" : "Connect first to configure"}</p>
           </div>
         </div>
         <div className="pl-12">

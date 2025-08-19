@@ -124,9 +124,41 @@ export default function App() {
       return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     } catch { return s; }
   };
+  // Parse prefill params from URL (hash or search)
+  const parsePrefillParams = () => {
+    try {
+      const href = (typeof window !== 'undefined' ? window.location.href : '') || '';
+      const u = new URL(href);
+      const hash = (u.hash || '').replace(/^#\/?/, '');
+      // Prefer hash query string (/#/?...)
+      const q = hash.includes('?') ? hash.substring(hash.indexOf('?')) : u.search;
+      const sp = new URLSearchParams(q);
+      return {
+        protocol: (sp.get('protocol') || '').toLowerCase(),
+        scenarioUrl: sp.get('scenarioUrl') || '',
+        plannerAgentId: sp.get('plannerAgentId') || '',
+        counterpartAgentId: sp.get('counterpartAgentId') || '',
+        defaultModel: sp.get('defaultModel') || ''
+      };
+    } catch {
+      return { protocol: '', scenarioUrl: '', plannerAgentId: '', counterpartAgentId: '', defaultModel: '' };
+    }
+  };
+  const prefill = parsePrefillParams();
   const initialEndpoint = localStorage.getItem("a2a.endpoint") || "";
-  const inferredProto = (detectProtocolFromUrl(initialEndpoint) ? "auto" : ("a2a" as Protocol));
-  const initialProto = (localStorage.getItem("a2a.protocol") as Protocol) || inferredProto;
+  const initialProto: Protocol = (() => {
+    const ep = (initialEndpoint || '').trim();
+    const detected = detectProtocolFromUrl(ep);
+    // If endpoint contains explicit /a2a or /mcp, prefer Auto so detection drives requests
+    if (detected) return 'auto';
+    // With no endpoint, default to Auto regardless of persisted or prefill
+    if (!ep) return 'auto';
+    // If endpoint does not declare, honor explicit prefill if present
+    if (prefill.protocol === 'a2a' || prefill.protocol === 'mcp') return prefill.protocol as Protocol;
+    // Otherwise honor persisted user selection
+    const persisted = (localStorage.getItem('a2a.protocol') as Protocol) || 'auto';
+    return (persisted === 'a2a' || persisted === 'mcp' || persisted === 'auto') ? persisted : 'auto';
+  })();
   const [endpoint, setEndpoint] = useState(initialEndpoint);
   const [protocol, setProtocol] = useState<Protocol>(initialProto);
   const debouncedEndpoint = useDebounce(endpoint, 500);
@@ -138,7 +170,7 @@ export default function App() {
   // Deprecated: goals/background not used; kept for compatibility
   const [goals, setGoals] = useState<string>("");
   const [providers, setProviders] = useState<Array<{ name: string; models: string[] }>>([]);
-  const [selectedModel, setSelectedModel] = useState<string>(() => localStorage.getItem("a2a.planner.model") || "");
+  const [selectedModel, setSelectedModel] = useState<string>(() => prefill.defaultModel || localStorage.getItem("a2a.planner.model") || "");
   const [summarizerModel, setSummarizerModel] = useState<string>(() => localStorage.getItem("a2a.attach.model") || "");
 
   const [model, dispatch] = useReducer(reducer, initModel(initialEndpoint, initialProto));
@@ -158,7 +190,7 @@ export default function App() {
 
   const [agentLog, setAgentLog] = useState<AgentLogEntry[]>([]);
   // Scenario URL + agent selection
-  const [scenarioUrl, setScenarioUrl] = useState<string>(() => localStorage.getItem("a2a.scenario.url") || "");
+  const [scenarioUrl, setScenarioUrl] = useState<string>(() => prefill.scenarioUrl || localStorage.getItem("a2a.scenario.url") || "");
   const debouncedScenarioUrl = useDebounce(scenarioUrl, 500);
   const [scenarioAgents, setScenarioAgents] = useState<string[]>([]);
   const [scenarioConfig, setScenarioConfig] = useState<any | null>(null);
@@ -169,6 +201,28 @@ export default function App() {
   const [cardLoading, setCardLoading] = useState(false);
   const [eventLog, setEventLog] = useState<PlannerUnifiedEvent[]>([]);
   const preloadedEventsRef = useRef<PlannerUnifiedEvent[] | null>(null);
+  const eventLogRef = useRef<PlannerUnifiedEvent[]>([]);
+  useEffect(() => { eventLogRef.current = eventLog; }, [eventLog]);
+
+  // Persist event log whenever it changes (scoped by endpoint + taskId)
+  useEffect(() => {
+    try {
+      const tid = taskRef.current?.getTaskId();
+      const ep = (endpoint || '').trim();
+      if (!ep || !tid) return;
+      const st = lastStatusRef.current;
+      saveTaskSession(ep, tid, {
+        taskId: tid,
+        status: st,
+        plannerStarted: plannerStartedRef.current,
+        front: frontMsgsRef.current,
+        frontDraft: frontInput,
+        plannerEvents: (eventLog as any) || [],
+      });
+      saveSession(ep, { taskId: tid, status: st });
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventLog]);
 
   // Live ref of front messages to avoid stale-closure reads in Planner
   const frontMsgsRef = useRef<FrontMsg[]>([]);
@@ -207,13 +261,19 @@ export default function App() {
     const tid = taskRef.current?.getTaskId();
     const st = lastStatusRef.current;
     if (endpoint && tid && st && !['completed','failed','canceled'].includes(String(st))) {
-      saveSession(endpoint, {
-        taskId: tid,
-        status: st,
-        plannerStarted: plannerStartedRef.current,
-        front: frontMsgsRef.current,
-        frontDraft: frontInput,
-      });
+      // Keep minimal endpoint pointer for resume
+      saveSession(endpoint, { taskId: tid, status: st });
+      // Persist full per-task UI + event state
+      try {
+        saveTaskSession(endpoint, tid, {
+          taskId: tid,
+          status: st,
+          plannerStarted: plannerStartedRef.current,
+          front: frontMsgsRef.current,
+          frontDraft: frontInput,
+          plannerEvents: (eventLog as any) || [],
+        });
+      } catch {}
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model.front, frontInput]);
@@ -222,6 +282,26 @@ export default function App() {
     localStorage.setItem("a2a.endpoint", endpoint);
   }, [endpoint]);
   useEffect(() => { try { localStorage.setItem("a2a.protocol", protocol); } catch {} }, [protocol]);
+
+  // If endpoint is cleared, reset protocol selector to Auto to avoid misleading MCP/A2A state
+  useEffect(() => {
+    const ep = (endpoint || '').trim();
+    if (!ep && protocol !== 'auto') setProtocol('auto');
+  }, [endpoint]);
+
+  // On initial load, if endpoint includes explicit /a2a or /mcp but UI isn't Auto,
+  // force selector to Auto to avoid mismatched requests. Honor explicit prefill.
+  const didInitRef = useRef(false);
+  const hasPrefillProtocol = prefill.protocol === 'a2a' || prefill.protocol === 'mcp';
+  useEffect(() => {
+    if (didInitRef.current) return;
+    didInitRef.current = true;
+    if (hasPrefillProtocol) return;
+    const ep = (initialEndpoint || '').trim();
+    if (!ep) return;
+    const detected = detectProtocolFromUrl(ep);
+    if (detected && protocol !== 'auto') setProtocol('auto');
+  }, []);
 
   useEffect(() => { try { localStorage.setItem("a2a.planner.instructions", instructions); } catch {} }, [instructions]);
   // No longer persisting background/goals by default
@@ -234,6 +314,29 @@ export default function App() {
   useEffect(() => { plannerStartedRef.current = model.plannerStarted; }, [model.plannerStarted]);
   useEffect(() => { try { localStorage.setItem("a2a.planner.summarizeOnUpload", String(model.summarizeOnUpload)); } catch {} }, [model.summarizeOnUpload]);
   useEffect(() => { try { localStorage.setItem("a2a.scenario.url", scenarioUrl); } catch {} }, [scenarioUrl]);
+
+  // Persist planner event log on page unload to avoid losing history on reload
+  useEffect(() => {
+    const handler = () => {
+      try {
+        const tid = taskRef.current?.getTaskId();
+        if (endpoint && tid) {
+          const st = lastStatusRef.current;
+          saveTaskSession(endpoint, tid, {
+            taskId: tid,
+            status: st,
+            plannerStarted: plannerStartedRef.current,
+            front: frontMsgsRef.current,
+            frontDraft: frontInput,
+            plannerEvents: (eventLogRef.current as any) || [],
+          });
+          saveSession(endpoint, { taskId: tid, status: st });
+        }
+      } catch {}
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => { window.removeEventListener('beforeunload', handler); };
+  }, [endpoint, frontInput]);
 
   // Helper: per-URL key builders
   const scenarioKey = (url: string) => `a2a.scenario.sel.${toBase64Url(url)}`;
@@ -289,6 +392,23 @@ export default function App() {
       return obj as SessionState;
     } catch { return null; }
   };
+  // Per-task scoped session helpers (endpoint + task)
+  const taskSessionKey = (ep: string, tid: string) => `a2a.session.${toBase64Url(ep || '')}.task.${toBase64Url(tid)}`;
+  const saveTaskSession = (ep: string, tid: string, state: SessionState) => {
+    try { localStorage.setItem(taskSessionKey(ep, tid), JSON.stringify(state)); } catch {}
+  };
+  const loadTaskSession = (ep: string, tid: string): SessionState | null => {
+    try {
+      const raw = localStorage.getItem(taskSessionKey(ep, tid));
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || typeof obj !== 'object') return null;
+      return obj as SessionState;
+    } catch { return null; }
+  };
+  const removeTaskSession = (ep: string, tid: string) => {
+    try { localStorage.removeItem(taskSessionKey(ep, tid)); } catch {}
+  };
 
   // Auto-connect when debounced endpoint or protocol changes
   useEffect(() => {
@@ -299,14 +419,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedEndpoint, protocol]);
 
-  // Auto-detect protocol from URL and update selector if needed
-  useEffect(() => {
-    const detected = detectProtocolFromUrl(debouncedEndpoint);
-    if (detected && protocol !== detected) {
-      setProtocol(detected as Protocol);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedEndpoint]);
+  // Removed auto-detect protocol effect to avoid race conditions; resolution happens in handleConnect
 
   // Load provider list
   useEffect(() => {
@@ -338,6 +451,33 @@ export default function App() {
   // Keep summarizer model ref in sync
   useEffect(() => { summarizerModelRef.current = summarizerModel; }, [summarizerModel]);
 
+  // Apply prefilled agent selections once agents are known
+  useEffect(() => {
+    if (!scenarioAgents.length) return;
+    let planner = selectedPlannerAgentId;
+    let counterpart = selectedCounterpartAgentId;
+    if (prefill.plannerAgentId && scenarioAgents.includes(prefill.plannerAgentId)) {
+      planner = prefill.plannerAgentId;
+    }
+    if (prefill.counterpartAgentId && scenarioAgents.includes(prefill.counterpartAgentId)) {
+      counterpart = prefill.counterpartAgentId;
+    }
+    if (!planner) planner = scenarioAgents[0];
+    if (!counterpart && scenarioAgents.length >= 2) counterpart = scenarioAgents.find(a => a !== planner) || scenarioAgents[1];
+    if (planner && planner !== selectedPlannerAgentId) setSelectedPlannerAgentId(planner);
+    if (counterpart && counterpart !== selectedCounterpartAgentId) setSelectedCounterpartAgentId(counterpart);
+    // Initialize enabled tools for preselected planner
+    try {
+      const cfg = scenarioConfig as any;
+      const agent = cfg?.agents?.find((a: any) => a?.agentId === planner);
+      const tools: string[] = Array.isArray(agent?.tools)
+        ? agent.tools.map((t: any) => String(t?.toolName || t?.name || '')).filter(Boolean)
+        : [];
+      setEnabledTools(tools);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenarioAgents]);
+
   const handleConnect = async (endpointUrl: string, proto: Protocol) => {
     // Cancel any ongoing tasks when endpoint changes
     if (taskRef.current?.getTaskId()) {
@@ -360,10 +500,16 @@ export default function App() {
     dispatch({ type: "reset" });
     lastStatusRef.current = "submitted";
     lastTaskIdRef.current = undefined;
-    dispatch({ type: "connect", endpoint: endpointUrl, protocol: proto });
+    // Resolve effective protocol when in 'auto' mode (avoid MCP calls against A2A endpoints)
+    const selectedProto: Protocol = ((): Protocol => {
+      if (proto !== 'auto') return proto;
+      const detected = detectProtocolFromUrl(endpointUrl);
+      return (detected || 'a2a') as Protocol;
+    })();
+    dispatch({ type: "connect", endpoint: endpointUrl, protocol: selectedProto });
 
     clientRef.current = new A2AClient(endpointUrl);
-    const taskClient = createTaskClient(proto, endpointUrl);
+    const taskClient = createTaskClient(selectedProto, endpointUrl);
     taskRef.current = taskClient;
 
     // Attachment summarizer (background)
@@ -464,19 +610,26 @@ export default function App() {
           } catch {}
           ptSendInFlight.current = false;
         }
-        // Persist session on status changes
-        saveSession(endpointUrl, {
-          taskId: taskRef.current?.getTaskId(),
-          status: st,
-          plannerStarted: plannerStartedRef.current,
-          front: frontMsgsRef.current,
-          frontDraft: frontInput,
-        });
+        // Persist per-task session on status changes
+        try {
+          const tid = taskRef.current?.getTaskId();
+          if (endpointUrl && tid) {
+            saveSession(endpointUrl, { taskId: tid, status: st });
+            saveTaskSession(endpointUrl, tid, {
+              taskId: tid,
+              status: st,
+              plannerStarted: plannerStartedRef.current,
+              front: frontMsgsRef.current,
+              frontDraft: frontInput,
+              plannerEvents: (eventLog as any) || [],
+            });
+          }
+        } catch {}
       }
     });
 
     // Fetch agent info: A2A uses agent-card; MCP lists tools
-    if (proto === 'a2a') {
+    if (selectedProto === 'a2a') {
       (async () => {
         setCardLoading(true);
         try {
@@ -490,7 +643,7 @@ export default function App() {
           setCardLoading(false);
         }
       })();
-    } else {
+    } else if (selectedProto === 'mcp') {
       (async () => {
         setCardLoading(true);
         try {
@@ -509,31 +662,43 @@ export default function App() {
 
     // Resume task if provided or stored in session
     let targetTask = resumeTask.trim();
-    if (!targetTask) {
-      const sess = loadSession(endpointUrl);
-      if (sess?.taskId && sess.status && !['completed','failed','canceled'].includes(String(sess.status))) {
-        targetTask = sess.taskId;
-        // Preload front UI from session
-        const savedFront = Array.isArray(sess.front) ? sess.front : [];
-        for (const msg of savedFront) dispatch({ type: 'frontAppend', msg });
-        if (typeof sess.frontDraft === 'string') setFrontInput(sess.frontDraft);
-        // Preload planner events into UI and ref for later start
-        const savedEvents = Array.isArray(sess.plannerEvents) ? (sess.plannerEvents as any) : [];
-        if (savedEvents.length) {
-          setEventLog(savedEvents);
-          preloadedEventsRef.current = savedEvents as any;
-        }
-      }
+    let savedSess: SessionState | null = null;
+    try { savedSess = loadSession(endpointUrl); } catch {}
+    // Always pick up the last known task for this endpoint (even if completed) so UI state restores
+    if (!targetTask && savedSess?.taskId) {
+      targetTask = savedSess.taskId;
     }
 
     if (targetTask) {
+      // Preload any persisted per-task UI before resuming
+      try {
+        const preSess = loadTaskSession(endpointUrl, targetTask);
+        if (preSess) {
+          const savedFront = Array.isArray(preSess.front) ? preSess.front : [];
+          for (const msg of savedFront) dispatch({ type: 'frontAppend', msg });
+          if (typeof preSess.frontDraft === 'string') setFrontInput(preSess.frontDraft);
+          const savedEvents = Array.isArray(preSess.plannerEvents) ? (preSess.plannerEvents as any) : [];
+          if (savedEvents.length) {
+            setEventLog(savedEvents);
+            preloadedEventsRef.current = savedEvents as any;
+          }
+        }
+      } catch {}
       try {
         await taskClient.resume(targetTask);
         dispatch({ type: "setTask", taskId: targetTask });
-        const sess = loadSession(endpointUrl);
-        if (sess?.plannerStarted) {
+        const taskSess = loadTaskSession(endpointUrl, targetTask);
+        if (taskSess?.plannerStarted) {
           // Defer to allow initial snapshot to land
-          setTimeout(() => { try { startPlanner(sess?.plannerEvents || []); } catch {} }, 0);
+          setTimeout(() => { try { startPlanner(taskSess?.plannerEvents || []); } catch {} }, 0);
+        } else {
+          // If the thread is in a state where the agent can act, kick the planner to continue
+          try {
+            const st = taskRef.current?.getStatus();
+            if (st === 'working' || st === 'input-required' || st === 'initializing') {
+              setTimeout(() => { try { startPlanner(preloadedEventsRef.current || taskSess?.plannerEvents || []); } catch {} }, 0);
+            }
+          } catch {}
         }
       } catch (e: any) {
         dispatch({ type: "error", error: String(e?.message ?? e) });
@@ -562,21 +727,27 @@ export default function App() {
       ? preloadedEvents
       : (preloadedEventsRef.current && preloadedEventsRef.current.length ? preloadedEventsRef.current : []);
     if (preload && preload.length) {
-      try { (orch as any).loadEvents(preloadedEvents as any); } catch {}
+      try { (orch as any).loadEvents(preload as any); } catch {}
     }
     preloadedEventsRef.current = null;
     setEventLog(orch.getEvents() as any);
     const off = orch.onEvent((ev) => {
       setEventLog((prev) => {
         const next = [...prev, ev as any];
-        saveSession(endpoint, {
-          taskId: taskRef.current?.getTaskId(),
-          status: lastStatusRef.current,
-          plannerStarted: true,
-          front: frontMsgsRef.current,
-          frontDraft: frontInput,
-          plannerEvents: next as any,
-        });
+        try {
+          const tid = taskRef.current?.getTaskId();
+          if (endpoint && tid) {
+            saveSession(endpoint, { taskId: tid, status: lastStatusRef.current });
+            saveTaskSession(endpoint, tid, {
+              taskId: tid,
+              status: lastStatusRef.current,
+              plannerStarted: true,
+              front: frontMsgsRef.current,
+              frontDraft: frontInput,
+              plannerEvents: next as any,
+            });
+          }
+        } catch {}
         return next;
       });
     });
@@ -584,15 +755,21 @@ export default function App() {
     orch.start();
     signalEvent('planner-start');
     dispatch({ type: "setPlannerStarted", started: true });
-    // Persist session snapshot
-    saveSession(endpoint, {
-      taskId: taskRef.current?.getTaskId(),
-      status: lastStatusRef.current,
-      plannerStarted: true,
-      front: frontMsgsRef.current,
-      frontDraft: frontInput,
-      plannerEvents: (scenarioPlannerRef.current?.getEvents() as any) || [],
-    });
+    // Persist per-task session snapshot
+    try {
+      const tid = taskRef.current?.getTaskId();
+      if (endpoint && tid) {
+        saveSession(endpoint, { taskId: tid, status: lastStatusRef.current });
+        saveTaskSession(endpoint, tid, {
+          taskId: tid,
+          status: lastStatusRef.current,
+          plannerStarted: true,
+          front: frontMsgsRef.current,
+          frontDraft: frontInput,
+          plannerEvents: (scenarioPlannerRef.current?.getEvents() as any) || [],
+        });
+      }
+    } catch {}
   };
 
   const stopPlanner = () => {
@@ -601,20 +778,27 @@ export default function App() {
     scenarioPlannerOffRef.current = null;
     scenarioPlannerRef.current = null;
     dispatch({ type: 'setPlannerStarted', started: false });
-    // Persist existing event log (do not clear) so it survives reloads
-    saveSession(endpoint, {
-      taskId: taskRef.current?.getTaskId(),
-      status: lastStatusRef.current,
-      plannerStarted: false,
-      front: frontMsgsRef.current,
-      frontDraft: frontInput,
-      plannerEvents: (eventLog as any) || [],
-    });
+    // Persist existing event log per-task (do not clear)
+    try {
+      const tid = taskRef.current?.getTaskId();
+      if (endpoint && tid) {
+        saveSession(endpoint, { taskId: tid, status: lastStatusRef.current });
+        saveTaskSession(endpoint, tid, {
+          taskId: tid,
+          status: lastStatusRef.current,
+          plannerStarted: false,
+          front: frontMsgsRef.current,
+          frontDraft: frontInput,
+          plannerEvents: (eventLog as any) || [],
+        });
+      }
+    } catch {}
   };
 
   const cancelTask = async () => {
     const task = taskRef.current;
-    if (task?.getTaskId()) {
+    const tidBefore = task?.getTaskId();
+    if (tidBefore) {
       try { await task.cancel(); }
       catch (e: any) { dispatch({ type: "error", error: String(e?.message ?? e) }); }
     }
@@ -625,14 +809,26 @@ export default function App() {
     try { ptStreamAbort.current?.abort(); ptStreamAbort.current = null; } catch {}
     ptSendInFlight.current = false;
     
-    // Clear task client local state
+    // Clear task client local state and destroy any polling loops (A2A/MCP)
+    try { (taskRef.current as any)?.destroy?.(); } catch {}
     try { taskRef.current?.clearLocal(); } catch {}
+    taskRef.current = null as any;
+    clientRef.current = null;
 
-    // Clear session persistence and local UI state
+    // Clear session persistence and local UI state (use tid captured before clearLocal)
+    try { if (tidBefore) removeTaskSession(endpoint, tidBefore); } catch {}
     removeSession(endpoint);
+    // Purge non-user attachments (keep only user uploads)
+    try { vaultRef.current.purgeBySource(['agent','remote-agent']); } catch {}
+    // Clear planner event log and any cached preloaded events
+    preloadedEventsRef.current = null;
+    setEventLog([]);
     dispatch({ type: "clearConversation" });
     setAgentLog([]);
     setFrontInput("");
+    // Reset endpoint card state to avoid stale UI
+    setCard(null);
+    setCardLoading(false);
   };
 
   const sendFrontMessage = async (text: string) => {
@@ -787,7 +983,11 @@ const onAttachFiles = async (files: FileList | null) => {
   const openBase64Attachment = (name: string, mimeType: string, bytes?: string, uri?: string) => {
     try {
       if (bytes) {
-        const safeMime = mimeType || 'application/octet-stream';
+        let safeMime = mimeType || 'application/octet-stream';
+        // Ensure text types specify UTF-8 so browsers render correctly
+        if (/^text\//i.test(safeMime) && !/charset=/i.test(safeMime)) {
+          safeMime = `${safeMime}; charset=utf-8`;
+        }
         if (/^data:[^;]+;base64,/.test(bytes)) {
           window.open(bytes, '_blank');
           return;
@@ -882,7 +1082,7 @@ const onAttachFiles = async (files: FileList | null) => {
 
           {/* Event Log Section */}
           <div className="mt-8">
-            <EventLogView events={eventLog} />
+            <EventLogView events={eventLog} busy={model.status === 'working'} />
           </div>
       </div>
     </AppLayout>

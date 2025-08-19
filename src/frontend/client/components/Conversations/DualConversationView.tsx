@@ -98,15 +98,15 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
 
   return (
     <div className="grid gap-4 2xl:grid-cols-2 grid-cols-1">
-      {/* User ↔ Planner Conversation */}
+      {/* User ↔ Your Agent Conversation */}
       <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
         <div className="bg-gradient-to-r from-indigo-500 to-purple-500 text-white p-4">
           <div className="flex items-center justify-between">
-            <h3 className="font-bold text-lg">User ↔ Planner</h3>
+            <h3 className="font-bold text-lg">You ↔ Your Agent</h3>
             <div className="flex items-center gap-2">
               <span className="px-2 py-1 bg-white/20 rounded-full text-xs font-medium">You</span>
               <span className="text-white/60">→</span>
-              <span className="px-2 py-1 bg-white/20 rounded-full text-xs font-medium">Planner</span>
+              <span className="px-2 py-1 bg-white/20 rounded-full text-xs font-medium">Your Agent</span>
             </div>
           </div>
         </div>
@@ -142,8 +142,8 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
                 </div>
                 <p className="text-sm text-gray-500">
                   {plannerStarted
-                    ? "Start a conversation with the planner"
-                    : "Configure and start the planner first"}
+                    ? "Start a conversation with your agent"
+                    : "Configure and activate your agent first"}
                 </p>
               </div>
             )}
@@ -174,7 +174,7 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
               }}
               disabled={!plannerStarted}
               className="flex-1 px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              placeholder={plannerStarted ? "Type your message..." : "Start the planner to send messages"}
+              placeholder={plannerStarted ? "Type your message..." : "Activate your agent to send messages"}
             />
             <button
               onClick={() => onSendMessage(input)}
@@ -190,13 +190,13 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
         </div>
       </div>
 
-      {/* Planner ↔ Agent Conversation */}
+      {/* Your Agent ↔ Remote Agent Conversation */}
       <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
         <div className="bg-gradient-to-r from-blue-500 to-cyan-500 text-white p-4">
           <div className="flex items-center justify-between">
-            <h3 className="font-bold text-lg">Planner ↔ Remote Agent</h3>
+            <h3 className="font-bold text-lg">Your Agent ↔ Remote Agent</h3>
             <div className="flex items-center gap-2">
-              <span className="px-2 py-1 bg-white/20 rounded-full text-xs font-medium">Planner</span>
+              <span className="px-2 py-1 bg-white/20 rounded-full text-xs font-medium">Your Agent</span>
               <span className="text-white/60">→</span>
               <span className="px-2 py-1 bg-white/20 rounded-full text-xs font-medium">Remote Agent</span>
             </div>

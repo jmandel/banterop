@@ -5,3 +5,4 @@ export * from './components/Badge';
 export * from './components/Toolbar';
 export * from './components/Card';
 export * from './components/CardHeader';
+export * from './components/ModelSelect';

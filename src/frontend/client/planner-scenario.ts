@@ -80,11 +80,9 @@ export class ScenarioPlannerV2 {
   // Preload a prior event log (e.g., from persistence) before start()
   loadEvents(events: UnifiedEvent[]) {
     try {
+      // Restore prior event log as-is without re-processing documents.
+      // Attachments from any previous run should already be in the vault.
       this.eventLog = Array.isArray(events) ? [...events] : [];
-      // Re-index any documents from prior tool_result entries
-      for (const ev of this.eventLog) {
-        if (ev?.type === 'tool_result') this.indexDocumentsFromResult(ev.payload?.result);
-      }
       // Set sequence to the max existing seq to avoid collisions
       const maxSeq = this.eventLog.reduce((m, e) => Math.max(m, Number(e?.seq || 0)), 0);
       this.seq = Number.isFinite(maxSeq) ? maxSeq : this.seq;
@@ -200,6 +198,15 @@ export class ScenarioPlannerV2 {
 
   private maybeTick() {
     const canAct = this.canActNow();
+    // If a scenarioId is embedded in the endpoint, wait until scenario is loaded
+    try {
+      const needScenario = !!this.decodeConfig64FromEndpoint()?.scenarioId;
+      if (needScenario && !this.scenario) {
+        // ensure loader is running and defer until it completes
+        void this.ensureScenarioLoaded();
+        return;
+      }
+    } catch {}
     const decision = !this.running
       ? 'skip:not_running'
       : this.busy
@@ -218,6 +225,12 @@ export class ScenarioPlannerV2 {
     (async () => {
       try {
         await this.tickOnce();
+      } catch (e: any) {
+        try {
+          const msg = String(e?.message || e || 'Planner error');
+          console.warn('[PlannerTick] error:', msg);
+          this.deps.onSystem('— agent planning encountered an error; please try again.');
+        } catch {}
       } finally {
         this.busy = false;
         if (this.pendingTick) {
@@ -249,6 +262,15 @@ export class ScenarioPlannerV2 {
         lines.push(`<message from="planner" kind="ask_user" at="${ev.timestamp}">${q}</message>`);
       } else if (ev.type === "trace") {
         if (ev.payload?.type === "thought") lines.push(`<thought at="${ev.timestamp}">${ev.payload.content}</thought>`);
+      } else if (ev.type === "send_to_remote_agent") {
+        const text = String(ev.payload?.text || "");
+        if (text) lines.push(`<message from="planner" at="${ev.timestamp}">${text}</message>`);
+        const atts = Array.isArray(ev.payload?.attachments) ? ev.payload.attachments : [];
+        for (const a of atts) {
+          const name = String(a?.name || 'attachment');
+          const mime = String(a?.mimeType || a?.contentType || 'application/octet-stream');
+          lines.push(`<attachment name="${name}" mimeType="${mime}" />`);
+        }
       } else if (ev.type === "tool_call") {
         const name = String(ev.payload?.name || '');
         const args = ev.payload?.args ?? {};
@@ -256,10 +278,58 @@ export class ScenarioPlannerV2 {
         const body = { reasoning, action: { tool: name, args } };
         lines.push(`<tool_call at="${ev.timestamp}">${JSON.stringify(body)}</tool_call>`);
       } else if (ev.type === "tool_result") {
-        lines.push(`<tool_result at="${ev.timestamp}">${JSON.stringify(ev.payload?.result ?? {})}</tool_result>`);
+        // Prefer showing synthesized file contents if present; otherwise JSON body
+        const res = ev.payload?.result;
+        const names: string[] = Array.isArray(ev.payload?.filenames) ? ev.payload.filenames : [];
+        let rendered = false;
+        try {
+          if (names.length) {
+            for (const name of names) {
+              const doc = this.documents.get(String(name));
+              const body = typeof doc?.content === 'string' ? doc!.content : undefined;
+              if (body) {
+                const safe = body.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                lines.push(`<tool_result filename="${name}">\n${safe}\n</tool_result>`);
+                rendered = true;
+              }
+            }
+          }
+          // Common shapes: { documents: [{ name, contentType, content|text }] } or flat { docId, name, content }
+          const docs: any[] = Array.isArray(res?.documents) ? res.documents : [];
+          const single = (res && typeof res === 'object' && (res.name || res.docId)) ? [res] : [];
+          const all = (docs.length ? docs : single) as any[];
+          for (const d of all) {
+            const name = String(d?.name || d?.docId || 'result');
+            const body = typeof d?.content === 'string' ? d.content : (typeof d?.text === 'string' ? d.text : undefined);
+            if (name && typeof body === 'string' && body) {
+              const safe = body.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+              lines.push(`<tool_result filename="${name}">\n${safe}\n</tool_result>`);
+              rendered = true;
+            }
+          }
+        } catch {}
+        if (!rendered) {
+          lines.push(`<tool_result>${JSON.stringify(res ?? {})}</tool_result>`);
+        }
       } else if (ev.type === 'read_attachment') {
-        const body = { name: 'readAttachment', args: ev.payload?.args ?? {}, result: ev.payload?.result ?? {} };
-        lines.push(`<tool_call at="${ev.timestamp}">${JSON.stringify(body)}</tool_call>`);
+        const res = ev.payload?.result || {};
+        const args = ev.payload?.args || {};
+        const fname = String(res?.name || args?.name || '').trim();
+        if (!fname) throw new Error('read_attachment event missing filename');
+        let content: string | undefined;
+        const doc = this.documents.get(fname);
+        if (doc && typeof doc.content === 'string') content = doc.content;
+        if (!content) {
+          const rec = (this.deps.vault as any).getByName?.(fname);
+          if (!rec || typeof rec.bytes !== 'string') throw new Error(`Attachment not found in vault: ${fname}`);
+          const bin = atob(rec.bytes);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          content = new TextDecoder('utf-8').decode(bytes);
+        }
+        if (!content || !content.trim()) throw new Error(`Attachment has no decodable content: ${fname}`);
+        const safe = content.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        lines.push(`<tool_result filename="${fname}">\n${safe}\n</tool_result>`);
       }
     }
     // One-off hint: if we haven't contacted the remote agent yet and the scenario
@@ -477,11 +547,26 @@ export class ScenarioPlannerV2 {
       temperature: 0.2,
     };
     const url = `${this.deps.getApiBase()}/llm/complete`;
-    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify(body) });
-    if (!res.ok) throw new Error(`LLM ${res.status}`);
-    const j = await res.json();
-    const text = String(j?.content ?? "");
-    return { content: text };
+    const delays = [300, 800];
+    let lastErr: any = null;
+    for (let attempt = 0; attempt < delays.length + 1; attempt++) {
+      try {
+        const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify(body) });
+        if (res.ok) {
+          const j = await res.json();
+          const text = String(j?.content ?? "");
+          return { content: text };
+        }
+        let msg = `LLM ${res.status}`;
+        try { const j = await res.json(); if (j && (j.error || j.message)) msg = String(j.error || j.message); } catch {}
+        lastErr = new Error(msg);
+      } catch (e: any) {
+        lastErr = e;
+      }
+      if (attempt < delays.length) await new Promise(r => setTimeout(r, delays[attempt]));
+    }
+    try { this.deps.onSystem('— having trouble reaching the LLM provider; please try again in a moment.'); } catch {}
+    throw lastErr || new Error('LLM provider unavailable');
   }
 
   private parseAction(text: string): { reasoning: string; tool: string; args: any } {
@@ -507,9 +592,10 @@ export class ScenarioPlannerV2 {
     }
   }
 
-  private indexDocumentsFromResult(obj: any, opts?: { toolName?: string }) {
+  private indexDocumentsFromResult(obj: any, opts?: { toolName?: string }): string[] {
     // recursively find any { docId, name, contentType, content?, summary? }
     let found = 0;
+    const created: string[] = [];
     const walk = (x: any) => {
       if (!x || typeof x !== 'object') return;
       if (typeof x.docId === 'string') {
@@ -543,19 +629,27 @@ export class ScenarioPlannerV2 {
           }
         } catch {}
         found++;
+        created.push(name);
       }
       if (Array.isArray(x)) x.forEach(walk);
       else for (const k of Object.keys(x)) walk(x[k]);
     };
     try { walk(obj); } catch {}
     if (!found && obj && typeof obj === 'object') {
-      const tool = opts?.toolName ? String(opts.toolName).replace(/[^a-z0-9]+/gi,'_').toLowerCase() : 'result';
-      const name = `synth_${tool}_${Date.now()}.json`;
-      const contentType = 'application/json';
-      const contentUtf8 = JSON.stringify(obj, null, 2);
-      this.documents.set(name, { name, contentType, content: contentUtf8, summary: undefined });
-      try { this.deps.vault.addSynthetic(name, contentType, contentUtf8); } catch {}
+      // Skip creating a synthetic file for tool results that explicitly indicate failure
+      const status = String((obj as any)?.status || '').toLowerCase();
+      const isError = (obj as any)?.ok === false || typeof (obj as any)?.error === 'string' || status === 'error' || status === 'failed';
+      if (!isError) {
+        const tool = opts?.toolName ? String(opts.toolName).replace(/[^a-z0-9]+/gi,'_').toLowerCase() : 'result';
+        const name = `synth_${tool}_${Date.now()}.json`;
+        const contentType = 'application/json';
+        const contentUtf8 = JSON.stringify(obj, null, 2);
+        this.documents.set(name, { name, contentType, content: contentUtf8, summary: undefined });
+        try { this.deps.vault.addSynthetic(name, contentType, contentUtf8); } catch {}
+        created.push(name);
+      }
     }
+    return created;
   }
 
   private utf8ToBase64(s: string): string {
@@ -672,9 +766,9 @@ export class ScenarioPlannerV2 {
           conversationHistory,
         } as any);
         // Log tool_result and index any returned documents
+        const filenames = this.indexDocumentsFromResult(result?.output, { toolName: tool });
         this.turnScratch.toolCalls.push({ callId, name: tool, args, result: result?.output });
-        this.pushEvent({ type: "tool_result", agentId: this.deps.getPlannerAgentId() || this.myAgentId || "planner", payload: { result: result?.output, callId } });
-        this.indexDocumentsFromResult(result?.output, { toolName: tool });
+        this.pushEvent({ type: "tool_result", agentId: this.deps.getPlannerAgentId() || this.myAgentId || "planner", payload: { result: result?.output, callId, filenames } });
       } catch (e: any) {
         const err = { ok: false, error: String(e?.message ?? e) };
         this.turnScratch.toolCalls.push({ callId, name: tool, args, result: err });

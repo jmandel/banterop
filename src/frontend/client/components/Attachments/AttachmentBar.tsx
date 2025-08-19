@@ -79,7 +79,7 @@ export const AttachmentBar: React.FC<AttachmentBarProps> = ({
             </Button>
           </label>
           <div className="flex-1">
-            <label className="text-sm font-medium text-gray-700">Upload files for the planner to reference</label>
+            <label className="text-sm font-medium text-gray-700">Upload files for your agent to reference</label>
           </div>
         </div>
 
@@ -122,8 +122,8 @@ export const AttachmentBar: React.FC<AttachmentBarProps> = ({
       {/* Unified Attachments */}
       {allAttachments.length > 0 && (
         <div className="space-y-2">
-          <h4 className="text-sm font-medium text-gray-700">Attachments</h4>
-          <div className="flex items-center justify-start">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-medium text-gray-700">Attachments</h4>
             <Button
               variant="ghost"
               size="sm"
