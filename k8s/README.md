@@ -51,6 +51,7 @@ Secrets are managed separately to avoid accidental resets:
 kubectl -n interop create secret generic app-secrets \
   --from-literal=OPENROUTER_API_KEY="..." \
   --from-literal=GEMINI_API_KEY="..." \
+  --from-literal=PUBLISHED_EDIT_TOKEN="..." \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
@@ -78,6 +79,73 @@ curl -s https://chitchat.fhir.me/api/health
 - To restrict OpenRouter models, set:
   `LLM_MODELS_OPENROUTER_INCLUDE="openai/gpt-oss-120b:nitro,qwen/qwen3-235b-a22b-2507:nitro"` in the Deployment env.
 - WebSocket endpoint is `/api/ws` under the same host.
+
+## Published Edit Token (optional)
+
+Enable a soft-lock for scenarios tagged `published`. When set, the API returns `423 Locked` for `PUT`/`DELETE` on published scenarios unless the `X-Edit-Token` header matches the configured token. The UI always offers an Unlock flow and includes the header if present.
+
+### Set or rotate the token
+
+Option A: Guided script (recommended)
+
+```bash
+# Prompts for all secrets, including PUBLISHED_EDIT_TOKEN
+./k8s/update-secrets.sh
+
+# Restart to pick up the change
+kubectl -n interop rollout restart deploy/interop-api
+```
+
+Option B: kubectl patch
+
+```bash
+# Set your token; keep it simple but unguessable for your environment
+EDIT_TOKEN="my-shared-edit-token"
+kubectl -n interop patch secret app-secrets -p \
+  '{"data":{"PUBLISHED_EDIT_TOKEN":"'$(echo -n $EDIT_TOKEN | base64)'"}}'
+
+# Restart to pick up the change
+kubectl -n interop rollout restart deploy/interop-api
+```
+
+To disable server enforcement, clear the secret value (empty string) and restart:
+
+```bash
+kubectl -n interop patch secret app-secrets -p '{"data":{"PUBLISHED_EDIT_TOKEN":""}}'
+kubectl -n interop rollout restart deploy/interop-api
+```
+
+### Verify
+
+1) Identify a scenario whose config includes `metadata.tags: ["published"]`.
+
+2) Without a token (expect 423):
+
+```bash
+SCENARIO_ID=your_published_scenario_id
+BASE=https://chitchat.fhir.me
+curl -s -o /dev/null -w "%{http_code}\n" \
+  -X PUT "$BASE/api/scenarios/$SCENARIO_ID" \
+  -H 'Content-Type: application/json' \
+  --data '{"name":"Test"}'
+# Expect: 423
+```
+
+3) With the correct token (expect 200):
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" \
+  -X PUT "$BASE/api/scenarios/$SCENARIO_ID" \
+  -H 'Content-Type: application/json' \
+  -H "X-Edit-Token: $EDIT_TOKEN" \
+  --data '{"name":"Test"}'
+# Expect: 200
+```
+
+UI notes:
+- The editor shows a banner and an Unlock flow for published scenarios.
+- Unlock is local (stored in `localStorage`) with a 24h TTL; users can "Lock again" or "Forget token".
+- If the token is wrong or not required, the server response makes it obvious (423 vs 200).
 
 ## Reset / Wipe Data
 
@@ -189,4 +257,3 @@ kubectl -n interop delete job wipe-debug-logs
 Notes:
 - The Deployment uses `strategy: Recreate` and a single replica; you do not need to scale down to wipe files, but active writes may briefly fail during deletion. For a perfectly clean reset, perform the wipe during a quiet period.
 - The server recreates and migrates the SQLite schema automatically on startup or first access when the DB file is missing.
-

@@ -22,7 +22,8 @@ if ! kubectl -n interop get secret app-secrets &>/dev/null; then
     echo "Creating new secret..."
     kubectl -n interop create secret generic app-secrets \
         --from-literal=OPENROUTER_API_KEY="" \
-        --from-literal=GEMINI_API_KEY=""
+        --from-literal=GEMINI_API_KEY="" \
+        --from-literal=PUBLISHED_EDIT_TOKEN=""
 fi
 
 # Function to safely read password-like input
@@ -49,6 +50,14 @@ echo "----------------------------"
 echo "Leave empty to skip, or enter '-' to explicitly clear"
 echo
 read_secret "Enter Gemini API Key (hidden): " GEMINI_KEY
+
+# Prompt for Published Edit Token
+echo
+echo "Published Edit Token"
+echo "---------------------"
+echo "Leave empty to skip, or enter '-' to explicitly clear"
+echo
+read_secret "Enter PUBLISHED_EDIT_TOKEN (hidden): " EDIT_TOKEN
 
 # Build the patch JSON
 echo
@@ -91,6 +100,26 @@ else
     echo "  - Skipping Gemini API Key (no change)"
 fi
 
+# Handle Published Edit Token
+if [ -n "$EDIT_TOKEN" ]; then
+    if [ "$EDIT_TOKEN" = "-" ]; then
+        echo "  - Clearing PUBLISHED_EDIT_TOKEN"
+        EDIT_B64=$(echo -n "" | base64 | tr -d '\n')
+    else
+        echo "  - Setting PUBLISHED_EDIT_TOKEN (${#EDIT_TOKEN} characters)"
+        EDIT_B64=$(echo -n "$EDIT_TOKEN" | base64 | tr -d '\n')
+    fi
+
+    if [ -n "$PATCH_NEEDED" ]; then
+        PATCH_JSON="${PATCH_JSON},\"PUBLISHED_EDIT_TOKEN\":\"$EDIT_B64\""
+    else
+        PATCH_JSON="${PATCH_JSON}\"data\":{\"PUBLISHED_EDIT_TOKEN\":\"$EDIT_B64\""
+        PATCH_NEEDED=true
+    fi
+else
+    echo "  - Skipping PUBLISHED_EDIT_TOKEN (no change)"
+fi
+
 # Apply the patch if needed
 if [ -n "$PATCH_NEEDED" ]; then
     PATCH_JSON="${PATCH_JSON}}}"
@@ -126,6 +155,11 @@ if [ -n "$PATCH_NEEDED" ]; then
         else
             CMD="$CMD --from-literal=GEMINI_API_KEY=''"
         fi
+        if [ -n "$EDIT_TOKEN" ] && [ "$EDIT_TOKEN" != "-" ]; then
+            CMD="$CMD --from-literal=PUBLISHED_EDIT_TOKEN='$EDIT_TOKEN'"
+        else
+            CMD="$CMD --from-literal=PUBLISHED_EDIT_TOKEN=''"
+        fi
         
         CMD="$CMD --dry-run=client -o yaml"
         
@@ -142,7 +176,7 @@ else
 fi
 
 # Clear sensitive variables
-unset OPENROUTER_KEY GEMINI_KEY OPENROUTER_B64 GEMINI_B64 PATCH_JSON
+unset OPENROUTER_KEY GEMINI_KEY EDIT_TOKEN OPENROUTER_B64 GEMINI_B64 EDIT_B64 PATCH_JSON
 
 # Verify the secret
 echo
@@ -161,6 +195,14 @@ echo -n "Gemini API Key:     "
 GEM_LEN=$(kubectl -n interop get secret app-secrets -o jsonpath='{.data.GEMINI_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null | wc -c)
 if [ "$GEM_LEN" -gt 0 ]; then
     echo "✓ Set ($GEM_LEN bytes)"
+else
+    echo "✗ Not set (0 bytes)"
+fi
+
+echo -n "PUBLISHED_EDIT_TOKEN: "
+ED_LEN=$(kubectl -n interop get secret app-secrets -o jsonpath='{.data.PUBLISHED_EDIT_TOKEN}' 2>/dev/null | base64 -d 2>/dev/null | wc -c)
+if [ "$ED_LEN" -gt 0 ]; then
+    echo "✓ Set ($ED_LEN bytes)"
 else
     echo "✗ Not set (0 bytes)"
 fi

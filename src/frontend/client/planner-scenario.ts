@@ -375,22 +375,8 @@ export class ScenarioPlannerV2 {
         }
       }
     }
-    // One-off hint: if we haven't contacted the remote agent yet and the scenario
-    // includes a suggested initiating message for our agent, surface it here.
-    try {
-      const hasPlannerContact = this.eventLog.some(ev =>
-        (ev.type === 'message' && ev.channel === 'planner-agent' && ev.author === 'planner')
-      );
-      if (!hasPlannerContact) {
-        const sc: any = this.scenario;
-        const plannerId = this.deps.getPlannerAgentId?.() || this.myAgentId || '';
-        const me = Array.isArray(sc?.agents) ? sc.agents.find((a: any) => a?.agentId === plannerId) : null;
-        const suggested: string | undefined = me?.messageToUseWhenInitiatingConversation || me?.initialMessage || undefined;
-        if (suggested && String(suggested).trim()) {
-          lines.push(`<trace>A suggested starting message is: ${String(suggested).trim()}</trace>`);
-        }
-      }
-    } catch {}
+    // Do not inject suggested starting message into event log XML; it will be
+    // surfaced separately in the prompt just before <RESPONSE>.
     return lines.join("\n");
   }
 
@@ -571,6 +557,26 @@ export class ScenarioPlannerV2 {
     parts.push("</TOOLS>");
 
     parts.push("");
+    // If there's a suggested initiating message for the planner and we
+    // haven't yet sent a message to the remote agent, surface it here
+    // outside of the event log, just before <RESPONSE>.
+    try {
+      const hasPlannerContact = this.eventLog.some(ev =>
+        (ev.type === 'message' && ev.channel === 'planner-agent' && ev.author === 'planner')
+      );
+      if (!hasPlannerContact) {
+        const sc: any = this.scenario;
+        const plannerId = this.deps.getPlannerAgentId?.() || this.myAgentId || '';
+        const me = Array.isArray(sc?.agents) ? sc.agents.find((a: any) => a?.agentId === plannerId) : null;
+        const suggested: string | undefined = me?.messageToUseWhenInitiatingConversation || me?.initialMessage || undefined;
+        if (suggested && String(suggested).trim()) {
+          parts.push('<suggested_starting_message>');
+          parts.push(String(suggested).trim());
+          parts.push('</suggested_starting_message>');
+          parts.push('');
+        }
+      }
+    } catch {}
     parts.push("<RESPONSE>");
     parts.push("Output exactly one JSON object with fields 'reasoning' and 'action'. No extra commentary or code fences.");
     parts.push("</RESPONSE>");

@@ -1,0 +1,962 @@
+Great idea. The clean way to support **multiple back‑end conversation protocols** (A2A today, MCP “Streamable HTTP” next, and a sample REST afterwards) is to introduce a tiny **adapter interface** the UI can talk to, and then add one adapter per protocol.
+
+Below I outline the architecture and then give **drop‑in code**: new adapter files + minimal edits to your existing UI (mostly swapping types, adding a “Protocol” selector, and widening a couple of regexes that assumed `/a2a`).
+
+---
+
+## What changes—at a glance
+
+* **New unified adapter interface** `TaskClientLike` (start/send/resume/cancel/getStatus + `new-task` event).
+* **Three concrete adapters**
+
+  * `A2ABridgeTaskClient` (wraps your current `A2ATaskClient` + `A2AClient`)
+  * `McpTaskClient` (calls MCP tools: `begin_chat_thread`, `send_message_to_chat_thread`, `check_replies`)
+  * `RestTaskClient` (reference implementation of a simple REST conversation API)
+* **UI upgrades**
+
+  * Add a **Protocol** selector (`Auto | A2A | MCP | REST`); default Auto detects from URL suffix (`/a2a`, `/mcp`, `/rest`)
+  * Keep everything else (planner, attachments, dual views) unchanged thanks to the adapter
+* **A couple of safe regex updates** to accept `/mcp` and `/rest` wherever `/a2a` was hardcoded (scenario detection, config64 parsing, “Open in Watch” link).
+
+---
+
+## Status mapping (normalized to your current A2A states)
+
+| Source                                                           | Meaning                                         | UI state (A2AStatus) |
+| ---------------------------------------------------------------- | ----------------------------------------------- | -------------------- |
+| A2A `submitted/working/input-required/completed/failed/canceled` | unchanged                                       | unchanged            |
+| MCP `check_replies.status = "waiting"`                           | remote composing / waiting                      | `working`            |
+| MCP `check_replies.status = "input_required"`                    | your turn to speak                              | `input-required`     |
+| MCP `conversation_ended = true`                                  | thread ended                                    | `completed`          |
+| REST sample `status`                                             | `waiting / input_required / completed / failed` | mapped the same      |
+
+---
+
+## 1) New adapter interface (protocol‑agnostic)
+
+**`src/frontend/a2a-client/protocols/task-client.ts`**
+
+```ts
+import type { A2APart, A2ATask, A2AStatus } from "../a2a-types";
+
+export type TaskClientEventType = "new-task" | "error";
+
+export interface TaskClientLike {
+  on<T = any>(eventType: TaskClientEventType, cb: (ev: T) => void): () => void;
+
+  getTask(): A2ATask | null;
+  getTaskId(): string | undefined;
+  getStatus(): A2AStatus | "initializing";
+
+  resume(taskId: string): Promise<void>;
+  startNew(parts: A2APart[]): Promise<void>;
+  send(parts: A2APart[]): Promise<void>;
+  cancel(): Promise<void>;
+  clearLocal(): void;
+}
+```
+
+---
+
+## 2) A2A adapter (thin wrapper around your existing client)
+
+**`src/frontend/a2a-client/protocols/a2a-bridge-client.ts`**
+
+```ts
+import type { TaskClientLike, TaskClientEventType } from "./task-client";
+import type { A2APart, A2ATask, A2AStatus } from "../a2a-types";
+import { A2ATaskClient } from "../a2a-task-client";
+import { A2AClient } from "../a2a-client";
+
+export class A2ABridgeTaskClient implements TaskClientLike {
+  private task: A2ATaskClient;
+  private rpc: A2AClient;
+  private listeners = new Map<TaskClientEventType, Set<(ev: any) => void>>();
+
+  constructor(private endpointUrl: string) {
+    this.task = new A2ATaskClient(endpointUrl);
+    this.rpc = new A2AClient(endpointUrl);
+
+    this.task.on("new-task", (t) => this.emit("new-task", t));
+    this.task.on("error", (e) => this.emit("error", e));
+  }
+
+  on<T = any>(eventType: TaskClientEventType, cb: (ev: T) => void): () => void {
+    if (!this.listeners.has(eventType)) this.listeners.set(eventType, new Set());
+    const set = this.listeners.get(eventType)!;
+    set.add(cb as any);
+    return () => set.delete(cb as any);
+  }
+  private emit(type: TaskClientEventType, data: any) {
+    const set = this.listeners.get(type);
+    if (set) for (const cb of set) { try { (cb as any)(data); } catch {} }
+  }
+
+  getTask(): A2ATask | null { return this.task.getTask(); }
+  getTaskId(): string | undefined { return this.task.getTaskId(); }
+  getStatus(): A2AStatus | "initializing" { return this.task.getStatus(); }
+
+  async resume(taskId: string) { await this.task.resume(taskId); }
+  async startNew(parts: A2APart[]) { await this.task.startNew(parts); }
+  async send(parts: A2APart[]) { await this.task.send(parts); }
+  async cancel(): Promise<void> {
+    const id = this.task.getTaskId();
+    if (id) { try { await this.rpc.tasksCancel(id); } catch {} }
+    this.clearLocal();
+  }
+  clearLocal() { this.task.clearLocal(); }
+}
+```
+
+---
+
+## 3) MCP adapter (calls MCP tools over Streamable HTTP)
+
+> Assumes the MCP bridge you showed is mounted at an HTTP endpoint (e.g. `/api/bridge/<config64>/mcp`) and responds to **JSON** (you set `enableJsonResponse: true`).
+
+**`src/frontend/a2a-client/protocols/mcp-task-client.ts`**
+
+```ts
+import type { TaskClientLike, TaskClientEventType } from "./task-client";
+import type { A2APart, A2ATask, A2AStatus, A2AMessage } from "../a2a-types";
+
+type McpTextContent = { type: "text"; text: string };
+type McpCallResult = { result?: { content?: Array<McpTextContent | any> } };
+
+function parseMcpTextResult(j: McpCallResult): string {
+  const c = j?.result?.content || [];
+  const t = c.find((x: any) => x?.type === "text") as McpTextContent | undefined;
+  return (t?.text || "").trim();
+}
+
+export class McpTaskClient implements TaskClientLike {
+  private listeners = new Map<TaskClientEventType, Set<(ev: any) => void>>();
+  private conversationId?: string;
+  private status: A2AStatus | "initializing" = "initializing";
+  private history: A2AMessage[] = [];
+  private dead = false;
+
+  // naive de-dupe for replies (since server doesn't include ids)
+  private seenHashes = new Set<string>();
+
+  constructor(private endpointUrl: string) {}
+
+  // ------------ TaskClientLike ------------
+  on<T = any>(eventType: TaskClientEventType, cb: (ev: T) => void): () => void {
+    if (!this.listeners.has(eventType)) this.listeners.set(eventType, new Set());
+    const set = this.listeners.get(eventType)!;
+    set.add(cb as any);
+    return () => set.delete(cb as any);
+  }
+  private emit(type: TaskClientEventType, data: any) {
+    const set = this.listeners.get(type);
+    if (set) for (const cb of set) { try { (cb as any)(data); } catch {} }
+  }
+
+  getTask(): A2ATask | null {
+    if (!this.conversationId) return null;
+    return {
+      id: this.conversationId,
+      contextId: this.conversationId,
+      status: { state: this.status },
+      history: this.history,
+      kind: "task",
+      metadata: {}
+    };
+  }
+  getTaskId(): string | undefined { return this.conversationId; }
+  getStatus(): A2AStatus | "initializing" { return this.status; }
+
+  async resume(taskId: string) {
+    this.conversationId = String(taskId);
+    // best-effort: poll once to compute current status
+    await this.pollOnce(0);
+    this.openPollLoop();
+    this.emit("new-task", this.getTask());
+  }
+
+  async startNew(parts: A2APart[]) {
+    if (!this.conversationId) {
+      const j = await this.callTool("begin_chat_thread", {});
+      const text = parseMcpTextResult(j);
+      const obj = safeParse(text);
+      this.conversationId = String(obj?.conversationId || "");
+      if (!this.conversationId) throw new Error("MCP: no conversationId");
+    }
+    await this.send(parts);
+  }
+
+  async send(parts: A2APart[]) {
+    if (!this.conversationId) {
+      await this.startNew(parts);
+      return;
+    }
+    const { text, attachments } = normalizePartsForMcp(parts);
+    await this.callTool("send_message_to_chat_thread", {
+      conversationId: this.conversationId,
+      message: text,
+      ...(attachments.length ? { attachments } : {})
+    });
+
+    // optimistic append (as "user")
+    const messageId = crypto.randomUUID();
+    const msg: A2AMessage = {
+      role: "user",
+      parts,
+      messageId,
+      taskId: this.conversationId,
+      kind: "message"
+    };
+    this.history = [...this.history, msg];
+    this.status = "working";
+    this.emit("new-task", this.getTask());
+
+    // ensure polling is running
+    this.openPollLoop();
+  }
+
+  async cancel(): Promise<void> {
+    // no formal cancel in this MCP tool palette; mark dead locally
+    this.dead = true;
+    this.status = "canceled";
+    this.emit("new-task", this.getTask());
+  }
+
+  clearLocal(): void {
+    this.dead = true;
+    this.conversationId = undefined;
+    this.status = "initializing";
+    this.history = [];
+    this.seenHashes.clear();
+  }
+
+  // ------------ Internals ------------
+
+  private async callTool(name: string, args: any): Promise<McpCallResult> {
+    const body = {
+      jsonrpc: "2.0",
+      id: crypto.randomUUID(),
+      method: "tools/call",
+      params: { name, arguments: args || {} }
+    };
+    const res = await fetch(this.endpointUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      credentials: "include",
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const msg = `MCP tool ${name} failed: ${res.status} ${await res.text()}`;
+      this.emit("error", { error: msg });
+      throw new Error(msg);
+    }
+    return (await res.json()) as McpCallResult;
+  }
+
+  private async pollOnce(waitMs: number) {
+    if (!this.conversationId) return;
+    const j = await this.callTool("check_replies", {
+      conversationId: this.conversationId,
+      waitMs,
+      max: 200
+    });
+    const text = parseMcpTextResult(j);
+    const obj = safeParse(text) || {};
+    const list = Array.isArray(obj.messages) ? obj.messages : [];
+    const status = String(obj.status || "waiting");
+    const ended = !!obj.conversation_ended;
+
+    // Map status
+    this.status = ended ? "completed" : (status === "input_required" ? "input-required" : "working");
+
+    // Append replies as "agent" messages, de-duped
+    for (const m of list) {
+      const hash = hashReply(m);
+      if (this.seenHashes.has(hash)) continue;
+      this.seenHashes.add(hash);
+
+      const parts: A2APart[] = [];
+      const t = typeof m.text === "string" ? m.text : "";
+      if (t) parts.push({ kind: "text", text: t });
+
+      const atts = Array.isArray(m.attachments) ? m.attachments : [];
+      for (const a of atts) {
+        const name = String(a?.name || "attachment");
+        const mime = String(a?.contentType || "application/octet-stream");
+        // simplified list: no bytes/uri provided; still surface as present
+        parts.push({ kind: "file", file: { name, mimeType: mime } as any });
+      }
+
+      if (parts.length) {
+        this.history = [
+          ...this.history,
+          {
+            role: "agent",
+            parts,
+            messageId: crypto.randomUUID(),
+            taskId: this.conversationId,
+            kind: "message"
+          }
+        ];
+      }
+    }
+  }
+
+  private openPollLoop() {
+    if (this.dead) this.dead = false;
+    // simple long-poll loop; exits when canceled/completed
+    const loop = async () => {
+      try {
+        while (!this.dead && this.conversationId && this.status !== "completed" && this.status !== "failed" && this.status !== "canceled") {
+          await this.pollOnce(10000);
+          this.emit("new-task", this.getTask());
+          // quick yield
+          await new Promise((r) => setTimeout(r, 25));
+        }
+      } catch (e: any) {
+        this.emit("error", { error: String(e?.message ?? e) });
+      }
+    };
+    // fire and forget
+    void loop();
+  }
+}
+
+function normalizePartsForMcp(parts: A2APart[]): { text: string; attachments: Array<{ name: string; contentType: string; content: string; summary?: string; docId?: string }> } {
+  let text = "";
+  const attachments: Array<{ name: string; contentType: string; content: string; summary?: string; docId?: string }> = [];
+  for (const p of parts) {
+    if (p.kind === "text") text += (text ? "\n" : "") + (p.text || "");
+    if (p.kind === "file") {
+      const f = (p as any).file || {};
+      const name = String(f.name || "attachment");
+      const contentType = String(f.mimeType || "application/octet-stream");
+      const content = typeof f.bytes === "string" ? f.bytes : ""; // base64
+      attachments.push({ name, contentType, content });
+    }
+  }
+  return { text, attachments: attachments.filter(a => !!a.content || a.contentType) };
+}
+
+function safeParse(s: string): any { try { return JSON.parse(s); } catch { return null; } }
+function hashReply(m: any): string {
+  const base = JSON.stringify({
+    from: m?.from || "",
+    at: m?.at || "",
+    text: m?.text || "",
+    attachments: (Array.isArray(m?.attachments) ? m.attachments : []).map((a: any) => `${a?.name}:${a?.contentType || ""}`)
+  });
+  // simple 32-bit hash
+  let h = 0; for (let i = 0; i < base.length; i++) h = (h * 31 + base.charCodeAt(i)) | 0;
+  return String(h >>> 0);
+}
+```
+
+---
+
+## 4) Sample REST adapter (illustrative)
+
+> This assumes an extremely simple REST shape:
+>
+> * `POST /threads` → `{ id: string }`
+> * `POST /threads/{id}/messages` with `{ text: string, attachments?: [{ name, mimeType, bytes }] }`
+> * `GET /threads/{id}/events?since=<seq>&waitMs=<ms>` → `{ events: [{ seq, role: "agent"|"user", text, attachments?: [...] , finality?: "turn"|"conversation" }], nextSeq: number, status?: "waiting"|"input_required"|"completed"|"failed" }`
+
+**`src/frontend/a2a-client/protocols/rest-task-client.ts`**
+
+```ts
+import type { TaskClientLike, TaskClientEventType } from "./task-client";
+import type { A2APart, A2ATask, A2AStatus, A2AMessage } from "../a2a-types";
+
+export class RestTaskClient implements TaskClientLike {
+  private listeners = new Map<TaskClientEventType, Set<(ev: any) => void>>();
+  private id?: string;
+  private status: A2AStatus | "initializing" = "initializing";
+  private history: A2AMessage[] = [];
+  private since = 0;
+  private dead = false;
+
+  constructor(private baseUrl: string /* e.g., http://host/api/rest */) {}
+
+  on<T = any>(eventType: TaskClientEventType, cb: (ev: T) => void): () => void {
+    if (!this.listeners.has(eventType)) this.listeners.set(eventType, new Set());
+    const set = this.listeners.get(eventType)!; set.add(cb as any);
+    return () => set.delete(cb as any);
+  }
+  private emit(type: TaskClientEventType, data: any) {
+    const set = this.listeners.get(type);
+    if (set) for (const cb of set) { try { (cb as any)(data); } catch {} }
+  }
+
+  getTask(): A2ATask | null {
+    if (!this.id) return null;
+    return { id: this.id, contextId: this.id, status: { state: this.status }, history: this.history, kind: "task", metadata: {} };
+  }
+  getTaskId(): string | undefined { return this.id; }
+  getStatus(): A2AStatus | "initializing" { return this.status; }
+
+  async resume(taskId: string) {
+    this.id = String(taskId);
+    this.status = "submitted";
+    this.emit("new-task", this.getTask());
+    this.openPollLoop();
+  }
+
+  async startNew(parts: A2APart[]) {
+    if (!this.id) {
+      const res = await fetch(`${this.baseUrl}/threads`, { method: "POST", headers: { "content-type": "application/json" }, credentials: "include" });
+      if (!res.ok) throw new Error(`REST: create thread failed ${res.status}`);
+      const j = await res.json(); this.id = String(j?.id || "");
+      if (!this.id) throw new Error("REST: no thread id");
+    }
+    await this.send(parts);
+  }
+
+  async send(parts: A2APart[]) {
+    if (!this.id) await this.startNew(parts);
+    const { text, attachments } = normalizeParts(parts);
+    const res = await fetch(`${this.baseUrl}/threads/${this.id}/messages`, {
+      method: "POST", headers: { "content-type": "application/json" }, credentials: "include",
+      body: JSON.stringify({ text, attachments })
+    });
+    if (!res.ok) {
+      const msg = `REST: send failed ${res.status} ${await res.text()}`;
+      this.emit("error", { error: msg }); throw new Error(msg);
+    }
+    // optimistic echo
+    this.history.push({ role: "user", parts, messageId: crypto.randomUUID(), taskId: this.id!, kind: "message" });
+    this.status = "working";
+    this.emit("new-task", this.getTask());
+    this.openPollLoop();
+  }
+
+  async cancel(): Promise<void> {
+    this.dead = true;
+    this.status = "canceled";
+    this.emit("new-task", this.getTask());
+  }
+
+  clearLocal(): void {
+    this.dead = true;
+    this.id = undefined;
+    this.history = [];
+    this.since = 0;
+    this.status = "initializing";
+  }
+
+  private async pollOnce(waitMs: number) {
+    if (!this.id) return;
+    const url = `${this.baseUrl}/threads/${this.id}/events?since=${this.since}&waitMs=${waitMs}`;
+    const res = await fetch(url, { headers: { accept: "application/json" }, credentials: "include" });
+    if (!res.ok) throw new Error(`REST: poll failed ${res.status}`);
+    const j = await res.json();
+    const events = Array.isArray(j?.events) ? j.events : [];
+    const nextSeq = Number(j?.nextSeq ?? this.since);
+    const st = String(j?.status || "waiting");
+    this.status = st === "input_required" ? "input-required" : st === "completed" ? "completed" : st === "failed" ? "failed" : "working";
+
+    for (const e of events) {
+      const parts: A2APart[] = [];
+      if (e.text) parts.push({ kind: "text", text: String(e.text) });
+      const atts = Array.isArray(e.attachments) ? e.attachments : [];
+      for (const a of atts) parts.push({ kind: "file", file: { name: a.name, mimeType: a.mimeType, bytes: a.bytes } as any });
+      this.history.push({
+        role: String(e.role) === "user" ? "user" : "agent",
+        parts,
+        messageId: crypto.randomUUID(),
+        taskId: this.id!,
+        kind: "message"
+      });
+      if (String(e.finality) === "conversation") this.status = "completed";
+    }
+    this.since = nextSeq;
+  }
+
+  private openPollLoop() {
+    if (this.dead) this.dead = false;
+    const loop = async () => {
+      try {
+        while (!this.dead && this.id && this.status !== "completed" && this.status !== "failed" && this.status !== "canceled") {
+          await this.pollOnce(10000);
+          this.emit("new-task", this.getTask());
+          await new Promise((r) => setTimeout(r, 25));
+        }
+      } catch (e: any) {
+        this.emit("error", { error: String(e?.message ?? e) });
+      }
+    };
+    void loop();
+  }
+}
+
+function normalizeParts(parts: A2APart[]): { text: string; attachments: Array<{ name: string; mimeType: string; bytes: string }> } {
+  let text = "";
+  const attachments: Array<{ name: string; mimeType: string; bytes: string }> = [];
+  for (const p of parts) {
+    if (p.kind === "text") text += (text ? "\n" : "") + (p.text || "");
+    if (p.kind === "file") {
+      const f = (p as any).file || {};
+      const name = String(f.name || "attachment");
+      const mimeType = String(f.mimeType || "application/octet-stream");
+      const bytes = typeof f.bytes === "string" ? f.bytes : "";
+      if (bytes) attachments.push({ name, mimeType, bytes });
+    }
+  }
+  return { text, attachments };
+}
+```
+
+---
+
+## 5) App wiring: use the adapters & add a Protocol dropdown
+
+### (a) Add protocol detection helper (optional)
+
+We’ll treat `/a2a`, `/mcp`, `/rest` suffixes:
+
+```ts
+// Put near the top of App.tsx
+type ProtocolKind = "auto" | "a2a" | "mcp" | "rest";
+const detectProtocolFromEndpoint = (url: string): Exclude<ProtocolKind, "auto"> => {
+  if (/\b\/mcp\/?$/.test(url)) return "mcp";
+  if (/\b\/rest\/?$/.test(url)) return "rest";
+  return "a2a";
+};
+```
+
+### (b) App.tsx: state & imports
+
+* **Add imports**
+
+```ts
+// NEW
+import type { TaskClientLike } from "./protocols/task-client";
+import { A2ABridgeTaskClient } from "./protocols/a2a-bridge-client";
+import { McpTaskClient } from "./protocols/mcp-task-client";
+import { RestTaskClient } from "./protocols/rest-task-client";
+```
+
+* **Replace the A2ATaskClient typed ref** with the generic one
+
+```ts
+// BEFORE
+// const taskRef = useRef<A2ATaskClient | null>(null);
+// AFTER
+const taskRef = useRef<TaskClientLike | null>(null);
+```
+
+* **Add protocol state**
+
+```ts
+const [protocol, setProtocol] = useState<ProtocolKind>(() => (localStorage.getItem("a2a.protocol") as ProtocolKind) || "auto");
+useEffect(() => { try { localStorage.setItem("a2a.protocol", protocol); } catch {} }, [protocol]);
+```
+
+* **Remove** the `clientRef` and the `ptStreamAbort/ptSendInFlight` related code (no longer needed; adapters manage their own loops). Delete their declarations and the small cleanup blocks referencing them.
+
+### (c) Connection handler now chooses adapter
+
+Change `handleConnect()` to take the resolved protocol and instantiate the right client:
+
+```ts
+// Replace handleConnect signature
+const handleConnect = async (endpointUrl: string, proto?: Exclude<ProtocolKind, "auto">) => {
+  // cancel previous
+  if (taskRef.current?.getTaskId()) {
+    try { await cancelTask(); } catch {}
+  }
+
+  if (!endpointUrl.trim()) {
+    dispatch({ type: "reset" });
+    lastStatusRef.current = "submitted";
+    lastTaskIdRef.current = undefined;
+    taskRef.current = null;
+    try { scenarioPlannerRef.current?.stop(); } catch {}
+    scenarioPlannerRef.current = null;
+    return;
+  }
+
+  dispatch({ type: "reset" });
+  lastStatusRef.current = "submitted";
+  lastTaskIdRef.current = undefined;
+  dispatch({ type: "connect", endpoint: endpointUrl });
+
+  const resolved = proto || detectProtocolFromEndpoint(endpointUrl);
+
+  // Construct protocol adapter
+  let taskClient: TaskClientLike;
+  if (resolved === "a2a") {
+    taskClient = new A2ABridgeTaskClient(endpointUrl);
+  } else if (resolved === "mcp") {
+    taskClient = new McpTaskClient(endpointUrl);
+  } else {
+    // "rest"
+    // Trim possible trailing slashes – you can point this to e.g. http://localhost:3000/api/rest
+    const base = endpointUrl.replace(/\/+$/, "");
+    taskClient = new RestTaskClient(base);
+  }
+  taskRef.current = taskClient;
+
+  // Attachment summarizer unchanged...
+  summarizerRef.current = new AttachmentSummarizer(() => summarizerModelRef.current || undefined, vaultRef.current);
+  summarizerRef.current.onUpdate((name) => { signalEvent('summarizer'); setAttachmentUpdateTrigger((p) => p + 1); });
+
+  // Subscribe to normalized "new-task"
+  const updateAgentLogFromTask = () => {
+    const t = taskRef.current?.getTask();
+    const hist = t?.history || [];
+    const entries: AgentLogEntry[] = hist.map((m) => {
+      const text = (m.parts || []).filter((p: any) => p?.kind === 'text').map((p: any) => p.text).join('\n') || '';
+      const atts = (m.parts || []).filter((p:any)=>p?.kind==='file' && p?.file)
+        .map((p:any)=>({ name: String(p.file.name||'attachment'), mimeType: String(p.file.mimeType||'application/octet-stream'), bytes: p.file.bytes, uri: p.file.uri }));
+      return { id: m.messageId, role: m.role === 'user' ? 'planner' : 'agent', text, attachments: atts };
+    });
+    setAgentLog(entries);
+  };
+
+  taskClient.on('new-task', () => {
+    const curTask = taskRef.current?.getTaskId();
+    if (lastTaskIdRef.current !== curTask) {
+      lastTaskIdRef.current = curTask;
+      dispatch({ type: "setTask", taskId: curTask });
+    }
+    updateAgentLogFromTask();
+    signalEvent('store');
+  });
+
+  taskClient.on('new-task', () => {
+    const st = taskRef.current?.getStatus();
+    if (st && lastStatusRef.current !== st) {
+      lastStatusRef.current = st as any;
+      dispatch({ type: 'status', status: st as any });
+
+      if (st === 'completed' || st === 'failed' || st === 'canceled') {
+        dispatch({ type: 'system', text: `— conversation ${st} —` });
+        try { scenarioPlannerRef.current?.stop(); } catch {}
+        scenarioPlannerRef.current = null;
+        dispatch({ type: 'setPlannerStarted', started: false });
+      }
+
+      saveSession(endpointUrl, {
+        taskId: taskRef.current?.getTaskId(),
+        status: st as any,
+        plannerStarted: plannerStartedRef.current,
+        front: frontMsgsRef.current,
+        frontDraft: frontInput,
+      });
+    }
+  });
+
+  taskClient.on('error', (e: any) => dispatch({ type: "error", error: String(e?.error ?? e) }));
+
+  // Agent card best-effort (works if hosted)
+  (async () => {
+    setCardLoading(true);
+    try {
+      const base = endpointUrl.replace(/\/+$/, "");
+      const res = await fetch(`${base}/.well-known/agent-card.json`, { credentials: "include" });
+      if (!res.ok) throw new Error(`Agent card fetch failed: ${res.status}`);
+      setCard(await res.json());
+    } catch (e: any) {
+      setCard({ error: String(e?.message ?? e) });
+    } finally {
+      setCardLoading(false);
+    }
+  })();
+
+  // Resume if we have one
+  let targetTask = resumeTask.trim();
+  if (!targetTask) {
+    const sess = loadSession(endpointUrl);
+    if (sess?.taskId && sess.status && !['completed','failed','canceled'].includes(String(sess.status))) {
+      targetTask = sess.taskId;
+      const savedFront = Array.isArray(sess.front) ? sess.front : [];
+      for (const msg of savedFront) dispatch({ type: 'frontAppend', msg });
+      if (typeof sess.frontDraft === 'string') setFrontInput(sess.frontDraft);
+    }
+  }
+  if (targetTask) {
+    try {
+      await taskClient.resume(targetTask);
+      dispatch({ type: "setTask", taskId: targetTask });
+      const sess = loadSession(endpointUrl);
+      if (sess?.plannerStarted) setTimeout(() => { try { startPlanner(); } catch {} }, 0);
+    } catch (e: any) {
+      dispatch({ type: "error", error: String(e?.message ?? e) });
+    }
+  }
+};
+```
+
+* Update the `useEffect` that auto‑connects so it passes the resolved protocol:
+
+```ts
+useEffect(() => {
+  const chosen = protocol === "auto" ? detectProtocolFromEndpoint(debouncedEndpoint) : protocol;
+  if (debouncedEndpoint !== model.endpoint || !model.connected) {
+    console.log("[App] Auto-connecting to:", debouncedEndpoint, "via", chosen);
+    handleConnect(debouncedEndpoint, chosen);
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [debouncedEndpoint, protocol]);
+```
+
+### (d) Cancel now calls the adapter
+
+Replace `cancelTask`:
+
+```ts
+const cancelTask = async () => {
+  const task = taskRef.current;
+  if (task) {
+    try { await task.cancel(); } catch (e: any) { dispatch({ type: "error", error: String(e?.message ?? e) }); }
+  }
+  try { scenarioPlannerRef.current?.stop(); } catch {}
+  scenarioPlannerRef.current = null;
+
+  try { taskRef.current?.clearLocal(); } catch {}
+  removeSession(endpoint);
+  dispatch({ type: "clearConversation" });
+  setAgentLog([]);
+  setFrontInput("");
+};
+```
+
+### (e) Pass Protocol to Step 1 (and persist selection)
+
+* Keep a small local state + callbacks in **App.tsx**:
+
+```ts
+// inside App component:
+const [selectedProtocol, setSelectedProtocol] = [protocol, setProtocol]; // just pass through
+```
+
+* Wire it into the `StepFlow` props:
+
+```tsx
+<StepFlow
+  // Connection props (existing)
+  endpoint={endpoint}
+  onEndpointChange={setEndpoint}
+  status={model.status}
+  taskId={model.taskId}
+  connected={model.connected}
+  error={model.error}
+  card={card}
+  cardLoading={cardLoading}
+  onCancelTask={cancelTask}
+
+  // NEW
+  protocol={selectedProtocol}
+  onProtocolChange={setProtocol}
+
+  // ... rest unchanged
+/>
+```
+
+---
+
+## 6) Step 1 UI: add “Protocol” dropdown
+
+**`src/frontend/a2a-client/components/StepFlow/ConnectionStep.tsx`** — add props, UI, and widen the “Open in Watch” guard.
+
+```ts
+// 1) extend props
+interface ConnectionStepProps {
+  endpoint: string;
+  onEndpointChange: (value: string) => void;
+  status: A2AStatus | "initializing";
+  taskId?: string;
+  connected: boolean;
+  error?: string;
+  card?: any;
+  cardLoading?: boolean;
+  onCancelTask: () => void;
+  onLoadScenario?: (goals: string, instructions: string) => void;
+  goals?: string;
+  instructions?: string;
+
+  // NEW:
+  protocol: "auto" | "a2a" | "mcp" | "rest";
+  onProtocolChange: (p: "auto" | "a2a" | "mcp" | "rest") => void;
+}
+```
+
+Render a selector just under the endpoint input:
+
+```tsx
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-1">A2A/MCP/REST Endpoint</label>
+    <input /* existing endpoint input */ />
+  </div>
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-1">Protocol</label>
+    <select
+      value={protocol}
+      onChange={(e) => onProtocolChange(e.target.value as any)}
+      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+    >
+      <option value="auto">Auto (by URL)</option>
+      <option value="a2a">A2A</option>
+      <option value="mcp">MCP</option>
+      <option value="rest">REST (sample)</option>
+    </select>
+    <p className="text-xs text-gray-500 mt-1">
+      Auto detects by suffix: /a2a, /mcp, or /rest.
+    </p>
+  </div>
+</div>
+```
+
+Update **“Open in Watch”** visibility (A2A only):
+
+```ts
+// add 'protocol' to component args
+export const ConnectionStep: React.FC<ConnectionStepProps> = ({ /*...,*/ protocol, /*...*/ }) => {
+  const canOpenWatch = useMemo(() => {
+    try {
+      if (!taskId) return false;
+      if (protocol !== "a2a") return false;
+      const match = endpoint.match(/^(https?:\/\/[^\/]+)(\/api)?\/bridge\/([^\/]+)\/(a2a|mcp|rest)/);
+      return !!(match && match[3]);
+    } catch { return false; }
+  }, [endpoint, taskId, protocol]);
+  // ...
+};
+```
+
+---
+
+## 7) StepFlow: pass protocol props through
+
+**`src/frontend/a2a-client/components/StepFlow/StepFlow.tsx`**
+
+```ts
+interface StepFlowProps {
+  // ...existing...
+  protocol: "auto" | "a2a" | "mcp" | "rest";
+  onProtocolChange: (p: "auto" | "a2a" | "mcp" | "rest") => void;
+}
+```
+
+and in the render (Step 1):
+
+```tsx
+<ConnectionStep
+  endpoint={props.endpoint}
+  onEndpointChange={props.onEndpointChange}
+  status={props.status}
+  taskId={props.taskId}
+  connected={props.connected}
+  error={props.error}
+  card={props.card}
+  cardLoading={props.cardLoading}
+  onCancelTask={props.onCancelTask}
+  onLoadScenario={props.onLoadScenario}
+  // NEW
+  protocol={props.protocol}
+  onProtocolChange={props.onProtocolChange}
+/>
+```
+
+---
+
+## 8) Regexes that assumed `/a2a`: broaden to `/a2a|mcp|rest`
+
+* **Scenario detector**: `components/StepFlow/ScenarioDetector.tsx`
+
+Change:
+
+```ts
+function isOurBridgeEndpoint(url: string): { isOurs: boolean; config64?: string; apiBase?: string } {
+  const match = url.match(/^(https?:\/\/[^\/]+)(\/api)?\/bridge\/([^\/]+)\/(a2a|mcp|rest)/);
+  if (!match || !match[3]) return { isOurs: false };
+  const apiBase = match[2] ? match[1] + match[2] : match[1] + '/api';
+  return { isOurs: true, config64: match[3], apiBase };
+}
+```
+
+* **Planner scenario**: `planner-scenario.ts` (decode base64 config from endpoint)
+
+Change:
+
+```ts
+private decodeConfig64FromEndpoint(): { scenarioId?: string; startingAgentId?: string; apiBase: string } | null {
+  try {
+    const url = this.deps.getEndpoint();
+    const m = url.match(/^(https?:\/\/[^\/]+)(?:\/api)?\/bridge\/([^\/]+)\/(a2a|mcp|rest)/);
+    if (!m) return { apiBase: this.deps.getApiBase() };
+    const apiBase = `${m[1]}/api`;
+    const encoded = m[2]!;
+    // ... (unchanged base64url decode)
+    // returns { scenarioId, startingAgentId, apiBase }
+  } catch { return { apiBase: this.deps.getApiBase() }; }
+}
+```
+
+* **ConnectionStep.tsx** (already broadened above for `canOpenWatch`).
+
+---
+
+## 9) Make the planners accept the protocol‑agnostic client
+
+Both planners only used the subset of methods we preserved.
+
+* **Scenario Planner**: `planner-scenario.ts`
+
+  * Change the constructor type import line:
+
+```ts
+// BEFORE
+// import { A2ATaskClient } from "./a2a-task-client";
+// type ScenarioPlannerDeps = { task: A2ATaskClient; ... }
+// AFTER
+import type { TaskClientLike } from './protocols/task-client';
+type ScenarioPlannerDeps = {
+  task: TaskClientLike;
+  // ... (rest unchanged)
+};
+```
+
+* **Classic Planner**: `planner.ts`
+
+  * Change the type import similarly:
+
+```ts
+// BEFORE
+// import { A2ATaskClient } from "./a2a-task-client";
+// export type PlannerDeps = { task: A2ATaskClient; ... }
+// AFTER
+import type { TaskClientLike } from "./protocols/task-client";
+export type PlannerDeps = {
+  task: TaskClientLike;
+  // ... (rest unchanged)
+};
+```
+
+Nothing else in those files needs to change because they only use the normalized methods (`getTaskId`, `getStatus`, `startNew`, `send`, `on('new-task', ...)`) and we kept the **A2A‑shaped snapshot** (`A2ATask`) across adapters.
+
+---
+
+## 10) Wire props through StepFlow call in `App.tsx`
+
+(Already shown in §5e/§7.)
+
+---
+
+## What you can do next
+
+* If you want **attachments with bytes on MCP replies**, extend your server’s `check_replies` to include a `content` field per attachment (or add a `get_attachment(docId)` tool) and have `McpTaskClient` fill the `file.bytes` or `file.uri`; the UI will start showing clickable attachments automatically.
+* If you’d like **“Open in Watch”** for MCP/REST, add equivalent viewer routes and gate the link by `protocol`.
+
+---
+
+## Why this works well
+
+* The **UI doesn’t care** which protocol runs underneath; adapters normalize to your existing `A2ATask` shape and event.
+* MCP is **fully supported** via three tool calls and a small long‑poll loop.
+* Adding **more protocols** later is just “one more adapter” implementing `TaskClientLike`.
+
+If you want, I can also add a tiny **mock REST server** spec document (OpenAPI snippet) to match the `RestTaskClient` here so devs can scaffold it quickly.
+

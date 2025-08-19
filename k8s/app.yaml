@@ -33,6 +33,7 @@ data:
 #   kubectl -n interop create secret generic app-secrets \
 #     --from-literal=OPENROUTER_API_KEY=your-key \
 #     --from-literal=GEMINI_API_KEY=your-key \
+#     --from-literal=PUBLISHED_EDIT_TOKEN=your-token \
 #     --dry-run=client -o yaml | kubectl apply -f -
 #
 # Example (commented out):
@@ -45,6 +46,7 @@ data:
 # stringData:
 #   GEMINI_API_KEY: ""
 #   OPENROUTER_API_KEY: ""
+#   PUBLISHED_EDIT_TOKEN: ""
 ---
 apiVersion: apps/v1
 kind: Deployment

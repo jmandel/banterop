@@ -10,6 +10,7 @@ Your secret `app-secrets` exists but has empty values (0 bytes) for the API keys
 kubectl -n interop create secret generic app-secrets \
   --from-literal=OPENROUTER_API_KEY='sk-or-v1-xxxxx' \
   --from-literal=GEMINI_API_KEY='' \
+  --from-literal=PUBLISHED_EDIT_TOKEN='your-shared-edit-token' \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
@@ -29,9 +30,12 @@ kubectl -n interop edit secret app-secrets
 # Set your key in a variable
 OPENROUTER_KEY="sk-or-v1-your-actual-key-here"
 
-# Patch the secret
-kubectl -n interop patch secret app-secrets -p \
-  '{"data":{"OPENROUTER_API_KEY":"'$(echo -n $OPENROUTER_KEY | base64)'"}}'
+# Patch the secret (OpenRouter)
+kubectl -n interop patch secret app-secrets -p '{"data":{"OPENROUTER_API_KEY":"'$(echo -n $OPENROUTER_KEY | base64)'"}}'
+
+# Patch the secret (Published Edit Token)
+EDIT_TOKEN="my-shared-token"
+kubectl -n interop patch secret app-secrets -p '{"data":{"PUBLISHED_EDIT_TOKEN":"'$(echo -n $EDIT_TOKEN | base64)'"}}'
 ```
 
 ## Verify Secret is Set
@@ -42,6 +46,9 @@ kubectl -n interop describe secret app-secrets
 
 # Decode and check (BE CAREFUL - this shows the actual key!)
 kubectl -n interop get secret app-secrets -o jsonpath='{.data.OPENROUTER_API_KEY}' | base64 -d
+
+# Check edit token (optional)
+kubectl -n interop get secret app-secrets -o jsonpath='{.data.PUBLISHED_EDIT_TOKEN}' | base64 -d
 ```
 
 ## Apply the Updated Deployment

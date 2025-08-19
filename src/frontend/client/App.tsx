@@ -453,7 +453,7 @@ export default function App() {
   // Keep summarizer model ref in sync
   useEffect(() => { summarizerModelRef.current = summarizerModel; }, [summarizerModel]);
 
-  // Apply prefilled agent selections once agents are known
+  // Apply prefilled agent selections once agents are known, without clobbering saved tool choices
   useEffect(() => {
     if (!scenarioAgents.length) return;
     let planner = selectedPlannerAgentId;
@@ -468,17 +468,27 @@ export default function App() {
     if (!counterpart && scenarioAgents.length >= 2) counterpart = scenarioAgents.find(a => a !== planner) || scenarioAgents[1];
     if (planner && planner !== selectedPlannerAgentId) setSelectedPlannerAgentId(planner);
     if (counterpart && counterpart !== selectedCounterpartAgentId) setSelectedCounterpartAgentId(counterpart);
-    // Initialize enabled tools for preselected planner
+    // Initialize enabled tools for preselected planner ONLY if no saved selection exists
     try {
       const cfg = scenarioConfig as any;
       const agent = cfg?.agents?.find((a: any) => a?.agentId === planner);
       const tools: string[] = Array.isArray(agent?.tools)
         ? agent.tools.map((t: any) => String(t?.toolName || t?.name || '')).filter(Boolean)
         : [];
-      setEnabledTools(tools);
+      const url = scenarioUrl.trim();
+      let hasSaved = false;
+      if (url && planner) {
+        try {
+          const savedRaw = localStorage.getItem(scenarioToolsKey(url, planner));
+          hasSaved = !!savedRaw;
+        } catch {}
+      }
+      if (!hasSaved && enabledTools.length === 0) {
+        setEnabledTools(tools);
+      }
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scenarioAgents]);
+  }, [scenarioAgents, enabledTools.length]);
 
   const handleConnect = async (endpointUrl: string, proto: Protocol) => {
     // Cancel any ongoing tasks when endpoint changes
@@ -762,6 +772,14 @@ export default function App() {
         try { await handleConnect(ep, protocol); } catch {}
       }
     }
+
+    // After reset, if a scenario URL is set, refetch it to pick up
+    // any updates while preserving stored role/tool selections.
+    try {
+      if (scenarioUrl && scenarioUrl.trim()) {
+        await onLoadScenarioUrl();
+      }
+    } catch {}
   };
 
   // UI handler for the Reset button: clear + immediate reconnect for a fresh planner
@@ -780,7 +798,7 @@ export default function App() {
     const url = scenarioUrl.trim();
     if (!url) return;
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { cache: 'no-cache', headers: { 'Cache-Control': 'no-cache' } });
       if (!res.ok) throw new Error(`Scenario fetch failed: ${res.status}`);
       const j = await res.json();
       const cfg = j?.config ?? j;
@@ -879,6 +897,14 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedScenarioUrl]);
+
+  // Ensure scenario is (re)fetched after connect/reset when a URL is present
+  useEffect(() => {
+    if (model.connected && debouncedScenarioUrl && debouncedScenarioUrl.trim()) {
+      onLoadScenarioUrl();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model.connected]);
 
   
 
