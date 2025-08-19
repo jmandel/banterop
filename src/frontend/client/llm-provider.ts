@@ -1,5 +1,6 @@
 import type { LLMProvider, LLMStepContext, ToolCall } from "./llm-types";
 import { SYSTEM_PREAMBLE } from "./planner-instructions";
+import { API_BASE } from './api-base';
 
 function apiBase(): string {
   const win = (globalThis as any)?.window;
@@ -228,7 +229,7 @@ export class ServerLLMProvider implements LLMProvider {
     if (model) body.model = model;
 
     // Robust request with up to 3 retries on transient failures
-    const url = `${apiBase()}/llm/complete`;
+    const url = `${API_BASE}/llm/complete`;
     const maxAttempts = 4; // Allow up to 3 retries for JSON parsing or network failures
     let lastErr: any = null;
     
@@ -238,7 +239,6 @@ export class ServerLLMProvider implements LLMProvider {
         const res = await fetch(url, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          credentials: "include",
           body: JSON.stringify(body),
         });
         if (!res.ok) {

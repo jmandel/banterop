@@ -41,19 +41,9 @@ export function ScenarioEditor({
             ) : (
               <>
                 <Button as="a" href={`#/scenarios/${scenarioId}/edit`} size="sm" variant="secondary">Edit</Button>
-                <DropdownButton
-                  label="Run"
-                  buttonClassName="bg-[color:var(--primary)] text-[color:var(--primary-foreground)] text-xs"
-                  options={Object.values(RUN_MODES).map(mode => ({
-                    label: mode.label,
-                    value: mode.value,
-                    description: mode.description,
-                    disabled: mode.disabled
-                  }))}
-                  onSelect={(mode) => {
-                    navigate(`/scenarios/${scenarioId}/run?mode=${mode}`);
-                  }}
-                />
+                <Button size="sm" onClick={() => navigate(`/scenarios/${scenarioId}/run`)}>
+                  Run
+                </Button>
               </>
             )}
           </div>

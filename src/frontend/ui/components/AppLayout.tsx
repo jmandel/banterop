@@ -18,6 +18,9 @@ export function AppLayout({
   headerRight,
   fullWidth = false
 }: AppLayoutProps) {
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const toggleMenu = () => setMenuOpen(v => !v);
+  const closeMenu = () => setMenuOpen(false);
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
       {/* Header */}
@@ -29,16 +32,35 @@ export function AppLayout({
           </div>
           
           {breadcrumbs && (
-            <nav className="flex items-center gap-2 text-sm">
+            <nav className="hidden md:flex items-center gap-2 text-sm">
               {breadcrumbs}
             </nav>
           )}
           
-          {headerRight && (
-            <div className="flex items-center gap-4">
-              {headerRight}
+          <div className="flex items-center gap-2">
+            {headerRight && (
+              <div className="hidden sm:flex items-center gap-4">
+                {headerRight}
+              </div>
+            )}
+            {/* Hamburger menu (mobile + desktop) */}
+            <div className="relative">
+              <button
+                aria-label="Open menu"
+                className="inline-flex items-center justify-center w-10 h-10 rounded-full border border-gray-200 bg-white text-gray-700 hover:bg-gray-100"
+                onClick={toggleMenu}
+              >
+                <span className="text-xl leading-none">☰</span>
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 mt-2 w-48 rounded-lg border border-gray-200 bg-white shadow-lg z-40">
+                  <a href="/" onClick={closeMenu} className="block px-3 py-2 text-sm text-gray-800 hover:bg-gray-50">Scenarios</a>
+                  <a href="/watch/" onClick={closeMenu} className="block px-3 py-2 text-sm text-gray-800 hover:bg-gray-50">Watch</a>
+                  <a href="/client/" onClick={closeMenu} className="block px-3 py-2 text-sm text-gray-800 hover:bg-gray-50">Client</a>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
       </header>
 
@@ -85,4 +107,3 @@ export function AppLayout({
     </div>
   );
 }
-

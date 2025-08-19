@@ -176,19 +176,12 @@ export function ScenarioLandingPage() {
                 <div className="flex gap-2 items-center">
                   <a href={`#/scenarios/${scenario.config.metadata.id}`} className="inline-flex items-center justify-center gap-2 px-2 py-1 text-xs border border-[color:var(--border)] rounded-2xl bg-[color:var(--panel)]" style={{ minHeight: '28px' }}>View</a>
                   <a href={`#/scenarios/${scenario.config.metadata.id}/edit`} className="inline-flex items-center justify-center gap-2 px-2 py-1 text-xs border border-[color:var(--border)] rounded-2xl bg-[color:var(--panel)]" style={{ minHeight: '28px' }}>Edit</a>
-                  <DropdownButton
-                    label="Run"
-                    buttonClassName="bg-[color:var(--primary)] text-[color:var(--primary-foreground)]"
-                    options={Object.values(RUN_MODES).map(mode => ({
-                      label: mode.label,
-                      value: mode.value,
-                      description: mode.description,
-                      disabled: mode.disabled
-                    }))}
-                    onSelect={(mode) => {
-                      navigate(`/scenarios/${scenario.config.metadata.id}/run?mode=${mode}`);
-                    }}
-                  />
+                  <button
+                    className="inline-flex items-center justify-center gap-2 px-2 py-1 text-xs rounded-2xl bg-[color:var(--primary)] text-[color:var(--primary-foreground)]"
+                    onClick={() => navigate(`/scenarios/${scenario.config.metadata.id}/run`)}
+                  >
+                    Run
+                  </button>
                 </div>
               </Card>
             ))

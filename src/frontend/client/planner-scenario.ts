@@ -6,7 +6,7 @@ import type { TaskClientLike } from "./protocols/task-client";
 import { AttachmentVault } from "./attachments-vault";
 import { ToolSynthesisService } from '$src/agents/services/tool-synthesis.service';
 import { parseBridgeEndpoint } from './bridge-endpoint';
-import { BrowserLLMProvider } from './browser-llm-provider';
+import { BrowsersideLLMProvider } from '$src/llm/providers/browserside';
 
 // Minimal types to keep this self-contained on the browser side
 type ScenarioConfiguration = {
@@ -79,6 +79,7 @@ export class ScenarioPlannerV2 {
   private listeners = new Set<(e: UnifiedEvent) => void>();
   private documents = new Map<string, { name: string; contentType: string; content?: string; summary?: string }>();
   private oracle: ToolSynthesisService | null = null;
+  private llmProvider: BrowsersideLLMProvider | null = null;
   private taskOff: (() => void) | null = null;
 
   constructor(private deps: ScenarioPlannerDeps) {}
@@ -230,8 +231,14 @@ export class ScenarioPlannerV2 {
       } catch (e: any) {
         try {
           const msg = String(e?.message || e || 'Planner error');
-          console.warn('[PlannerTick] error:', msg);
-          this.deps.onSystem('— agent planning encountered an error; please try again.');
+          const stack = String(e?.stack || '');
+          console.error('[PlannerTick] error:', e);
+          // Record an internal trace event with structured error details (shown in Event Log)
+          this.pushEvent({
+            type: 'trace',
+            agentId: this.deps.getPlannerAgentId() || this.myAgentId || 'planner',
+            payload: { type: 'error', message: msg, stack: stack.slice(0, 2000) }
+          });
         } catch {}
       } finally {
         this.busy = false;
@@ -318,6 +325,15 @@ export class ScenarioPlannerV2 {
         const args = ev.payload?.args || {};
         const fname = String(res?.name || args?.name || '').trim();
         if (!fname) throw new Error('read_attachment event missing filename');
+        if (res?.ok === false) throw new Error(`read_attachment failed: ${res?.reason || 'unknown reason'}`);
+
+        // Synthesize a tool_call for readAttachment before showing the result
+        try {
+          const reasoning = typeof ev.payload?.reasoning === 'string' ? ev.payload.reasoning : '';
+          const callBody = { reasoning, action: { tool: 'readAttachment', args: { name: fname } } };
+          lines.push(`<tool_call>${JSON.stringify(callBody)}</tool_call>`);
+        } catch {}
+
         let content: string | undefined;
         const doc = this.documents.get(fname);
         if (doc && typeof doc.content === 'string') content = doc.content;
@@ -539,35 +555,21 @@ export class ScenarioPlannerV2 {
   }
 
   private async callLLM(prompt: string): Promise<{ content: string }> {
-    // Do not constrain max tokens; let server/provider defaults apply
-    const body: any = {
+    // Route completions through the shared Browserside provider
+    const api = this.deps.getApiBase();
+    const serverUrl = api.replace(/\/api$/, '');
+    if (!this.llmProvider) {
+      this.llmProvider = new BrowsersideLLMProvider({ provider: 'browserside', serverUrl });
+    }
+    const resp = await this.llmProvider.complete({
       messages: [
-        { role: "system", content: "You are a turn-based agent planner. Respond with JSON only." },
-        { role: "user", content: prompt }
+        { role: 'system', content: 'You are a turn-based agent planner. Respond with JSON only.' },
+        { role: 'user', content: prompt },
       ],
       temperature: 0.2,
-    };
-    const url = `${this.deps.getApiBase()}/llm/complete`;
-    const delays = [300, 800];
-    let lastErr: any = null;
-    for (let attempt = 0; attempt < delays.length + 1; attempt++) {
-      try {
-        const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify(body) });
-        if (res.ok) {
-          const j = await res.json();
-          const text = String(j?.content ?? "");
-          return { content: text };
-        }
-        let msg = `LLM ${res.status}`;
-        try { const j = await res.json(); if (j && (j.error || j.message)) msg = String(j.error || j.message); } catch {}
-        lastErr = new Error(msg);
-      } catch (e: any) {
-        lastErr = e;
-      }
-      if (attempt < delays.length) await new Promise(r => setTimeout(r, delays[attempt]));
-    }
-    try { this.deps.onSystem('— having trouble reaching the LLM provider; please try again in a moment.'); } catch {}
-    throw lastErr || new Error('LLM provider unavailable');
+      loggingMetadata: {},
+    } as any);
+    return { content: String(resp?.content ?? '') };
   }
 
   private parseAction(text: string): { reasoning: string; tool: string; args: any } {
@@ -757,7 +759,12 @@ export class ScenarioPlannerV2 {
       this.pushEvent({ type: "tool_call", agentId: this.deps.getPlannerAgentId() || this.myAgentId || "planner", payload: { name: tool, args, callId, reasoning } });
       try {
         setThinking(true);
-        if (!this.oracle) this.oracle = new ToolSynthesisService(new BrowserLLMProvider({ provider: 'browserside' }));
+        if (!this.oracle) {
+          const api = this.deps.getApiBase();
+          const serverUrl = api.replace(/\/api$/, '');
+          const provider = new BrowsersideLLMProvider({ provider: 'browserside', serverUrl });
+          this.oracle = new ToolSynthesisService(provider);
+        }
         const sc: any = this.scenario;
         const plannerId = this.deps.getPlannerAgentId?.() || this.myAgentId || '';
         const agentDef = Array.isArray(sc?.agents) ? sc.agents.find((a: any) => a?.agentId === plannerId) : null;

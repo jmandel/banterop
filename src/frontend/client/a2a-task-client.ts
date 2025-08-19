@@ -220,14 +220,27 @@ export class A2ATaskClient {
       }
     }
     const repairedHistory = [...missingFromIncoming, ...incomingHistory];
+    // De-duplicate by messageId while preserving order (prefer first occurrence)
+    const seenIds = new Set<string>();
+    const dedupHistory: A2AMessage[] = [] as any;
+    for (const m of repairedHistory) {
+      const id = String(m?.messageId || '');
+      if (!id) { dedupHistory.push(m as any); continue; }
+      if (seenIds.has(id)) {
+        try { console.warn('[TaskClient] dropping duplicate messageId in history', { taskId: newTask.id, messageId: id }); } catch {}
+        continue;
+      }
+      seenIds.add(id);
+      dedupHistory.push(m as any);
+    }
 
     const knownMessages = new Map(prev?.knownMessages ?? []);
-    for (const m of repairedHistory) knownMessages.set(m.messageId, m);
+    for (const m of dedupHistory) knownMessages.set(m.messageId, m);
 
-    const canonicalIds = new Set(repairedHistory.map(m => m.messageId));
+    const canonicalIds = new Set(dedupHistory.map(m => m.messageId));
     const snapshot: A2ATask = {
       ...newTask,
-      history: repairedHistory,
+      history: dedupHistory,
       status: { ...(newTask.status ?? {}), state: newStatus } as any,
     };
 

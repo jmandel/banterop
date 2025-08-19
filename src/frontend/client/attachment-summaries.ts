@@ -1,10 +1,5 @@
 import { AttachmentVault } from "./attachments-vault";
-
-function apiBase(): string {
-  const win = (globalThis as any)?.window;
-  const fromWin = win?.__APP_CONFIG__?.API_BASE;
-  return typeof fromWin === "string" && fromWin ? fromWin : "http://localhost:3000/api";
-}
+import { API_BASE } from './api-base';
 async function llmSummarize(model: string | undefined, prompt: string): Promise<{ summary: string; keywords: string[] }> {
   const body: any = {
     messages: [
@@ -15,7 +10,7 @@ async function llmSummarize(model: string | undefined, prompt: string): Promise<
     temperature: 0.2,
   };
   if (model) body.model = model;
-  const url = `${apiBase()}/llm/complete`;
+  const url = `${API_BASE}/llm/complete`;
   const maxAttempts = 3; // initial + 2 retries
   let j: any = null;
   let lastErr: any = null;
@@ -24,7 +19,6 @@ async function llmSummarize(model: string | undefined, prompt: string): Promise<
       const res = await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        credentials: "include",
         body: JSON.stringify(body),
       });
       if (!res.ok) {

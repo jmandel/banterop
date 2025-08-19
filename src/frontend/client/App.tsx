@@ -9,6 +9,8 @@ import type { UnifiedEvent as PlannerUnifiedEvent } from "./components/EventLogV
 import { EventLogView } from "./components/EventLogView";
 import { StepFlow } from "./components/StepFlow/StepFlow";
 import { ScenarioPlannerV2 } from "./planner-scenario";
+import { API_BASE } from './api-base';
+import { listMcpTools } from './protocols/mcp-utils';
 import { createTaskClient, detectProtocolFromUrl, type Protocol } from "./protocols";
 import type { TaskClientLike } from "./protocols/task-client";
 import { useDebounce } from "./useDebounce";
@@ -426,7 +428,7 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const base = (window as any)?.__APP_CONFIG__?.API_BASE || "http://localhost:3000/api";
+        const base = API_BASE;
         const res = await fetch(`${base}/llm/providers`);
         if (!res.ok) return;
         const list = await res.json();
@@ -523,6 +525,28 @@ export default function App() {
     const updateAgentLogFromTask = () => {
       const t = taskRef.current?.getTask();
       const hist = t?.history || [];
+      // Detect duplicate messageIds in a single snapshot to surface upstream data issues
+      try {
+        const seen = new Map<string, number[]>();
+        hist.forEach((m: any, idx: number) => {
+          const id = String(m?.messageId || '');
+          if (!id) return;
+          const arr = seen.get(id) || [];
+          arr.push(idx);
+          seen.set(id, arr);
+        });
+        const dups = Array.from(seen.entries()).filter(([, idxs]) => idxs.length > 1);
+        if (dups.length) {
+          const detail = dups.map(([id, idxs]) => ({ id, positions: idxs, roles: idxs.map(i => hist[i]?.role) }));
+          console.error('[AgentLog] Duplicate messageId(s) detected in task history', { taskId: t?.id, duplicates: detail, historyLen: hist.length });
+          // Throw to make this loud during development; React error overlay + console captures context
+          throw new Error(`Duplicate messageId detected in task ${t?.id}: ${detail.map(d => d.id).join(', ')}`);
+        }
+      } catch (e) {
+        // Intentionally rethrow after logging for visibility
+        throw e;
+      }
+
       const entries: AgentLogEntry[] = hist.map((m) => {
         const text = (m.parts || []).filter((p: any) => p?.kind === 'text').map((p: any) => p.text).join('\n') || '';
         const atts = (m.parts || []).filter((p:any)=>p?.kind==='file' && p?.file).map((p:any)=>({ name: String(p.file.name||'attachment'), mimeType: String(p.file.mimeType||'application/octet-stream'), bytes: p.file.bytes, uri: p.file.uri }));
@@ -546,6 +570,14 @@ export default function App() {
           const msgId = String(m.messageId || '');
           if (!msgId || mirroredAgentIdsRef.current.has(msgId)) continue;
           const parts = Array.isArray(m.parts) ? m.parts : [];
+          try {
+            const attNames = parts
+              .filter((p: any) => p?.kind === 'file' && p?.file)
+              .map((p: any) => String(p.file?.name || 'attachment'));
+            if (attNames.length) {
+              console.log('[AgentMessage] Received agent message', { taskId: t?.id, messageId: msgId, attachmentCount: attNames.length, attachments: attNames });
+            }
+          } catch {}
           let mirrored = false;
           for (const p of parts) {
             if (p?.kind === 'file' && p?.file) {
@@ -554,6 +586,10 @@ export default function App() {
               const bytes = typeof p.file.bytes === 'string' ? p.file.bytes : '';
               try {
                 const rec = vaultRef.current.addFromAgent(name, mimeType, bytes || '');
+                try {
+                  const size = bytes ? atob(bytes).length : 0;
+                  console.log('[Vault] Mirrored agent attachment into vault', { name: rec.name, mimeType: rec.mimeType, size });
+                } catch {}
                 mirrored = true;
                 // Auto-summarize new agent attachments if no summary present
                 if (!rec.summary) {
@@ -634,8 +670,8 @@ export default function App() {
       (async () => {
         setCardLoading(true);
         try {
-          const base = endpointUrl.replace(/\/+$/, "");
-          const res = await fetch(`${base}/.well-known/agent-card.json`, { credentials: "include" });
+        const base = endpointUrl.replace(/\/+$/, "");
+        const res = await fetch(`${base}/.well-known/agent-card.json`);
           if (!res.ok) throw new Error(`Agent card fetch failed: ${res.status}`);
           setCard(await res.json());
         } catch (e: any) {
@@ -648,7 +684,6 @@ export default function App() {
       (async () => {
         setCardLoading(true);
         try {
-          const { listMcpTools } = await import('./protocols/mcp-utils');
           const names = await listMcpTools(endpointUrl);
           const required = ['begin_chat_thread','send_message_to_chat_thread','check_replies'];
           const missing = required.filter(n => !names.includes(n));
@@ -710,7 +745,7 @@ export default function App() {
   const startPlanner = (preloadedEvents?: PlannerUnifiedEvent[]) => {
     if (scenarioPlannerRef.current) return;
     const task = taskRef.current!;
-    const getApiBase = () => (window as any)?.__APP_CONFIG__?.API_BASE || "http://localhost:3000/api";
+    const getApiBase = () => API_BASE;
     const orch = new ScenarioPlannerV2({
       task,
       vault: vaultRef.current,
@@ -1023,7 +1058,7 @@ const onAttachFiles = async (files: FileList | null) => {
         return;
       }
       if (uri) {
-        const base = (window as any)?.__APP_CONFIG__?.API_BASE || 'http://localhost:3000/api';
+        const base = API_BASE;
         const full = uri.startsWith('http') ? uri : `${base}${uri}`;
         window.open(full, '_blank');
         return;
@@ -1036,7 +1071,7 @@ const onAttachFiles = async (files: FileList | null) => {
   // Deprecated: external scenario detector is no longer used to populate instructions
 
   return (
-    <AppLayout title="Conversational Interop Client">
+    <AppLayout title="Conversational Client">
       <div className="w-full">
           
           {/* Main Step Flow Section */}

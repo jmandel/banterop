@@ -128,16 +128,38 @@ export function RunWizardPage() {
         {/* Step 1: Role */}
         <Card className="space-y-3">
           <CardHeader title="Step 1: Choose Your Role" />
-          <div className="text-sm text-slate-600">Which agent will you represent?</div>
+          {cfg?.metadata?.description && (
+            <div className="text-sm text-slate-700">{cfg.metadata.description}</div>
+          )}
+          <div className="text-sm text-slate-600">Which agent will you provide?</div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {agentIds.map((id) => (
-              <label key={id} className={`p-3 rounded-lg border-2 cursor-pointer ${role === id ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}>
-                <div className="flex items-center gap-2">
-                  <input type="radio" name="role" checked={role === id} onChange={() => setRole(id)} />
-                  <div className="font-medium">{id}</div>
-                </div>
-              </label>
-            ))}
+            {agentIds.map((id) => {
+              const a = (scenario?.config?.agents || []).find((x: any) => x.agentId === id) || {};
+              const principal = a?.principal || {};
+              const principalLine = [principal?.name, principal?.type].filter(Boolean).join(' • ');
+              const situation: string = (a?.situation || '').toString();
+              const situationShort = situation ? (situation.length > 140 ? situation.slice(0, 140) + '…' : situation) : '';
+              const toolNames: string[] = Array.isArray(a?.tools) ? a.tools.map((t: any) => String(t?.toolName || t?.name || '')).filter(Boolean) : [];
+              return (
+                <label key={id} className={`p-3 rounded-lg border-2 cursor-pointer ${role === id ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                  <div className="flex items-center gap-2">
+                    <input type="radio" name="role" checked={role === id} onChange={() => setRole(id)} />
+                    <div className="font-medium">{id}</div>
+                  </div>
+                  {principalLine && (
+                    <div className="text-xs text-slate-600 mt-1">{principalLine}</div>
+                  )}
+                  {principal?.description && (
+                    <div className="text-xs text-slate-600 mt-1">{principal.description}</div>
+                  )}
+                  {toolNames.length > 0 && (
+                    <div className="text-xs text-slate-600 mt-1">
+                      <span className="font-medium">Tools:</span> {toolNames.join(', ')}
+                    </div>
+                  )}
+                </label>
+              );
+            })}
           </div>
         </Card>
 
