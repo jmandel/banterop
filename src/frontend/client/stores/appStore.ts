@@ -4,16 +4,16 @@ import type { Protocol } from '../protocols';
 import type { A2AStatus, A2AMessage, A2APart } from '../a2a-types';
 import type { TaskClientLike } from '../protocols/task-client';
 import type { UnifiedEvent } from '../types/events';
-import type { ScenarioPlannerV2 } from '../planner-scenario';
+import { ScenarioPlanner } from '../planner-scenario';
 // Store is composed from slices; app imports only useAppStore
 import { createConnectionSlice } from './slices/connection.slice';
-import { ScenarioPlannerV2 as PlannerClass } from '../planner-scenario';
 import { AttachmentVault } from '../attachments-vault';
 import { AttachmentSummarizer } from '../attachment-summaries';
 import { StorageService } from '../services/StorageService';
 import { type Protocol as ProtoType } from '../protocols';
 import { refreshPreview as svcRefreshPreview, detectEffectiveProtocol, createClient } from '../services/connection.service';
 import { API_BASE } from '../api-base';
+import { BrowsersideLLMProvider } from '$src/llm/providers/browserside';
 
 // Minimal public shape for the app store. This mirrors SessionManager for now.
 export interface AppState {
@@ -40,7 +40,7 @@ export interface AppState {
   };
 
   planner: {
-    instance: ScenarioPlannerV2 | null;
+    instance: ScenarioPlanner | null;
     started: boolean;
     thinking: boolean;
     eventLog: UnifiedEvent[];
@@ -247,12 +247,15 @@ export const useAppStore = create<AppState>()(
         if (get().planner.instance) return;
         const client = get()._internal.taskClient as TaskClientLike | null;
         if (!client) return;
-        const planner = new PlannerClass({
+        // Provide a shared BrowsersideLLMProvider instance to the planner
+        const provider = new BrowsersideLLMProvider({ provider: 'browserside', apiBase: API_BASE });
+        const planner = new ScenarioPlanner({
           task: client,
           vault: get()._internal.vault,
           getApiBase: () => API_BASE,
           getEndpoint: () => get().connection.endpoint,
           getModel: () => get().planner.model,
+          getLLMProvider: () => provider,
           getPlannerAgentId: () => get().scenario.selectedAgents.planner,
           getCounterpartAgentId: () => get().scenario.selectedAgents.counterpart,
           getScenarioConfig: () => get().scenario.config,

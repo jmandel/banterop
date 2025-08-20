@@ -2,13 +2,21 @@ import { LLMProvider, type LLMProviderConfig, type LLMProviderMetadata, type LLM
 
 export class BrowsersideLLMProvider extends LLMProvider {
   static isAvailable(): boolean { return true; }
-  private serverUrl: string;
+  private apiBase: string;
   private cachedModels: string[] | null = null;
   private cachedDefaultModel: string | null = null;
   
-  constructor(config: LLMProviderConfig & { serverUrl?: string }) {
+  constructor(config: LLMProviderConfig & { apiBase?: string; serverUrl?: string }) {
     super(config);
-    this.serverUrl = config.serverUrl || '';
+    // Prefer explicit apiBase; fall back to serverUrl with heuristic
+    if (config.apiBase) {
+      this.apiBase = config.apiBase;
+    } else if (config.serverUrl) {
+      const s = config.serverUrl.replace(/\/$/, '');
+      this.apiBase = s.endsWith('/api') ? s : `${s}/api`;
+    } else {
+      this.apiBase = '';
+    }
   }
   
   static getMetadata(): LLMProviderMetadata {
@@ -34,7 +42,7 @@ export class BrowsersideLLMProvider extends LLMProvider {
       return;
     }
     
-    const response = await fetch(`${this.serverUrl}/api/llm/providers`);
+    const response = await fetch(`${this.apiBase}/llm/providers`);
     if (!response.ok) {
       throw new Error(`Failed to fetch providers from server: ${response.statusText}`);
     }
@@ -58,7 +66,7 @@ export class BrowsersideLLMProvider extends LLMProvider {
   async complete(request: LLMRequest): Promise<LLMResponse> {
     await this.fetchAvailableModels();
     
-    const response = await fetch(`${this.serverUrl}/api/llm/complete`, {
+    const response = await fetch(`${this.apiBase}/llm/complete`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -6,7 +6,7 @@ import type { TaskClientLike } from "./protocols/task-client";
 import { AttachmentVault } from "./attachments-vault";
 import { ToolSynthesisService } from '$src/agents/services/tool-synthesis.service';
 import { parseBridgeEndpoint } from './bridge-endpoint';
-import { BrowsersideLLMProvider } from '$src/llm/providers/browserside';
+import type { LLMProvider } from '$src/types/llm.types';
 import type { UnifiedEvent as StrictEvent, EventType, AttachmentLite } from './types/events';
 import { makeEvent, assertEvent } from './types/events';
 
@@ -23,14 +23,6 @@ type ScenarioConfiguration = {
   }>;
 };
 
-// Legacy event type kept only for replay during migration
-export type LegacyEvent = {
-  seq: number;
-  timestamp: string;
-  type: "agent_message" | "trace" | "planner_ask_user" | "user_reply" | "tool_call" | "tool_result" | "send_to_remote_agent" | "send_to_user" | "read_attachment";
-  agentId: string;
-  payload: any;
-};
 
 type IntraTurnState = {
   thoughts: string[];
@@ -46,6 +38,10 @@ type ScenarioPlannerDeps = {
   getApiBase: () => string; // e.g., http://localhost:3000/api
   // Selected model for planner + summarizer
   getModel?: () => string | undefined;
+
+  // Injected LLM provider (required): generic LLM provider
+  // Planner can run with any implementation (browserside, mock, etc.)
+  getLLMProvider: () => LLMProvider;
 
   // Endpoint URL for A2A; used to decode config64 to find scenario
   getEndpoint: () => string;
@@ -72,7 +68,7 @@ type ScenarioPlannerDeps = {
   onPlannerThinking?: (busy: boolean) => void;
 };
 
-export class ScenarioPlannerV2 {
+export class ScenarioPlanner {
   private running = false;
   private busy = false;
   private pendingTick = false;
@@ -85,7 +81,7 @@ export class ScenarioPlannerV2 {
   private listeners = new Set<(e: StrictEvent) => void>();
   private documents = new Map<string, { name: string; contentType: string; content?: string; summary?: string }>();
   private oracle: ToolSynthesisService | null = null;
-  private llmProvider: BrowsersideLLMProvider | null = null;
+  private llmProvider: LLMProvider | null = null;
   private taskOff: (() => void) | null = null;
 
   constructor(private deps: ScenarioPlannerDeps) {}
@@ -93,7 +89,8 @@ export class ScenarioPlannerV2 {
   // Preload a prior event log (e.g., from persistence) before start()
   loadEvents(events: any[]) {
     try {
-      // Accept strict events only; legacy events are ignored for the unified log but used to rebuild vault
+      // Accept strict events only; legacy events are not supported.
+      // Rebuild vault/doc index solely from strict events.
       const stricts: StrictEvent[] = Array.isArray(events)
         ? (events as any[]).filter(e => e && typeof e === 'object' && typeof (e as any).channel === 'string')
         : [];
@@ -123,26 +120,7 @@ export class ScenarioPlannerV2 {
           }
         }
       }
-      // Also consider legacy events for vault rebuild in case older sessions are loaded
-      const legacy: LegacyEvent[] = Array.isArray(events)
-        ? (events as any[]).filter(e => e && typeof e === 'object' && typeof (e as any).agentId === 'string' && !(e as any).channel)
-        : [];
-      for (const ev of legacy) {
-        if (ev.type === 'tool_result') {
-          try { this.indexDocumentsFromResult((ev as any)?.payload?.result); } catch {}
-        }
-        if (ev.type === 'agent_message') {
-          const atts = Array.isArray((ev as any)?.payload?.attachments) ? (ev as any).payload.attachments : [];
-          for (const a of atts) {
-            try {
-              const name = String(a?.name || '');
-              const mime = String(a?.mimeType || (a as any).contentType || 'application/octet-stream');
-              const bytes = typeof a?.bytes === 'string' ? a.bytes : '';
-              if (name) this.deps.vault.addFromAgent(name, mime, bytes);
-            } catch {}
-          }
-        }
-      }
+      // Legacy event replay removed
     } catch {}
   }
 
@@ -278,6 +256,10 @@ export class ScenarioPlannerV2 {
     // Always allow tick right after a user message to the planner
     const lastEv = this.eventLog[this.eventLog.length - 1] as any;
     if (lastEv && lastEv.type === 'message' && lastEv.channel === 'user-planner') return true;
+    // Also allow immediate follow-ups after planner-local actions (tool events)
+    if (lastEv && lastEv.author === 'planner' && (lastEv.type === 'tool_call' || lastEv.type === 'tool_result' || lastEv.type === 'read_attachment')) {
+      return true;
+    }
     // Otherwise, allow only when input is required
     return st === 'input-required';
   }
@@ -634,12 +616,8 @@ export class ScenarioPlannerV2 {
   }
 
   private async callLLM(prompt: string): Promise<{ content: string }> {
-    // Route completions through the shared Browserside provider with simple retries
-    const api = this.deps.getApiBase();
-    const serverUrl = api.replace(/\/api$/, '');
-    if (!this.llmProvider) {
-      this.llmProvider = new BrowsersideLLMProvider({ provider: 'browserside', serverUrl });
-    }
+    // Always use injected BrowsersideLLMProvider; no local instantiation.
+    this.llmProvider = this.deps.getLLMProvider();
     const maxAttempts = 3;
     let lastErr: any = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -816,15 +794,13 @@ export class ScenarioPlannerV2 {
     const canSendRemote = !lastSt || statusNow === 'input-required';
 
     if (tool === "sleep") {
-      // No args; wait briefly and rely on event-driven wakeups
-      await new Promise(r => setTimeout(r, 150));
       return;
     }
 
     if (tool === "sendMessageToUser" || tool === "askUser") {
       const q = String(args?.text || args?.question || "").trim();
       if (q) {
-        this.emit({ type: 'message', channel: 'user-planner', author: 'planner', payload: { text: q } } as any);
+        this.emit({ type: 'message', channel: 'user-planner', author: 'planner', payload: { text: q }, reasoning } as any);
         try { this.deps.onAskUser(q); } catch {}
       }
       // Run another tick to keep momentum after notifying the user
@@ -839,7 +815,7 @@ export class ScenarioPlannerV2 {
       const payload = ok
         ? { name, ok: true, size: a!.size, truncated: !!a!.summary, text_excerpt: a!.summary || undefined }
         : { name, ok: false };
-      this.emit({ type: 'read_attachment', channel: 'tool', author: 'planner', payload } as any);
+      this.emit({ type: 'read_attachment', channel: 'tool', author: 'planner', payload, reasoning } as any);
       this.maybeTick();
       return;
     }
@@ -849,7 +825,7 @@ export class ScenarioPlannerV2 {
       if (summary) {
         try { this.deps.onSystem(`Planner done: ${summary}`); } catch {}
         // Also surface as trace in the log
-        this.emit({ type: 'trace', channel: 'system', author: 'system', payload: { text: `Planner done: ${summary}` } } as any);
+        this.emit({ type: 'trace', channel: 'system', author: 'system', payload: { text: `Planner done: ${summary}` }, reasoning } as any);
       }
       // Disable further ticks for this planner instance
       this.finished = true;
@@ -882,7 +858,7 @@ export class ScenarioPlannerV2 {
         return;
       }
       // Emit unified message event to planner-agent channel (author planner)
-      this.emit({ type: 'message', channel: 'planner-agent', author: 'planner', payload: { text, attachments: atts && atts.length ? atts.map((a: any)=>({ name: String(a.name), mimeType: String(a.mimeType || 'application/octet-stream') })) : undefined } } as any);
+      this.emit({ type: 'message', channel: 'planner-agent', author: 'planner', payload: { text, attachments: atts && atts.length ? atts.map((a: any)=>({ name: String(a.name), mimeType: String(a.mimeType || 'application/octet-stream') })) : undefined }, reasoning } as any);
       if (this.deps.task) {
         if (!this.deps.task.getTaskId?.()) await (this.deps.task as any).startNew?.(parts as any);
         else await (this.deps.task as any).send?.(parts as any);
@@ -897,13 +873,11 @@ export class ScenarioPlannerV2 {
     const enabledNames = enabledDefs.map(t => t.name);
     if (enabledNames.includes(tool)) {
       const callId = `call_${Date.now()}`;
-      this.emit({ type: 'tool_call', channel: 'tool', author: 'planner', payload: { name: tool, args } } as any);
+      this.emit({ type: 'tool_call', channel: 'tool', author: 'planner', payload: { name: tool, args }, reasoning } as any);
       try {
         setThinking(true);
         if (!this.oracle) {
-          const api = this.deps.getApiBase();
-          const serverUrl = api.replace(/\/api$/, '');
-          const provider = new BrowsersideLLMProvider({ provider: 'browserside', serverUrl });
+          const provider = this.deps.getLLMProvider();
           this.oracle = new ToolSynthesisService(provider);
         }
         const sc: any = this.scenario;
@@ -930,15 +904,17 @@ export class ScenarioPlannerV2 {
           },
           scenario: sc,
           conversationHistory,
+          omitHistory: true,
+          leadingThought: reasoning || undefined,
         } as any);
         // Log tool_result and index any returned documents
         const filenames = this.indexDocumentsFromResult(result?.output, { toolName: tool });
         this.turnScratch.toolCalls.push({ callId, name: tool, args, result: result?.output });
-        this.emit({ type: 'tool_result', channel: 'tool', author: 'planner', payload: { result: result?.output } } as any);
+        this.emit({ type: 'tool_result', channel: 'tool', author: 'planner', payload: { result: result?.output }, reasoning } as any);
       } catch (e: any) {
         const err = { ok: false, error: String(e?.message ?? e) };
         this.turnScratch.toolCalls.push({ callId, name: tool, args, result: err });
-        this.emit({ type: 'tool_result', channel: 'tool', author: 'planner', payload: { result: err } } as any);
+        this.emit({ type: 'tool_result', channel: 'tool', author: 'planner', payload: { result: err }, reasoning } as any);
       } finally { setThinking(false); }
       // Reconsider planning after any tool_result
       this.maybeTick();

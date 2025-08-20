@@ -17,7 +17,8 @@ export interface LLMConfig {
   googleApiKey?: string | undefined;
   openRouterApiKey?: string | undefined;
   openRouterProviderConfig?: Record<string, unknown> | undefined;
-  serverUrl?: string | undefined;
+  serverUrl?: string | undefined; // legacy; will be treated as apiBase if ends with /api
+  apiBase?: string | undefined;   // preferred explicit API base (e.g., http://localhost:3000/api)
 }
 
 export class LLMProviderManager {
@@ -136,7 +137,7 @@ export class LLMProviderManager {
       provider: providerName, 
       ...(apiKey !== undefined ? { apiKey } : {}),
       ...(config?.model !== undefined ? { model: config.model } : {}),
-      ...(providerName === 'browserside' && this.config.serverUrl ? { serverUrl: this.config.serverUrl } : {}),
+      ...(providerName === 'browserside' && (this.config.apiBase || this.config.serverUrl) ? { apiBase: this.config.apiBase || this.config.serverUrl } : {}),
       ...(providerName === 'openrouter' && this.config.openRouterProviderConfig ? { providerRouting: this.config.openRouterProviderConfig } : {})
     };
     

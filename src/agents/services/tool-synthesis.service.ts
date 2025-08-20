@@ -69,6 +69,8 @@ export interface ToolExecutionInput {
   conversationHistory: string; // include recent window for realism
   conversationId?: string; // For logging metadata
   omitHistory?: boolean; // When true, do not include conversation history in the prompt
+  // Optional: include the planner's immediate reasoning that led to this tool call
+  leadingThought?: string;
 }
 
 export interface ToolExecutionOutput {
@@ -294,6 +296,12 @@ export class ToolSynthesisService {
       metadataBlock,
       '</SCENARIO_METADATA>',
       '',
+      ...(input.leadingThought ? [
+        '<AGENT_THOUGHT_LEADING_TO_TOOL_CALL>',
+        input.leadingThought,
+        '</AGENT_THOUGHT_LEADING_TO_TOOL_CALL>',
+        ''
+      ] : []),
       '<TOOL_INVOCATION>',
       `- name: ${tool.toolName}`,
       `- description: ${tool.description || '(no description provided)'}`,

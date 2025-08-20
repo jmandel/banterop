@@ -41,6 +41,8 @@ export type UnifiedEvent<T extends EventType = EventType> = {
   channel: Channel;
   author: MsgAuthor;
   payload: PayloadByType[T];
+  // Optional reasoning associated with planner LLM decisions leading to this event
+  reasoning?: string;
 };
 
 function isObject(x: unknown): x is Record<string, unknown> {
@@ -163,4 +165,3 @@ export function makeEvent<T extends EventType>(
   assertEvent(ev);
   return ev;
 }
-
