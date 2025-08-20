@@ -81,7 +81,7 @@ REST API
       - `check_replies`
         - Input: `{ conversationId: string, waitMs?: number (default 10000), max?: number (default 200) }`
         - Action: Returns replies since your last external message (messages‑only view).
-        - Result: `{ messages: Array<{ from: string; at: ISOString; text: string; attachments?: Array<{ name: string; contentType: string; summary?: string; docId?: string }> }>, guidance: string, status: 'input_required'|'waiting', conversation_ended: boolean }`
+        - Result: `{ messages: Array<{ from: string; at: ISOString; text: string; attachments?: Array<{ name: string; contentType: string; summary?: string; docId?: string }> }>, guidance: string, status: 'input-required'|'waiting', conversation_ended: boolean }`
     - Notes:
       - Wire type: `conversationId` is a string on the wire (numeric id serialized as string).
       - Envelope: JSON‑RPC results place payload in `result.content[0].text` as JSON string.

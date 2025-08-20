@@ -55,8 +55,22 @@ export function PreLaunchShared({ heading, serverUrlLabel, serverUrl, onCopy, co
       {/* Server URL with big copy button */}
       <div className="p-4 border rounded bg-white space-y-2">
         <div className="text-sm text-slate-600">{serverUrlLabel}</div>
-        <div className="flex items-center gap-3">
-          <div className="font-mono p-2 bg-slate-50 rounded border text-sm truncate grow" title={serverUrl}>{displayUrl(serverUrl)}</div>
+        <div
+          className="flex items-center gap-3"
+          style={{ userSelect: 'none', WebkitUserSelect: 'none', msUserSelect: 'none', MozUserSelect: 'none', WebkitTouchCallout: 'none' } as React.CSSProperties}
+          onMouseDown={(e) => { e.preventDefault(); }}
+          onSelectStart={(e) => { e.preventDefault(); }}
+        >
+          <div
+            className="font-mono p-2 bg-slate-50 rounded border text-sm truncate grow select-none"
+            style={{ userSelect: 'none', WebkitUserSelect: 'none', msUserSelect: 'none', MozUserSelect: 'none', WebkitTouchCallout: 'none' } as React.CSSProperties}
+            onMouseDown={(e) => { e.preventDefault(); }}
+            onSelectStart={(e) => { e.preventDefault(); }}
+            draggable={false}
+            title={serverUrl}
+          >
+            {displayUrl(serverUrl)}
+          </div>
           <button onClick={onCopy} className={`px-3 py-2 rounded text-sm shadow ${copied ? 'bg-green-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
             {copied ? 'Copied!' : 'Copy URL'}
           </button>

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, CardHeader, Button, ModelSelect } from '../../ui';
 import { api } from '../utils/api';
+import { buildBridgeEndpoint } from '../utils/bridgeUrls';
 
 type Protocol = 'a2a' | 'mcp';
 
@@ -350,9 +351,8 @@ export function RunWizardPage() {
               // Simulation mode - direct client launch
               const config64ForSim = encodeBase64Url(buildMeta());
               const base = api.getBaseUrl();
-              const serverUrl = protocol === 'mcp'
-                ? `${base}/api/bridge/${config64ForSim}/mcp`
-                : `${base}/api/bridge/${config64ForSim}/a2a/.well-known/agent-card.json`;
+              const apiBase = `${base}/api`;
+              const { label: endpointLabel, url: serverUrl } = buildBridgeEndpoint(apiBase, protocol, config64ForSim);
               const cfg = (scenario?.config || scenario);
               const agents: string[] = (cfg?.agents || []).map((a: any) => a.agentId);
               const plannerId = startFirst || agents[0] || '';
@@ -372,7 +372,7 @@ export function RunWizardPage() {
                 <div className="space-y-3">
                   <h3 className="text-lg font-semibold text-slate-800">Ready to Launch</h3>
                   <div className="text-sm text-slate-600 bg-white rounded p-3 border border-slate-200">
-                    <div className="font-medium mb-1">Simulation Server Endpoint:</div>
+                    <div className="font-medium mb-1">{endpointLabel}:</div>
                     <div className="font-mono text-xs break-all text-slate-500">{serverUrl}</div>
                   </div>
                   <Button 

@@ -181,7 +181,7 @@ export function ScenarioPluginPage() {
                   — only replies since your last message.
                 </li>
                 <li><code>guidance</code>: short hint (e.g., “Your turn to respond.”).</li>
-                <li><code>status</code>: <code>input_required</code> | <code>waiting</code>.</li>
+                <li><code>status</code>: <code>input-required</code> | <code>waiting</code>.</li>
                 <li><code>conversation_ended</code>: boolean.</li>
               </ul>
             </li>

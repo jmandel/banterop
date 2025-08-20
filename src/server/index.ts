@@ -45,7 +45,14 @@ server.route('/api', createLLMRoutes(appInstance.llmProviderManager));
 server.route('/api/bridge', createBridgeRoutes(appInstance.orchestrator, appInstance.llmProviderManager, appInstance.lifecycleManager));
 
 // A2A bridge under /api/bridge/:config64/a2a
-server.route('/api/bridge', createA2ARoutes(appInstance.orchestrator, appInstance.lifecycleManager));
+server.route(
+  '/api/bridge',
+  createA2ARoutes(
+    appInstance.orchestrator,
+    appInstance.lifecycleManager,
+    appInstance.configManager.publicApiBaseUrl
+  )
+);
 
 // Debug API (read-only) under /api/debug
 server.route('/api/debug', createDebugRoutes(appInstance.orchestrator));

@@ -26,9 +26,9 @@ Below I outline the architecture and then give **drop‑in code**: new adapter f
 | ---------------------------------------------------------------- | ----------------------------------------------- | -------------------- |
 | A2A `submitted/working/input-required/completed/failed/canceled` | unchanged                                       | unchanged            |
 | MCP `check_replies.status = "waiting"`                           | remote composing / waiting                      | `working`            |
-| MCP `check_replies.status = "input_required"`                    | your turn to speak                              | `input-required`     |
+| MCP `check_replies.status = "input-required"`                    | your turn to speak                              | `input-required`     |
 | MCP `conversation_ended = true`                                  | thread ended                                    | `completed`          |
-| REST sample `status`                                             | `waiting / input_required / completed / failed` | mapped the same      |
+| REST sample `status`                                             | `waiting / input-required / completed / failed` | mapped the same      |
 
 ---
 
@@ -267,7 +267,7 @@ export class McpTaskClient implements TaskClientLike {
     const ended = !!obj.conversation_ended;
 
     // Map status
-    this.status = ended ? "completed" : (status === "input_required" ? "input-required" : "working");
+    this.status = ended ? "completed" : (status === "input-required" ? "input-required" : "working");
 
     // Append replies as "agent" messages, de-duped
     for (const m of list) {
@@ -360,7 +360,7 @@ function hashReply(m: any): string {
 >
 > * `POST /threads` → `{ id: string }`
 > * `POST /threads/{id}/messages` with `{ text: string, attachments?: [{ name, mimeType, bytes }] }`
-> * `GET /threads/{id}/events?since=<seq>&waitMs=<ms>` → `{ events: [{ seq, role: "agent"|"user", text, attachments?: [...] , finality?: "turn"|"conversation" }], nextSeq: number, status?: "waiting"|"input_required"|"completed"|"failed" }`
+> * `GET /threads/{id}/events?since=<seq>&waitMs=<ms>` → `{ events: [{ seq, role: "agent"|"user", text, attachments?: [...] , finality?: "turn"|"conversation" }], nextSeq: number, status?: "waiting"|"input-required"|"completed"|"failed" }`
 
 **`src/frontend/a2a-client/protocols/rest-task-client.ts`**
 
@@ -453,7 +453,7 @@ export class RestTaskClient implements TaskClientLike {
     const events = Array.isArray(j?.events) ? j.events : [];
     const nextSeq = Number(j?.nextSeq ?? this.since);
     const st = String(j?.status || "waiting");
-    this.status = st === "input_required" ? "input-required" : st === "completed" ? "completed" : st === "failed" ? "failed" : "working";
+    this.status = st === "input-required" ? "input-required" : st === "completed" ? "completed" : st === "failed" ? "failed" : "working";
 
     for (const e of events) {
       const parts: A2APart[] = [];

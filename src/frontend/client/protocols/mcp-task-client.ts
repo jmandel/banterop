@@ -246,7 +246,7 @@ export class McpTaskClient implements TaskClientLike {
       }
 
       if (ended) this.status = "completed";
-      else if (status === "input_required" || status === "input-required") this.status = "input-required";
+      else if (status === "input-required") this.status = "input-required";
       else if (status === "waiting" || status === "working" || status === "pending") this.status = "working";
 
       this.emitIfChanged(appended > 0);

@@ -139,17 +139,17 @@ export class McpBridgeServer {
         const last = msgs.length ? msgs[msgs.length - 1] : null;
         const ended = snapshot.status === 'completed' || (last && last.finality === 'conversation');
 
-        let status: 'input_required' | 'waiting' | 'completed' = 'waiting';
+        let status: 'input-required' | 'waiting' | 'completed' = 'waiting';
         let guidance = '';
         if (ended) {
           status = 'completed';
           guidance = 'Conversation ended. No further input is expected.';
         } else if (!last) {
-          status = 'input_required';
+          status = 'input-required';
           guidance = `It\'s your turn to begin as ${external}.`;
         } else if (last.finality === 'turn') {
           if (last.agentId !== external) {
-            status = 'input_required';
+            status = 'input-required';
             guidance = `Agent ${last.agentId} finished a turn. It\'s your turn to respond.`;
           } else {
             const others = (convMeta.agents || []).map(a => a.id).filter(id => id !== external);

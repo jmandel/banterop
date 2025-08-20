@@ -9,7 +9,8 @@ import { buildScenarioAgentCard } from '$src/server/bridge/a2a-wellknown';
 
 export function createA2ARoutes(
   orchestrator: OrchestratorService,
-  lifecycle: ServerAgentLifecycleManager
+  lifecycle: ServerAgentLifecycleManager,
+  publicApiBaseUrl?: string
 ) {
   const app = new Hono();
   // Enable CORS for standalone mounts (tests or embedded usage)
@@ -46,8 +47,22 @@ export function createA2ARoutes(
   // Scenario-specific Agent Card (well-known, per-config)
   app.get('/:config64/a2a/.well-known/agent-card.json', (c) => {
     const config64 = c.req.param('config64');
-    const baseUrl = new URL(c.req.url);
-    baseUrl.pathname = baseUrl.pathname.replace(/\/\.well-known\/agent-card\.json$/, '');
+    let baseUrl: URL;
+    try {
+      if (publicApiBaseUrl && typeof publicApiBaseUrl === 'string' && publicApiBaseUrl.trim()) {
+        const trimmed = publicApiBaseUrl.replace(/\/$/, '');
+        baseUrl = new URL(`${trimmed}/bridge/${encodeURIComponent(config64)}/a2a`);
+      } else {
+        // Fallback to deriving from request URL
+        baseUrl = new URL(c.req.url);
+        baseUrl.pathname = baseUrl.pathname.replace(/\/\.well-known\/agent-card\.json$/, '');
+      }
+    } catch {
+      // Ultimate fallback: derive from request URL
+      baseUrl = new URL(c.req.url);
+      baseUrl.pathname = baseUrl.pathname.replace(/\/\.well-known\/agent-card\.json$/, '');
+    }
+
     const card = buildScenarioAgentCard(baseUrl, config64, orchestrator);
     return c.json(card);
   });

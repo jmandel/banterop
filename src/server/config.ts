@@ -8,6 +8,10 @@ const ConfigSchema = z.object({
   // Server
   port: z.number().int().positive().default(3000),
   
+  // Public base URL for this server (e.g., behind a proxy)
+  // If not provided, will default to `http://localhost:${port}/api` at runtime.
+  publicApiBaseUrl: z.string().optional(),
+  
   // Orchestrator
   idleTurnMs: z.number().int().positive().default(120_000),
   maxTurnsDefault: z.number().int().positive().default(40),
@@ -44,6 +48,7 @@ export class ConfigManager {
       
       // Server
       port: process.env.PORT ? Number(process.env.PORT) : undefined,
+      publicApiBaseUrl: process.env.PUBLIC_API_BASE_URL,
       
       // Orchestrator
       idleTurnMs: process.env.IDLE_TURN_MS ? Number(process.env.IDLE_TURN_MS) : undefined,
@@ -97,7 +102,10 @@ export class ConfigManager {
       throw new Error(`Invalid configuration: ${result.error.message}`);
     }
     
-    this.config = result.data;
+    // Apply computed defaults that depend on other fields (e.g., port)
+    const cfg = result.data;
+    const computedPublicBase = cfg.publicApiBaseUrl || `http://localhost:${cfg.port}/api`;
+    this.config = { ...cfg, publicApiBaseUrl: computedPublicBase };
   }
   
   get(): Config {
@@ -111,6 +119,10 @@ export class ConfigManager {
   
   get port(): number {
     return this.config.port;
+  }
+  
+  get publicApiBaseUrl(): string {
+    return this.config.publicApiBaseUrl as string;
   }
   
   get orchestratorConfig() {

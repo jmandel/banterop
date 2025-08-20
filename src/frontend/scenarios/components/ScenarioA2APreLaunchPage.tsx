@@ -3,6 +3,7 @@ import { Card, CardHeader } from '../../ui';
 import { useParams, Link } from 'react-router-dom';
 import { PreLaunchShared } from './PreLaunchShared';
 import { sha256Base64Url } from '$src/lib/hash';
+import { buildBridgeEndpoint } from '../utils/bridgeUrls';
 
 declare const __API_BASE__: string | undefined;
 const API_BASE: string =
@@ -141,10 +142,8 @@ export function ScenarioA2APreLaunchPage() {
     return () => { cancelled = true; };
   }, [hash]);
 
-  const a2aUrl = useMemo(() => (
-    `${API_BASE}/bridge/${config64}/a2a`
-  ), [config64]);
-  const [copiedUrl, copyUrl] = useCopy(a2aUrl);
+  const { label: endpointLabel, url: endpointUrl } = useMemo(() => buildBridgeEndpoint(API_BASE, 'a2a', config64), [config64]);
+  const [copiedUrl, copyUrl] = useCopy(endpointUrl);
 
   const prettyMeta = meta ? JSON.stringify(meta, null, 2) : '';
 
@@ -152,15 +151,15 @@ export function ScenarioA2APreLaunchPage() {
     <>
       <PreLaunchShared
         heading="A2A Pre‑Launch"
-        serverUrlLabel="A2A Server URL"
-        serverUrl={a2aUrl}
+        serverUrlLabel={endpointLabel}
+        serverUrl={endpointUrl}
         onCopy={copyUrl}
         copied={copiedUrl}
         meta={{ scenarioId, startingAgentId: meta?.startingAgentId }}
         hash={hash}
         subState={subState}
         matches={matches}
-        urlNote={<span>Post JSON‑RPC requests to this URL. For streaming, set <code>accept: text/event-stream</code>.</span>}
+        urlNote={<span>Paste this URL into your external client. The card includes the JSON‑RPC base in its <code>url</code> field.</span>}
       />
 
       <div className="p-6 max-w-4xl mx-auto space-y-4">

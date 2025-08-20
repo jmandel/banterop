@@ -110,14 +110,13 @@ export function buildScenarioAgentCard(baseUrlToA2A: URL, config64: string, orch
         outputModes: ['application/json', 'text/plain'],
       },
     ],
-    // Non-normative hint to explain the config64 nature of this card
+    // Simple, non-normative note about origin context
     extensions: [
       {
-        id: 'a2a.config64',
-        name: 'Config64 Binding',
-        description:
-          'This Agent Card is scoped to the ConversationMeta encoded in the URL path.',
-        config64,
+        id: 'interop.reference',
+        name: 'Conversational Interop Reference',
+        description: 'Part of the conversational interop reference implementation.',
+        url: 'https://github.com/jmandel/conversational-interop',
       },
     ],
   };

@@ -174,7 +174,7 @@ describe('MCP Bridge with ConversationMeta config (Phase 2)', () => {
         expect(typeof m.attachments[0].name).toBe('string');
         expect(typeof m.attachments[0].contentType).toBe('string');
       }
-      expect(['input_required','waiting']).toContain(upd.status);
+      expect(['input-required','waiting']).toContain(upd.status);
       expect(typeof upd.guidance).toBe('string');
       expect(typeof upd.conversation_ended).toBe('boolean');
     }
