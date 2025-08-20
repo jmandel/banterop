@@ -4,6 +4,7 @@ import type { OrchestratorService } from '$src/server/orchestrator/orchestrator'
 import type { ServerAgentLifecycleManager } from '$src/server/control/server-agent-lifecycle';
 import type { UnifiedEvent } from '$src/types/event.types';
 import { parseConversationMetaFromConfig64, getStartingAgentId } from '$src/server/bridge/conv-config.types';
+import { mkStructuredMsgId } from '$src/server/bridge/id-utils';
 import { sha256Base64Url } from '$src/lib/hash';
 
 type Deps = {
@@ -496,7 +497,15 @@ export class A2ABridgeServer {
           }
         }
         const clientReq = (e as any)?.payload?.clientRequestId as string | undefined;
-        const outMsgId = isExternal && clientReq ? clientReq : String(e.event);
+        const outMsgId = isExternal && clientReq
+          ? clientReq
+          : mkStructuredMsgId({
+              conversation: snap.conversation,
+              turn: e.turn ?? 0,
+              event: e.event,
+              kind: 'message',
+              agent: e.agentId,
+            });
         return {
           role: isExternal ? 'user' : 'agent',
           parts,
@@ -530,7 +539,13 @@ export class A2ABridgeServer {
             parts.push({ kind: 'file', file: { name: a.name ?? 'attachment', mimeType: a.contentType, bytes } });
           }
         }
-        const outMsgId = String(evt.event);
+        const outMsgId = mkStructuredMsgId({
+          conversation: conversationId,
+          turn: evt.turn ?? 0,
+          event: evt.event,
+          kind: 'message',
+          agent: evt.agentId,
+        });
         const messageObj = {
           role: 'agent',
           parts,
@@ -582,7 +597,13 @@ export class A2ABridgeServer {
       return {
         role: 'agent',
         parts: [{ kind: 'text', text }],
-        messageId: String(evt.event ?? evt.seq ?? `${Date.now()}`),
+        messageId: mkStructuredMsgId({
+          conversation: conversationId,
+          turn: evt.turn ?? 0,
+          event: evt.event ?? evt.seq ?? Date.now(),
+          kind: 'trace',
+          agent: evt.agentId,
+        }),
         taskId: String(conversationId),
         contextId: String(conversationId),
         kind: 'message',

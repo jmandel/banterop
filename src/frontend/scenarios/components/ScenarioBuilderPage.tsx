@@ -9,7 +9,7 @@ import { ScenarioEditor } from './ScenarioEditor';
 import { SaveBar } from './SaveBar';
 import { Button } from '../../ui';
 import { api } from '../utils/api';
-import { createDefaultScenario, createBlankScenario } from '../utils/defaults';
+import { createBlankScenario } from '../utils/defaults';
 import { buildScenarioBuilderPrompt } from '../utils/prompt-builder';
 import { parseBuilderLLMResponse } from '../utils/response-parser';
 import { getCuratedSchemaText, getExampleScenarioText } from '../utils/schema-loader';
@@ -292,26 +292,7 @@ export function ScenarioBuilderPage() {
     navigate(`/scenarios/${id}/edit`);
   };
 
-  const createNewScenario = async () => {
-    const name = prompt('Enter scenario name:');
-    if (!name) return;
-
-    try {
-      const config = createDefaultScenario();
-      const response = await api.createScenario(name, config);
-      if (response.success) {
-        await loadScenarios();
-        navigate(`/scenarios/${response.data.id}/edit`);
-      } else {
-        throw new Error(response.error || 'Failed to create scenario');
-      }
-    } catch (error) {
-      setState(prev => ({
-        ...prev,
-        error: error instanceof Error ? error.message : 'Failed to create scenario'
-      }));
-    }
-  };
+  // Immediate-persist create flow removed; creation happens via blank scenario route
 
   const deleteScenario = async (id: string) => {
     if (!confirm('Are you sure you want to delete this scenario?')) return;

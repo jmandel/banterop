@@ -201,7 +201,13 @@ export const useAppStore = create<AppState>()(
         (async () => {
           const ep = get().connection.endpoint;
           const tid = get()._internal.taskClient?.getTaskId();
-          try { await get()._internal.taskClient?.cancel(); } catch {}
+          try {
+            const st = get().task.status;
+            const canCancel = st === 'submitted' || st === 'working' || st === 'input-required';
+            if (canCancel) {
+              await get()._internal.taskClient?.cancel();
+            }
+          } catch {}
           try { get()._internal.taskClient?.clearLocal(); } catch {}
           try { get()._internal.taskOffs.forEach((fn: any) => fn()); } catch {}
           set((s) => { s._internal.taskOffs = []; s._internal.taskClient = null; });
@@ -219,6 +225,7 @@ export const useAppStore = create<AppState>()(
         })();
       },
       restartScenario: async () => {
+        // Best-effort cancel; proceed regardless of outcome
         try { await get().actions.cancelTask(); } catch {}
         try { await get().actions.refreshPreview(); } catch {}
         try { (get().actions as any).scheduleAutoConnect?.(); } catch {}

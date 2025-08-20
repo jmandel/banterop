@@ -49,7 +49,7 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
   const error = app.connection.error ?? errorProp;
   const onEndpointChange = onEndpointChangeProp ?? ((v: string) => app.actions.setEndpoint(v));
   const onProtocolChange = onProtocolChangeProp ?? ((p: any) => app.actions.setProtocol(p));
-  const onCancelTask = onCancelTaskProp ?? (() => { app.actions.cancelTask(); });
+  const onCancelTask = onCancelTaskProp ?? (() => { app.actions.restartScenario(); });
   // Detect our reference stack (same logic as ScenarioDetector)
   const canOpenWatch = useMemo(() => {
     try {
@@ -189,7 +189,7 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
           variant="primary"
           onClick={onCancelTask}
           className="px-4 py-2"
-          title="Disconnect, clear planner, and remove non-user attachments"
+          title="Restart scenario: best-effort cancel, then reconnect"
         >
           Restart Scenario
         </Button>
