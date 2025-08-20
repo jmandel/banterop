@@ -27,25 +27,6 @@ describe('MCP Bridge with ConversationMeta config (Phase 2)', () => {
     await app.shutdown();
   });
 
-  it('diagnostic endpoint returns parsed meta', async () => {
-    const configMeta = {
-      title: 'Test Conversation',
-      agents: [
-        { id: 'agent-a', kind: 'external' },
-        { id: 'agent-b', kind: 'internal', agentClass: 'EchoAgent' },
-      ],
-    };
-    const config64 = toBase64Url(configMeta);
-
-    const res = await fetch(`${baseUrl}/api/bridge/${config64}/mcp/diag`);
-    expect(res.status).toBe(200);
-    
-    const json = await res.json();
-    expect(json.ok).toBe(true);
-    expect(json.meta.title).toBe('Test Conversation');
-    expect(json.meta.agents).toHaveLength(2);
-  });
-
   it('supports different agent types', async () => {
     const configMeta = {
       title: 'Multi-Agent Test',
@@ -174,7 +155,7 @@ describe('MCP Bridge with ConversationMeta config (Phase 2)', () => {
         expect(typeof m.attachments[0].name).toBe('string');
         expect(typeof m.attachments[0].contentType).toBe('string');
       }
-      expect(['input-required','waiting']).toContain(upd.status);
+      expect(['input-required','working']).toContain(upd.status);
       expect(typeof upd.guidance).toBe('string');
       expect(typeof upd.conversation_ended).toBe('boolean');
     }

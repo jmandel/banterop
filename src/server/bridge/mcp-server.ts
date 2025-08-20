@@ -109,7 +109,7 @@ export class McpBridgeServer {
 
         // Send-only: no polling here; advise caller to check for replies next
         const guidance = 'Message sent. Check for replies by calling check_replies (waitMs=10000 recommended).';
-        const status: 'waiting' = 'waiting';
+        const status: 'working' = 'working';
         const obj = { ok: true, guidance, status } as const;
         return { content: [{ type: 'text', text: JSON.stringify(obj) }], structuredContent: obj } as any;
       }
@@ -139,7 +139,7 @@ export class McpBridgeServer {
         const last = msgs.length ? msgs[msgs.length - 1] : null;
         const ended = snapshot.status === 'completed' || (last && last.finality === 'conversation');
 
-        let status: 'input-required' | 'waiting' | 'completed' = 'waiting';
+        let status: 'input-required' | 'working' | 'completed' = 'working';
         let guidance = '';
         if (ended) {
           status = 'completed';
@@ -165,14 +165,14 @@ export class McpBridgeServer {
         }
 
         // Add an explicit instruction for polling when we are waiting
-        if (!ended && status === 'waiting') {
+        if (!ended && status === 'working') {
           guidance += ' Keep checking for replies (call check_replies again).';
         }
 
         // Return only messages + guidance/status/ended per spec (no threadText/nextSeq)
         // Avoid confusing states: if no new replies detected, report waiting
         if (!ended && simplified.messages.length === 0) {
-          status = 'waiting';
+          status = 'working';
           guidance = 'No new replies yet. Keep checking for replies (call check_replies again).';
         }
 

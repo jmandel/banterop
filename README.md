@@ -502,10 +502,9 @@ The lookback period determines how old a conversation's last activity can be bef
 ## 🧩 MCP Bridge (optional)
 
 - Bridge endpoint: `/api/bridge/:config64/mcp` where `config64` is base64url‑encoded ConversationMeta.
-- Diagnostic: `/api/bridge/:config64/mcp/diag` echoes parsed meta.
 - Tools (server‑mode):
   - `begin_chat_thread`: Creates a local conversation from the template and ensures internal agents on the server via the runner registry (survives restarts). Returns `{ conversationId: string }`.
-  - `send_message_to_chat_thread`: Send‑only. Inputs `{ conversationId, message, attachments? }`. Returns `{ ok: true, guidance, status: 'waiting' }` — guidance instructs to call `check_replies` (e.g., `waitMs=10000`).
+  - `send_message_to_chat_thread`: Send‑only. Inputs `{ conversationId, message, attachments? }`. Returns `{ ok: true, guidance, status: 'working' }` — guidance instructs to call `check_replies` (e.g., `waitMs=10000`).
   - `check_replies`: Long‑polling replies since your last external message. Inputs `{ conversationId, waitMs=10000 }`. Returns `{ messages, guidance, status, conversation_ended }`.
 - Discovery: conversations created by the bridge are stamped with `metadata.custom.bridgeConfig64Hash = base64url(sha256(config64))` so UIs can match existing and new conversations to a template.
 - Wire types: `conversationId` is a string on the wire.

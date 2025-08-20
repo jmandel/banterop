@@ -34,15 +34,6 @@ export function createA2ARoutes(
     }
   });
 
-  // Diagnostics: decode config64 and echo meta
-  app.get('/:config64/a2a/diag', (c) => {
-    try {
-      const meta = parseConversationMetaFromConfig64(c.req.param('config64'));
-      return c.json({ ok: true, meta, notes: 'ConversationMeta for this A2A base.' });
-    } catch (err: any) {
-      return c.json({ ok: false, error: err?.message ?? String(err) }, 400);
-    }
-  });
 
   // Scenario-specific Agent Card (well-known, per-config)
   app.get('/:config64/a2a/.well-known/agent-card.json', (c) => {

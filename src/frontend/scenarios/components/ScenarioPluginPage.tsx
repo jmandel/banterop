@@ -176,7 +176,7 @@ export function ScenarioPluginPage() {
             <li>
               <span className="font-medium">send_message_to_chat_thread</span>:
               input — <code>conversationId</code>, <code>message</code>, optional <code>attachments[]</code> (objects with <code>name</code>, <code>contentType</code>, <code>content</code>, <code>summary?</code>);
-              output — <code>{`{ ok: true, guidance, status: 'waiting' }`}</code>.
+              output — <code>{`{ guidance, status: 'working' }`}</code>.
             </li>
             <li>
               <span className="font-medium">check_replies</span>:
@@ -190,7 +190,7 @@ export function ScenarioPluginPage() {
                   — only replies since your last message.
                 </li>
                 <li><code>guidance</code>: short hint (e.g., “Your turn to respond.”).</li>
-                <li><code>status</code>: <code>input-required</code> | <code>waiting</code> | <code>completed</code>.</li>
+                <li><code>status</code>: <code>input-required</code> | <code>working</code> | <code>completed</code>.</li>
                 <li><code>conversation_ended</code>: boolean.</li>
               </ul>
             </li>

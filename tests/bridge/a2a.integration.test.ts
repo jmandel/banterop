@@ -59,23 +59,6 @@ describe('A2A Bridge JSON-RPC', () => {
     await app.shutdown();
   });
 
-  it('diag endpoint echoes ConversationMeta', async () => {
-    const meta = {
-      title: 'A2A Test',
-      startingAgentId: 'user',
-      agents: [
-        { id: 'user' },
-        { id: 'echo', agentClass: 'EchoAgent' },
-      ],
-    };
-    const config64 = toBase64Url(meta);
-    const res = await fetch(`${baseUrl}/api/bridge/${config64}/a2a/diag`);
-    expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.ok).toBe(true);
-    expect(json.meta.title).toBe('A2A Test');
-    expect(json.meta.agents.length).toBe(2);
-  });
 
   it('message/send creates a task and posts external message', async () => {
     const meta = {

@@ -4,14 +4,13 @@
 // The diag endpoint reflects that meta.
 //
 
+import type { LLMProviderManager } from '$src/llm/provider-manager';
+import { HonoIncomingMessage, HonoServerResponse } from '$src/server/bridge/hono-node-adapters';
+import { McpBridgeServer } from '$src/server/bridge/mcp-server';
+import type { ServerAgentLifecycleManager } from '$src/server/control/server-agent-lifecycle';
+import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import type { OrchestratorService } from '$src/server/orchestrator/orchestrator';
-import type { LLMProviderManager } from '$src/llm/provider-manager';
-import type { ServerAgentLifecycleManager } from '$src/server/control/server-agent-lifecycle';
-import { McpBridgeServer } from '$src/server/bridge/mcp-server';
-import { HonoIncomingMessage, HonoServerResponse } from '$src/server/bridge/hono-node-adapters';
-import { parseConversationMetaFromConfig64 } from '$src/server/bridge/conv-config.types';
 
 export function createBridgeRoutes(orchestrator: OrchestratorService, providerManager: LLMProviderManager, lifecycle: ServerAgentLifecycleManager, replyTimeoutMs?: number) {
   const app = new Hono();
@@ -63,19 +62,6 @@ export function createBridgeRoutes(orchestrator: OrchestratorService, providerMa
         },
         500
       );
-    }
-  });
-
-  app.get('/:config64/mcp/diag', (c) => {
-    try {
-      const meta = parseConversationMetaFromConfig64(c.req.param('config64'));
-      return c.json({
-        ok: true,
-        meta,
-        notes: 'This is a base64url-encoded ConversationMeta payload. begin_chat_thread will use it to create and start a conversation.',
-      });
-    } catch (err) {
-      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 400);
     }
   });
 
