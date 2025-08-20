@@ -197,31 +197,43 @@ export class ScenarioPlannerV2 {
     }
     this.taskOff = task.on("new-task", () => {
       const t = task.getTask?.();
-      // Emit status event if changed (from remote)
+      // Detect status change but defer emission until after message, to keep
+      // status lines below the corresponding agent reply in the log.
+      let pendingStatus: string | undefined;
       try {
         const st = String(t?.status?.state || '');
         if (st) {
           const lastSt = [...this.eventLog].reverse().find(e => e.type === 'status') as any;
           const prev = String(lastSt?.payload?.state || '');
-          if (st !== prev) this.emit({ type: 'status', channel: 'status', author: 'system', payload: { state: st as any } } as any);
+          if (st !== prev) pendingStatus = st;
         }
       } catch {}
+
+      // Prepare latest agent message (if any)
       const last = (t?.history || []).slice(-1)[0];
-      if (!last) return;
-      if (String(last.role) === 'user') return; // avoid duplicating planner sends
-      const text = (last.parts || []).filter((p: any) => p?.kind === "text").map((p: any) => p.text).join("\n") || '';
-      const attachments: AttachmentLite[] = (last.parts || [])
-        .filter((p: any) => p?.kind === 'file' && p?.file)
-        .map((p: any) => ({ name: p.file.name, mimeType: p.file.mimeType, bytes: p.file.bytes, uri: p.file.uri }))
-        .filter((a: any) => a?.name && a?.mimeType);
-      // Upsert into vault first
-      for (const a of attachments) {
-        try { this.deps.vault.addFromAgent(a.name, a.mimeType, a.bytes || ''); } catch {}
+      let emittedMessage = false;
+      if (last && String(last.role) !== 'user') {
+        const text = (last.parts || []).filter((p: any) => p?.kind === 'text').map((p: any) => p.text).join('\n') || '';
+        const attachments: AttachmentLite[] = (last.parts || [])
+          .filter((p: any) => p?.kind === 'file' && p?.file)
+          .map((p: any) => ({ name: p.file.name, mimeType: p.file.mimeType, bytes: p.file.bytes, uri: p.file.uri }))
+          .filter((a: any) => a?.name && a?.mimeType);
+        // Upsert into vault first
+        for (const a of attachments) {
+          try { this.deps.vault.addFromAgent(a.name, a.mimeType, a.bytes || ''); } catch {}
+        }
+        if (text || attachments.length) {
+          this.emit({ type: 'message', channel: 'planner-agent', author: 'agent', payload: { text, attachments: attachments.length ? attachments : undefined } } as any);
+          emittedMessage = true;
+        }
       }
-      if (text || attachments.length) {
-        this.emit({ type: 'message', channel: 'planner-agent', author: 'agent', payload: { text, attachments: attachments.length ? attachments : undefined } } as any);
+
+      // Emit status after message so it appears at the bottom of the chat
+      if (pendingStatus) {
+        try { this.emit({ type: 'status', channel: 'status', author: 'system', payload: { state: pendingStatus as any } } as any); } catch {}
       }
-      this.maybeTick();
+
+      if (emittedMessage) this.maybeTick();
     });
   }
 
@@ -643,6 +655,35 @@ export class ScenarioPlannerV2 {
     }
   }
 
+  // Strict extractor: require a valid JSON object with reasoning and an action.tool
+  private parseToolCallStrict(text: string): { reasoning: string; tool: string; args: any } | null {
+    try {
+      let raw = String(text || "").trim();
+      const m = raw.match(/```json\s*([\s\S]*?)```/i) || raw.match(/```\s*([\s\S]*?)```/i);
+      if (m && m[1]) raw = m[1].trim();
+      const start = raw.indexOf("{"); const end = raw.lastIndexOf("}");
+      const objTxt = start >= 0 && end > start ? raw.slice(start, end + 1) : raw;
+      const obj: any = JSON.parse(objTxt);
+      if (obj && typeof obj === 'object') {
+        if (obj.action && typeof obj.action === 'object' && typeof obj.action.tool === 'string') {
+          const reasoning = typeof obj.reasoning === 'string' ? obj.reasoning : '';
+          const tool = String(obj.action.tool || '');
+          const args = obj.action.args || {};
+          if (tool) return { reasoning, tool, args };
+        }
+        if (obj.toolCall && typeof obj.toolCall === 'object' && typeof obj.toolCall.tool === 'string') {
+          const reasoning = typeof obj.reasoning === 'string' ? obj.reasoning : (typeof obj.thought === 'string' ? obj.thought : '');
+          const tool = String(obj.toolCall.tool || '');
+          const args = obj.toolCall.args || {};
+          if (tool) return { reasoning, tool, args };
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   private indexDocumentsFromResult(obj: any, opts?: { toolName?: string }): string[] {
     // recursively find any { docId, name, contentType, content?, summary? }
     let found = 0;
@@ -717,14 +758,23 @@ export class ScenarioPlannerV2 {
     };
     const prompt = this.buildPrompt();
     let content: string = '';
-    try {
-      setThinking(true);
-      const res = await this.callLLM(prompt);
-      content = res.content;
-    } finally {
-      setThinking(false);
+    // Call LLM with up to 3 attempts if response does not contain a valid ToolCall JSON
+    let parsed: { reasoning: string; tool: string; args: any } | null = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        setThinking(true);
+        const res = await this.callLLM(prompt);
+        content = res.content;
+      } finally {
+        setThinking(false);
+      }
+      parsed = this.parseToolCallStrict(content);
+      if (parsed) break;
+      if (attempt < 3) {
+        try { await new Promise(r => setTimeout(r, 200 * attempt)); } catch {}
+      }
     }
-    const { reasoning, tool, args } = this.parseAction(content);
+    const { reasoning, tool, args } = parsed || this.parseAction(content);
     const lastSt = [...this.eventLog].reverse().find(e => e.type === 'status') as any;
     const statusNow = String(lastSt?.payload?.state || '');
     const canSendRemote = !lastSt || statusNow === 'input-required';

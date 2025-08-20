@@ -13,6 +13,7 @@ type AgentLogEntry = {
     bytes?: string; 
     uri?: string;
   }>; 
+  status?: boolean;
 };
 
 interface DualConversationViewProps {
@@ -27,6 +28,7 @@ interface DualConversationViewProps {
   connected: boolean;
   busy: boolean;
   yourTurn?: boolean;
+  currentStatus?: string;
 }
 
 export const DualConversationView: React.FC<DualConversationViewProps> = ({
@@ -40,6 +42,7 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
   connected,
   busy,
   yourTurn,
+  currentStatus,
 }) => {
   const frontLogRef = useRef<HTMLDivElement | null>(null);
   const agentLogRef = useRef<HTMLDivElement | null>(null);
@@ -152,13 +155,7 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
         
         {/* Message Input */}
         <div className="border-t border-gray-200 p-4 bg-white">
-          {yourTurn && (
-            <div className="mb-2 text-center">
-              <span className="inline-block px-2 py-1 text-xs font-medium rounded-full bg-orange-100 text-orange-700 border border-orange-200">
-                — your turn now —
-              </span>
-            </div>
-          )}
+          {/* Removed explicit "your turn" bubble; user can speak anytime */}
           <div className="flex gap-2">
             <input
               type="text"
@@ -184,14 +181,11 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
               Send
             </button>
           </div>
-          <p className="text-xs text-gray-500 mt-2">
-            Press <kbd className="px-1 py-0.5 bg-gray-100 rounded text-xs">Enter</kbd> to send
-          </p>
         </div>
       </div>
 
       {/* Your Agent ↔ Remote Agent Conversation */}
-      <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden flex flex-col">
         <div className="bg-gradient-to-r from-blue-500 to-cyan-500 text-white p-4">
           <div className="flex items-center justify-between">
             <h3 className="font-bold text-lg">Your Agent ↔ Remote Agent</h3>
@@ -199,12 +193,29 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
               <span className="px-2 py-1 bg-white/20 rounded-full text-xs font-medium">Your Agent</span>
               <span className="text-white/60">→</span>
               <span className="px-2 py-1 bg-white/20 rounded-full text-xs font-medium">Remote Agent</span>
+              {currentStatus && (
+                <span
+                  className={(() => {
+                    const st = String(currentStatus).toLowerCase();
+                    if (st === 'working') return 'ml-2 inline-block px-2 py-1 rounded-full bg-blue-100 text-blue-800 border border-blue-200 text-xs';
+                    if (st === 'input-required') return 'ml-2 inline-block px-2 py-1 rounded-full bg-orange-100 text-orange-800 border border-orange-200 text-xs';
+                    if (st === 'completed') return 'ml-2 inline-block px-2 py-1 rounded-full bg-green-100 text-green-800 border border-green-200 text-xs';
+                    if (st === 'failed') return 'ml-2 inline-block px-2 py-1 rounded-full bg-rose-100 text-rose-800 border border-rose-200 text-xs';
+                    if (st === 'canceled') return 'ml-2 inline-block px-2 py-1 rounded-full bg-gray-100 text-gray-800 border border-gray-200 text-xs';
+                    if (st === 'submitted' || st === 'initializing') return 'ml-2 inline-block px-2 py-1 rounded-full bg-gray-100 text-gray-800 border border-gray-200 text-xs';
+                    return 'ml-2 inline-block px-2 py-1 rounded-full bg-gray-100 text-gray-800 border border-gray-200 text-xs';
+                  })()}
+                  title={`Status: ${currentStatus}`}
+                >
+                  {currentStatus}
+                </span>
+              )}
             </div>
           </div>
         </div>
         
         <div 
-          className="h-[400px] overflow-y-auto p-6 bg-gray-50" 
+          className="flex-1 overflow-y-auto p-6 bg-gray-50" 
           ref={agentLogRef}
           onScroll={handleAgentScroll}
         >
@@ -214,12 +225,16 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
                 key={m.id}
                 className={`max-w-[75%] ${m.role === "agent" ? "ml-auto" : ""}`}
               >
-                <div className={`px-4 py-3 rounded-2xl shadow-sm ${
-                  m.role === "planner"
-                    ? "bg-white border border-gray-200"
-                    : "bg-blue-50 border border-blue-200 ml-auto"
-                } ${m.partial ? "opacity-60 italic" : ""}`}>
-                  <div className="whitespace-pre-wrap break-words">{m.text}</div>
+                <div className={`${
+                  m.status
+                    ? "inline-block px-2 py-1 rounded-full bg-blue-100 border border-blue-200 text-blue-800 text-xs"
+                    : `px-4 py-3 rounded-2xl shadow-sm ${
+                        m.role === "planner"
+                          ? "bg-white border border-gray-200"
+                          : "bg-blue-50 border border-blue-200 ml-auto"
+                      } ${m.partial ? "opacity-60 italic" : ""}`
+                }`}>
+                  <div className={`whitespace-pre-wrap break-words ${m.status ? "text-center" : ""}`}>{m.text}</div>
                   {m.attachments && m.attachments.length > 0 && (
                     <div className="flex items-center gap-2 flex-wrap mt-3 pt-3 border-t border-gray-200">
                       {m.attachments.map((a, idx) => (

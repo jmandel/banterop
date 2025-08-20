@@ -997,7 +997,7 @@ const onAttachFiles = async (files: FileList | null) => {
             onEndpointChange={handleEndpointChange}
             protocol={protocol}
             onProtocolChange={setProtocol}
-            status={model.status}
+            status={(lastStatusStr as A2AStatus | undefined) || model.status}
             taskId={model.taskId}
             connected={model.connected}
             error={model.error}
@@ -1048,6 +1048,7 @@ const onAttachFiles = async (files: FileList | null) => {
               connected={model.connected}
               busy={model.busy}
               yourTurn={yourTurn}
+              currentStatus={lastStatusStr}
             />
 
           {/* Event Log Section */}

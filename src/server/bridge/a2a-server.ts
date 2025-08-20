@@ -438,11 +438,12 @@ export class A2ABridgeServer {
     const state = forceState ?? this.deriveState(snap, externalId);
     const artifacts: any[] = [];
     const history = this.toA2aHistory(snap, externalId);
+    const lastMessage = Array.isArray(history) && history.length ? history[history.length - 1] : undefined;
 
     return {
       id,
       contextId: id,
-      status: { state },
+      status: lastMessage ? { state, message: lastMessage } : { state },
       artifacts,
       history,
       kind: 'task',

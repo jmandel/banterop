@@ -21,6 +21,7 @@ export class A2ATaskClient {
 
   private streamAbort: AbortController | null = null;
   private resubAbort: AbortController | null = null;
+  private refetchAbort: AbortController | null = null;
 
   private debounceTimer: NodeJS.Timeout | null = null;
   private readonly debounceInterval: number;
@@ -132,19 +133,23 @@ export class A2ATaskClient {
     if (r?.id && !this.taskId && r.kind === "task") this.taskId = r.id;
     try { console.debug('[TaskClient] processFrame:', r?.kind, 'taskId=', this.taskId); } catch {}
 
-    // debounce refetch
-    if (this.debounceTimer) clearTimeout(this.debounceTimer);
-    this.debounceTimer = setTimeout(() => {
-      this.refetchAndProcess();
-    }, this.debounceInterval);
+    // Simplest flow with freshness: abort any in-flight refetch and start a new one
+    try { this.refetchAbort?.abort(); } catch {}
+    const ac = new AbortController();
+    this.refetchAbort = ac;
+    void this.refetchAndProcess(ac.signal);
   }
 
-  private async refetchAndProcess() {
+  private async refetchAndProcess(signal?: AbortSignal) {
     if (!this.taskId) return;
     try {
-      const snap = await this.a2a.tasksGet(this.taskId, "full");
+      const snap = await this.a2a.tasksGet(this.taskId, "full", signal);
+      // Ignore stale results if a newer refetch has superseded this one
+      if (signal && this.refetchAbort && signal !== this.refetchAbort.signal) return;
       this.applyCanonicalDiff(snap);
     } catch (e: any) {
+      // Swallow aborts; report other errors
+      if (e?.name === 'AbortError') return;
       const err = String(e?.message ?? e);
       console.warn('[TaskClient] refetch error:', err);
       this.emit("error", { error: err });
@@ -204,7 +209,10 @@ export class A2ATaskClient {
 
   // Canonicalization + Diff
   private applyCanonicalDiff(newTask: A2ATask) {
-    const incomingHistory = newTask.history ?? [];
+    const baseHistory = newTask.history ?? [];
+    const statusMsg = (newTask.status as any)?.message as A2AMessage | undefined;
+    // Always fold in status.message; de-dup below ensures we won't double-insert once history catches up
+    const incomingHistory = (statusMsg && statusMsg.kind === 'message') ? [...baseHistory, statusMsg] : baseHistory;
     const incomingIds = new Set(incomingHistory.map(m => m.messageId));
     const newStatus = (newTask.status?.state ?? this.status) as A2AStatus;
 
@@ -213,13 +221,8 @@ export class A2ATaskClient {
     const anyNewIds = !prev || [...incomingIds].some(id => !prev.messageIds.has(id));
     if (!statusChanged && !anyNewIds) return;
 
-    const missingFromIncoming: A2AMessage[] = [];
-    if (prev?.knownMessages) {
-      for (const [id, msg] of prev.knownMessages) {
-        if (!incomingIds.has(id)) missingFromIncoming.push(msg);
-      }
-    }
-    const repairedHistory = [...missingFromIncoming, ...incomingHistory];
+    // Accept server-provided order; rely on snapshot (plus status.message)
+    const repairedHistory = [...incomingHistory];
     // De-duplicate by messageId while preserving order (prefer first occurrence)
     const seenIds = new Set<string>();
     const dedupHistory: A2AMessage[] = [] as any;
@@ -234,7 +237,7 @@ export class A2ATaskClient {
       dedupHistory.push(m as any);
     }
 
-    const knownMessages = new Map(prev?.knownMessages ?? []);
+    const knownMessages = new Map<string, A2AMessage>();
     for (const m of dedupHistory) knownMessages.set(m.messageId, m);
 
     const canonicalIds = new Set(dedupHistory.map(m => m.messageId));

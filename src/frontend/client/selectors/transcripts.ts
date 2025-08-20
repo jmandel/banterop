@@ -8,6 +8,7 @@ export type AgentLogEntry = {
   role: 'planner' | 'agent';
   text: string;
   attachments?: Array<{ name: string; mimeType: string; bytes?: string; uri?: string }>;
+  status?: boolean;
 };
 
 export function selectFrontMessages(events: UnifiedEvent[]): FrontMsg[] {
@@ -22,10 +23,7 @@ export function selectFrontMessages(events: UnifiedEvent[]): FrontMsg[] {
       out.push({ id: String(e.seq), role: 'system', text: (e.payload as any).text });
       continue;
     }
-    if (e.type === 'status') {
-      out.push({ id: String(e.seq), role: 'system', text: `— status: ${(e.payload as any).state} —` });
-      continue;
-    }
+    // Status updates should not appear in the user↔agent pane
   }
   return out;
 }
@@ -33,13 +31,15 @@ export function selectFrontMessages(events: UnifiedEvent[]): FrontMsg[] {
 export function selectAgentLog(events: UnifiedEvent[]): AgentLogEntry[] {
   const out: AgentLogEntry[] = [];
   for (const e of events) {
-    if (e.type !== 'message' || e.channel !== 'planner-agent') continue;
-    out.push({
-      id: String(e.seq),
-      role: e.author === 'planner' ? 'planner' : 'agent',
-      text: (e.payload as any).text,
-      attachments: (e.payload as any).attachments || [],
-    });
+    if (e.type === 'message' && e.channel === 'planner-agent') {
+      out.push({
+        id: String(e.seq),
+        role: e.author === 'planner' ? 'planner' : 'agent',
+        text: (e.payload as any).text,
+        attachments: (e.payload as any).attachments || [],
+      });
+      continue;
+    }
   }
   return out;
 }

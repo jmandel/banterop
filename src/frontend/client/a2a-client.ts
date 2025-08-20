@@ -43,9 +43,9 @@ export class A2AClient {
     return j.result;
   }
 
-  async tasksGet(taskId: string, include: "full" | "history" | "status" = "full") {
+  async tasksGet(taskId: string, include: "full" | "history" | "status" = "full", signal?: AbortSignal) {
     const body = { jsonrpc: "2.0", id: crypto.randomUUID(), method: "tasks/get", params: { id: taskId, include } };
-    const res = await fetch(this.endpoint(), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const res = await fetch(this.endpoint(), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
     if (!res.ok) throw new Error(`tasks/get failed: ${res.status} ${await res.text()}`);
     const j = (await res.json()) as { result?: A2ATask; error?: { message: string } };
     if (!j.result) throw new Error(j.error?.message || "no result");
