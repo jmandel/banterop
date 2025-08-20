@@ -1,18 +1,6 @@
 import type { Finality, MessagePayload, TracePayload, UnifiedEvent } from './event.types';
 
-// REST API types
-export interface ListConversationsRequest {
-  status?: 'active' | 'completed';
-  scenarioId?: string;
-  limit?: number;
-  offset?: number;
-}
-
-export interface GetConversationRequest {
-  conversationId: number;
-  includeEvents?: boolean;
-  includeAttachments?: boolean;
-}
+// REST API types (legacy request shapes removed)
 
 // WebSocket JSON-RPC types
 export interface SubscribeRequest {
@@ -101,16 +89,6 @@ export interface CreateConversationRpcResult {
   conversationId: number;
 }
 
-export interface ListConversationsRpcParams {
-  status?: 'active' | 'completed';
-  scenarioId?: string;
-  limit?: number;
-  offset?: number;
-}
-
-export interface ListConversationsRpcResult {
-  conversations: import('$src/db/conversation.store').Conversation[];
-}
 
 export interface GetEventsPageParams {
   conversationId: number;
@@ -123,24 +101,4 @@ export interface GetEventsPageResult {
   nextAfterSeq?: number;
 }
 
-// Scenario RPC types
-export interface CreateScenarioRpcParams {
-  id: string;
-  name: string;
-  config: import('$src/types/scenario-configuration.types').ScenarioConfiguration;
-  history?: any[];
-}
-
-export interface GetScenarioRpcParams {
-  scenarioId: string;
-}
-
-export interface UpdateScenarioRpcParams {
-  id: string;
-  name?: string;
-  config?: import('$src/types/scenario-configuration.types').ScenarioConfiguration;
-}
-
-export interface DeleteScenarioRpcParams {
-  id: string;
-}
+// Scenario RPC legacy param types removed
