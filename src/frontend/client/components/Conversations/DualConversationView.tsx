@@ -13,10 +13,16 @@ export const DualConversationView: React.FC = () => {
   const derivedAgent = React.useMemo(() => selectAgentLog(eventLog as any), [eventLog]);
   const currentStatus = React.useMemo(() => selectLastStatus(eventLog as any), [eventLog]);
   const yourTurn = currentStatus ? currentStatus === 'input-required' : true;
+  const plannerDone = React.useMemo(() => {
+    try {
+      return (eventLog as any[]).some((e: any) => e && e.type === 'trace' && e.channel === 'system' && e.author === 'system' && typeof e?.payload?.text === 'string' && e.payload.text.startsWith('Planner done:'));
+    } catch { return false; }
+  }, [eventLog]);
 
   const [input, setInput] = React.useState("");
   const onSendMessage = async (text: string) => {
     if (!text.trim()) return;
+    if (plannerDone) return; // disable sends after planner is done
     try { await app.actions.sendMessage([{ kind: 'text', text } as any]); } catch {}
     setInput("");
   };
@@ -143,17 +149,18 @@ export const DualConversationView: React.FC = () => {
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  if (input.trim()) {
+                  if (input.trim() && !plannerDone) {
                     onSendMessage(input);
                   }
                 }
               }}
               className="flex-1 px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              placeholder={"Type your message..."}
+              placeholder={plannerDone ? "Planner is done. Restart to continue." : "Type your message..."}
+              disabled={plannerDone}
             />
             <button
               onClick={() => onSendMessage(input)}
-              disabled={!input.trim()}
+              disabled={!input.trim() || plannerDone}
               className="px-6 py-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               Send
