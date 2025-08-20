@@ -1,49 +1,28 @@
 import React, { useRef, useEffect } from "react";
-import { Card, CardHeader, Badge } from "../../../ui";
+import { Badge } from "../../../ui";
+import { useAppStore } from "$src/frontend/client/stores/appStore";
+import { selectFrontMessages, selectAgentLog, selectLastStatus } from "$src/frontend/client/selectors/transcripts";
 
-type FrontMsg = { id: string; role: "you" | "planner" | "system"; text: string };
-type AgentLogEntry = { 
-  id: string; 
-  role: "planner" | "agent"; 
-  text: string; 
-  partial?: boolean; 
-  attachments?: Array<{ 
-    name: string; 
-    mimeType: string; 
-    bytes?: string; 
-    uri?: string;
-  }>; 
-  status?: boolean;
-};
+export const DualConversationView: React.FC = () => {
+  const app = useAppStore();
+  const eventLog = useAppStore((s) => s.planner.eventLog) as any[];
+  const plannerStarted = useAppStore((s) => s.planner.started);
+  const plannerThinking = useAppStore((s) => s.planner.thinking);
+  const connected = useAppStore((s) => s.connection.status === 'connected');
+  const derivedFront = React.useMemo(() => selectFrontMessages(eventLog as any), [eventLog]);
+  const derivedAgent = React.useMemo(() => selectAgentLog(eventLog as any), [eventLog]);
+  const currentStatus = React.useMemo(() => selectLastStatus(eventLog as any), [eventLog]);
+  const yourTurn = currentStatus ? currentStatus === 'input-required' : true;
 
-interface DualConversationViewProps {
-  frontMessages: FrontMsg[];
-  agentLog: AgentLogEntry[];
-  plannerStarted: boolean;
-  onOpenAttachment?: (name: string, mimeType: string, bytes?: string, uri?: string) => void;
-  // Message input props
-  input: string;
-  onInputChange: (value: string) => void;
-  onSendMessage: (text: string) => void;
-  connected: boolean;
-  busy: boolean;
-  yourTurn?: boolean;
-  currentStatus?: string;
-}
-
-export const DualConversationView: React.FC<DualConversationViewProps> = ({
-  frontMessages,
-  agentLog,
-  plannerStarted,
-  onOpenAttachment,
-  input,
-  onInputChange,
-  onSendMessage,
-  connected,
-  busy,
-  yourTurn,
-  currentStatus,
-}) => {
+  const [input, setInput] = React.useState("");
+  const onSendMessage = async (text: string) => {
+    if (!text.trim()) return;
+    try { await app.actions.sendMessage([{ kind: 'text', text } as any]); } catch {}
+    setInput("");
+  };
+  const onOpenAttachment = (name: string, mimeType: string, bytes?: string, uri?: string) => {
+    void app.actions.openAttachment(name);
+  };
   const frontLogRef = useRef<HTMLDivElement | null>(null);
   const agentLogRef = useRef<HTMLDivElement | null>(null);
   const [frontAutoScroll, setFrontAutoScroll] = React.useState(true);
@@ -55,14 +34,14 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
     if (el && frontAutoScroll) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [frontMessages.length, frontAutoScroll]);
+  }, [derivedFront.length, frontAutoScroll]);
 
   useEffect(() => {
     const el = agentLogRef.current;
     if (el && agentAutoScroll) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [agentLog.length, agentAutoScroll]);
+  }, [derivedAgent.length, agentAutoScroll]);
   
   // Check if user has scrolled away from bottom
   const handleFrontScroll = () => {
@@ -120,7 +99,7 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
           onScroll={handleFrontScroll}
         >
           <div className="space-y-3">
-            {frontMessages.map((m) => (
+            {derivedFront.map((m: any) => (
               <div
                 key={m.id}
                 className={`max-w-[75%] ${m.role === "you" ? "ml-auto" : m.role === "system" ? "mx-auto" : ""}`}
@@ -136,7 +115,7 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
                 </div>
               </div>
             ))}
-            {!frontMessages.length && (
+            {!derivedFront.length && (
               <div className="text-center py-12">
                 <div className="text-gray-400 mb-2">
                   <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -160,7 +139,7 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
             <input
               type="text"
               value={input}
-              onChange={(e) => onInputChange(e.target.value)}
+              onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -219,7 +198,7 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
           onScroll={handleAgentScroll}
         >
           <div className="space-y-3">
-            {agentLog.map((m) => (
+            {derivedAgent.map((m: any) => (
               <div
                 key={m.id}
                 className={`max-w-[75%] ${m.role === "agent" ? "ml-auto" : ""}`}
@@ -236,7 +215,7 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
                   <div className={`whitespace-pre-wrap break-words ${m.status ? "text-center" : ""}`}>{m.text}</div>
                   {m.attachments && m.attachments.length > 0 && (
                     <div className="flex items-center gap-2 flex-wrap mt-3 pt-3 border-t border-gray-200">
-                      {m.attachments.map((a, idx) => (
+                      {m.attachments.map((a: any, idx: number) => (
                         <button
                           key={`${m.id}:att:${idx}`}
                           title={`${a.mimeType}`}
@@ -252,7 +231,7 @@ export const DualConversationView: React.FC<DualConversationViewProps> = ({
                 </div>
               </div>
             ))}
-            {!agentLog.length && (
+            {!derivedAgent.length && (
               <div className="text-center py-12">
                 <div className="text-gray-400 mb-2">
                   <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">

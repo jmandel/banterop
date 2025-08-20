@@ -154,23 +154,10 @@ export default function App() {
   // Event queue with monotonic counter to avoid missed wakeups
   // Planner wake queue removed; SessionManager orchestrates ticks
   
-  const lastStatusRef = useRef<A2AStatus | "initializing">("initializing");
-  
-
   // Front-stage composer
   const [frontInput, setFrontInput] = useState("");
   const [attachmentUpdateTrigger, setAttachmentUpdateTrigger] = useState(0);
-  // Persist front draft as user types while task is active
-  useEffect(() => {
-    const tid = useAppStore.getState().task.id;
-    const st = lastStatusRef.current;
-    const started = useAppStore.getState().planner.started;
-    const epNow = useAppStore.getState().connection.endpoint;
-    if (epNow && tid && st && !['completed','failed','canceled'].includes(String(st))) {
-      try { saveTaskSessionFrontDraft(epNow, tid, frontInput, st, started); } catch {}
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frontInput]);
+  // Front draft persistence removed for simplicity
 
   // Persistence handled by StorageService/Config pipeline
 
@@ -200,43 +187,13 @@ export default function App() {
 
   // Selection restoration handled in SessionManager
 
-  // Minimal per-task persistence: only frontDraft
-  const taskSessionKey = (ep: string, tid: string) => `a2a.session.${toBase64Url(ep || '')}.task.${toBase64Url(tid)}`;
-  const saveTaskSessionFrontDraft = (ep: string, tid: string, frontDraft: string, status: A2AStatus | "initializing", started: boolean) => {
-    try {
-      const raw = localStorage.getItem(taskSessionKey(ep, tid));
-      const obj = raw ? JSON.parse(raw) : {};
-      const next = { ...(obj && typeof obj === 'object' ? obj : {}), taskId: tid, status, plannerStarted: started, frontDraft };
-      localStorage.setItem(taskSessionKey(ep, tid), JSON.stringify(next));
-    } catch {}
-  };
+  // Removed per-task draft persistence
 
   // No auto-connect; manual via Step 1 Connect button
 
   // Removed auto-detect protocol effect to avoid race conditions; resolution happens in handleConnect
 
-  // Load provider list
-  useEffect(() => {
-    (async () => {
-      try {
-        const base = API_BASE;
-        const res = await fetch(`${base}/llm/providers`);
-        if (!res.ok) return;
-        const list = await res.json();
-        const filtered = (Array.isArray(list) ? list : []).filter((p: any) => 
-          p?.name !== "browserside" && 
-          p?.name !== "mock" &&
-          p?.available !== false
-        );
-        setProviders(filtered);
-        if (!selectedModel) {
-          const first = filtered.flatMap((p: any) => p.models || [])[0];
-          if (first) setSelectedModel(first);
-        }
-      } catch {}
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Provider list fetched in ConfigurationStep
 
   // Keep planner model ref in sync (used by summarizer as well)
   useEffect(() => { selectedModelRef.current = selectedModel; try { app.actions.setModel(selectedModel); } catch {} }, [selectedModel]);
@@ -334,36 +291,11 @@ const onAttachFiles = async (files: FileList | null) => {
           
           {/* Main Step Flow Section */}
           <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8 mb-8">
-          <StepFlow
-            onCancelTask={onResetClient}
-            card={card}
-            cardLoading={cardLoading}
-            providers={providers}
-            attachments={{
-              vault: getAttachmentVaultForUI(),
-              onFilesSelect: onAttachFiles,
-              onAnalyze: onAnalyzeAttachment,
-              onOpenAttachment: openBase64Attachment,
-              summarizeOnUpload: useAppStore.getState().attachments.summarizeOnUpload,
-              onToggleSummarize: (on) => app.actions.toggleSummarizeOnUpload(on),
-            }}
-          />
+          <StepFlow />
           </div>
 
           {/* Conversations Section */}
-          <DualConversationView
-              frontMessages={derivedFront}
-              agentLog={derivedAgent}
-              plannerStarted={useAppStore.getState().planner.started}
-              onOpenAttachment={openBase64Attachment}
-              input={frontInput}
-              onInputChange={setFrontInput}
-              onSendMessage={sendFrontMessage}
-              connected={storeConnected}
-              busy={false}
-              yourTurn={yourTurn}
-              currentStatus={lastStatusStr}
-            />
+          <DualConversationView />
 
           {/* Event Log Section */}
           <div className="mt-8">

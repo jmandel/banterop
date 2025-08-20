@@ -1,7 +1,8 @@
 import React from "react";
 import { Button, ModelSelect } from "../../../ui";
 import { AttachmentBar } from "../Attachments/AttachmentBar";
-import { useAppStore } from "$src/frontend/client/stores/appStore";
+import { useAppStore, getAttachmentVaultForUI } from "$src/frontend/client/stores/appStore";
+import { API_BASE } from "$src/frontend/client/api-base";
 
 interface ConfigurationStepProps {
   instructions?: string;
@@ -35,14 +36,14 @@ interface ConfigurationStepProps {
   };
 }
 
-export const ConfigurationStep: React.FC<ConfigurationStepProps> = (props) => {
+export const ConfigurationStep: React.FC<ConfigurationStepProps> = () => {
   // Prefer Zustand store where available (kept in sync via binder)
   const store = useAppStore();
   const instructions = store.planner.instructions || "";
-  const onInstructionsChange = props.onInstructionsChange ?? ((v: string) => store.actions.setInstructions(v));
+  const onInstructionsChange = (v: string) => store.actions.setInstructions(v);
   const scenarioUrl = store.scenario.url || "";
-  const onScenarioUrlChange = props.onScenarioUrlChange ?? ((v: string) => store.actions.setScenarioUrl(v));
-  const onLoadScenarioUrl = props.onLoadScenarioUrl ?? (() => { const u = (scenarioUrl || '').trim(); if (u) void store.actions.loadScenario(); else store.actions.setScenarioUrl(''); });
+  const onScenarioUrlChange = (v: string) => store.actions.setScenarioUrl(v);
+  const onLoadScenarioUrl = () => { const u = (scenarioUrl || '').trim(); if (u) void store.actions.loadScenario(); else store.actions.setScenarioUrl(''); };
   // Auto-fetch on edit with debounce for instant feedback
   React.useEffect(() => {
     const u = (scenarioUrl || '').trim();
@@ -52,31 +53,54 @@ export const ConfigurationStep: React.FC<ConfigurationStepProps> = (props) => {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scenarioUrl]);
-  const scenarioAgents = props.scenarioAgents ?? (Array.isArray((store.scenario.config as any)?.agents) ? ((store.scenario.config as any).agents as any[]).map(a => String(a?.agentId || '')).filter(Boolean) : []);
-  const selectedPlannerAgentId = props.selectedPlannerAgentId ?? store.scenario.selectedAgents?.planner;
-  const selectedCounterpartAgentId = props.selectedCounterpartAgentId ?? store.scenario.selectedAgents?.counterpart;
-  const enabledTools = props.enabledTools ?? store.scenario.enabledTools ?? [];
-  const providers = props.providers ?? [];
+  const scenarioAgents = (Array.isArray((store.scenario.config as any)?.agents) ? ((store.scenario.config as any).agents as any[]).map(a => String(a?.agentId || '')).filter(Boolean) : []);
+  const selectedPlannerAgentId = store.scenario.selectedAgents?.planner;
+  const selectedCounterpartAgentId = store.scenario.selectedAgents?.counterpart;
+  const enabledTools = store.scenario.enabledTools ?? [];
+  const [providers, setProviders] = React.useState<Array<{ name: string; models: string[] }>>([]);
   const selectedModel = store.planner.model || "";
-  const onSelectedModelChange = props.onSelectedModelChange ?? ((m: string) => store.actions.setModel(m));
-  const plannerStarted = props.plannerStarted ?? store.planner.started ?? false;
-  const onStartPlanner = props.onStartPlanner ?? (() => { store.actions.startPlanner(); });
-  const onStopPlanner = props.onStopPlanner ?? (() => { store.actions.stopPlanner(); });
-  const connected = props.connected ?? (store.connection.status === 'connected');
-  const onSelectPlannerAgentId = props.onSelectPlannerAgentId ?? ((id: string) => store.actions.selectAgent('planner', id));
-  const tools = props.tools ?? (() => {
+  const onSelectedModelChange = (m: string) => store.actions.setModel(m);
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/llm/providers`);
+        if (!res.ok) return;
+        const list = await res.json();
+        const filtered = (Array.isArray(list) ? list : []).filter((p: any) => p?.name !== 'browserside' && p?.name !== 'mock' && p?.available !== false);
+        setProviders(filtered);
+        if (!selectedModel) {
+          const first = filtered.flatMap((p: any) => p.models || [])[0];
+          if (first) onSelectedModelChange(first);
+        }
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const plannerStarted = store.planner.started ?? false;
+  const onStartPlanner = () => { store.actions.startPlanner(); };
+  const onStopPlanner = () => { store.actions.stopPlanner(); };
+  const connected = (store.connection.status === 'connected');
+  const onSelectPlannerAgentId = (id: string) => store.actions.selectAgent('planner', id);
+  const tools = (() => {
     try {
       const cfg: any = store.scenario.config;
       const agent = Array.isArray(cfg?.agents) ? cfg.agents.find((a: any) => a?.agentId === selectedPlannerAgentId) : null;
       return Array.isArray(agent?.tools) ? (agent.tools as any[]).map((t: any) => ({ name: String(t?.toolName || t?.name || ''), description: t?.description ? String(t.description) : undefined })).filter((ti: any) => ti.name) : [];
     } catch { return []; }
   })();
-  const onToggleTool = props.onToggleTool ?? ((name: string, enabled: boolean) => {
+  const onToggleTool = (name: string, enabled: boolean) => {
     const set = new Set(enabledTools);
     if (enabled) set.add(name); else set.delete(name);
     store.actions.setEnabledTools(Array.from(set));
-  });
-  const attachments = props.attachments;
+  };
+  const attachments = {
+    vault: getAttachmentVaultForUI(),
+    onFilesSelect: (files: FileList | null) => { void store.actions.uploadFiles(files); },
+    onAnalyze: (name: string) => store.actions.analyzeAttachment(name),
+    onOpenAttachment: (name: string) => { void store.actions.openAttachment(name); },
+    summarizeOnUpload: useAppStore.getState().attachments.summarizeOnUpload,
+    onToggleSummarize: (on: boolean) => store.actions.toggleSummarizeOnUpload(on),
+  } as const;
   return (
     <div className="space-y-4">
       {/* Scenario URL + agent selection */}

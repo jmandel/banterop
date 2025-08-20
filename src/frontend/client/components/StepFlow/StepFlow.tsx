@@ -2,76 +2,19 @@ import React from "react";
 import { ConnectionStep } from "./ConnectionStep";
 import { ConfigurationStep } from "./ConfigurationStep";
 // ConversationStep removed - input is now in DualConversationView
-import type { A2AStatus } from "../../a2a-types";
 import { useAppStore } from "$src/frontend/client/stores/appStore";
-type FrontMsg = { id: string; role: "you" | "planner" | "system"; text: string };
 
-interface StepFlowProps {
-  // Connection props
-  endpoint?: string;
-  onEndpointChange?: (value: string) => void;
-  protocol?: "auto" | "a2a" | "mcp";
-  onProtocolChange?: (p: "auto" | "a2a" | "mcp") => void;
-  status?: A2AStatus | "initializing";
-  taskId?: string;
-  connected?: boolean;
-  error?: string;
-  card?: any;
-  cardLoading?: boolean;
-  onCancelTask?: () => void;
-  
-  // Configuration props
-  instructions?: string;
-  onInstructionsChange?: (value: string) => void;
-  scenarioUrl?: string;
-  onScenarioUrlChange?: (value: string) => void;
-  onLoadScenarioUrl?: () => void;
-  scenarioAgents?: string[];
-  selectedPlannerAgentId?: string;
-  onSelectPlannerAgentId?: (id: string) => void;
-  selectedCounterpartAgentId?: string;
-  tools?: Array<{ name: string; description?: string }>;
-  enabledTools?: string[];
-  onToggleTool?: (name: string, enabled: boolean) => void;
-  providers?: Array<{ name: string; models: string[] }>;
-  selectedModel?: string;
-  onSelectedModelChange?: (model: string) => void;
-  plannerStarted?: boolean;
-  onStartPlanner?: () => void;
-  onStopPlanner?: () => void;
-  
-  // Scenario loading
-  onLoadScenario?: (goals: string, instructions: string) => void;
-
-  // Attachments (moved inside planner configuration)
-  attachments?: {
-    vault: import("../../attachments-vault").AttachmentVault;
-    onFilesSelect: (files: FileList | null) => void;
-    onAnalyze: (name: string) => void;
-    onOpenAttachment?: (name: string, mimeType: string, bytes?: string, uri?: string) => void;
-    summarizeOnUpload: boolean;
-    onToggleSummarize: (value: boolean) => void;
-  };
-}
-
-export const StepFlow: React.FC<StepFlowProps> = (props) => {
+export const StepFlow: React.FC = () => {
   const store = useAppStore();
   const endpoint = store.connection.endpoint ?? "";
   const protocol = store.connection.protocol ?? "auto";
-  const status = store.task.status ?? props.status ?? "initializing";
-  const taskId = store.task.id ?? props.taskId;
+  const status = store.task.status ?? "initializing";
+  const taskId = store.task.id;
   const connected = (store.connection.status === 'connected');
-  const plannerStarted = store.planner.started ?? props.plannerStarted ?? false;
-  const error = store.connection.error ?? props.error;
-  const card = store.connection.card ?? props.card;
-  const instructions = store.planner.instructions ?? "";
-  const selectedModel = store.planner.model ?? "";
-  const onEndpointChange = props.onEndpointChange ?? ((v: string) => store.actions.setEndpoint(v));
-  const onProtocolChange = props.onProtocolChange ?? ((p: any) => store.actions.setProtocol(p));
-  const onCancelTask = props.onCancelTask ?? (() => store.actions.cancelTask());
-  const onStartPlanner = props.onStartPlanner ?? (() => store.actions.startPlanner());
-  const onStopPlanner = props.onStopPlanner ?? (() => store.actions.stopPlanner());
-  const onInstructionsChange = props.onInstructionsChange ?? ((v: string) => store.actions.setInstructions(v));
+  const plannerStarted = store.planner.started ?? false;
+  const error = store.connection.error;
+  const card = store.connection.card;
+  const onCancelTask = () => { void store.actions.restartScenario(); };
 
   const getStepStyles = (stepNum: number) => {
     // Determine status based on state
@@ -126,18 +69,11 @@ export const StepFlow: React.FC<StepFlowProps> = (props) => {
           {getStepIcon(1)}
           <div className="flex-1">
             <h3 className="text-lg font-bold text-gray-900">Step 1: Configure Remote Agent</h3>
-            <p className="text-sm text-gray-600 mt-1">
-              {props.connected ? "✓ Connected successfully" : "Enter your endpoint URL and protocol"}
-            </p>
+            <p className="text-sm text-gray-600 mt-1">{connected ? "✓ Connected successfully" : "Enter your endpoint URL and protocol"}</p>
           </div>
         </div>
         <div className="pl-12">
-          <ConnectionStep
-            card={card}
-            cardLoading={props.cardLoading}
-            onLoadScenario={props.onLoadScenario}
-            onCancelTask={props.onCancelTask}
-          />
+          <ConnectionStep card={card} onCancelTask={onCancelTask} />
         </div>
       </div>
 
@@ -147,17 +83,11 @@ export const StepFlow: React.FC<StepFlowProps> = (props) => {
           {getStepIcon(2)}
           <div className="flex-1">
             <h3 className="text-lg font-bold text-gray-900">Step 2: Configure Your Agent</h3>
-            <p className="text-sm text-gray-600 mt-1">{props.plannerStarted ? "✓ Agent is running" : props.connected ? "Set up your agent" : "Connect first to configure"}</p>
+            <p className="text-sm text-gray-600 mt-1">{plannerStarted ? "✓ Agent is running" : connected ? "Set up your agent" : "Connect first to configure"}</p>
           </div>
         </div>
         <div className="pl-12">
-        <ConfigurationStep
-          scenarioUrl={props.scenarioUrl ?? store.scenario.url ?? ""}
-          onScenarioUrlChange={props.onScenarioUrlChange}
-          onLoadScenarioUrl={props.onLoadScenarioUrl}
-          providers={props.providers ?? []}
-          attachments={props.attachments}
-        />
+        <ConfigurationStep />
         </div>
       </div>
 

@@ -3,6 +3,7 @@ import type { AppState } from '../appStore';
 import { type Protocol as ProtoType } from '../../protocols';
 import { refreshPreview as svcRefreshPreview, detectEffectiveProtocol, createClient } from '../../services/connection.service';
 import { AttachmentSummarizer } from '../../attachment-summaries';
+import { useConfigStore } from '../configStore';
 
 let autoConnectTimer: any = null;
 
@@ -63,6 +64,9 @@ export function createConnectionSlice(set: Set, get: Get): any {
           s.connection.card = undefined;
           (s.connection as any).preview = undefined;
         });
+        // Persist to config so reloads keep the latest values
+        try { useConfigStore.getState().actions.updateField('endpoint', ep); } catch {}
+        try { useConfigStore.getState().actions.updateField('protocol', protocol); } catch {}
         const effective: ProtoType = detectEffectiveProtocol(ep, protocol);
         set((s) => { s.connection.detectedProtocol = effective as any; });
         // Prepare preview first; bail on known errors
@@ -128,6 +132,8 @@ export function createConnectionSlice(set: Set, get: Get): any {
       },
       setEndpoint: (endpoint: string) => {
         set((s) => { s.connection.endpoint = endpoint; });
+        // Persist to config storage for durability across reloads
+        try { useConfigStore.getState().actions.updateField('endpoint', endpoint); } catch {}
         // If currently connected, disconnect on change
         if (get().connection.status === 'connected') {
           (async () => { try { await get().actions.disconnect(); } catch {} })();
@@ -137,6 +143,8 @@ export function createConnectionSlice(set: Set, get: Get): any {
       },
       setProtocol: (protocol: Protocol) => {
         set((s) => { s.connection.protocol = protocol; });
+        // Persist to config storage for durability across reloads
+        try { useConfigStore.getState().actions.updateField('protocol', protocol); } catch {}
         // If currently connected, disconnect on change
         if (get().connection.status === 'connected') {
           (async () => { try { await get().actions.disconnect(); } catch {} })();

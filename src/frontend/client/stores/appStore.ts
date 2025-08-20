@@ -77,6 +77,8 @@ export interface AppState {
     resumeTask: (taskId?: string) => Promise<void>;
     disconnect: () => Promise<void>;
     refreshPreview: () => Promise<void>;
+    // Optional internal action from connection slice
+    scheduleAutoConnect?: () => void;
     setEndpoint: (endpoint: string) => void;
     setProtocol: (protocol: Protocol) => void;
     setCard: (card: any | undefined) => void;
@@ -86,6 +88,7 @@ export interface AppState {
     setTaskState: (s: Partial<Pick<AppState['task'], 'id' | 'status' | 'history'>>) => void;
     sendMessage: (parts: A2APart[]) => Promise<void>;
     cancelTask: () => void;
+    restartScenario: () => Promise<void>;
 
     // Planner
     setInstructions: (text: string) => void;
@@ -209,6 +212,11 @@ export const useAppStore = create<AppState>()(
             s.planner.eventLog = [];
           });
         })();
+      },
+      restartScenario: async () => {
+        try { await get().actions.cancelTask(); } catch {}
+        try { await get().actions.refreshPreview(); } catch {}
+        try { (get().actions as any).scheduleAutoConnect?.(); } catch {}
       },
       setInstructions: (text: string) => {
         set((s) => { s.planner.instructions = text; });
