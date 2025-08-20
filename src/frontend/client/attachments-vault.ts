@@ -35,6 +35,7 @@ function saveMetaMap(map: Record<string, PersistMeta>) {
 export class AttachmentVault {
   private byName = new Map<string, AttachmentRecord>();
   private metaMap = loadMetaMap();
+  private listeners = new Set<(name?: string) => void>();
 
   constructor() {
     this.loadFromStorage();
@@ -61,6 +62,7 @@ export class AttachmentVault {
     } catch (e) {
       console.warn('Failed to save attachments to storage:', e);
     }
+    this.emit();
   }
 
   listDetailed(): AttachmentRecord[] {
@@ -198,5 +200,13 @@ export class AttachmentVault {
       saveMetaMap(this.metaMap);
     }
     this.saveToStorage();
+  }
+
+  onChange(fn: (name?: string) => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+  private emit(name?: string) {
+    try { for (const fn of this.listeners) fn(name); } catch {}
   }
 }

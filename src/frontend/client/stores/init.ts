@@ -1,6 +1,6 @@
 import { useAppStore } from './appStore';
 import { StorageService } from '../services/StorageService';
-import { extractLaunchParams, clearUrlParams } from '../utils/urlParams';
+import { useConfigStore } from './configStore';
 
 function debounce<T extends (...args: any[]) => void>(fn: T, ms: number) {
   let t: any;
@@ -35,16 +35,45 @@ useAppStore.subscribe((state, prev) => {
   } catch {}
 });
 
-// One-time URL param initialization (consume and clear)
-(function initFromUrlOnce() {
-  try {
-    const params = extractLaunchParams();
-    // Clear immediately so reloads don't override working state
-    clearUrlParams();
-    // Save as ephemeral, one-time launch defaults. Components will use them
-    // as initial values; user changes then take precedence and persist.
-    useAppStore.setState((s) => { (s as any).defaultsFromUrlParameters = params; });
-  } catch {
-    // ignore
-  }
+// Initialize configuration store: URL → storage → hardcoded
+(function initConfigAndBridge() {
+  const cfg = useConfigStore.getState();
+  cfg.actions.initializeFromUrl();
+  cfg.actions.initializeFromStorage();
+  cfg.actions.initializeRuntime();
+
+  // Push initial config into app store
+  const runtime = useConfigStore.getState().runtime;
+  const a = useAppStore.getState().actions;
+  a.setEndpoint(runtime.endpoint);
+  a.setProtocol(runtime.protocol);
+  if (runtime.scenarioUrl) a.setScenarioUrl(runtime.scenarioUrl);
+  if (runtime.model) a.setModel(runtime.model);
+  if (runtime.instructions) a.setInstructions(runtime.instructions);
+  if (runtime.plannerAgentId) a.selectAgent('planner', runtime.plannerAgentId);
+  if (runtime.counterpartAgentId) a.selectAgent('counterpart', runtime.counterpartAgentId);
+
+  // Bridge config → app store (keeps connection/testing in sync with Step 1)
+  useConfigStore.subscribe((state, prev) => {
+    try {
+      const prevRt = prev?.runtime;
+      const rt = state.runtime;
+      if (!prevRt || rt.endpoint !== prevRt.endpoint) useAppStore.getState().actions.setEndpoint(rt.endpoint);
+      if (!prevRt || rt.protocol !== prevRt.protocol) useAppStore.getState().actions.setProtocol(rt.protocol);
+      if (!prevRt || rt.scenarioUrl !== prevRt.scenarioUrl) useAppStore.getState().actions.setScenarioUrl(rt.scenarioUrl);
+      if (!prevRt || rt.model !== prevRt.model) useAppStore.getState().actions.setModel(rt.model);
+      if (!prevRt || rt.instructions !== prevRt.instructions) useAppStore.getState().actions.setInstructions(rt.instructions);
+      if (!prevRt || rt.plannerAgentId !== prevRt.plannerAgentId) { if (rt.plannerAgentId) useAppStore.getState().actions.selectAgent('planner', rt.plannerAgentId); }
+      if (!prevRt || rt.counterpartAgentId !== prevRt.counterpartAgentId) { if (rt.counterpartAgentId) useAppStore.getState().actions.selectAgent('counterpart', rt.counterpartAgentId); }
+    } catch {}
+  });
 })();
+
+// Keep scenario URL persisted when it changes (legacy/global key)
+useAppStore.subscribe((state, prev) => {
+  try {
+    const prevUrl = prev?.scenario?.url;
+    const nextUrl = state.scenario.url;
+    if (nextUrl !== prevUrl) storage.saveScenarioUrl(nextUrl || '');
+  } catch {}
+});

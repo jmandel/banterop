@@ -111,6 +111,14 @@ export class StorageService {
     try { localStorage.setItem("a2a.planner.summarizeOnUpload", String(!!on)); } catch {}
   }
 
+  // Scenario URL persistence (global, last-used)
+  loadScenarioUrl(): string {
+    try { return localStorage.getItem("a2a.scenario.url") || ""; } catch { return ""; }
+  }
+  saveScenarioUrl(url: string): void {
+    try { localStorage.setItem("a2a.scenario.url", url || ""); } catch {}
+  }
+
   loadEndpoint(): string {
     try { return localStorage.getItem("a2a.endpoint") || ""; } catch { return ""; }
   }
@@ -125,4 +133,3 @@ export class StorageService {
     try { localStorage.setItem("a2a.protocol", protocol); } catch {}
   }
 }
-

@@ -19,8 +19,13 @@ export const AttachmentBar: React.FC<AttachmentBarProps> = ({
   summarizeOnUpload,
   onToggleSummarize,
 }) => {
-  const allAttachments = vault.listDetailed();
   const [forceUpdate, setForceUpdate] = React.useState(0);
+  const allAttachments = React.useMemo(() => vault.listDetailed(), [vault, forceUpdate]);
+
+  React.useEffect(() => {
+    const off = vault.onChange(() => setForceUpdate((v) => v + 1));
+    return () => { try { off(); } catch {} };
+  }, [vault]);
 
   const fileIcon = (mime: string): string => {
     const m = (mime || "").toLowerCase();

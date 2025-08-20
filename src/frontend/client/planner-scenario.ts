@@ -505,7 +505,7 @@ export class ScenarioPlannerV2 {
     parts.push("");
     parts.push("Always-available tools:");
 
-    // Determine whether to omit certain messaging tools based on the last planner message target
+    // Determine whether to omit certain messaging tools based on context
     let omitUserMsg = false;
     let omitRemoteMsg = false;
     try {
@@ -514,6 +514,11 @@ export class ScenarioPlannerV2 {
         if (lastMessage.channel === 'user-planner' && lastMessage.author === 'planner') omitUserMsg = true;
         if (lastMessage.channel === 'planner-agent' && lastMessage.author === 'planner') omitRemoteMsg = true;
       }
+      // Also respect task status: only allow remote messaging when the conversation is accepting input
+      const lastStatus = [...this.eventLog].reverse().find(e => e.type === 'status') as any;
+      const statusNow = String(lastStatus?.payload?.state || '');
+      const allowRemote = !statusNow || statusNow === 'input-required';
+      if (!allowRemote) omitRemoteMsg = true;
     } catch {}
 
     if (!omitRemoteMsg) {

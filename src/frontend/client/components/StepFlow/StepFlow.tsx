@@ -56,16 +56,16 @@ interface StepFlowProps {
 
 export const StepFlow: React.FC<StepFlowProps> = (props) => {
   const store = useAppStore();
-  const endpoint = store.connection.endpoint ?? props.endpoint ?? "";
-  const protocol = store.connection.protocol ?? props.protocol ?? "auto";
+  const endpoint = store.connection.endpoint ?? "";
+  const protocol = store.connection.protocol ?? "auto";
   const status = store.task.status ?? props.status ?? "initializing";
   const taskId = store.task.id ?? props.taskId;
   const connected = (store.connection.status === 'connected');
   const plannerStarted = store.planner.started ?? props.plannerStarted ?? false;
   const error = store.connection.error ?? props.error;
   const card = store.connection.card ?? props.card;
-  const instructions = store.planner.instructions ?? props.instructions ?? "";
-  const selectedModel = store.planner.model ?? props.selectedModel ?? "";
+  const instructions = store.planner.instructions ?? "";
+  const selectedModel = store.planner.model ?? "";
   const onEndpointChange = props.onEndpointChange ?? ((v: string) => store.actions.setEndpoint(v));
   const onProtocolChange = props.onProtocolChange ?? ((p: any) => store.actions.setProtocol(p));
   const onCancelTask = props.onCancelTask ?? (() => store.actions.cancelTask());

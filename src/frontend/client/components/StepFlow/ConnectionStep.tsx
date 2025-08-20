@@ -39,19 +39,17 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
   goals,
   instructions,
 }) => {
-  const store = useAppStore();
+  const app = useAppStore();
   const controlled = typeof onEndpointChangeProp === 'function';
-  const endpoint = controlled
-    ? (epProp ?? "")
-    : (store.connection.endpoint || store.defaultsFromUrlParameters?.endpoint || epProp || "");
-  const protocol = store.connection.protocol ?? protoProp ?? "auto";
-  const status = store.task.status ?? statusProp ?? "initializing";
-  const taskId = store.task.id ?? taskIdProp;
-  const connected = (store.connection.status === 'connected');
-  const error = store.connection.error ?? errorProp;
-  const onEndpointChange = onEndpointChangeProp ?? ((v: string) => store.actions.setEndpoint(v));
-  const onProtocolChange = onProtocolChangeProp ?? ((p: any) => store.actions.setProtocol(p));
-  const onCancelTask = onCancelTaskProp ?? (() => { store.actions.cancelTask(); });
+  const endpoint = controlled ? (epProp ?? "") : (app.connection.endpoint ?? "");
+  const protocol = app.connection.protocol ?? "auto";
+  const status = app.task.status ?? statusProp ?? "initializing";
+  const taskId = app.task.id ?? taskIdProp;
+  const connected = (app.connection.status === 'connected');
+  const error = app.connection.error ?? errorProp;
+  const onEndpointChange = onEndpointChangeProp ?? ((v: string) => app.actions.setEndpoint(v));
+  const onProtocolChange = onProtocolChangeProp ?? ((p: any) => app.actions.setProtocol(p));
+  const onCancelTask = onCancelTaskProp ?? (() => { app.actions.cancelTask(); });
   // Detect our reference stack (same logic as ScenarioDetector)
   const canOpenWatch = useMemo(() => {
     try {
@@ -116,7 +114,7 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
           <p className="text-xs text-gray-500 mt-1">
             Auto detects by suffix: /a2a or /mcp.
             {(() => {
-              const info = store.connection.preview as any;
+              const info = app.connection.preview as any;
               const epHasText = (endpoint || '').trim().length > 0;
               if (protocol === 'auto') {
                 if (info?.protocol === 'a2a') {
@@ -163,33 +161,6 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
       {/* Connect/Disconnect controls and Task Status */}
       <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
         <div className="flex items-center gap-3 flex-wrap">
-          {!connected ? (
-            <Button
-              variant="primary"
-              onClick={() => store.actions.connect(endpoint, protocol)}
-              className="px-4 py-2"
-              disabled={!String(endpoint || '').trim()}
-            >
-              Connect
-            </Button>
-          ) : (
-            <Button
-              variant="secondary"
-              onClick={() => store.actions.disconnect()}
-              className="px-4 py-2"
-            >
-              Disconnect
-            </Button>
-          )}
-          {(connected || taskId) && (
-            <Button
-              variant="primary"
-              onClick={onCancelTask}
-              className="px-4 py-2"
-            >
-              Restart Scenario
-            </Button>
-          )}
           <span className="text-sm font-medium text-gray-700">Task Status:</span>
           {getStatusPill()}
           {taskId && (
@@ -210,6 +181,18 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
             </a>
           )}
         </div>
+      </div>
+
+      {/* Restart Scenario - always available (bottom-left) */}
+      <div className="mt-4 flex justify-start">
+        <Button
+          variant="primary"
+          onClick={onCancelTask}
+          className="px-4 py-2"
+          title="Disconnect, clear planner, and remove non-user attachments"
+        >
+          Restart Scenario
+        </Button>
       </div>
 
       {connected && (

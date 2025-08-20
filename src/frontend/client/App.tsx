@@ -100,47 +100,13 @@ export default function App() {
       return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     } catch { return s; }
   };
-  // Parse prefill params from URL (hash or search)
-  const parsePrefillParams = () => {
-    try {
-      const href = (typeof window !== 'undefined' ? window.location.href : '') || '';
-      const u = new URL(href);
-      const hash = (u.hash || '').replace(/^#\/?/, '');
-      // Prefer hash query string (/#/?...)
-      const q = hash.includes('?') ? hash.substring(hash.indexOf('?')) : u.search;
-      const sp = new URLSearchParams(q);
-      return {
-        protocol: (sp.get('protocol') || '').toLowerCase(),
-        endpoint: sp.get('endpoint') || '',
-        scenarioUrl: sp.get('scenarioUrl') || '',
-        plannerAgentId: sp.get('plannerAgentId') || '',
-        counterpartAgentId: sp.get('counterpartAgentId') || '',
-        defaultModel: sp.get('defaultModel') || ''
-      };
-    } catch {
-      return { protocol: '', endpoint: '', scenarioUrl: '', plannerAgentId: '', counterpartAgentId: '', defaultModel: '' };
-    }
-  };
-  const prefill = parsePrefillParams();
-  const initialEndpoint = prefill.endpoint || localStorage.getItem("a2a.endpoint") || "";
-  const initialProto: Protocol = (() => {
-    const ep = (initialEndpoint || '').trim();
-    const detected = detectProtocolFromUrl(ep);
-    // If endpoint declares a protocol, prefer Auto so detection drives requests
-    if (detected) return 'auto';
-    // With no endpoint, default to Auto
-    if (!ep) return 'auto';
-    // Otherwise honor persisted user selection; ignore any URL prefill
-    const persisted = (localStorage.getItem('a2a.protocol') as Protocol) || 'auto';
-    return (persisted === 'a2a' || persisted === 'mcp' || persisted === 'auto') ? persisted : 'auto';
-  })();
-  const [endpoint, setEndpoint] = useState(initialEndpoint);
-  const [protocol, setProtocol] = useState<Protocol>(initialProto);
-  const debouncedEndpoint = useDebounce(endpoint, 500);
+  // Endpoint/protocol now come from the store via ConnectionStep/StepFlow
   const [resumeTask, setResumeTask] = useState("");
   const [providers, setProviders] = useState<Array<{ name: string; models: string[] }>>([]);
   const [plannerThinking, setPlannerThinking] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<string>(() => prefill.defaultModel || localStorage.getItem("a2a.planner.model") || "");
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    try { return useAppStore.getState().planner.model || ""; } catch { return ""; }
+  });
 
   const app = useAppStore();
 
@@ -151,8 +117,7 @@ export default function App() {
   // Planner mode kept in local UI state only
   const plannerStartedRef = useRef<boolean>(false);
   // no-op placeholders removed; unified event log drives UI
-  // Scenario URL + agent selection
-  const [scenarioUrl, setScenarioUrl] = useState<string>(() => prefill.scenarioUrl || localStorage.getItem("a2a.scenario.url") || "");
+  // Scenario URL + agent selection handled in store via ConfigurationStep
 
   // When the user edits Endpoint or Scenario URL, scrub those params from the URL so reloads don't override
   const clearHashParams = (keys: string[]) => {
@@ -172,16 +137,7 @@ export default function App() {
     } catch {}
   };
 
-  const handleEndpointChange = (v: string) => {
-    setEndpoint(v);
-    try { app.actions.setEndpoint(v); } catch {}
-    clearHashParams(['endpoint','protocol','defaultModel']);
-  };
-  const handleScenarioUrlChange = (v: string) => {
-    setScenarioUrl(v);
-    clearHashParams(['scenarioUrl','protocol','defaultModel']);
-  };
-  const debouncedScenarioUrl = useDebounce(scenarioUrl, 500);
+  // No local endpoint/scenarioUrl; handled by stores/components
   const card = useAppStore(s => s.connection.card);
   const cardLoading = false;
   const eventLog = useAppStore(s => s.planner.eventLog) as PlannerUnifiedEvent[];
@@ -209,35 +165,24 @@ export default function App() {
     const tid = useAppStore.getState().task.id;
     const st = lastStatusRef.current;
     const started = useAppStore.getState().planner.started;
-    if (endpoint && tid && st && !['completed','failed','canceled'].includes(String(st))) {
-      try { saveTaskSessionFrontDraft(endpoint, tid, frontInput, st, started); } catch {}
+    const epNow = useAppStore.getState().connection.endpoint;
+    if (epNow && tid && st && !['completed','failed','canceled'].includes(String(st))) {
+      try { saveTaskSessionFrontDraft(epNow, tid, frontInput, st, started); } catch {}
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frontInput]);
 
-  useEffect(() => {
-    localStorage.setItem("a2a.endpoint", endpoint);
-  }, [endpoint]);
-  useEffect(() => { try { localStorage.setItem("a2a.protocol", protocol); } catch {} }, [protocol]);
+  // Persistence handled by StorageService/Config pipeline
 
   // If endpoint is cleared, reset protocol selector to Auto to avoid misleading MCP/A2A state
-  useEffect(() => {
-    const ep = (endpoint || '').trim();
-    if (!ep && protocol !== 'auto') setProtocol('auto');
-  }, [endpoint]);
+  // Protocol auto-reset handled by preview logic
 
   // On initial load, if endpoint includes explicit /a2a or /mcp but UI isn't Auto,
   // force selector to Auto to avoid mismatched requests. Honor explicit prefill.
   const didInitRef = useRef(false);
-  const hasPrefillProtocol = prefill.protocol === 'a2a' || prefill.protocol === 'mcp';
   useEffect(() => {
     if (didInitRef.current) return;
     didInitRef.current = true;
-    if (hasPrefillProtocol) return;
-    const ep = (initialEndpoint || '').trim();
-    if (!ep) return;
-    const detected = detectProtocolFromUrl(ep);
-    if (detected && protocol !== 'auto') setProtocol('auto');
   }, []);
 
   // Instructions are managed in-session by ConfigurationStep
@@ -245,7 +190,7 @@ export default function App() {
   useEffect(() => { try { localStorage.setItem("a2a.planner.model", selectedModel); } catch {} }, [selectedModel]);
   
   // No more plannerMode/summarizeOnUpload in local reducer; store owns preferences
-  useEffect(() => { try { localStorage.setItem("a2a.scenario.url", scenarioUrl); } catch {} }, [scenarioUrl]);
+  // Scenario URL persistence handled by init subscription
   
 
   // Removed beforeunload persistence (SessionManager manages snapshots)
@@ -319,20 +264,25 @@ export default function App() {
   const stopPlanner = () => { try { app.actions.stopPlanner(); } catch {} };
 
   const cancelTask = async (opts?: { reconnect?: boolean }) => {
-    console.debug('[App] cancelTask: begin', { endpoint, protocol, reconnect: !!opts?.reconnect });
+    const epNow = useAppStore.getState().connection.endpoint;
+    const protoNow = useAppStore.getState().connection.protocol;
+    console.debug('[App] cancelTask: begin', { endpoint: epNow, protocol: protoNow, reconnect: !!opts?.reconnect });
     try { await app.actions.cancelTask(); } catch (e) { console.warn('[App] cancelTask: cancel error', e); }
     preloadedEventsRef.current = null;
     setFrontInput("");
     setResumeTask("");
     console.debug('[App] cancelTask: cleared UI state');
     if (opts?.reconnect) {
-      const ep = (endpoint || '').trim();
+      const ep = (epNow || '').trim();
       if (ep) {
-        console.debug('[App] cancelTask: reconnecting', { ep, protocol });
-        try { await handleConnect(ep, protocol); } catch (e) { console.warn('[App] cancelTask: reconnect error', e); }
+        console.debug('[App] cancelTask: reconnecting', { ep, protocol: protoNow });
+        try { await handleConnect(ep, protoNow); } catch (e) { console.warn('[App] cancelTask: reconnect error', e); }
       }
     }
-    try { if (scenarioUrl && scenarioUrl.trim()) { console.debug('[App] cancelTask: reload scenario'); await onLoadScenarioUrl(); } } catch {}
+    try {
+      const scen = useAppStore.getState().scenario.url;
+      if (scen && scen.trim()) { console.debug('[App] cancelTask: reload scenario'); await onLoadScenarioUrl(); }
+    } catch {}
     console.debug('[App] cancelTask: done');
   };
 
@@ -346,30 +296,18 @@ export default function App() {
   };
 
   // Scenario URL loader and agent selection
-  const onLoadScenarioUrl = async () => {
-    const url = scenarioUrl.trim();
-    if (!url) return;
-    try { app.actions.setScenarioUrl(url); } catch (e) { console.error('Scenario load error', e); }
-  };
+  const onLoadScenarioUrl = async () => {};
 
   // Planner agent selection handled in ConfigurationStep via SessionManager
 
   // Tool persistence handled in SessionManager
 
   // Auto-load scenario when URL is present/changes (via SessionManager)
-  useEffect(() => {
-    if (debouncedScenarioUrl && debouncedScenarioUrl.trim()) { try { app.actions.setScenarioUrl(debouncedScenarioUrl.trim()); } catch {} }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedScenarioUrl]);
+  // Scenario changes handled by ConfigurationStep
 
   // Ensure scenario is (re)fetched after connect/reset when a URL is present
   const storeConnected = useAppStore(s => s.connection.status === 'connected');
-  useEffect(() => {
-    if (storeConnected && debouncedScenarioUrl && debouncedScenarioUrl.trim()) {
-      try { app.actions.setScenarioUrl(debouncedScenarioUrl.trim()); } catch {}
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeConnected]);
+  // Ensure scenario is fetched when connected handled by store
 
   
 

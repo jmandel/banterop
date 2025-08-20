@@ -5,19 +5,18 @@ import type { A2AStatus, A2AMessage, A2APart } from '../a2a-types';
 import type { TaskClientLike } from '../protocols/task-client';
 import type { UnifiedEvent } from '../types/events';
 import type { ScenarioPlannerV2 } from '../planner-scenario';
+// Store is composed from slices; app imports only useAppStore
+import { createConnectionSlice } from './slices/connection.slice';
 import { ScenarioPlannerV2 as PlannerClass } from '../planner-scenario';
 import { AttachmentVault } from '../attachments-vault';
 import { AttachmentSummarizer } from '../attachment-summaries';
 import { StorageService } from '../services/StorageService';
-import type { LaunchParams as LaunchDefaults } from '../utils/urlParams';
 import { type Protocol as ProtoType } from '../protocols';
 import { refreshPreview as svcRefreshPreview, detectEffectiveProtocol, createClient } from '../services/connection.service';
 import { API_BASE } from '../api-base';
 
 // Minimal public shape for the app store. This mirrors SessionManager for now.
 export interface AppState {
-  // One-time defaults parsed from URL at boot, not persisted
-  defaultsFromUrlParameters?: LaunchDefaults;
   connection: {
     endpoint: string;
     protocol: Protocol;
@@ -55,6 +54,8 @@ export interface AppState {
     config: any | null;
     selectedAgents: { planner?: string; counterpart?: string };
     enabledTools: string[];
+    error?: string;
+    loading?: boolean;
   };
 
   attachments: {
@@ -96,6 +97,7 @@ export interface AppState {
 
     // Scenario
     setScenarioUrl: (url: string) => void;
+    loadScenario: () => Promise<void>;
     setScenarioConfig: (cfg: any | null) => void;
     selectAgent: (role: 'planner' | 'counterpart', id: string) => void;
     setEnabledTools: (names: string[]) => void;
@@ -109,16 +111,10 @@ export interface AppState {
 }
 
 export const useAppStore = create<AppState>()(
-  immer((set, get) => ({
-    defaultsFromUrlParameters: undefined,
-    connection: {
-      endpoint: '',
-      protocol: 'auto',
-      status: 'disconnected',
-      error: undefined,
-      card: undefined,
-      detectedProtocol: undefined,
-    },
+  immer((set, get) => {
+    const connectionSlice = createConnectionSlice(set as any, get as any) as Partial<AppState>;
+    return ({
+    ...(connectionSlice as any),
     task: {
       id: undefined,
       status: 'initializing',
@@ -138,6 +134,8 @@ export const useAppStore = create<AppState>()(
       config: null,
       selectedAgents: {},
       enabledTools: [],
+      error: undefined,
+      loading: false,
     },
     attachments: {
       summarizeOnUpload: new StorageService().loadSummarizeOnUpload(),
@@ -150,75 +148,9 @@ export const useAppStore = create<AppState>()(
       summarizer: null,
     },
     actions: {
-      refreshPreview: async () => {
-        const ep = (get().connection.endpoint || '').trim();
-        const proto = get().connection.protocol;
-        if (!ep) { set((s) => { s.connection.preview = undefined; s.connection.card = undefined; }); return; }
-        const effective = detectEffectiveProtocol(ep, proto);
-        set((s) => { s.connection.detectedProtocol = effective as any; });
-        const preview = await svcRefreshPreview(ep, proto);
-        set((s) => {
-          s.connection.preview = preview as any;
-          if (preview.protocol === 'a2a') s.connection.card = (preview as any).card;
-          else if (preview.protocol === 'mcp' && (preview as any).status === 'tools') s.connection.card = { name: 'MCP Endpoint', mcp: { toolNames: (preview as any).tools || [] } } as any;
-          else s.connection.card = undefined;
-        });
-      },
-      // Core connection lifecycle
-      connect: async (endpoint: string, protocol: Protocol) => {
-        const storage = ensureStorage();
-        const ep = String(endpoint || '').trim();
-        if (!ep) {
-          await get().actions.disconnect();
-          return;
-        }
-        set((s) => {
-          s.connection.endpoint = ep;
-          s.connection.protocol = protocol;
-          s.connection.status = 'connecting';
-          s.connection.error = undefined;
-          s.connection.card = undefined;
-          s.connection.preview = undefined;
-        });
-        const effective: ProtoType = detectEffectiveProtocol(ep, protocol);
-        set((s) => { s.connection.detectedProtocol = effective as any; });
-        // Prepare preview first; bail on known errors
-        await get().actions.refreshPreview();
-        const preview = get().connection.preview as any;
-        if (!preview || preview.protocol === 'cannot-detect' || preview.status === 'error') {
-          set((s) => { s.connection.status = 'error'; s.connection.error = preview?.error || 'Could not detect or connect'; });
-          return;
-        }
-        // Create client via service
-        const client = createClient(ep, effective as Exclude<ProtoType,'auto'>);
-        // Attach listener
-        const off = client.on('new-task', () => {
-          const task = client.getTask();
-          const tid = client.getTaskId();
-          const status = client.getStatus();
-          set((s) => {
-            if (tid) s.task.id = tid;
-            if (status) s.task.status = status as any;
-            if (task?.history) s.task.history = task.history as any;
-          });
-          const id = tid || undefined;
-          if (ep && id) storage.saveSession(ep, { taskId: id, status: status as any });
-        });
-        // Save references in store
-        set((s) => { s._internal.taskClient = client; s._internal.taskOffs.forEach((fn) => { try { fn(); } catch {} }); s._internal.taskOffs = [off]; });
-        // Setup summarizer
-        const summarizer = new AttachmentSummarizer(() => get().planner.model || undefined, get()._internal.vault);
-        summarizer.onUpdate((_name) => { set((s) => s); });
-        set((s) => { s._internal.summarizer = summarizer; });
-
-        set((s) => {
-          s.connection.status = 'connected';
-          s.task.status = 'initializing';
-        });
-
-        // Auto-resume if possible
-        try { await get().actions.resumeTask(); } catch {}
-      },
+      // merge connection actions from slice first
+      ...(connectionSlice as any).actions,
+      // Remaining domain actions
       resumeTask: async (taskId?: string) => {
         const storage = ensureStorage();
         const ep = get().connection.endpoint;
@@ -241,37 +173,7 @@ export const useAppStore = create<AppState>()(
           get().actions.startPlanner();
         }
       },
-      disconnect: async () => {
-        const client = get()._internal.taskClient as TaskClientLike | null;
-        try { if (client?.getTaskId()) await client.cancel(); } catch {}
-        try { client?.clearLocal(); } catch {}
-        try { get()._internal.taskOffs.forEach((fn: any) => fn()); } catch {}
-        set((s) => { s._internal.taskOffs = []; s._internal.taskClient = null; });
-        get().actions.stopPlanner();
-        get()._internal.vault.purgeBySource(['agent', 'remote-agent']);
-        set((s) => {
-          s.connection.status = 'disconnected';
-          s.connection.error = undefined;
-          s.connection.card = undefined;
-          s.task.id = undefined;
-          s.task.status = 'initializing';
-          s.planner.eventLog = [];
-        });
-      },
-      setEndpoint: (endpoint: string) => {
-        set((s) => { s.connection.endpoint = endpoint; });
-        void get().actions.refreshPreview();
-      },
-      setProtocol: (protocol: Protocol) => {
-        set((s) => { s.connection.protocol = protocol; });
-        void get().actions.refreshPreview();
-      },
-      setCard: (card: any | undefined) => {
-        set((s) => { s.connection.card = card; });
-      },
-      setConnectionStatus: (status, error) => {
-        set((s) => { s.connection.status = status; s.connection.error = error; });
-      },
+      // Note: disconnect/setEndpoint/setProtocol/etc come from connection slice
       setTaskState: (p) => {
         set((s) => {
           if (p.id !== undefined) s.task.id = p.id;
@@ -359,46 +261,59 @@ export const useAppStore = create<AppState>()(
         set((s) => { s.planner.thinking = b; });
       },
       setScenarioUrl: (url: string) => {
-        set((s) => { s.scenario.url = url; });
-        // opportunistic load
-        (async () => {
-          const u = (url || '').trim();
-          if (!u) { set((s) => { s.scenario.config = null; }); return; }
-          try {
-            const res = await fetch(u, { cache: 'no-cache', headers: { 'Cache-Control': 'no-cache' } });
-            if (!res.ok) throw new Error(`Scenario fetch failed: ${res.status}`);
-            const j = await res.json();
-            const cfg = (j?.config ?? j) as any;
-            set((s) => { s.scenario.config = cfg; });
-            // restore selection
-            const agents: string[] = Array.isArray(cfg?.agents) ? (cfg.agents as any[]).map((a) => String(a?.agentId || '')).filter(Boolean) : [];
-            const saved = ensureStorage().loadScenarioSelection(u) || {};
-            const defaults = get().defaultsFromUrlParameters;
-            // Prefer one-time defaults if provided and valid
-            let planner = defaults?.plannerAgentId && agents.includes(defaults.plannerAgentId) ? defaults.plannerAgentId : undefined;
-            let counterpart = defaults?.counterpartAgentId && agents.includes(defaults.counterpartAgentId) ? defaults.counterpartAgentId : undefined;
-            // Then fall back to saved selection
-            if (!planner && saved.planner && agents.includes(saved.planner)) planner = saved.planner;
-            if (!counterpart && saved.counterpart && agents.includes(saved.counterpart)) counterpart = saved.counterpart;
-            if (!planner && agents.length) planner = agents[0];
-            if (!counterpart && agents.length > 1) counterpart = agents.find((a) => a !== planner) || agents[1];
-            set((s) => { s.scenario.selectedAgents = { planner, counterpart }; });
-            ensureStorage().saveScenarioSelection(u, get().scenario.selectedAgents);
-            // restore tools for planner
-            if (planner) {
-              const allTools: string[] = Array.isArray(cfg?.agents?.find((a: any) => a?.agentId === planner)?.tools)
-                ? (cfg?.agents?.find((a: any) => a?.agentId === planner)?.tools || []).map((t: any) => String(t?.toolName || t?.name || '')).filter(Boolean)
-                : [];
-              const savedTools = ensureStorage().loadScenarioTools(u, planner);
-              const next = (savedTools || allTools).filter((n) => allTools.includes(n));
-              set((s) => { s.scenario.enabledTools = next; });
-            } else {
-              set((s) => { s.scenario.enabledTools = []; });
-            }
-          } catch (e: any) {
-            set((s) => { s.connection.error = String(e?.message ?? e); });
+        set((s) => {
+          s.scenario.url = url;
+          s.scenario.error = undefined;
+          // Clear prior scenario state so UI reflects current URL, not stale config
+          s.scenario.config = null;
+          s.scenario.selectedAgents = {};
+          s.scenario.enabledTools = [];
+        });
+      },
+      loadScenario: async () => {
+        const u = (get().scenario.url || '').trim();
+        if (!u) {
+          set((s) => {
+            s.scenario.config = null;
+            s.scenario.error = undefined;
+            s.scenario.selectedAgents = {};
+            s.scenario.enabledTools = [];
+          });
+          return;
+        }
+        set((s) => { s.scenario.loading = true; s.scenario.error = undefined; });
+        try {
+          const res = await fetch(u, { cache: 'no-cache', headers: { 'Cache-Control': 'no-cache' } });
+          if (!res.ok) throw new Error(`Scenario fetch failed: ${res.status}`);
+          const j = await res.json();
+          const cfg = (j?.config ?? j) as any;
+          set((s) => { s.scenario.config = cfg; });
+          // restore selection
+          const agents: string[] = Array.isArray(cfg?.agents) ? (cfg.agents as any[]).map((a) => String(a?.agentId || '')).filter(Boolean) : [];
+          const saved = ensureStorage().loadScenarioSelection(u) || {};
+          let planner = saved.planner && agents.includes(saved.planner) ? saved.planner : undefined;
+          let counterpart = saved.counterpart && agents.includes(saved.counterpart) ? saved.counterpart : undefined;
+          if (!planner && agents.length) planner = agents[0];
+          if (!counterpart && agents.length > 1) counterpart = agents.find((a) => a !== planner) || agents[1];
+          set((s) => { s.scenario.selectedAgents = { planner, counterpart }; });
+          ensureStorage().saveScenarioSelection(u, get().scenario.selectedAgents);
+          // restore tools for planner
+          if (planner) {
+            const allTools: string[] = Array.isArray(cfg?.agents?.find((a: any) => a?.agentId === planner)?.tools)
+              ? (cfg?.agents?.find((a: any) => a?.agentId === planner)?.tools || []).map((t: any) => String(t?.toolName || t?.name || '')).filter(Boolean)
+              : [];
+            const savedTools = ensureStorage().loadScenarioTools(u, planner);
+            const next = (savedTools || allTools).filter((n) => allTools.includes(n));
+            set((s) => { s.scenario.enabledTools = next; });
+          } else {
+            set((s) => { s.scenario.enabledTools = []; });
           }
-        })();
+          set((s) => { s.scenario.error = undefined; });
+        } catch (e: any) {
+          set((s) => { s.scenario.error = String(e?.message ?? e); });
+        } finally {
+          set((s) => { s.scenario.loading = false; });
+        }
       },
       setScenarioConfig: (cfg: any | null) => {
         set((s) => { s.scenario.config = cfg; });
@@ -471,7 +386,8 @@ export const useAppStore = create<AppState>()(
         set((s) => { s.attachments.summarizeOnUpload = v; });
       },
     },
-  }))
+  });
+  })
 );
 
 // Simple derived selectors

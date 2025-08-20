@@ -38,17 +38,26 @@ interface ConfigurationStepProps {
 export const ConfigurationStep: React.FC<ConfigurationStepProps> = (props) => {
   // Prefer Zustand store where available (kept in sync via binder)
   const store = useAppStore();
-  const instructions = store.planner.instructions || store.defaultsFromUrlParameters?.instructions || (props.instructions ?? "");
+  const instructions = store.planner.instructions || "";
   const onInstructionsChange = props.onInstructionsChange ?? ((v: string) => store.actions.setInstructions(v));
-  const scenarioUrl = (props.scenarioUrl ?? store.scenario.url) || store.defaultsFromUrlParameters?.scenarioUrl || "";
+  const scenarioUrl = store.scenario.url || "";
   const onScenarioUrlChange = props.onScenarioUrlChange ?? ((v: string) => store.actions.setScenarioUrl(v));
-  const onLoadScenarioUrl = props.onLoadScenarioUrl ?? (() => { const u = (scenarioUrl || '').trim(); if (u) store.actions.setScenarioUrl(u); });
+  const onLoadScenarioUrl = props.onLoadScenarioUrl ?? (() => { const u = (scenarioUrl || '').trim(); if (u) void store.actions.loadScenario(); else store.actions.setScenarioUrl(''); });
+  // Auto-fetch on edit with debounce for instant feedback
+  React.useEffect(() => {
+    const u = (scenarioUrl || '').trim();
+    const t = setTimeout(() => {
+      if (u) void store.actions.loadScenario();
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenarioUrl]);
   const scenarioAgents = props.scenarioAgents ?? (Array.isArray((store.scenario.config as any)?.agents) ? ((store.scenario.config as any).agents as any[]).map(a => String(a?.agentId || '')).filter(Boolean) : []);
-  const selectedPlannerAgentId = props.selectedPlannerAgentId ?? store.scenario.selectedAgents?.planner ?? store.defaultsFromUrlParameters?.plannerAgentId;
-  const selectedCounterpartAgentId = props.selectedCounterpartAgentId ?? store.scenario.selectedAgents?.counterpart ?? store.defaultsFromUrlParameters?.counterpartAgentId;
+  const selectedPlannerAgentId = props.selectedPlannerAgentId ?? store.scenario.selectedAgents?.planner;
+  const selectedCounterpartAgentId = props.selectedCounterpartAgentId ?? store.scenario.selectedAgents?.counterpart;
   const enabledTools = props.enabledTools ?? store.scenario.enabledTools ?? [];
   const providers = props.providers ?? [];
-  const selectedModel = (props.selectedModel ?? store.planner.model) || store.defaultsFromUrlParameters?.defaultModel || "";
+  const selectedModel = store.planner.model || "";
   const onSelectedModelChange = props.onSelectedModelChange ?? ((m: string) => store.actions.setModel(m));
   const plannerStarted = props.plannerStarted ?? store.planner.started ?? false;
   const onStartPlanner = props.onStartPlanner ?? (() => { store.actions.startPlanner(); });
@@ -89,6 +98,34 @@ export const ConfigurationStep: React.FC<ConfigurationStepProps> = (props) => {
             )}
           </div>
           <p className="text-xs text-gray-500 mt-1">Paste a scenario endpoint to drive your agent's context.</p>
+          {(() => {
+            const err = useAppStore(s => s.scenario.error);
+            const cfg = useAppStore(s => s.scenario.config as any);
+            const loading = useAppStore(s => s.scenario.loading);
+            if (loading) {
+              return (
+                <div className="mt-2 p-2 rounded border border-blue-200 bg-blue-50 text-sm text-blue-700">
+                  Checking scenario…
+                </div>
+              );
+            }
+            if (err) {
+              return (
+                <div className="mt-2 p-2 rounded border border-red-200 bg-red-50 text-sm text-red-700">
+                  Scenario load error: {err}
+                </div>
+              );
+            }
+            if (cfg && Array.isArray(cfg?.agents)) {
+              const count = (cfg.agents as any[]).length;
+              return (
+                <div className="mt-2 p-2 rounded border border-green-200 bg-green-50 text-sm text-green-700">
+                  Scenario loaded • Agents: {count}
+                </div>
+              );
+            }
+            return null;
+          })()}
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Your Role</label>
