@@ -15,6 +15,7 @@ const ConfigSchema = z.object({
   // LLM Providers
   googleApiKey: z.string().optional(),
   openRouterApiKey: z.string().optional(),
+  openRouterProviderConfig: z.record(z.unknown()).optional(), // JSON config for OpenRouter provider routing
   defaultLlmProvider: z.enum(['google', 'openrouter', 'mock']).default('mock'),
   defaultLlmModel: z.string().optional(), // e.g. 'gemini-2.5-flash'
   
@@ -51,6 +52,15 @@ export class ConfigManager {
       // LLM Providers
       googleApiKey: process.env.GEMINI_API_KEY,
       openRouterApiKey: process.env.OPENROUTER_API_KEY,
+      openRouterProviderConfig: process.env.OPENROUTER_PROVIDER_CONFIG ? 
+        (() => {
+          try {
+            return JSON.parse(process.env.OPENROUTER_PROVIDER_CONFIG);
+          } catch (e) {
+            console.warn('Invalid OPENROUTER_PROVIDER_CONFIG JSON, ignoring:', e);
+            return undefined;
+          }
+        })() : undefined,
       defaultLlmProvider: process.env.DEFAULT_LLM_PROVIDER as Config['defaultLlmProvider'],
       defaultLlmModel: process.env.DEFAULT_LLM_MODEL,
       

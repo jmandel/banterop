@@ -151,7 +151,6 @@ export default function App() {
   const [providers, setProviders] = useState<Array<{ name: string; models: string[] }>>([]);
   const [plannerThinking, setPlannerThinking] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string>(() => prefill.defaultModel || localStorage.getItem("a2a.planner.model") || "");
-  const [summarizerModel, setSummarizerModel] = useState<string>(() => localStorage.getItem("a2a.attach.model") || "");
 
   const [model, dispatch] = useReducer(reducer, initModel(initialEndpoint, initialProto));
 
@@ -163,7 +162,7 @@ export default function App() {
   const scenarioPlannerRef = useRef<ScenarioPlannerV2 | null>(null);
   const scenarioPlannerOffRef = useRef<(() => void) | null>(null);
   const summarizerRef = useRef<AttachmentSummarizer | null>(null);
-  const summarizerModelRef = useRef<string>(summarizerModel);
+  const selectedModelRef = useRef<string>(selectedModel);
   const plannerModeRef = useRef<PlannerMode>("autostart");
   const plannerStartedRef = useRef<boolean>(false);
   // no-op placeholders removed; unified event log drives UI
@@ -310,7 +309,6 @@ export default function App() {
   useEffect(() => { try { localStorage.setItem("a2a.planner.instructions", instructions); } catch {} }, [instructions]);
   // No longer persisting background/goals by default
   useEffect(() => { try { localStorage.setItem("a2a.planner.model", selectedModel); } catch {} }, [selectedModel]);
-  useEffect(() => { try { localStorage.setItem("a2a.attach.model", summarizerModel); } catch {} }, [summarizerModel]);
   
   // Sync planner settings to localStorage
   useEffect(() => { try { localStorage.setItem("a2a.planner.mode", model.plannerMode); } catch {} }, [model.plannerMode]);
@@ -441,17 +439,13 @@ export default function App() {
           const first = filtered.flatMap((p: any) => p.models || [])[0];
           if (first) setSelectedModel(first);
         }
-        if (!summarizerModel) {
-          const first = filtered.flatMap((p: any) => p.models || [])[0];
-          if (first) setSummarizerModel(first);
-        }
       } catch {}
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Keep summarizer model ref in sync
-  useEffect(() => { summarizerModelRef.current = summarizerModel; }, [summarizerModel]);
+  // Keep planner model ref in sync (used by summarizer as well)
+  useEffect(() => { selectedModelRef.current = selectedModel; }, [selectedModel]);
 
   // Apply prefilled agent selections once agents are known, without clobbering saved tool choices
   useEffect(() => {
@@ -525,7 +519,7 @@ export default function App() {
     taskRef.current = taskClient;
 
     // Attachment summarizer (background)
-    summarizerRef.current = new AttachmentSummarizer(() => summarizerModelRef.current || undefined, vaultRef.current);
+    summarizerRef.current = new AttachmentSummarizer(() => selectedModelRef.current || undefined, vaultRef.current);
     summarizerRef.current.onUpdate((_name) => {
       // Update attachment UI when summaries arrive; do not trigger planner ticks
       setAttachmentUpdateTrigger(prev => prev + 1);
@@ -646,6 +640,7 @@ export default function App() {
       vault: vaultRef.current,
       getApiBase,
       getEndpoint: () => endpoint,
+      getModel: () => selectedModel,
       getPlannerAgentId: () => selectedPlannerAgentId,
       getCounterpartAgentId: () => selectedCounterpartAgentId,
       getScenarioConfig: () => scenarioConfig,
@@ -1024,6 +1019,8 @@ const onAttachFiles = async (files: FileList | null) => {
             enabledTools={enabledTools}
             onToggleTool={onToggleTool}
             providers={providers}
+            selectedModel={selectedModel}
+            onSelectedModelChange={(m) => { setSelectedModel(m); clearHashParams(['defaultModel']); }}
             plannerStarted={model.plannerStarted}
             onStartPlanner={startPlanner}
             onStopPlanner={stopPlanner}
@@ -1035,8 +1032,6 @@ const onAttachFiles = async (files: FileList | null) => {
                 onOpenAttachment: openBase64Attachment,
                 summarizeOnUpload: model.summarizeOnUpload,
                 onToggleSummarize: (on) => dispatch({ type: "toggleSummarizeOnUpload", on }),
-                summarizerModel,
-                onSummarizerModelChange: setSummarizerModel,
               }}
             />
           </div>

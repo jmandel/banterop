@@ -33,6 +33,8 @@ interface StepFlowProps {
   enabledTools: string[];
   onToggleTool: (name: string, enabled: boolean) => void;
   providers: Array<{ name: string; models: string[] }>;
+  selectedModel: string;
+  onSelectedModelChange: (model: string) => void;
   plannerStarted: boolean;
   onStartPlanner: () => void;
   onStopPlanner: () => void;
@@ -48,8 +50,6 @@ interface StepFlowProps {
     onOpenAttachment?: (name: string, mimeType: string, bytes?: string, uri?: string) => void;
     summarizeOnUpload: boolean;
     onToggleSummarize: (value: boolean) => void;
-    summarizerModel: string;
-    onSummarizerModelChange: (model: string) => void;
   };
 }
 
@@ -154,6 +154,8 @@ export const StepFlow: React.FC<StepFlowProps> = (props) => {
           enabledTools={props.enabledTools}
           onToggleTool={props.onToggleTool}
           providers={props.providers}
+          selectedModel={props.selectedModel}
+          onSelectedModelChange={props.onSelectedModelChange}
           plannerStarted={props.plannerStarted}
           onStartPlanner={props.onStartPlanner}
           onStopPlanner={props.onStopPlanner}

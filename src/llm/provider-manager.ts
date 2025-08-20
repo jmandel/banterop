@@ -16,6 +16,7 @@ export interface LLMConfig {
   defaultLlmModel?: string | undefined;
   googleApiKey?: string | undefined;
   openRouterApiKey?: string | undefined;
+  openRouterProviderConfig?: Record<string, unknown> | undefined;
   serverUrl?: string | undefined;
 }
 
@@ -135,7 +136,8 @@ export class LLMProviderManager {
       provider: providerName, 
       ...(apiKey !== undefined ? { apiKey } : {}),
       ...(config?.model !== undefined ? { model: config.model } : {}),
-      ...(providerName === 'browserside' && this.config.serverUrl ? { serverUrl: this.config.serverUrl } : {})
+      ...(providerName === 'browserside' && this.config.serverUrl ? { serverUrl: this.config.serverUrl } : {}),
+      ...(providerName === 'openrouter' && this.config.openRouterProviderConfig ? { providerRouting: this.config.openRouterProviderConfig } : {})
     };
     
     console.log(`[LLMProviderManager] Creating ${providerName} provider, serverUrl=${(providerConfig as any).serverUrl || 'none'}`);

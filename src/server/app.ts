@@ -33,7 +33,8 @@ export class App {
       defaultLlmProvider: config.defaultLlmProvider,
       defaultLlmModel: config.defaultLlmModel,
       googleApiKey: config.googleApiKey,
-      openRouterApiKey: config.openRouterApiKey
+      openRouterApiKey: config.openRouterApiKey,
+      openRouterProviderConfig: config.openRouterProviderConfig
     });
     this.orchestrator = new OrchestratorService(
       this.storage,

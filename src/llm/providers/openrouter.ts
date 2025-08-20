@@ -4,23 +4,29 @@ import { getLLMDebugLogger } from '$src/llm/services/debug-logger';
 
 export class OpenRouterLLMProvider extends LLMProvider {
   private client: OpenAI;
+  private providerRouting: Record<string, unknown>;
+  
   static isAvailable(env?: { openRouterApiKey?: string }): boolean {
     return Boolean(env?.openRouterApiKey);
   }
   
-  constructor(config: LLMProviderConfig) {
+  constructor(config: LLMProviderConfig & { providerRouting?: Record<string, unknown> }) {
     super(config);
     if (!config.apiKey) {
       throw new Error('OpenRouter API key is required');
     }
     
+    // Use configured provider routing, or default to excluding baseten with throughput optimization
+    this.providerRouting = config.providerRouting || {
+      ignore: ['baseten'],
+      allow_fallbacks: true,
+      sort: 'throughput'
+    };
+    
     this.client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: 'https://openrouter.ai/api/v1',
-      defaultHeaders: {
-        'HTTP-Referer': 'https://github.com/language-track',
-        'X-Title': 'Language Track v3',
-      },
+      defaultHeaders: {},
     });
   }
   
@@ -49,10 +55,13 @@ export class OpenRouterLLMProvider extends LLMProvider {
       messages: request.messages,
       ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
       ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
-    });
+      // OpenRouter-specific provider routing configuration
+      provider: this.providerRouting,
+    } as any);
     
     const choice = completion.choices[0];
     if (!choice?.message?.content) {
+      console.error(completion, completion.choices[0]?.message);
       throw new Error('No response from OpenRouter');
     }
     

@@ -44,6 +44,8 @@ type ScenarioPlannerDeps = {
 
   // Fetch API base used by server LLM proxy and scenario endpoints
   getApiBase: () => string; // e.g., http://localhost:3000/api
+  // Selected model for planner + summarizer
+  getModel?: () => string | undefined;
 
   // Endpoint URL for A2A; used to decode config64 to find scenario
   getEndpoint: () => string;
@@ -599,6 +601,7 @@ export class ScenarioPlannerV2 {
             { role: 'system', content: 'You are a turn-based agent planner. Respond with JSON only.' },
             { role: 'user', content: prompt },
           ],
+          model: this.deps.getModel?.(),
           temperature: 0.2,
           loggingMetadata: {},
         } as any);

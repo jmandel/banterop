@@ -107,27 +107,28 @@ export function RunWizardPage() {
     return agentIds.find((a) => a !== role) || agentIds[0] || '';
   }, [agentIds, role]);
 
+  // Helper function to build metadata for simulation
+  const buildMeta = () => {
+    const cfg = scenario?.config || scenario;
+    const sid = cfg?.metadata?.id || scenarioId;
+    const agents = (cfg?.agents || []).map((a: any) => {
+      const conf: Record<string, unknown> = {};
+      if (selectedModel) conf.model = selectedModel;
+      const extra = (agentInstructions[a.agentId] || '').trim();
+      if (extra) conf.systemPromptExtra = extra;
+      return Object.keys(conf).length ? { id: a.agentId, config: conf } : { id: a.agentId };
+    });
+    return {
+      title: `Run: ${cfg?.metadata?.title || scenario?.name || ''}`,
+      scenarioId: sid,
+      agents,
+      startingAgentId: startFirst || agents[0]?.id || '',
+    };
+  };
+
   const onLaunch = () => {
-    if (internalSim) {
-      const cfg = scenario?.config || scenario;
-      const sid = cfg?.metadata?.id || scenarioId;
-      const agents = (cfg?.agents || []).map((a: any) => {
-        const conf: Record<string, unknown> = {};
-        if (selectedModel) conf.model = selectedModel;
-        const extra = (agentInstructions[a.agentId] || '').trim();
-        if (extra) conf.systemPromptExtra = extra;
-        return Object.keys(conf).length ? { id: a.agentId, config: conf } : { id: a.agentId };
-      });
-      const meta = {
-        title: `Run: ${cfg?.metadata?.title || scenario?.name || ''}`,
-        scenarioId: sid,
-        agents,
-        startingAgentId: startFirst || agents[0]?.id || '',
-      };
-      const c64 = encodeBase64Url(meta);
-      setGeneratedConfig64(c64);
-      return;
-    }
+    // Only used for non-simulation modes now
+    if (internalSim) return;
     const cfg = scenario?.config || scenario;
     const title = cfg?.metadata?.title || scenario?.name || '';
     const sid = cfg?.metadata?.id || scenarioId;
@@ -164,6 +165,10 @@ export function RunWizardPage() {
         plannerAgentId: simulatedAgentId || '',
         counterpartAgentId: role || '',
       });
+      // Add the selected model if one is chosen
+      if (selectedModel) {
+        params.set('defaultModel', selectedModel);
+      }
       window.open(`/client/#/?${params.toString()}`, '_blank');
     }
   };
@@ -334,44 +339,88 @@ export function RunWizardPage() {
           </div>
         </Card>
 
-        {/* Launch / Generate Links */}
-        <div className="space-y-2">
-          <Button variant="primary" className="w-full" onClick={onLaunch}>
-            {internalSim ? 'Generate Links' : (hasClient ? 'Generate Server Endpoint & Start' : 'Open Client and Connect')}
-          </Button>
-          {internalSim && generatedConfig64 && (
-            <Card className="space-y-2 p-3">
-              <CardHeader title="Simulation Links" />
-              <div className="text-xs text-slate-700">
-                <div className="font-medium mb-1">A2A Server URL</div>
-                <div className="break-all border rounded p-2 bg-white">{`${api.getBaseUrl()}/api/bridge/${generatedConfig64}/a2a`}</div>
-              </div>
-              <div className="flex gap-2 text-sm">
-                {(() => {
-                  const base = api.getBaseUrl();
-                  const sid = encodeURIComponent(String(scenarioId!));
-                  const serverUrl = `${base}/api/bridge/${generatedConfig64}/a2a`;
-                  const cfg = (scenario?.config || scenario);
-                  const agents: string[] = (cfg?.agents || []).map((a: any) => a.agentId);
-                  const plannerId = startFirst || agents[0] || '';
-                  const counterpart = agents.find(a => a !== plannerId) || '';
-                  const params = new URLSearchParams({
-                    scenarioUrl: `${base}/api/scenarios/${encodeURIComponent(String(scenarioId!))}`,
-                    plannerAgentId: plannerId,
-                    counterpartAgentId: counterpart,
-                    endpoint: serverUrl,
-                  });
-                  const href = `/client/#/?${params.toString()}`;
-                  return (
-                    <Button as="a" href={href} target="_blank" rel="noreferrer" variant="secondary">
-                      Open Client to start interaction
-                    </Button>
-                  );
-                })()}
-              </div>
-            </Card>
-          )}
-        </div>
+        {/* Action Buttons */}
+        <Card className="p-4 bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
+          {(() => {
+            if (internalSim) {
+              // Simulation mode - direct client launch
+              const config64ForSim = encodeBase64Url(buildMeta());
+              const base = api.getBaseUrl();
+              const serverUrl = `${base}/api/bridge/${config64ForSim}/a2a`;
+              const cfg = (scenario?.config || scenario);
+              const agents: string[] = (cfg?.agents || []).map((a: any) => a.agentId);
+              const plannerId = startFirst || agents[0] || '';
+              const counterpart = agents.find(a => a !== plannerId) || '';
+              const params = new URLSearchParams({
+                scenarioUrl: `${base}/api/scenarios/${encodeURIComponent(String(scenarioId!))}`,
+                plannerAgentId: plannerId,
+                counterpartAgentId: counterpart,
+                endpoint: serverUrl,
+              });
+              if (selectedModel) {
+                params.set('defaultModel', selectedModel);
+              }
+              const href = `/client/#/?${params.toString()}`;
+              
+              return (
+                <div className="space-y-3">
+                  <h3 className="text-lg font-semibold text-slate-800">Ready to Launch</h3>
+                  <div className="text-sm text-slate-600 bg-white rounded p-3 border border-slate-200">
+                    <div className="font-medium mb-1">Simulation Server Endpoint:</div>
+                    <div className="font-mono text-xs break-all text-slate-500">{serverUrl}</div>
+                  </div>
+                  <Button 
+                    as="a" 
+                    href={href} 
+                    target="_blank" 
+                    rel="noreferrer" 
+                    variant="primary"
+                    className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold py-4 px-6 rounded-lg shadow-lg transition-colors text-lg"
+                  >
+                    🚀 Launch Simulation Client
+                  </Button>
+                  <p className="text-xs text-slate-600 text-center">
+                    Opens in a new tab with all settings pre-configured
+                  </p>
+                </div>
+              );
+            } else if (hasClient) {
+              // Client mode - launch monitoring page
+              return (
+                <div className="space-y-3">
+                  <h3 className="text-lg font-semibold text-slate-800">Ready to Connect</h3>
+                  <Button 
+                    variant="primary"
+                    className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold py-4 px-6 rounded-lg shadow-lg transition-colors text-lg"
+                    onClick={onLaunch}
+                  >
+                    📊 Open Server Manager
+                  </Button>
+                  <p className="text-xs text-slate-600 text-center">
+                    Configure server endpoint and monitor connection
+                  </p>
+                </div>
+              );
+            } else {
+              // Server mode - open client
+              return (
+                <div className="space-y-3">
+                  <h3 className="text-lg font-semibold text-slate-800">Ready to Connect</h3>
+                  <Button 
+                    variant="primary"
+                    className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold py-4 px-6 rounded-lg shadow-lg transition-colors text-lg"
+                    onClick={onLaunch}
+                  >
+                    💬 Open Client & Connect
+                  </Button>
+                  <p className="text-xs text-slate-600 text-center">
+                    Opens client in new tab to connect to your server
+                  </p>
+                </div>
+              );
+            }
+          })()}
+        </Card>
       </div>
   );
 }

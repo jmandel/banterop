@@ -9,9 +9,6 @@ interface AttachmentBarProps {
   onOpenAttachment?: (name: string, mimeType: string, bytes?: string, uri?: string) => void;
   summarizeOnUpload: boolean;
   onToggleSummarize: (value: boolean) => void;
-  summarizerModel: string;
-  onSummarizerModelChange: (model: string) => void;
-  providers: Array<{ name: string; models: string[] }>;
 }
 
 export const AttachmentBar: React.FC<AttachmentBarProps> = ({
@@ -21,9 +18,6 @@ export const AttachmentBar: React.FC<AttachmentBarProps> = ({
   onOpenAttachment,
   summarizeOnUpload,
   onToggleSummarize,
-  summarizerModel,
-  onSummarizerModelChange,
-  providers,
 }) => {
   const allAttachments = vault.listDetailed();
   const [forceUpdate, setForceUpdate] = React.useState(0);
@@ -94,25 +88,6 @@ export const AttachmentBar: React.FC<AttachmentBarProps> = ({
             />
             <span>Auto-summarize on upload</span>
           </label>
-          
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-gray-600">Summarizer:</span>
-            <select
-              value={summarizerModel}
-              onChange={(e) => onSummarizerModelChange(e.target.value)}
-              className="px-2 py-1 border border-gray-300 rounded text-sm"
-            >
-              {providers.map((p) => (
-                <optgroup key={p.name} label={p.name}>
-                  {p.models.map((m) => (
-                    <option key={`${p.name}:${m}`} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </div>
         </div>
       </div>
 

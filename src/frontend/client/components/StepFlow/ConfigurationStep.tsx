@@ -1,5 +1,5 @@
 import React from "react";
-import { Button } from "../../../ui";
+import { Button, ModelSelect } from "../../../ui";
 import { AttachmentBar } from "../Attachments/AttachmentBar";
 
 interface ConfigurationStepProps {
@@ -17,6 +17,8 @@ interface ConfigurationStepProps {
   enabledTools: string[];
   onToggleTool: (name: string, enabled: boolean) => void;
   providers: Array<{ name: string; models: string[] }>;
+  selectedModel: string;
+  onSelectedModelChange: (model: string) => void;
   plannerStarted: boolean;
   onStartPlanner: () => void;
   onStopPlanner: () => void;
@@ -29,8 +31,6 @@ interface ConfigurationStepProps {
     onOpenAttachment?: (name: string, mimeType: string, bytes?: string, uri?: string) => void;
     summarizeOnUpload: boolean;
     onToggleSummarize: (value: boolean) => void;
-    summarizerModel: string;
-    onSummarizerModelChange: (model: string) => void;
   };
 }
 
@@ -48,6 +48,8 @@ export const ConfigurationStep: React.FC<ConfigurationStepProps> = ({
   enabledTools,
   onToggleTool,
   providers,
+  selectedModel,
+  onSelectedModelChange,
   plannerStarted,
   onStartPlanner,
   onStopPlanner,
@@ -130,6 +132,17 @@ export const ConfigurationStep: React.FC<ConfigurationStepProps> = ({
         )}
       </div>
 
+      {/* Planner Model */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Planner Model</label>
+        <ModelSelect
+          providers={providers}
+          value={selectedModel}
+          onChange={onSelectedModelChange}
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+        />
+      </div>
+
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">Additional Instructions for Your Agent (optional)</label>
         <textarea
@@ -149,9 +162,6 @@ export const ConfigurationStep: React.FC<ConfigurationStepProps> = ({
           onOpenAttachment={attachments.onOpenAttachment}
           summarizeOnUpload={attachments.summarizeOnUpload}
           onToggleSummarize={attachments.onToggleSummarize}
-          summarizerModel={attachments.summarizerModel}
-          onSummarizerModelChange={attachments.onSummarizerModelChange}
-          providers={providers}
         />
       )}
 
