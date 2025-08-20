@@ -3,41 +3,42 @@ import { ConnectionStep } from "./ConnectionStep";
 import { ConfigurationStep } from "./ConfigurationStep";
 // ConversationStep removed - input is now in DualConversationView
 import type { A2AStatus } from "../../a2a-types";
+import { useAppStore } from "$src/frontend/client/stores/appStore";
 type FrontMsg = { id: string; role: "you" | "planner" | "system"; text: string };
 
 interface StepFlowProps {
   // Connection props
-  endpoint: string;
-  onEndpointChange: (value: string) => void;
-  protocol: "auto" | "a2a" | "mcp";
-  onProtocolChange: (p: "auto" | "a2a" | "mcp") => void;
-  status: A2AStatus | "initializing";
+  endpoint?: string;
+  onEndpointChange?: (value: string) => void;
+  protocol?: "auto" | "a2a" | "mcp";
+  onProtocolChange?: (p: "auto" | "a2a" | "mcp") => void;
+  status?: A2AStatus | "initializing";
   taskId?: string;
-  connected: boolean;
+  connected?: boolean;
   error?: string;
   card?: any;
   cardLoading?: boolean;
-  onCancelTask: () => void;
+  onCancelTask?: () => void;
   
   // Configuration props
-  instructions: string;
-  onInstructionsChange: (value: string) => void;
-  scenarioUrl: string;
-  onScenarioUrlChange: (value: string) => void;
+  instructions?: string;
+  onInstructionsChange?: (value: string) => void;
+  scenarioUrl?: string;
+  onScenarioUrlChange?: (value: string) => void;
   onLoadScenarioUrl?: () => void;
-  scenarioAgents: string[];
+  scenarioAgents?: string[];
   selectedPlannerAgentId?: string;
-  onSelectPlannerAgentId: (id: string) => void;
+  onSelectPlannerAgentId?: (id: string) => void;
   selectedCounterpartAgentId?: string;
-  tools: Array<{ name: string; description?: string }>;
-  enabledTools: string[];
-  onToggleTool: (name: string, enabled: boolean) => void;
-  providers: Array<{ name: string; models: string[] }>;
-  selectedModel: string;
-  onSelectedModelChange: (model: string) => void;
-  plannerStarted: boolean;
-  onStartPlanner: () => void;
-  onStopPlanner: () => void;
+  tools?: Array<{ name: string; description?: string }>;
+  enabledTools?: string[];
+  onToggleTool?: (name: string, enabled: boolean) => void;
+  providers?: Array<{ name: string; models: string[] }>;
+  selectedModel?: string;
+  onSelectedModelChange?: (model: string) => void;
+  plannerStarted?: boolean;
+  onStartPlanner?: () => void;
+  onStopPlanner?: () => void;
   
   // Scenario loading
   onLoadScenario?: (goals: string, instructions: string) => void;
@@ -54,22 +55,40 @@ interface StepFlowProps {
 }
 
 export const StepFlow: React.FC<StepFlowProps> = (props) => {
+  const store = useAppStore();
+  const endpoint = store.connection.endpoint ?? props.endpoint ?? "";
+  const protocol = store.connection.protocol ?? props.protocol ?? "auto";
+  const status = store.task.status ?? props.status ?? "initializing";
+  const taskId = store.task.id ?? props.taskId;
+  const connected = (store.connection.status === 'connected');
+  const plannerStarted = store.planner.started ?? props.plannerStarted ?? false;
+  const error = store.connection.error ?? props.error;
+  const card = store.connection.card ?? props.card;
+  const instructions = store.planner.instructions ?? props.instructions ?? "";
+  const selectedModel = store.planner.model ?? props.selectedModel ?? "";
+  const onEndpointChange = props.onEndpointChange ?? ((v: string) => store.actions.setEndpoint(v));
+  const onProtocolChange = props.onProtocolChange ?? ((p: any) => store.actions.setProtocol(p));
+  const onCancelTask = props.onCancelTask ?? (() => store.actions.cancelTask());
+  const onStartPlanner = props.onStartPlanner ?? (() => store.actions.startPlanner());
+  const onStopPlanner = props.onStopPlanner ?? (() => store.actions.stopPlanner());
+  const onInstructionsChange = props.onInstructionsChange ?? ((v: string) => store.actions.setInstructions(v));
+
   const getStepStyles = (stepNum: number) => {
     // Determine status based on state
-    if (stepNum === 1 && props.connected) {
+    if (stepNum === 1 && connected) {
       return "bg-gradient-to-br from-green-50 to-emerald-50 border-green-400";
-    } else if (stepNum === 2 && props.plannerStarted) {
+    } else if (stepNum === 2 && plannerStarted) {
       return "bg-gradient-to-br from-green-50 to-emerald-50 border-green-400";
-    } else if (stepNum === 3 && props.plannerStarted) {
+    } else if (stepNum === 3 && plannerStarted) {
       return "bg-gradient-to-br from-indigo-50 to-blue-50 border-indigo-400";
-    } else if (stepNum === 1 || (stepNum === 2 && props.connected) || (stepNum === 3 && props.plannerStarted)) {
+    } else if (stepNum === 1 || (stepNum === 2 && connected) || (stepNum === 3 && plannerStarted)) {
       return "bg-white border-gray-300";
     }
     return "bg-gray-50 border-gray-200 opacity-60";
   };
 
   const getStepIcon = (stepNum: number) => {
-    if (stepNum === 1 && props.connected) {
+    if (stepNum === 1 && connected) {
       return (
         <div className="w-8 h-8 rounded-full bg-green-500 text-white flex items-center justify-center">
           <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -77,7 +96,7 @@ export const StepFlow: React.FC<StepFlowProps> = (props) => {
           </svg>
         </div>
       );
-    } else if (stepNum === 2 && props.plannerStarted) {
+    } else if (stepNum === 2 && plannerStarted) {
       return (
         <div className="w-8 h-8 rounded-full bg-green-500 text-white flex items-center justify-center">
           <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -85,7 +104,7 @@ export const StepFlow: React.FC<StepFlowProps> = (props) => {
           </svg>
         </div>
       );
-    } else if ((stepNum === 1) || (stepNum === 2 && props.connected) || (stepNum === 3 && props.plannerStarted)) {
+    } else if ((stepNum === 1) || (stepNum === 2 && connected) || (stepNum === 3 && plannerStarted)) {
       return (
         <div className="w-8 h-8 rounded-full bg-indigo-500 text-white flex items-center justify-center font-bold">
           {stepNum}
@@ -114,18 +133,10 @@ export const StepFlow: React.FC<StepFlowProps> = (props) => {
         </div>
         <div className="pl-12">
           <ConnectionStep
-            endpoint={props.endpoint}
-            onEndpointChange={props.onEndpointChange}
-            protocol={props.protocol}
-            onProtocolChange={props.onProtocolChange}
-            status={props.status}
-            taskId={props.taskId}
-            connected={props.connected}
-            error={props.error}
-            card={props.card}
+            card={card}
             cardLoading={props.cardLoading}
-            onCancelTask={props.onCancelTask}
             onLoadScenario={props.onLoadScenario}
+            onCancelTask={props.onCancelTask}
           />
         </div>
       </div>
@@ -141,25 +152,10 @@ export const StepFlow: React.FC<StepFlowProps> = (props) => {
         </div>
         <div className="pl-12">
         <ConfigurationStep
-          instructions={props.instructions}
-          onInstructionsChange={props.onInstructionsChange}
-          scenarioUrl={props.scenarioUrl}
+          scenarioUrl={props.scenarioUrl ?? store.scenario.url ?? ""}
           onScenarioUrlChange={props.onScenarioUrlChange}
           onLoadScenarioUrl={props.onLoadScenarioUrl}
-          scenarioAgents={props.scenarioAgents}
-          selectedPlannerAgentId={props.selectedPlannerAgentId}
-          onSelectPlannerAgentId={props.onSelectPlannerAgentId}
-          selectedCounterpartAgentId={props.selectedCounterpartAgentId}
-          tools={props.tools}
-          enabledTools={props.enabledTools}
-          onToggleTool={props.onToggleTool}
-          providers={props.providers}
-          selectedModel={props.selectedModel}
-          onSelectedModelChange={props.onSelectedModelChange}
-          plannerStarted={props.plannerStarted}
-          onStartPlanner={props.onStartPlanner}
-          onStopPlanner={props.onStopPlanner}
-          connected={props.connected}
+          providers={props.providers ?? []}
           attachments={props.attachments}
         />
         </div>

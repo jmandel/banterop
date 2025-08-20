@@ -19,6 +19,7 @@ export function detectProtocolFromUrl(url: string): Exclude<Protocol, "auto"> | 
 
 export function createTaskClient(protocol: Protocol, endpointUrl: string): TaskClientLike {
   const selected = protocol === "auto" ? (detectProtocolFromUrl(endpointUrl) || "a2a") : protocol;
+  // Treat URL as opaque: do not rewrite suffix, respect explicit protocol or detection
   if (selected === "mcp") return new McpTaskClient(endpointUrl);
   return new A2ABridgeTaskClient(endpointUrl);
 }

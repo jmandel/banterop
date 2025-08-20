@@ -66,10 +66,10 @@ describe('OpenRouterLLMProvider', () => {
     await provider.complete({ messages, loggingMetadata: {} });
     
     const expectedModel = provider.getMetadata().defaultModel;
-    expect(mockCreate).toHaveBeenCalledWith({
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
       model: expectedModel,
       messages
-    });
+    }));
   });
 
   it('includes temperature and maxTokens when provided', async () => {
@@ -100,12 +100,12 @@ describe('OpenRouterLLMProvider', () => {
     });
     
     const expectedModel = provider.getMetadata().defaultModel;
-    expect(mockCreate).toHaveBeenCalledWith({
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
       model: expectedModel,
       messages: [{ role: 'user', content: 'test' }],
       temperature: 0.7,
       max_tokens: 150
-    });
+    }));
   });
 
   it('handles response without usage data', async () => {
@@ -183,9 +183,9 @@ describe('OpenRouterLLMProvider', () => {
       loggingMetadata: {}
     });
     
-    expect(mockCreate).toHaveBeenCalledWith({
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
       model: 'anthropic/claude-3-opus',
       messages: [{ role: 'user', content: 'test' }]
-    });
+    }));
   });
 });

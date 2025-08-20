@@ -1,28 +1,29 @@
 import React from "react";
 import { Button, ModelSelect } from "../../../ui";
 import { AttachmentBar } from "../Attachments/AttachmentBar";
+import { useAppStore } from "$src/frontend/client/stores/appStore";
 
 interface ConfigurationStepProps {
-  instructions: string;
-  onInstructionsChange: (value: string) => void;
+  instructions?: string;
+  onInstructionsChange?: (value: string) => void;
   // Scenario configuration (URL + agent selection)
-  scenarioUrl: string;
-  onScenarioUrlChange: (value: string) => void;
+  scenarioUrl?: string;
+  onScenarioUrlChange?: (value: string) => void;
   onLoadScenarioUrl?: () => void;
-  scenarioAgents: string[];
+  scenarioAgents?: string[];
   selectedPlannerAgentId?: string;
-  onSelectPlannerAgentId: (id: string) => void;
+  onSelectPlannerAgentId?: (id: string) => void;
   selectedCounterpartAgentId?: string;
-  tools: Array<{ name: string; description?: string }>;
-  enabledTools: string[];
-  onToggleTool: (name: string, enabled: boolean) => void;
-  providers: Array<{ name: string; models: string[] }>;
-  selectedModel: string;
-  onSelectedModelChange: (model: string) => void;
-  plannerStarted: boolean;
-  onStartPlanner: () => void;
-  onStopPlanner: () => void;
-  connected: boolean;
+  tools?: Array<{ name: string; description?: string }>;
+  enabledTools?: string[];
+  onToggleTool?: (name: string, enabled: boolean) => void;
+  providers?: Array<{ name: string; models: string[] }>;
+  selectedModel?: string;
+  onSelectedModelChange?: (model: string) => void;
+  plannerStarted?: boolean;
+  onStartPlanner?: () => void;
+  onStopPlanner?: () => void;
+  connected?: boolean;
   // Attachments
   attachments?: {
     vault: import("../../attachments-vault").AttachmentVault;
@@ -34,28 +35,39 @@ interface ConfigurationStepProps {
   };
 }
 
-export const ConfigurationStep: React.FC<ConfigurationStepProps> = ({
-  instructions,
-  onInstructionsChange,
-  scenarioUrl,
-  onScenarioUrlChange,
-  onLoadScenarioUrl,
-  scenarioAgents,
-  selectedPlannerAgentId,
-  onSelectPlannerAgentId,
-  selectedCounterpartAgentId,
-  tools,
-  enabledTools,
-  onToggleTool,
-  providers,
-  selectedModel,
-  onSelectedModelChange,
-  plannerStarted,
-  onStartPlanner,
-  onStopPlanner,
-  connected,
-  attachments,
-}) => {
+export const ConfigurationStep: React.FC<ConfigurationStepProps> = (props) => {
+  // Prefer Zustand store where available (kept in sync via binder)
+  const store = useAppStore();
+  const instructions = store.planner.instructions || store.defaultsFromUrlParameters?.instructions || (props.instructions ?? "");
+  const onInstructionsChange = props.onInstructionsChange ?? ((v: string) => store.actions.setInstructions(v));
+  const scenarioUrl = (props.scenarioUrl ?? store.scenario.url) || store.defaultsFromUrlParameters?.scenarioUrl || "";
+  const onScenarioUrlChange = props.onScenarioUrlChange ?? ((v: string) => store.actions.setScenarioUrl(v));
+  const onLoadScenarioUrl = props.onLoadScenarioUrl ?? (() => { const u = (scenarioUrl || '').trim(); if (u) store.actions.setScenarioUrl(u); });
+  const scenarioAgents = props.scenarioAgents ?? (Array.isArray((store.scenario.config as any)?.agents) ? ((store.scenario.config as any).agents as any[]).map(a => String(a?.agentId || '')).filter(Boolean) : []);
+  const selectedPlannerAgentId = props.selectedPlannerAgentId ?? store.scenario.selectedAgents?.planner ?? store.defaultsFromUrlParameters?.plannerAgentId;
+  const selectedCounterpartAgentId = props.selectedCounterpartAgentId ?? store.scenario.selectedAgents?.counterpart ?? store.defaultsFromUrlParameters?.counterpartAgentId;
+  const enabledTools = props.enabledTools ?? store.scenario.enabledTools ?? [];
+  const providers = props.providers ?? [];
+  const selectedModel = (props.selectedModel ?? store.planner.model) || store.defaultsFromUrlParameters?.defaultModel || "";
+  const onSelectedModelChange = props.onSelectedModelChange ?? ((m: string) => store.actions.setModel(m));
+  const plannerStarted = props.plannerStarted ?? store.planner.started ?? false;
+  const onStartPlanner = props.onStartPlanner ?? (() => { store.actions.startPlanner(); });
+  const onStopPlanner = props.onStopPlanner ?? (() => { store.actions.stopPlanner(); });
+  const connected = props.connected ?? (store.connection.status === 'connected');
+  const onSelectPlannerAgentId = props.onSelectPlannerAgentId ?? ((id: string) => store.actions.selectAgent('planner', id));
+  const tools = props.tools ?? (() => {
+    try {
+      const cfg: any = store.scenario.config;
+      const agent = Array.isArray(cfg?.agents) ? cfg.agents.find((a: any) => a?.agentId === selectedPlannerAgentId) : null;
+      return Array.isArray(agent?.tools) ? (agent.tools as any[]).map((t: any) => ({ name: String(t?.toolName || t?.name || ''), description: t?.description ? String(t.description) : undefined })).filter((ti: any) => ti.name) : [];
+    } catch { return []; }
+  })();
+  const onToggleTool = props.onToggleTool ?? ((name: string, enabled: boolean) => {
+    const set = new Set(enabledTools);
+    if (enabled) set.add(name); else set.delete(name);
+    store.actions.setEnabledTools(Array.from(set));
+  });
+  const attachments = props.attachments;
   return (
     <div className="space-y-4">
       {/* Scenario URL + agent selection */}
@@ -160,8 +172,8 @@ export const ConfigurationStep: React.FC<ConfigurationStepProps> = ({
           onFilesSelect={attachments.onFilesSelect}
           onAnalyze={attachments.onAnalyze}
           onOpenAttachment={attachments.onOpenAttachment}
-          summarizeOnUpload={attachments.summarizeOnUpload}
-          onToggleSummarize={attachments.onToggleSummarize}
+          summarizeOnUpload={useAppStore.getState().attachments.summarizeOnUpload}
+          onToggleSummarize={(on) => store.actions.toggleSummarizeOnUpload(on)}
         />
       )}
 

@@ -28,6 +28,7 @@ export function createA2ARoutes(
       return await bridge.handleJsonRpc(c, body);
     } catch (err: any) {
       const id = body?.id ?? null;
+      console.error("[A2ARoutes] JSON-RPC error:", err);
       return c.json({ jsonrpc: '2.0', id, error: { code: -32603, message: err?.message ?? 'Internal error' } }, 500);
     }
   });

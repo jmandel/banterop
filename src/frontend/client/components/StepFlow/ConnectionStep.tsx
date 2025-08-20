@@ -2,40 +2,56 @@ import React, { useMemo } from "react";
 import { Button, Badge } from "../../../ui";
 import type { A2AStatus } from "../../a2a-types";
 import { parseBridgeEndpoint } from "../../bridge-endpoint";
+import { useAppStore } from "$src/frontend/client/stores/appStore";
+import { detectProtocolFromUrl } from "../../protocols";
 
 interface ConnectionStepProps {
-  endpoint: string;
-  onEndpointChange: (value: string) => void;
-  protocol: "auto" | "a2a" | "mcp";
-  onProtocolChange: (p: "auto" | "a2a" | "mcp") => void;
-  status: A2AStatus | "initializing";
+  // session removed; reads from store
+  endpoint?: string;
+  onEndpointChange?: (value: string) => void;
+  protocol?: "auto" | "a2a" | "mcp";
+  onProtocolChange?: (p: "auto" | "a2a" | "mcp") => void;
+  status?: A2AStatus | "initializing";
   taskId?: string;
-  connected: boolean;
+  connected?: boolean;
   error?: string;
   card?: any;
   cardLoading?: boolean;
-  onCancelTask: () => void;
+  onCancelTask?: () => void;
   onLoadScenario?: (goals: string, instructions: string) => void;
   goals?: string;
   instructions?: string;
 }
 
 export const ConnectionStep: React.FC<ConnectionStepProps> = ({
-  endpoint,
-  onEndpointChange,
-  protocol,
-  onProtocolChange,
-  status,
-  taskId,
-  connected,
-  error,
+  endpoint: epProp,
+  onEndpointChange: onEndpointChangeProp,
+  protocol: protoProp,
+  onProtocolChange: onProtocolChangeProp,
+  status: statusProp,
+  taskId: taskIdProp,
+  connected: connectedProp,
+  error: errorProp,
   card,
   cardLoading,
-  onCancelTask,
+  onCancelTask: onCancelTaskProp,
   onLoadScenario,
   goals,
   instructions,
 }) => {
+  const store = useAppStore();
+  const controlled = typeof onEndpointChangeProp === 'function';
+  const endpoint = controlled
+    ? (epProp ?? "")
+    : (store.connection.endpoint || store.defaultsFromUrlParameters?.endpoint || epProp || "");
+  const protocol = store.connection.protocol ?? protoProp ?? "auto";
+  const status = store.task.status ?? statusProp ?? "initializing";
+  const taskId = store.task.id ?? taskIdProp;
+  const connected = (store.connection.status === 'connected');
+  const error = store.connection.error ?? errorProp;
+  const onEndpointChange = onEndpointChangeProp ?? ((v: string) => store.actions.setEndpoint(v));
+  const onProtocolChange = onProtocolChangeProp ?? ((p: any) => store.actions.setProtocol(p));
+  const onCancelTask = onCancelTaskProp ?? (() => { store.actions.cancelTask(); });
   // Detect our reference stack (same logic as ScenarioDetector)
   const canOpenWatch = useMemo(() => {
     try {
@@ -78,7 +94,7 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
         </label>
         <input
           type="text"
-          value={endpoint}
+          defaultValue={endpoint}
           onChange={(e) => onEndpointChange(e.target.value)}
           placeholder="https://example.org/path/to/(a2a|mcp)"
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
@@ -97,13 +113,84 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
             <option value="a2a">A2A</option>
             <option value="mcp">MCP</option>
           </select>
-          <p className="text-xs text-gray-500 mt-1">Auto detects by suffix: /a2a or /mcp.</p>
+          <p className="text-xs text-gray-500 mt-1">
+            Auto detects by suffix: /a2a or /mcp.
+            {(() => {
+              const info = store.connection.preview as any;
+              const epHasText = (endpoint || '').trim().length > 0;
+              if (protocol === 'auto') {
+                if (info?.protocol === 'a2a') {
+                  const cls = 'text-green-600';
+                  const text = info.status === 'connecting'
+                    ? 'A2A: connecting'
+                    : info.status === 'agent-card'
+                      ? 'A2A: agent card fetched'
+                      : info.status === 'error'
+                        ? `A2A: ${info.error || 'error'}`
+                        : 'A2A';
+                  return <span className={`ml-2 ${cls}`}>{text}</span>;
+                }
+                if (info?.protocol === 'mcp') {
+                  const cls = 'text-blue-600';
+                  const text = info.status === 'connecting'
+                    ? 'MCP: connecting'
+                    : info.status === 'tools'
+                      ? `MCP: tools loaded${Array.isArray(info.tools) ? ` (${info.tools.length})` : ''}`
+                      : info.status === 'error'
+                        ? `MCP: ${info.error || 'error'}`
+                        : 'MCP';
+                  return <span className={`ml-2 ${cls}`}>{text}</span>;
+                }
+                if (epHasText) return <span className="ml-2 text-gray-500">Could not detect</span>;
+                return null;
+              } else {
+                // Explicit selection: prefer service-reported status if present
+                if (info?.protocol === protocol) {
+                  const cls = protocol === 'a2a' ? 'text-green-600' : 'text-blue-600';
+                  const text = protocol === 'a2a'
+                    ? (info.status === 'connecting' ? 'A2A: connecting' : info.status === 'agent-card' ? 'A2A: agent card fetched' : info.status === 'error' ? `A2A: ${info.error || 'error'}` : 'A2A')
+                    : (info.status === 'connecting' ? 'MCP: connecting' : info.status === 'tools' ? `MCP: tools loaded${Array.isArray(info.tools) ? ` (${info.tools.length})` : ''}` : info.status === 'error' ? `MCP: ${info.error || 'error'}` : 'MCP');
+                  return <span className={`ml-2 ${cls}`}>{text}</span>;
+                }
+                const cls = protocol === 'a2a' ? 'text-green-600' : 'text-blue-600';
+                return <span className={`ml-2 ${cls}`}>Using: {protocol} (selected)</span>;
+              }
+            })()}
+          </p>
         </div>
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-600">Status:</span>
+      {/* Connect/Disconnect controls and Task Status */}
+      <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+        <div className="flex items-center gap-3 flex-wrap">
+          {!connected ? (
+            <Button
+              variant="primary"
+              onClick={() => store.actions.connect(endpoint, protocol)}
+              className="px-4 py-2"
+              disabled={!String(endpoint || '').trim()}
+            >
+              Connect
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              onClick={() => store.actions.disconnect()}
+              className="px-4 py-2"
+            >
+              Disconnect
+            </Button>
+          )}
+          {(connected || taskId) && (
+            <Button
+              variant="primary"
+              onClick={onCancelTask}
+              className="px-4 py-2"
+            >
+              Restart Scenario
+            </Button>
+          )}
+          <span className="text-sm font-medium text-gray-700">Task Status:</span>
           {getStatusPill()}
           {taskId && (
             <>
@@ -121,14 +208,6 @@ export const ConnectionStep: React.FC<ConnectionStepProps> = ({
             >
               Open in Watch
             </a>
-          )}
-          {(connected || taskId) && (
-            <Button
-              variant="secondary"
-              onClick={onCancelTask}
-            >
-              Reset client state
-            </Button>
           )}
         </div>
       </div>

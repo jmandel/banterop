@@ -263,10 +263,14 @@ export class ScenarioPlannerV2 {
   }
 
   private canActNow(): boolean {
-    // Derive from Event Log: if no status yet → allow initial; else allow when input-required or completed
-    const last = [...this.eventLog].reverse().find(e => e.type === 'status') as any;
-    if (!last) return true;
-    const st = String(last?.payload?.state || '');
+    // Allow initial tick when no status yet
+    const lastStatus = [...this.eventLog].reverse().find(e => e.type === 'status') as any;
+    if (!lastStatus) return true;
+    const st = String(lastStatus?.payload?.state || '');
+    // Always allow tick right after a user message to the planner
+    const lastEv = this.eventLog[this.eventLog.length - 1] as any;
+    if (lastEv && lastEv.type === 'message' && lastEv.channel === 'user-planner') return true;
+    // Otherwise, allow when input is required or conversation completed
     return st === 'input-required' || st === 'completed';
   }
 
@@ -320,7 +324,8 @@ export class ScenarioPlannerV2 {
         const atts = Array.isArray((ev as any).payload?.attachments) ? (ev as any).payload.attachments : [];
         if (ev.channel === 'user-planner') {
           const from = ev.author === 'user' ? 'user' : 'planner';
-          lines.push(`<message from="${from}">`);
+          const to = ev.author === 'user' ? 'planner' : 'user';
+          lines.push(`<message from="${from}" to="${to}">`);
           if (safeText) lines.push(safeText);
           for (const a of atts) {
             const name = String(a?.name || 'attachment');
@@ -330,7 +335,8 @@ export class ScenarioPlannerV2 {
           lines.push(`</message>`);
         } else if (ev.channel === 'planner-agent') {
           const from = ev.author === 'planner' ? 'planner' : 'agent';
-          lines.push(`<message from="${from}">`);
+          const to = ev.author === 'planner' ? 'agent' : 'planner';
+          lines.push(`<message from="${from}" to="${to}">`);
           if (safeText) lines.push(safeText);
           for (const a of atts) {
             const name = String(a?.name || 'attachment');
@@ -498,13 +504,30 @@ export class ScenarioPlannerV2 {
     parts.push("Schema: { reasoning: string, action: { tool: string, args: object } }");
     parts.push("");
     parts.push("Always-available tools:");
-    parts.push("// Send a message to the remote agent (counterpart). Attachments should be included by 'name' (matching AVAILABLE_FILES).");
-    parts.push("interface SendMessageToRemoteAgentArgs { text?: string; attachments?: Array<{ name: string }>; finality?: 'none'|'turn'|'conversation'; }");
-    parts.push("Tool: sendMessageToRemoteAgent: SendMessageToRemoteAgentArgs");
-    parts.push("");
-    parts.push("// Send a message to the local user. Attachments may be included by 'name' if desired.");
-    parts.push("interface SendMessageToUserArgs { text: string; attachments?: Array<{ name: string }>; }");
-    parts.push("Tool: sendMessageToUser: SendMessageToUserArgs");
+
+    // Determine whether to omit certain messaging tools based on the last planner message target
+    let omitUserMsg = false;
+    let omitRemoteMsg = false;
+    try {
+      const lastMessage = [...this.eventLog].reverse().find(e => e.type === 'message') as any;
+      if (lastMessage) {
+        if (lastMessage.channel === 'user-planner' && lastMessage.author === 'planner') omitUserMsg = true;
+        if (lastMessage.channel === 'planner-agent' && lastMessage.author === 'planner') omitRemoteMsg = true;
+      }
+    } catch {}
+
+    if (!omitRemoteMsg) {
+      parts.push("// Send a message to the remote agent (counterpart). Attachments should be included by 'name' (matching AVAILABLE_FILES).");
+      parts.push("interface SendMessageToRemoteAgentArgs { text?: string; attachments?: Array<{ name: string }>; finality?: 'none'|'turn'|'conversation'; }");
+      parts.push("Tool: sendMessageToRemoteAgent: SendMessageToRemoteAgentArgs");
+      parts.push("");
+    }
+    if (!omitUserMsg) {
+      parts.push("// Send a message to the local user. Attachments may be included by 'name' if desired.");
+      parts.push("interface SendMessageToUserArgs { text: string; attachments?: Array<{ name: string }>; }");
+      parts.push("Tool: sendMessageToUser: SendMessageToUserArgs");
+      parts.push("");
+    }
     parts.push("");
     parts.push("// Sleep until a new event arrives (no arguments).");
     parts.push("type SleepArgs = {};");
@@ -791,6 +814,8 @@ export class ScenarioPlannerV2 {
         this.emit({ type: 'message', channel: 'user-planner', author: 'planner', payload: { text: q } } as any);
         try { this.deps.onAskUser(q); } catch {}
       }
+      // Run another tick to keep momentum after notifying the user
+      this.maybeTick();
       return;
     }
 
@@ -848,6 +873,8 @@ export class ScenarioPlannerV2 {
         else await (this.deps.task as any).send?.(parts as any);
       }
       if (finality === "conversation") this.deps.onSystem("Planner requested conversation end");
+      // After sending to the remote agent, reconsider immediately
+      this.maybeTick();
       return;
     }
     // Handle dynamic synthesis tools by name via ToolSynthesisService

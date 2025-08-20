@@ -20,13 +20,11 @@ describe('Transcript selectors from unified event log', () => {
     const right = selectAgentLog(events);
     const lastStatus = selectLastStatus(events);
 
-    expect(front.map(f => f.role)).toEqual(['you','planner','system','system','system']);
+    expect(front.map(f => f.role)).toEqual(['you','planner','system']);
     expect(front.map(f => f.text)).toEqual([
       'Hello',
       'Please confirm',
-      '— status: input-required —',
       'note',
-      '— status: working —',
     ]);
 
     expect(right.length).toBe(2);

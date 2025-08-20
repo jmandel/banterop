@@ -173,6 +173,8 @@ export function RunWizardPage() {
     }
   };
 
+  // (Removed) Live preview URL; Step 3 should not show a server endpoint
+
   if (loading) return <div className="p-6 text-slate-600">Loading…</div>;
   if (error) return <div className="p-6 text-rose-700">Error: {error}</div>;
   if (!scenario) return <div className="p-6">Scenario not found</div>;
@@ -278,6 +280,8 @@ export function RunWizardPage() {
               <div className="text-sm text-slate-600 mt-1">Model Context Protocol with tool-based interactions.</div>
             </label>
           </div>
+
+          {/* Removed Simulation Server Endpoint preview from Step 3 */}
         </Card>
 
         {/* Step 4: Simulated agent config */}
@@ -346,7 +350,9 @@ export function RunWizardPage() {
               // Simulation mode - direct client launch
               const config64ForSim = encodeBase64Url(buildMeta());
               const base = api.getBaseUrl();
-              const serverUrl = `${base}/api/bridge/${config64ForSim}/a2a`;
+              const serverUrl = protocol === 'mcp'
+                ? `${base}/api/bridge/${config64ForSim}/mcp`
+                : `${base}/api/bridge/${config64ForSim}/a2a/.well-known/agent-card.json`;
               const cfg = (scenario?.config || scenario);
               const agents: string[] = (cfg?.agents || []).map((a: any) => a.agentId);
               const plannerId = startFirst || agents[0] || '';

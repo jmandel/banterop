@@ -39,6 +39,24 @@ export function ScenarioRunPage() {
   const [agentInitiatingExtra, setAgentInitiatingExtra] = useState<Record<string, string>>({});
   // Autostart selection removed; we now start agents from the Created page per‑agent
 
+  // Keep URL hash query param `mode` in sync with selected run mode so deep links update.
+  useEffect(() => {
+    try {
+      const u = new URL(window.location.href);
+      const hash = u.hash || '';
+      const base = hash && hash.includes('?') ? hash.slice(0, hash.indexOf('?')) : (hash || '#/');
+      const qs = new URLSearchParams(hash && hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '');
+      // Map runMode to compact mode values
+      const modeValue = runMode.includes('mcp') ? 'mcp'
+        : runMode.includes('a2a') ? 'a2a'
+        : 'internal';
+      qs.set('mode', modeValue);
+      const newHash = base + (qs.toString() ? `?${qs.toString()}` : '');
+      const newUrl = `${u.origin}${u.pathname}${newHash}`;
+      if (newUrl !== window.location.href) history.replaceState(null, '', newUrl);
+    } catch {}
+  }, [runMode]);
+
   useEffect(() => {
     (async () => {
       try {
