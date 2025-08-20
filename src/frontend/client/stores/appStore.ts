@@ -167,6 +167,11 @@ export const useAppStore = create<AppState>()(
         if (!target) return;
         await client.resume(target);
         set((s) => { s.task.id = target; });
+        // Save/refresh the session pointer so a subsequent reload can resume
+        try {
+          const status = (client as any)?.getStatus?.() || get().task.status;
+          storage.saveSession(ep, { taskId: target, status: status as any });
+        } catch {}
         // Load per-task state
         const saved = storage.loadTaskSession(ep, target);
         if (saved?.plannerEvents && Array.isArray(saved.plannerEvents) && saved.plannerEvents.length) {

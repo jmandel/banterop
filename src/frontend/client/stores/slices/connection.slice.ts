@@ -4,6 +4,7 @@ import { type Protocol as ProtoType } from '../../protocols';
 import { refreshPreview as svcRefreshPreview, detectEffectiveProtocol, createClient } from '../../services/connection.service';
 import { AttachmentSummarizer } from '../../attachment-summaries';
 import { useConfigStore } from '../configStore';
+import { StorageService } from '../../services/StorageService';
 
 let autoConnectTimer: any = null;
 
@@ -94,9 +95,9 @@ export function createConnectionSlice(set: Set, get: Get): any {
             if (status) s.task.status = status as any;
             if (task?.history) s.task.history = task.history as any;
           });
+          // Persist session pointer for auto-resume on refresh
           const id = tid || undefined;
-          const storage = (get() as any)._storage || null; // no-op; storage handling stays in appStore helpers
-          try { if ((storage as any)?.saveSession && ep && id) (storage as any).saveSession(ep, { taskId: id, status: status as any }); } catch {}
+          try { if (ep && id) new StorageService().saveSession(ep, { taskId: id, status: status as any }); } catch {}
         });
         // Save references in store
         set((s) => { s._internal.taskClient = client; s._internal.taskOffs.forEach((fn) => { try { fn(); } catch {} }); s._internal.taskOffs = [off]; });

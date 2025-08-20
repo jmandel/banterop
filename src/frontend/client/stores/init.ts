@@ -29,11 +29,37 @@ const persistEvents = debounce(() => {
   } catch {}
 }, 500);
 
+// Flush snapshot immediately (used on unload/visibility changes)
+function persistEventsNow() {
+  try {
+    const state = useAppStore.getState();
+    const ep = state.connection.endpoint;
+    const tid = state._internal.taskClient?.getTaskId();
+    if (!ep || !tid) return;
+    storage.saveTaskSession(ep, tid, {
+      taskId: tid,
+      status: state.task.status as any,
+      plannerStarted: state.planner.started,
+      plannerEvents: state.planner.eventLog as any,
+    });
+  } catch {}
+}
+
 useAppStore.subscribe((state, prev) => {
   try {
     if (!prev || state.planner.eventLog !== prev.planner.eventLog) persistEvents();
   } catch {}
 });
+
+// Ensure we don't lose the last events on page close or backgrounding
+try {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', persistEventsNow);
+    document.addEventListener('visibilitychange', () => {
+      try { if (document.visibilityState === 'hidden') persistEventsNow(); } catch {}
+    });
+  }
+} catch {}
 
 // Initialize configuration store: URL → storage → hardcoded
 (function initConfigAndBridge() {

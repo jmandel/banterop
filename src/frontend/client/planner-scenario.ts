@@ -76,6 +76,7 @@ export class ScenarioPlannerV2 {
   private running = false;
   private busy = false;
   private pendingTick = false;
+  private finished = false; // set true when a terminal "done" trace is present
   private eventLog: StrictEvent[] = [];
   private turnScratch: IntraTurnState = { thoughts: [], toolCalls: [] };
   private scenario: ScenarioConfiguration | null = null;
@@ -100,6 +101,11 @@ export class ScenarioPlannerV2 {
       // Set sequence to the max existing seq to avoid collisions
       const maxSeq = this.eventLog.reduce((m, e) => Math.max(m, Number(e?.seq || 0)), 0);
       this.seq = Number.isFinite(maxSeq) ? maxSeq : this.seq;
+      // If prior log contains a planner-done trace, mark finished so we won't tick
+      try {
+        const hasDone = this.eventLog.some((e) => e.type === 'trace' && e.channel === 'system' && e.author === 'system' && typeof (e as any)?.payload?.text === 'string' && (e as any).payload.text.startsWith('Planner done:'));
+        if (hasDone) this.finished = true;
+      } catch {}
       // Rebuild vault/doc index deterministically by replaying events in order
       for (const ev of this.eventLog) {
         if (ev.type === 'tool_result') {
@@ -263,6 +269,8 @@ export class ScenarioPlannerV2 {
   }
 
   private canActNow(): boolean {
+    // Never act if we've already completed
+    if (this.finished) return false;
     // Allow initial tick when no status yet
     const lastStatus = [...this.eventLog].reverse().find(e => e.type === 'status') as any;
     if (!lastStatus) return true;
@@ -270,8 +278,8 @@ export class ScenarioPlannerV2 {
     // Always allow tick right after a user message to the planner
     const lastEv = this.eventLog[this.eventLog.length - 1] as any;
     if (lastEv && lastEv.type === 'message' && lastEv.channel === 'user-planner') return true;
-    // Otherwise, allow when input is required or conversation completed
-    return st === 'input-required' || st === 'completed';
+    // Otherwise, allow only when input is required
+    return st === 'input-required';
   }
 
   private maybeTick() {
@@ -843,6 +851,8 @@ export class ScenarioPlannerV2 {
         // Also surface as trace in the log
         this.emit({ type: 'trace', channel: 'system', author: 'system', payload: { text: `Planner done: ${summary}` } } as any);
       }
+      // Disable further ticks for this planner instance
+      this.finished = true;
       return;
     }
 
