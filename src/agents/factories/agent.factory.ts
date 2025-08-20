@@ -17,7 +17,6 @@ import { ScriptAgent } from '$src/agents/script/script.agent';
 import type { TurnBasedScript } from '$src/agents/script/script.types';
 import { InProcessTransport } from '$src/agents/runtime/inprocess.transport';
 import { logLine } from '$src/lib/utils/logger';
-import { McpProxyAgent, type McpProxyConfig } from '$src/agents/proxy/mcp-proxy.agent';
 
 export interface StartAgentsOptions {
   conversationId: number;
@@ -141,22 +140,6 @@ export function createAgent(
       logLine(agentMeta.id, 'factory', `Creating ScriptAgent with ${script.turns?.length || 0} turns`);
       return new ScriptAgent(transport, script, { turnRecoveryMode });
 
-    case 'mcpproxy':
-    case 'mcp-proxy': {
-      const cfg = (agentMeta.config || {}) as Partial<McpProxyConfig>;
-      if (!cfg.remoteBaseUrl || !cfg.bridgedAgentId || !cfg.counterpartyAgentId) {
-        logLine(agentMeta.id, 'factory', `Missing required mcp-proxy config: remoteBaseUrl, bridgedAgentId, counterpartyAgentId`);
-      }
-      return new McpProxyAgent(transport, {
-        remoteBaseUrl: String(cfg.remoteBaseUrl || ''),
-        bridgedAgentId: String(cfg.bridgedAgentId || agentMeta.id),
-        counterpartyAgentId: String(cfg.counterpartyAgentId || agentMeta.id),
-        headers: cfg.headers as Record<string, string> | undefined,
-        remoteConversationId: cfg.remoteConversationId,
-        waitMs: cfg.waitMs ?? 1000,
-      });
-    }
-    
     case 'scenariodrivenagent':
     case 'scenario':
     case 'default':

@@ -169,19 +169,28 @@ export function ScenarioPluginPage() {
         <div className="p-4 border rounded space-y-2 bg-white">
           <div className="text-sm font-semibold">How To Use (MCP)</div>
           <ul className="text-sm text-slate-700 space-y-1 list-disc pl-5">
-            <li><span className="font-medium">begin_chat_thread</span>: starts a new conversation from this template.</li>
-            <li><span className="font-medium">send_message_to_chat_thread</span>: input — <code>conversationId</code>, <code>message</code>, optional <code>attachments[]</code>; output — <code>{`{ ok: true, guidance, status: 'waiting' }`}</code>.</li>
             <li>
-              <span className="font-medium">check_replies</span>: input — <code>conversationId</code>, optional <code>waitMs</code> (default 10000); output includes:
+              <span className="font-medium">begin_chat_thread</span>:
+              starts a new conversation from this template; returns <code>{`{ conversationId: string }`}</code>.
+            </li>
+            <li>
+              <span className="font-medium">send_message_to_chat_thread</span>:
+              input — <code>conversationId</code>, <code>message</code>, optional <code>attachments[]</code> (objects with <code>name</code>, <code>contentType</code>, <code>content</code>, <code>summary?</code>);
+              output — <code>{`{ ok: true, guidance, status: 'waiting' }`}</code>.
+            </li>
+            <li>
+              <span className="font-medium">check_replies</span>:
+              input — <code>conversationId</code>, optional <code>waitMs</code> (default 10000);
+              output includes:
               <ul className="mt-1 space-y-1 list-disc pl-5">
                 <li>
-                  <code>messages</code>: array of objects with keys:
+                  <code>messages</code>: array with keys
                   <span className="ml-1"><code>from</code>, <code>at</code> (ISO), <code>text</code>,</span>
-                  <span className="ml-1"><code>attachments</code> (array of objects: <code>name</code>, <code>contentType</code>, <code>summary?</code>, <code>docId?</code>)</span>
+                  <span className="ml-1"><code>attachments</code> (array of <code>{`{ name, contentType, content, summary? }`}</code>)</span>
                   — only replies since your last message.
                 </li>
                 <li><code>guidance</code>: short hint (e.g., “Your turn to respond.”).</li>
-                <li><code>status</code>: <code>input-required</code> | <code>waiting</code>.</li>
+                <li><code>status</code>: <code>input-required</code> | <code>waiting</code> | <code>completed</code>.</li>
                 <li><code>conversation_ended</code>: boolean.</li>
               </ul>
             </li>
