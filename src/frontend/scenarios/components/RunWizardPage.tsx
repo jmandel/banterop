@@ -170,6 +170,10 @@ export function RunWizardPage() {
       if (selectedModel) {
         params.set('defaultModel', selectedModel);
       }
+      // Pass additional planner instructions if provided
+      if (instructions && instructions.trim()) {
+        params.set('instructions', instructions.trim());
+      }
       window.open(`/client/#/?${params.toString()}`, '_blank');
     }
   };
@@ -365,6 +369,9 @@ export function RunWizardPage() {
               });
               if (selectedModel) {
                 params.set('defaultModel', selectedModel);
+              }
+              if (instructions && instructions.trim()) {
+                params.set('instructions', instructions.trim());
               }
               const href = `/client/#/?${params.toString()}`;
               

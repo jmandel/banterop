@@ -12,6 +12,7 @@ import { AttachmentSummarizer } from '../attachment-summaries';
 import { StorageService } from '../services/StorageService';
 import { type Protocol as ProtoType } from '../protocols';
 import { refreshPreview as svcRefreshPreview, detectEffectiveProtocol, createClient } from '../services/connection.service';
+import { useConfigStore } from './configStore';
 import { API_BASE } from '../api-base';
 import { BrowsersideLLMProvider } from '$src/llm/providers/browserside';
 
@@ -233,10 +234,14 @@ export const useAppStore = create<AppState>()(
       setInstructions: (text: string) => {
         set((s) => { s.planner.instructions = text; });
         try { ensureStorage().savePlannerInstructions(text); } catch {}
+        // Keep config runtime + storage in sync so reloads persist edits
+        try { useConfigStore.getState().actions.updateField('instructions', text); } catch {}
       },
       setModel: (model: string) => {
         set((s) => { s.planner.model = model; });
         try { ensureStorage().saveSelectedModel(model); } catch {}
+        // Persist to config store (used for URL-less reloads)
+        try { useConfigStore.getState().actions.updateField('model', model); } catch {}
       },
       appendPlannerEvent: (ev: UnifiedEvent) => {
         set((s) => { s.planner.eventLog.push(ev); });
@@ -252,8 +257,9 @@ export const useAppStore = create<AppState>()(
         const planner = new ScenarioPlanner({
           task: client,
           vault: get()._internal.vault,
-          getApiBase: () => API_BASE,
-          getEndpoint: () => get().connection.endpoint,
+          // API base not needed when scenario JSON is provided directly
+          getApiBase: undefined,
+          getEndpoint: () => '',
           getModel: () => get().planner.model,
           getLLMProvider: () => provider,
           getPlannerAgentId: () => get().scenario.selectedAgents.planner,

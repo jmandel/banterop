@@ -1,4 +1,4 @@
-// Scenario-aware planner (sketch) for A2A client
+// Scenario-aware planner for Task Client (MCP or A2A)
 // Goal: Keep the same UI surface but replace the planning loop
 // with a scenario-driven, event-log- and scratchpad-oriented loop.
 
@@ -34,8 +34,8 @@ type ScenarioPlannerDeps = {
   task: TaskClientLike | null;
   vault: AttachmentVault;
 
-  // Fetch API base used by server LLM proxy and scenario endpoints
-  getApiBase: () => string; // e.g., http://localhost:3000/api
+  // Fetch API base used by server LLM proxy and scenario endpoints (optional for backend)
+  getApiBase?: () => string; // e.g., http://localhost:3000/api
   // Selected model for planner + summarizer
   getModel?: () => string | undefined;
 
@@ -60,6 +60,12 @@ type ScenarioPlannerDeps = {
     endsConversation?: boolean;
     conversationEndStatus?: string;
   }>;
+
+  // Tool restrictions for backend usage (optional)
+  getToolRestrictions?: () => {
+    omitCoreTools?: string[];    // Core communication tools to exclude
+    omitScenarioTools?: string[]; // Scenario-specific tools to exclude
+  };
 
   // UI hooks
   onSystem: (text: string) => void;
@@ -222,14 +228,15 @@ export class ScenarioPlanner {
   }
 
   // Deprecated: do not auto-extract scenario from endpoint config64; only provide apiBase
+  // This method is no longer used since we pass scenario JSON directly
   private decodeConfig64FromEndpoint(): { scenarioId?: string; startingAgentId?: string; apiBase: string } | null {
     try {
       const url = this.deps.getEndpoint();
       const parsed = parseBridgeEndpoint(url);
-      const api = (parsed?.apiBase) || this.deps.getApiBase();
+      const api = (parsed?.apiBase) || 'http://localhost:3000/api';
       return { apiBase: api };
     } catch {
-      return { apiBase: this.deps.getApiBase() };
+      return { apiBase: 'http://localhost:3000/api' };
     }
   }
 
@@ -489,15 +496,23 @@ export class ScenarioPlanner {
     parts.push("");
 
     const enabled = this.deps.getEnabledTools?.() || [];
+    const restrictions = this.deps.getToolRestrictions?.() || {};
+    const omitCoreTools = new Set(restrictions.omitCoreTools || []);
+    const omitScenarioTools = new Set(restrictions.omitScenarioTools || []);
+
     parts.push("<TOOLS>");
     parts.push("Respond with exactly ONE JSON object describing your reasoning and chosen action.");
     parts.push("Schema: { reasoning: string, action: { tool: string, args: object } }");
     parts.push("");
     parts.push("Always-available tools:");
 
-    // Determine whether to omit certain messaging tools based on context
-    let omitUserMsg = false;
-    let omitRemoteMsg = false;
+    // Determine whether to omit certain messaging tools based on context and restrictions
+    let omitUserMsg = omitCoreTools.has('sendMessageToUser');
+    let omitRemoteMsg = omitCoreTools.has('sendMessageToRemoteAgent');
+    let omitSleep = omitCoreTools.has('sleep');
+    let omitDone = omitCoreTools.has('done');
+    let omitReadAttachment = omitCoreTools.has('readAttachment');
+
     try {
       const lastMessage = [...this.eventLog].reverse().find(e => e.type === 'message') as any;
       if (lastMessage) {
@@ -523,18 +538,23 @@ export class ScenarioPlanner {
       parts.push("Tool: sendMessageToUser: SendMessageToUserArgs");
       parts.push("");
     }
-    parts.push("");
-    parts.push("// Sleep until a new event arrives (no arguments).");
-    parts.push("type SleepArgs = {};");
-    parts.push("Tool: sleep: SleepArgs");
-    parts.push("");
-    parts.push("// Read a previously uploaded attachment by name (from AVAILABLE_FILES).");
-    parts.push("interface ReadAttachmentArgs { name: string }");
-    parts.push("Tool: readAttachment: ReadAttachmentArgs");
-    parts.push("");
-    parts.push("// Declare that you're fully done: you've completed the task with the remote agent and wrapped up with the user; nothing remains.");
-    parts.push("interface DoneArgs { summary?: string }");
-    parts.push("Tool: done: DoneArgs");
+    if (!omitSleep) {
+      parts.push("// Sleep until a new event arrives (no arguments).");
+      parts.push("type SleepArgs = {};");
+      parts.push("Tool: sleep: SleepArgs");
+      parts.push("");
+    }
+    if (!omitReadAttachment) {
+      parts.push("// Read a previously uploaded attachment by name (from AVAILABLE_FILES).");
+      parts.push("interface ReadAttachmentArgs { name: string }");
+      parts.push("Tool: readAttachment: ReadAttachmentArgs");
+      parts.push("");
+    }
+    if (!omitDone) {
+      parts.push("// Declare that you're fully done: you've completed the task with the remote agent and wrapped up with the user; nothing remains.");
+      parts.push("interface DoneArgs { summary?: string }");
+      parts.push("Tool: done: DoneArgs");
+    }
     if (enabled.length) {
       // Scenario-Specific Tools (enabled)
       const schemaToTs = (schema: any, indent = 0): string => {
