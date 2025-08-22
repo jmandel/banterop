@@ -195,7 +195,7 @@
         },
         {
           "toolName": "mri_authorization_approval",
-          "description": "Terminal tool: Approve the MRI authorization request.",
+          "description": "Generate Approval for the MRI authorization request. Call this before returning an approval notice.",
           "inputSchema": {
             "type": "object",
             "required": ["reason"],
@@ -211,7 +211,7 @@
         },
         {
           "toolName": "mri_authorization_denial",
-          "description": "Terminal tool: Deny the MRI authorization request.",
+          "description": "Generate Denial for the MRI authorization request. Call this before returning a denial notice.",
           "inputSchema": {
             "type": "object",
             "required": ["reason"],

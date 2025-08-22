@@ -157,6 +157,8 @@ export interface Tool {
    * 
    * ✅ "Search patient medical records using natural language"
    * ❌ "Submit prior authorization request"
+   * 
+   * For Terminal Tools, the description should indicate that this tool should be called before informing the user of the outcome.
    */
   description: string;
   

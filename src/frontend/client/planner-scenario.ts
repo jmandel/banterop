@@ -515,10 +515,10 @@ export class ScenarioPlanner {
     const allowRemote = !statusNow || statusNow === 'input-required';
     if (!allowRemote) omitRemoteMsg = true;
 
-    // while 'working', also suppress user messaging (nothing needed)
-    if (statusNow === 'working') {
-      omitUserMsg = true;
-    }
+    // // while 'working', also suppress user messaging (nothing needed)
+    // if (statusNow === 'working') {
+    //   omitUserMsg = true;
+    // }
 
     // after 'completed', allow ONE user wrap-up; remote remains disabled
     if (statusNow === 'completed') {
@@ -902,8 +902,10 @@ export class ScenarioPlanner {
       } as any);
 
       if (this.deps.task) {
-        if (!this.deps.task.getTaskId?.()) await (this.deps.task as any).startNew?.(parts as any);
-        else await (this.deps.task as any).send?.(parts as any);
+        if (!this.deps.task.getTaskId?.())
+          Promise.resolve().then(() => {(this.deps.task as any).startNew?.(parts as any);});
+        else
+          Promise.resolve().then(() => {(this.deps.task as any).send?.(parts as any);});
       }
 
       if (finality === "conversation") {

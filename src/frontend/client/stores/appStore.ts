@@ -200,32 +200,34 @@ export const useAppStore = create<AppState>()(
         try { (get().planner.instance as any)?.recordUserReply?.(text); } catch {}
       },
       cancelTask: () => {
+        // Snapshot what you need *before* mutating state
+        const ep   = get().connection.endpoint;
+        const cl   = get()._internal.taskClient as TaskClientLike | null;
+        const tid  = cl?.getTaskId();
+        const st   = get().task.status;
+        const canCancel = st === 'submitted' || st === 'working' || st === 'input-required';
+      
+        // 1) Immediate local teardown (so restart can continue right now)
+        try { cl?.clearLocal?.(); } catch {}
+        try { get()._internal.taskOffs.forEach((fn: any) => fn()); } catch {}
+        set((s) => { s._internal.taskOffs = []; s._internal.taskClient = null; });
+        get().actions.stopPlanner();
+        get()._internal.vault.purgeBySource(['agent', 'remote-agent']);
+        if (ep && tid) ensureStorage().removeTaskSession(ep, tid);
+        if (ep) ensureStorage().removeSession(ep);
+        set((s) => {
+          s.task.id = undefined;
+          s.task.status = 'initializing';
+          s.connection.status = 'disconnected';
+          s.connection.card = undefined;
+          s.planner.eventLog = [];
+        });
+      
+        // 2) Fire-and-forget the *remote* cancel
         (async () => {
-          const ep = get().connection.endpoint;
-          const tid = get()._internal.taskClient?.getTaskId();
-          try {
-            const st = get().task.status;
-            const canCancel = st === 'submitted' || st === 'working' || st === 'input-required';
-            if (canCancel) {
-              await get()._internal.taskClient?.cancel();
-            }
-          } catch {}
-          try { get()._internal.taskClient?.clearLocal(); } catch {}
-          try { get()._internal.taskOffs.forEach((fn: any) => fn()); } catch {}
-          set((s) => { s._internal.taskOffs = []; s._internal.taskClient = null; });
-          get().actions.stopPlanner();
-          get()._internal.vault.purgeBySource(['agent', 'remote-agent']);
-          if (ep && tid) ensureStorage().removeTaskSession(ep, tid);
-          if (ep) ensureStorage().removeSession(ep);
-          set((s) => {
-            s.task.id = undefined;
-            s.task.status = 'initializing';
-            s.connection.status = 'disconnected';
-            s.connection.card = undefined;
-            s.planner.eventLog = [];
-          });
+          try { if (canCancel) await cl?.cancel?.(); } catch {}
         })();
-      },
+      },      
       restartScenario: async () => {
         // Best-effort cancel; proceed regardless of outcome
         try { await get().actions.cancelTask(); } catch {}
