@@ -59,33 +59,34 @@ async function* sseToObjects(stream: ReadableStream<Uint8Array>) {
   }
 }
 
-type Side = 'a'|'b'
+type Role = 'initiator'|'responder'
 
 function useQuery() {
   const u = new URL(window.location.href)
-  const pairId = u.searchParams.get('pairId') || ''
-  const role = (u.searchParams.get('role') || 'a') as Side
-  return { pairId, role }
+  const role = (u.searchParams.get('role') === 'responder') ? 'responder' : 'initiator'
+  const a2aUrl = u.searchParams.get('a2a') || ''
+  const tasksUrl = u.searchParams.get('tasks') || ''
+  return { role, a2aUrl, tasksUrl }
 }
 
 function App() {
-  const { pairId, role } = useQuery()
+  const { role, a2aUrl, tasksUrl } = useQuery()
   const [status, setStatus] = useState<A2AStatus | 'initializing'>('initializing')
   const [taskId, setTaskId] = useState<string | undefined>()
   const [history, setHistory] = useState<Array<{ role:'user'|'agent', text:string }>>([])
   const [text, setText] = useState('')
   const [finality, setFinality] = useState<'none'|'turn'|'conversation'>('turn')
   const [banner, setBanner] = useState<string>('')
-  const endpoint = useMemo(() => `${location.origin}/api/bridge/${pairId || ''}/a2a`, [pairId])
-  const a2a = useMemo(() => new A2AClient(endpoint), [endpoint])
+  const endpoint = useMemo(() => a2aUrl, [a2aUrl])
+  const client = useMemo(() => new A2AClient(endpoint), [endpoint])
   const resubAbort = useRef<AbortController | null>(null)
   const streamAbort = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    if (!pairId) return
-    if (role === 'b') {
+    if (!endpoint) return
+    if (role === 'responder' && tasksUrl) {
       // responder-only backchannel
-      const es = new EventSource(`/pairs/${pairId}/server-events`)
+      const es = new EventSource(tasksUrl)
       es.onmessage = (ev) => {
         try {
           const payload = JSON.parse(ev.data)
@@ -100,7 +101,7 @@ function App() {
               try {
                 // small delay so UI updates cleanly
                 await new Promise(r => setTimeout(r, 50))
-                for await (const frame of a2a.tasksResubscribe(msg.taskId, ac.signal)) {
+                for await (const frame of client.tasksResubscribe(msg.taskId, ac.signal)) {
                   handleFrame(frame as any)
                 }
               } catch {}
@@ -109,7 +110,7 @@ function App() {
             setBanner('Unsubscribed (reset) — waiting for next task...')
             setHistory([]); setTaskId(undefined); setStatus('initializing')
           } else if (msg.type === 'redirect') {
-            setBanner(`Hard reset — new links ready: A ${msg.newPair.aJoinUrl} | B ${msg.newPair.bJoinUrl}`)
+            setBanner(`Hard reset — new links ready: Initiator ${msg.newPair.aJoinUrl} | Responder ${msg.newPair.bJoinUrl}`)
           }
         } catch (e) {
           console.error('Bad server-event payload', ev.data, e)
@@ -118,7 +119,7 @@ function App() {
       es.onerror = () => setBanner('Backchannel disconnected — reconnecting...')
       return () => { try { es.close() } catch {} }
     }
-  }, [pairId, role, a2a])
+  }, [endpoint, tasksUrl, role, client])
 
   function handleFrame(frame: any) {
     if (!frame) return
@@ -152,7 +153,7 @@ function App() {
     streamAbort.current?.abort()
     streamAbort.current = ac
     try {
-      for await (const frame of a2a.messageStreamParts(parts, taskId, ac.signal)) {
+      for await (const frame of client.messageStreamParts(parts, taskId, ac.signal)) {
         handleFrame(frame as any)
       }
     } catch (e) {
@@ -163,28 +164,16 @@ function App() {
     }
   }
 
-  async function softReset() {
-    if (!pairId) return
-    await fetch(`/api/pairs/${pairId}/reset`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ type: 'soft' }) })
-  }
-  async function hardReset() {
-    if (!pairId) return
-    await fetch(`/api/pairs/${pairId}/reset`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ type: 'hard' }) })
-  }
-
-  const canSend = role === (status === 'input-required' ? 'b' : 'a') || !taskId
-  const roleName = role === 'a' ? 'Client (initiator)' : 'Responder (server)'
+  const canSend = !!endpoint && ((status === 'input-required') || (!taskId && role === 'initiator'))
+  const roleName = role === 'initiator' ? 'Initiator' : 'Responder'
 
   return (
     <div className="col" style={{gap:16}}>
       <div className="card">
         <div className="row">
-          <div><strong>Pair:</strong> {pairId || '(none)'} <span className="pill">{roleName}</span></div>
+          <div><strong>Role:</strong> <span className="pill">{roleName}</span></div>
           <div className="pill">Status: {status}</div>
-          <div style={{marginLeft:'auto'}} className="row">
-            <button onClick={softReset}>Soft reset</button>
-            <button onClick={hardReset} style={{borderColor:'#7b2f2f', color:'#ff9a9a'}}>Hard reset</button>
-          </div>
+          <div style={{marginLeft:'auto'}} className="row"/>
         </div>
         {banner && <div className="muted small" style={{marginTop:8}}>{banner}</div>}
       </div>
@@ -200,24 +189,46 @@ function App() {
           ))}
         </div>
         <div className="row" style={{marginTop:12}}>
-          <input style={{flex:1}} value={text} placeholder="Type a message..." onChange={e => setText(e.target.value)} />
-          <select value={finality} onChange={e => setFinality(e.target.value as any)}>
+          <input
+            style={{flex:1}}
+            value={text}
+            placeholder="Type a message..."
+            onChange={e => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (canSend) send(); } }}
+            autoFocus
+            tabIndex={1}
+            disabled={status === 'completed' || status === 'failed' || status === 'canceled'}
+          />
+          <select value={finality} onChange={e => setFinality(e.target.value as any)} tabIndex={2}
+            disabled={status === 'completed' || status === 'failed' || status === 'canceled'}>
             <option value="none">no finality</option>
             <option value="turn">end turn → flip</option>
             <option value="conversation">end conversation</option>
           </select>
-          <button onClick={send} disabled={!canSend}>Send</button>
+          <button
+            onClick={send}
+            disabled={!canSend}
+            tabIndex={3}
+            style={{ opacity: canSend ? 1 : 0.5, cursor: canSend ? 'pointer' : 'not-allowed' }}
+            aria-disabled={!canSend}
+          >
+            Send
+          </button>
         </div>
         <div className="small muted" style={{marginTop:8}}>
-          {(!taskId) ? 'No task yet — first send will create a new epoch (client only).' :
-            (canSend ? 'You may send now.' : 'Waiting for the other side to end their turn.')}
+          {!endpoint ? 'No endpoint configured — open from Control Plane links.' :
+           (!taskId) ? (role === 'initiator' ? 'First send will start the conversation.' : 'Waiting for initiator to start.') :
+           (status === 'completed' ? 'Conversation completed.' :
+            status === 'canceled' ? 'Conversation canceled.' :
+            status === 'failed' ? 'Conversation failed.' :
+            (canSend ? 'You may send now.' : 'Waiting for the other side to end their turn.'))}
         </div>
       </div>
 
       <div className="card small muted">
         <div><strong>How to use</strong></div>
         <ol>
-          <li>Create a pair on the Control page. Open two tabs: client (role=a) and responder (role=b).</li>
+          <li>Create a pair on the Control page. Open two tabs using the provided links (initiator and responder).</li>
           <li>Type a message on the client tab and choose finality=turn to pass the token.</li>
           <li>The responder receives the message; they can then reply and flip the turn.</li>
           <li>Use <em>Soft reset</em> to start a new epoch. Only the responder listens to the backchannel and re-subscribes automatically. The client remains a pure A2A app.</li>

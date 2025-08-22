@@ -36,11 +36,14 @@
       </div>
 
       <div class="card">
-        <div class="row" style="justify-content:space-between">
+        <div class="row" style="justify-content:space-between; align-items:center; gap: 12px;">
           <strong>Events</strong>
           <span class="small muted">SSE: <code id="sseUrl"></code></span>
+          <span style="margin-left:auto"></span>
+          <label class="small"><input type="checkbox" id="pretty" /> Pretty JSON</label>
+          <button id="btnCopy">Copy Log</button>
         </div>
-        <pre id="log">(no events yet)</pre>
+        <pre id="log" style="max-height:none; overflow:visible">(no events yet)</pre>
       </div>
     </div>
 
@@ -48,10 +51,15 @@
       let pairId = null;
       let es = null;
       const logEl = document.getElementById('log');
+      const prettyEl = document.getElementById('pretty');
+      const btnCopy = document.getElementById('btnCopy');
       const linksEl = document.getElementById('links');
       const badge = document.getElementById('pairBadge');
       const sseCode = document.getElementById('sseUrl');
 
+      let pretty = false;
+      prettyEl.onchange = () => { pretty = !!prettyEl.checked; };
+      btnCopy.onclick = async () => { try { await navigator.clipboard.writeText(logEl.textContent || ''); } catch {} };
       function log(msg) {
         const now = new Date().toLocaleTimeString();
         const line = `${now} ${msg}`;
@@ -59,6 +67,7 @@
         logEl.textContent += (logEl.textContent ? '\n' : '') + line;
         logEl.scrollTop = logEl.scrollHeight;
       }
+      function logObj(obj) { log(pretty ? JSON.stringify(obj, null, 2) : JSON.stringify(obj)); }
 
       async function createPair() {
         const res = await fetch('/api/pairs', { method: 'POST' });
@@ -68,8 +77,8 @@
         badge.textContent = `Pair: ${pairId}`;
         linksEl.style.display = 'block';
         linksEl.innerHTML = '';
-        const a = document.createElement('a'); a.href = j.aJoinUrl; a.target = '_blank'; a.textContent = 'Open Client (role=a)';
-        const b = document.createElement('a'); b.href = j.bJoinUrl; b.target = '_blank'; b.textContent = 'Open Responder (role=b)';
+        const a = document.createElement('a'); a.href = j.aJoinUrl; a.target = '_blank'; a.textContent = 'Open Initiator';
+        const b = document.createElement('a'); b.href = j.bJoinUrl; b.target = '_blank'; b.textContent = 'Open Responder';
         linksEl.appendChild(a); linksEl.appendChild(b);
         document.getElementById('btnSoft').disabled = false;
         document.getElementById('btnHard').disabled = false;
@@ -85,7 +94,14 @@
           try {
             const payload = JSON.parse(e.data);
             const ev = payload.result;
-            log(JSON.stringify(ev));
+            if (ev.type === 'message-summary') {
+              const side = ev.from;
+              const fin = ev.received?.finality;
+              const txt = (ev.received?.parts || []).map(p => p?.text).filter(Boolean).join(' ');
+              log(`[summary] ${side} -> finality=${fin} text=${JSON.stringify(txt)}`);
+            } else {
+              logObj(ev);
+            }
           } catch (err) {
             log('Bad event payload');
           }
@@ -108,4 +124,3 @@
     </script>
   </body>
   </html>
-

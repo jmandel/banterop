@@ -3,7 +3,8 @@ import { streamSSE } from "hono/streaming";
 import { serve } from "bun";
 import type { A2APart, A2AFrame, A2AMessage, A2AStatus, A2ATask } from "../shared/a2a-types";
 
-type Role = 'client' | 'server';
+type Role = 'initiator' | 'responder';
+const asPublicRole = (s: Role) => s;
 
 type TaskState = {
   id: string;
@@ -19,9 +20,10 @@ type Pair = {
   epoch: number;
   turn: Role;
   startingTurn: Role;
-  clientTask?: TaskState;
-  serverTask?: TaskState;
+  initiatorTask?: TaskState;
+  responderTask?: TaskState;
   serverEvents: Set<(ev:any)=>void>;
+  eventLog: Set<(ev:any)=>void>;
 };
 
 const pairs = new Map<string, Pair>();
@@ -40,14 +42,17 @@ async function safeJson(c: any): Promise<any> {
 app.post('/api/pairs', async (c) => {
   const pairId = shortId();
   const origin = new URL(c.req.url).origin;
-  const p: Pair = { id: pairId, epoch: 0, turn: 'client', startingTurn: 'client', serverEvents: new Set() };
+  const p: Pair = { id: pairId, epoch: 0, turn: 'initiator', startingTurn: 'initiator', serverEvents: new Set(), eventLog: new Set() };
   pairs.set(pairId, p);
+  logEvent(p, { type: 'pair-created', pairId });
+  const a2aUrl = `${origin}/api/bridge/${pairId}/a2a`;
+  const tasksUrl = `${origin}/pairs/${pairId}/server-events`;
   return c.json({
     pairId,
-    // Participant UI links with explicit role
-    aJoinUrl: `${origin}/participant/?pairId=${pairId}&role=a`,
-    bJoinUrl: `${origin}/participant/?pairId=${pairId}&role=b`,
-    serverEventsUrl: `${origin}/pairs/${pairId}/server-events`
+    // Participant UI links configured with explicit role and endpoints
+    aJoinUrl: `${origin}/participant/?role=initiator&a2a=${encodeURIComponent(a2aUrl)}`,
+    bJoinUrl: `${origin}/participant/?role=responder&a2a=${encodeURIComponent(a2aUrl)}&tasks=${encodeURIComponent(tasksUrl)}`,
+    serverEventsUrl: tasksUrl
   });
 });
 
@@ -63,7 +68,7 @@ app.get('/pairs/:pairId/server-events', async (c) => {
     }, 15000);
     p.serverEvents.add(push);
     // immediate subscribe to current epoch if present
-    if (p.serverTask) push({ type: 'subscribe', pairId, epoch: p.epoch, taskId: p.serverTask.id, turn: (p.turn === 'client' ? 'a' : 'b') });
+    if (p.responderTask) push({ type: 'subscribe', pairId, epoch: p.epoch, taskId: p.responderTask.id, turn: p.turn });
     await new Promise<void>((resolve) => stream.onAbort(resolve));
     p.serverEvents.delete(push);
     clearInterval(ka);
@@ -79,10 +84,10 @@ app.get('/pairs/:pairId/events.log', async (c) => {
     const ka = setInterval(() => {
       try { stream.writeSSE({ event: 'ping', data: String(Date.now()) }); } catch {}
     }, 15000);
-    p.serverEvents.add(push);
-    if (p.serverTask) push({ type: 'subscribe', pairId, epoch: p.epoch, taskId: p.serverTask.id, turn: (p.turn === 'client' ? 'a' : 'b') });
+    p.eventLog.add(push);
+    if (p.responderTask) push({ type: 'subscribe', pairId, epoch: p.epoch, taskId: p.responderTask.id, turn: p.turn });
     await new Promise<void>((resolve) => stream.onAbort(resolve));
-    p.serverEvents.delete(push);
+    p.eventLog.delete(push);
     clearInterval(ka);
   });
 });
@@ -93,39 +98,53 @@ app.post('/pairs/:pairId/reset', async (c) => {
   const p = mustPair(pairId);
   if (type === 'soft') {
     // notify server to unsubscribe old
-    if (p.serverTask) p.serverEvents.forEach(fn => fn({ type: 'unsubscribe', pairId, epoch: p.epoch }));
+    if (p.responderTask) {
+      const ev = { type: 'unsubscribe', pairId, epoch: p.epoch };
+      p.serverEvents.forEach(fn => fn(ev));
+      logEvent(p, ev);
+    }
     // cancel tasks and bump epoch
-    if (p.clientTask) setTaskStatus(p.clientTask, 'canceled');
-    if (p.serverTask) setTaskStatus(p.serverTask, 'canceled');
+    if (p.initiatorTask) setTaskStatus(p.initiatorTask, 'canceled');
+    if (p.responderTask) setTaskStatus(p.responderTask, 'canceled');
     p.epoch += 1;
-    p.turn = p.startingTurn || 'client';
-    p.clientTask = undefined;
-    p.serverTask = undefined;
+    p.turn = p.startingTurn || 'initiator';
+    p.initiatorTask = undefined;
+    p.responderTask = undefined;
     // create fresh tasks for next epoch (ids allocated now)
-    const cli = newTask(pairId, 'client', `cli:${pairId}#${p.epoch}`);
-    const srv = newTask(pairId, 'server', `srv:${pairId}#${p.epoch}`);
-    p.clientTask = cli; p.serverTask = srv;
+    const init = newTask(pairId, 'initiator', `init:${pairId}#${p.epoch}`);
+    const resp = newTask(pairId, 'responder', `resp:${pairId}#${p.epoch}`);
+    p.initiatorTask = init; p.responderTask = resp;
     // prompt server to subscribe new
-    p.serverEvents.forEach(fn => fn({ type: 'subscribe', pairId, epoch: p.epoch, taskId: srv.id, turn: (p.turn === 'client' ? 'a' : 'b') }));
+    {
+      const ev = { type: 'subscribe', pairId, epoch: p.epoch, taskId: resp.id, turn: p.turn };
+      p.serverEvents.forEach(fn => fn(ev));
+      logEvent(p, ev);
+    }
     return c.json({ ok: true, epoch: p.epoch });
   } else {
     // hard: redirect (new pair)
     const origin = new URL(c.req.url).origin;
     const np = shortId();
-    const newPair: Pair = { id: np, epoch: 0, turn: 'client', startingTurn: 'client', serverEvents: new Set() };
+    const newPair: Pair = { id: np, epoch: 0, turn: 'initiator', startingTurn: 'initiator', serverEvents: new Set(), eventLog: new Set() };
     pairs.set(np, newPair);
     // cancel existing
-    if (p.clientTask) setTaskStatus(p.clientTask, 'canceled');
-    if (p.serverTask) setTaskStatus(p.serverTask, 'canceled');
+    if (p.initiatorTask) setTaskStatus(p.initiatorTask, 'canceled');
+    if (p.responderTask) setTaskStatus(p.responderTask, 'canceled');
     // notify redirect
-    p.serverEvents.forEach(fn => fn({
-      type: 'redirect',
-      newPair: {
-        pairId: np,
-        aJoinUrl: `${origin}/participant/?pairId=${np}&role=a`,
-        bJoinUrl: `${origin}/participant/?pairId=${np}&role=b`
-      }
-    }));
+    const a2aUrl2 = `${origin}/api/bridge/${np}/a2a`;
+    const tasksUrl2 = `${origin}/pairs/${np}/server-events`;
+    {
+      const ev = {
+        type: 'redirect',
+        newPair: {
+          pairId: np,
+          aJoinUrl: `${origin}/participant/?role=initiator&a2a=${encodeURIComponent(a2aUrl2)}`,
+          bJoinUrl: `${origin}/participant/?role=responder&a2a=${encodeURIComponent(a2aUrl2)}&tasks=${encodeURIComponent(tasksUrl2)}`
+        }
+      };
+      p.serverEvents.forEach(fn => fn(ev));
+      logEvent(p, ev);
+    }
     pairs.delete(pairId);
     return c.json({ ok: true, redirectedTo: np });
   }
@@ -152,21 +171,28 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
         side = task?.side || null;
       }
       if (!task) {
-        // Treat as new epoch from client
-        side = 'client';
+        // Treat as new epoch from initiator
+        side = 'initiator';
         // if no tasks exist for this epoch, create them
-        if (!p.clientTask || !p.serverTask) {
+        if (!p.initiatorTask || !p.responderTask) {
           p.epoch += 1;
-          p.turn = p.startingTurn || 'client';
-          p.clientTask = newTask(pairId, 'client', `cli:${pairId}#${p.epoch}`);
-          p.serverTask = newTask(pairId, 'server', `srv:${pairId}#${p.epoch}`);
-          // tell server to subscribe
-          p.serverEvents.forEach(fn => fn({ type:'subscribe', pairId, epoch: p.epoch, taskId: p.serverTask!.id, turn: p.turn }));
+          p.turn = p.startingTurn || 'initiator';
+          p.initiatorTask = newTask(pairId, 'initiator', `init:${pairId}#${p.epoch}`);
+          p.responderTask = newTask(pairId, 'responder', `resp:${pairId}#${p.epoch}`);
+          // tell responder to subscribe
+          {
+            const ev = { type:'subscribe', pairId, epoch: p.epoch, taskId: p.responderTask!.id, turn: p.turn };
+            p.serverEvents.forEach(fn => fn(ev));
+            logEvent(p, ev);
+          }
         }
-        task = p.clientTask;
+        task = p.initiatorTask;
       }
       const t = task!;
-      const push = (frame: A2AFrame) => stream.writeSSE({ data: JSON.stringify(frame) });
+      const push = (frame: A2AFrame) => {
+        stream.writeSSE({ data: JSON.stringify(frame) });
+        logEvent(p, { type: 'a2a-frame', to: asPublicRole(t.side), frame });
+      };
       t.subscribers.add(push);
       // Let caller know the task snapshot first
       push({ result: taskToA2A(t) });
@@ -199,7 +225,10 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
     const t = getTaskById(p, String(params?.id || ''));
     if (!t) return c.text('not found', 404);
     return streamSSE(c, async (stream) => {
-      const push = (frame: A2AFrame) => stream.writeSSE({ data: JSON.stringify(frame) });
+      const push = (frame: A2AFrame) => {
+        stream.writeSSE({ data: JSON.stringify(frame) });
+        logEvent(p, { type: 'a2a-frame', to: asPublicRole(t.side), frame });
+      };
       t.subscribers.add(push);
       // initial snapshot
       push({ result: taskToA2A(t) });
@@ -219,13 +248,13 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
 });
 
 function onIncomingMessage(p: Pair, from: Role, req: { parts: A2APart[], messageId: string }) {
-  const cli = p.clientTask!, srv = p.serverTask!;
+  const cli = p.initiatorTask!, srv = p.responderTask!;
   const metadata = readExtension(req.parts);
   const finality = metadata?.finality || 'none';
 
   // Sender perspective
-  const fromTask = from === 'client' ? cli : srv;
-  const toTask   = from === 'client' ? srv : cli;
+  const fromTask = from === 'initiator' ? cli : srv;
+  const toTask   = from === 'initiator' ? srv : cli;
 
   // Append as 'user' on sender's task
   const msgSender: A2AMessage = {
@@ -237,8 +266,14 @@ function onIncomingMessage(p: Pair, from: Role, req: { parts: A2APart[], message
     kind: 'message',
   };
   fromTask.history.push(msgSender);
-  // Send status to sender side (working)
-  fromTask.subscribers.forEach(fn => fn({ result: statusUpdate(fromTask, 'working', msgSender) }));
+  logEvent(p, { type: 'incoming-message', from: asPublicRole(from), messageId: req.messageId, finality, parts: req.parts });
+  // For non-final messages, the sender should remain input-required to allow continued sending
+  if (finality === 'none') {
+    fromTask.subscribers.forEach(fn => fn({ result: statusUpdate(fromTask, 'input-required', msgSender) }));
+  } else {
+    // For 'turn' and 'conversation', show 'working' until turn flip/completion events
+    fromTask.subscribers.forEach(fn => fn({ result: statusUpdate(fromTask, 'working', msgSender) }));
+  }
 
   // Mirror as 'agent' on receiver's task
   const msgRecv: A2AMessage = {
@@ -251,16 +286,36 @@ function onIncomingMessage(p: Pair, from: Role, req: { parts: A2APart[], message
   };
   toTask.history.push(msgRecv);
   toTask.subscribers.forEach(fn => fn({ result: msgRecv }));
+  // For non-final messages, the receiver should be in 'working'
+  if (finality === 'none') {
+    setTaskStatus(toTask, 'working');
+  }
+  logEvent(p, { type: 'mirrored-message', to: asPublicRole(toTask.side), messageId: req.messageId });
 
   if (finality === 'turn') {
-    p.turn = (from === 'client') ? 'server' : 'client';
+    p.turn = (from === 'initiator') ? 'responder' : 'initiator';
     setTaskStatus(toTask, 'input-required');
+    logEvent(p, { type: 'finality', kind: 'turn', next: asPublicRole(p.turn) });
   } else if (finality === 'conversation') {
     setTaskStatus(cli, 'completed');
     setTaskStatus(srv, 'completed');
+    logEvent(p, { type: 'finality', kind: 'conversation' });
   } else {
     // non-final messages keep receiver in working; do nothing
   }
+
+  // Aggregate summary event for easier reading in Control Plane
+  try {
+    logEvent(p, {
+      type: 'message-summary',
+      from: asPublicRole(from),
+      received: { messageId: req.messageId, finality, parts: req.parts },
+      newTaskSnapshot: {
+        initiator: taskToA2A(cli),
+        responder: taskToA2A(srv),
+      },
+    });
+  } catch {}
 }
 
 function readExtension(parts: A2APart[]): any {
@@ -286,8 +341,8 @@ function newTask(pairId: string, side: Role, id: string): TaskState {
 
 function getTaskById(p: Pair, id: string): TaskState | undefined {
   if (!id) return undefined;
-  if (p.clientTask?.id === id) return p.clientTask;
-  if (p.serverTask?.id === id) return p.serverTask;
+  if (p.initiatorTask?.id === id) return p.initiatorTask;
+  if (p.responderTask?.id === id) return p.responderTask;
   return undefined;
 }
 
@@ -295,6 +350,7 @@ function setTaskStatus(t: TaskState, state: A2AStatus, message?: A2AMessage) {
   t.status = state;
   const frame = statusUpdate(t, state, message);
   t.subscribers.forEach(fn => fn({ result: frame }));
+  try { const pair = mustPair(t.pairId); logEvent(pair, { type: 'status', side: asPublicRole(t.side), state }); } catch {}
 }
 
 function taskToA2A(t: TaskState): A2ATask {
@@ -330,6 +386,11 @@ function shortId(): string {
 }
 
 // Dev server with HTML routes and HMR; delegate /api and /pairs to Hono
+function logEvent(p: Pair, ev: any) {
+  const payload = { ts: new Date().toISOString(), pairId: p.id, ...ev };
+  p.eventLog.forEach(fn => { try { fn(payload); } catch {} });
+}
+
 import controlHtml from '../frontend/control/index.html';
 import participantHtml from '../frontend/participant/index.html';
 

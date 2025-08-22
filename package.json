@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun src/server/flipproxy.ts",
+    "dev": "bun --watch src/server/flipproxy.ts",
     "start": "bun src/server/flipproxy.ts"
   },
   "dependencies": {
