@@ -779,12 +779,7 @@ export class ScenarioPlanner {
         const contentType = 'application/json';
         const contentUtf8 = JSON.stringify(obj, null, 2);
         this.documents.set(name, { name, contentType, content: contentUtf8 });
-        try {
-          const enc = new TextEncoder().encode(contentUtf8);
-          let bin = ''; for (let i = 0; i < enc.length; i++) bin += String.fromCharCode(enc[i]!);
-          const b64 = btoa(bin);
-          this.deps.vault.addSynthetic(name, contentType, b64);
-        } catch {}
+        this.deps.vault.addSynthetic(name, contentType, contentUtf8);
         created.push(name);
       }
     }

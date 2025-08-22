@@ -6,17 +6,15 @@
 import type { IAgentTransport } from '$src/agents/runtime/runtime.interfaces';
 import type { LLMProviderManager } from '$src/llm/provider-manager';
 import type { AgentMeta } from '$src/types/conversation.meta';
-import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
 import type { LLMProvider } from '$src/types/llm.types';
+import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
 
-import { BaseAgent, type TurnRecoveryMode } from '$src/agents/runtime/base-agent';
 import { AssistantAgent } from '$src/agents/assistant.agent';
 import { EchoAgent } from '$src/agents/echo.agent';
-import { ScenarioDrivenAgent } from '$src/agents/scenario/scenario-driven.agent';
+import { BaseAgent, type TurnRecoveryMode } from '$src/agents/runtime/base-agent';
 import { PlannerAgent } from '$src/agents/runtime/planner-agent';
 import { ScriptAgent } from '$src/agents/script/script.agent';
 import type { TurnBasedScript } from '$src/agents/script/script.types';
-import { InProcessTransport } from '$src/agents/runtime/inprocess.transport';
 import { logLine } from '$src/lib/utils/logger';
 
 export interface StartAgentsOptions {
