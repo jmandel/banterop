@@ -22,13 +22,13 @@ function saveToStorage(config: AppConfig) {
   try {
     const toSave: any = { ...config };
     delete toSave.resumeTaskId; // one-time values not persisted
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
   } catch {}
 }
 
 function loadFromStorage(): PartialConfig | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const obj = JSON.parse(raw);
     return obj && typeof obj === 'object' ? (obj as PartialConfig) : null;
@@ -124,4 +124,3 @@ export const useConfigStore = create<ConfigStore>()(
     },
   }))
 );
-

@@ -68,13 +68,24 @@ describe('PlannerAgent', () => {
 
       const events = (plannerAgent as any).convertSnapshotToPlannerEvents(snapshot, 'test-agent');
 
-      expect(events).toHaveLength(3); // 2 original + 1 synthetic
-      expect(events[0].channel).toBe('user-planner'); // Other agent's message
+      // Expect 2 mapped messages + 1 status gate
+      expect(events).toHaveLength(3);
+
+      // 1) Other agent's message → planner-agent channel, author=agent
+      expect(events[0].type).toBe('message');
+      expect(events[0].channel).toBe('planner-agent');
       expect(events[0].author).toBe('agent');
-      expect(events[1].channel).toBe('planner-agent'); // Our message
+
+      // 2) Our message → planner-agent channel, author=planner
+      expect(events[1].type).toBe('message');
+      expect(events[1].channel).toBe('planner-agent');
       expect(events[1].author).toBe('planner');
-      expect(events[2].channel).toBe('user-planner'); // Synthetic trigger message
-      expect(events[2].author).toBe('agent');
+
+      // 3) Status gate for planner activation
+      expect(events[2].type).toBe('status');
+      expect(events[2].channel).toBe('status');
+      expect(events[2].author).toBe('system');
+      expect((events[2] as any).payload?.state).toBe('input-required');
     });
 
     it('should extract scenario configuration correctly', () => {

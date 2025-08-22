@@ -30,31 +30,31 @@ export interface StorageWrapper {
 }
 
 /**
- * localStorage wrapper that handles browser/Node.js compatibility
+ * sessionStorage wrapper that handles browser/Node.js compatibility
  */
-export class LocalStorageWrapper implements StorageWrapper {
+export class SessionStorageWrapper implements StorageWrapper {
   isAvailable(): boolean {
-    return typeof localStorage !== 'undefined';
+    return typeof sessionStorage !== 'undefined';
   }
 
   getItem(key: string): string | null {
     if (!this.isAvailable()) return null;
-    return localStorage.getItem(key);
+    return sessionStorage.getItem(key);
   }
 
   setItem(key: string, value: string): void {
     if (!this.isAvailable()) return;
-    localStorage.setItem(key, value);
+    sessionStorage.setItem(key, value);
   }
 
   removeItem(key: string): void {
     if (!this.isAvailable()) return;
-    localStorage.removeItem(key);
+    sessionStorage.removeItem(key);
   }
 
   clear(): void {
     if (!this.isAvailable()) return;
-    localStorage.clear();
+    sessionStorage.clear();
   }
 }
 
@@ -109,7 +109,7 @@ export class AttachmentVault {
   private listeners = new Set<(name?: string) => void>();
   private storage: StorageWrapper;
 
-  constructor(storage: StorageWrapper = new LocalStorageWrapper()) {
+  constructor(storage: StorageWrapper = new SessionStorageWrapper()) {
     this.storage = storage;
     this.metaMap = loadMetaMap(this.storage);
 

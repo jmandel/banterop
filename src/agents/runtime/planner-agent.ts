@@ -165,16 +165,17 @@ export class PlannerAgent extends BaseAgent<ConversationSnapshot> {
           const callId = String(t.toolCallId || `call_${e.seq}`);
           if (name === 'readAttachment') {
             pending[callId] = { seq: e.seq, timestamp: ts, args, reasoning: lastThought };
+          } else {
+            out.push({
+              seq: e.seq,
+              timestamp: ts,
+              type: 'tool_call',
+              channel: 'tool',
+              author: 'planner',
+              payload: { name, args },
+              ...(lastThought ? { reasoning: lastThought } : {})
+            });  
           }
-          out.push({
-            seq: e.seq,
-            timestamp: ts,
-            type: 'tool_call',
-            channel: 'tool',
-            author: 'planner',
-            payload: { name, args },
-            ...(lastThought ? { reasoning: lastThought } : {})
-          });
           lastThought = undefined;
           continue;
         }
@@ -200,15 +201,16 @@ export class PlannerAgent extends BaseAgent<ConversationSnapshot> {
               ...(pend.reasoning ? { reasoning: pend.reasoning } : {})
             });
             delete pending[callId];
+          } else {
+            out.push({
+              seq: e.seq,
+              timestamp: ts,
+              type: 'tool_result',
+              channel: 'tool',
+              author: 'planner',
+              payload: { result: res }
+            });
           }
-          out.push({
-            seq: e.seq,
-            timestamp: ts,
-            type: 'tool_result',
-            channel: 'tool',
-            author: 'planner',
-            payload: { result: res }
-          });
           continue;
         }
       }

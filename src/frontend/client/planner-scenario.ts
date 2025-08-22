@@ -257,7 +257,7 @@ export class ScenarioPlanner {
       console.log("We have unanswered user questions")
       return true;
     }
-    console.log('we do not have unanswre use mesagse', this.hasUnansweredUserMessage(), this.eventLog)
+    // console.log('we do not have unanswre use mesagse', this.hasUnansweredUserMessage(), this.eventLog)
 
     const last = this.eventLog[this.eventLog.length - 1] as any;
 
@@ -293,7 +293,7 @@ export class ScenarioPlanner {
           status: (this.eventLog.slice().reverse().find(e => e.type==='status') as any)?.payload?.state,
           hasTask: !!this.deps.task?.getTaskId?.() },
         'decision', decision);
-      console.log("Basedon last ev", this.eventLog.slice(-1)[0]);
+      // console.log("Basedon last ev", this.eventLog.slice(-1)[0]);
     } catch {}
 
     if (!this.running) return;
@@ -889,7 +889,7 @@ export class ScenarioPlanner {
         }
       }
       if (unresolved.length) {
-        const err = { ok: false, error: `Unknown attachment name(s): ${unresolved.join(', ')}` } as any;
+        const err = { ok: false, error: `Could not send message becuse you included attachments that are unavailable: ${unresolved.join(', ')}` } as any;
         this.emit({ type: 'tool_result', channel: 'tool', author: 'planner', payload: { result: err } } as any);
         return;
       }

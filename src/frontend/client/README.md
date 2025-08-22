@@ -66,9 +66,9 @@ Notes:
 
 The server also exposes `/.well-known/agent-card.json` per config for display.
 
-## Local Storage
+## Session Storage
 
-The client saves non‑sensitive UI state (endpoint, Planner mode, models, goals/instructions, attachment summaries) in `localStorage` for convenience. No secrets are stored.
+The client saves non‑sensitive UI state (endpoint, Planner mode, models, goals/instructions, attachment summaries) in `sessionStorage` for convenience. No secrets are stored, and data clears with the browser session.
 
 ## Tips
 

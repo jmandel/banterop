@@ -44,10 +44,10 @@ const initModel = (endpoint: string, protocol: Protocol): Model => ({
   endpoint,
   protocol,
   status: "initializing",
-  plannerMode: (localStorage.getItem("a2a.planner.mode") as PlannerMode) || "autostart",
+  plannerMode: (sessionStorage.getItem("a2a.planner.mode") as PlannerMode) || "autostart",
   plannerStarted: false,
   busy: false,
-  summarizeOnUpload: localStorage.getItem("a2a.planner.summarizeOnUpload") !== "false",
+  summarizeOnUpload: sessionStorage.getItem("a2a.planner.summarizeOnUpload") !== "false",
 });
 
 function reducer(m: Model, a: Act): Model {
@@ -87,7 +87,7 @@ function reducer(m: Model, a: Act): Model {
 // Optional free-form guidance to augment scenario prompt
 
 export default function App() {
-  // Safe UTF-8 → base64url (sync) for localStorage keys
+  // Safe UTF-8 → base64url (sync) for sessionStorage keys
   const toBase64Url = (s: string) => {
     try {
       const bytes = new TextEncoder().encode(s ?? '');
@@ -174,7 +174,7 @@ export default function App() {
 
   // Instructions are managed in-session by ConfigurationStep
   // No longer persisting background/goals by default
-  useEffect(() => { try { localStorage.setItem("a2a.planner.model", selectedModel); } catch {} }, [selectedModel]);
+  useEffect(() => { try { sessionStorage.setItem("a2a.planner.model", selectedModel); } catch {} }, [selectedModel]);
   
   // No more plannerMode/summarizeOnUpload in local reducer; store owns preferences
   // Scenario URL persistence handled by init subscription

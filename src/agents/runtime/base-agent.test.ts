@@ -64,11 +64,13 @@ describe('BaseAgent reconcile-first pattern', () => {
     metadata: { agents: [] }
   });
 
-  const emitGuidance = (agentId: string, seq = 1) => {
+  const emitGuidance = (agentId: string, seq = 1, kind: 'start_turn'|'continue_turn' = 'continue_turn', turn = 1) => {
     const guidance: GuidanceEvent = {
       type: 'guidance',
       nextAgentId: agentId,
       seq,
+      kind,
+      turn,
       deadlineMs: Date.now() + 30000,
       conversation: 1
     };
@@ -83,7 +85,7 @@ describe('BaseAgent reconcile-first pattern', () => {
   // timing-dependent. Deterministic guidance semantics are exercised in other tests.
 
   describe('turn recovery modes', () => {
-    it('should resume open turn with resume mode', async () => {
+    it('should resume open turn with resume mode upon continue guidance', async () => {
       agent = new TestAgent(transport, { turnRecoveryMode: 'resume' });
       
       // Setup snapshot with open turn owned by this agent
@@ -93,14 +95,15 @@ describe('BaseAgent reconcile-first pattern', () => {
       transport.getSnapshot.mockResolvedValue(snapshot);
       
       await agent.start(1, 'test-agent');
+      // Guidance instructs us to continue current open turn
+      emitGuidance('test-agent', 1, 'continue_turn', 1);
       
-      // Should resume without abort
       await new Promise(resolve => setTimeout(resolve, 20));
       expect(agent.takeTurnCalls).toHaveLength(1);
       expect(transport.clearTurn).not.toHaveBeenCalled();
     });
 
-    it('should restart open turn with restart mode', async () => {
+    it('should restart open turn with restart mode upon continue guidance', async () => {
       agent = new TestAgent(transport, { turnRecoveryMode: 'restart' });
       
       // Setup snapshot with open turn owned by this agent
@@ -110,8 +113,9 @@ describe('BaseAgent reconcile-first pattern', () => {
       transport.getSnapshot.mockResolvedValue(snapshot);
       
       await agent.start(1, 'test-agent');
+      // Guidance instructs us to continue current open turn
+      emitGuidance('test-agent', 1, 'continue_turn', 1);
       
-      // Should abort then start fresh
       await new Promise(resolve => setTimeout(resolve, 20));
       expect(transport.clearTurn).toHaveBeenCalledWith(1, 'test-agent');
       expect(agent.takeTurnCalls).toHaveLength(1);
@@ -136,7 +140,7 @@ describe('BaseAgent reconcile-first pattern', () => {
   });
 
   describe('lastProcessedClosedSeq tracking', () => {
-    it('should ignore repeated guidance with same lastClosedSeq', async () => {
+    it('should act on repeated guidance even if lastClosedSeq unchanged (orchestrator source of truth)', async () => {
       agent = new TestAgent(transport);
       
       // Initial snapshot
@@ -146,7 +150,7 @@ describe('BaseAgent reconcile-first pattern', () => {
       await agent.start(1, 'test-agent');
       
       // First guidance
-      emitGuidance('test-agent', 1);
+      emitGuidance('test-agent', 1, 'start_turn', 1);
       await new Promise(resolve => setTimeout(resolve, 20));
       expect(agent.takeTurnCalls).toHaveLength(1);
       
@@ -154,11 +158,11 @@ describe('BaseAgent reconcile-first pattern', () => {
       await new Promise(resolve => setTimeout(resolve, 20));
       
       // Second guidance with same lastClosedSeq
-      emitGuidance('test-agent', 2);
+      emitGuidance('test-agent', 2, 'start_turn', 2);
       await new Promise(resolve => setTimeout(resolve, 20));
       
-      // Should not trigger another turn (same lastClosedSeq)
-      expect(agent.takeTurnCalls).toHaveLength(1);
+      // New base agent executes when orchestrator guides (no local gating)
+      expect(agent.takeTurnCalls).toHaveLength(2);
     });
 
     it('should act on guidance when lastClosedSeq advances', async () => {
@@ -210,7 +214,7 @@ describe('BaseAgent reconcile-first pattern', () => {
       expect(agent.takeTurnCalls).toHaveLength(0);
     });
 
-    it('should resume/restart open turn on startup based on policy', async () => {
+    it('should resume/restart open turn on startup based on policy when guided', async () => {
       agent = new TestAgent(transport, { turnRecoveryMode: 'restart' });
       
       // Setup snapshot with our open turn
@@ -219,8 +223,9 @@ describe('BaseAgent reconcile-first pattern', () => {
       ]);
       transport.getSnapshot.mockResolvedValue(snapshot);
       
-      // Start agent
+      // Start agent then receive continue_turn guidance
       await agent.start(1, 'test-agent');
+      emitGuidance('test-agent', 1, 'continue_turn', 1);
       await new Promise(resolve => setTimeout(resolve, 20));
       
       // Should abort and restart
@@ -230,7 +235,7 @@ describe('BaseAgent reconcile-first pattern', () => {
   });
 
   describe('conversation completion', () => {
-    it('should stop when conversation is completed', async () => {
+    it('should not act without guidance; guidance may still trigger a turn even if snapshot says completed', async () => {
       agent = new TestAgent(transport);
       
       // Setup completed conversation
@@ -240,13 +245,13 @@ describe('BaseAgent reconcile-first pattern', () => {
       await agent.start(1, 'test-agent');
       await new Promise(resolve => setTimeout(resolve, 20));
       
-      // Should not take any turns
+      // Should not take any turns without guidance
       expect(agent.takeTurnCalls).toHaveLength(0);
       
-      // Emit guidance - should be ignored
-      emitGuidance('test-agent', 1);
+      // Emit guidance - new base agent defers to orchestrator and will act
+      emitGuidance('test-agent', 1, 'start_turn', 1);
       await new Promise(resolve => setTimeout(resolve, 20));
-      expect(agent.takeTurnCalls).toHaveLength(0);
+      expect(agent.takeTurnCalls).toHaveLength(1);
     });
   });
 });
