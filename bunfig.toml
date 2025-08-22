@@ -1,0 +1,3 @@
+[install]
+# speeds up install by skipping optional deps
+optional = true

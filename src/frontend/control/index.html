@@ -1,0 +1,111 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FlipProxy Control</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif; margin: 0; background: #f6f7fb; color: #111; }
+      header { padding: 14px 18px; background: #fff; border-bottom: 1px solid #e6e8ee; position: sticky; top: 0; }
+      .wrap { padding: 20px; max-width: 960px; margin: 0 auto; }
+      .card { background: #fff; border: 1px solid #e6e8ee; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+      .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .col { display: flex; flex-direction: column; gap: 8px; }
+      input, button { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid #d4d8e2; background: #fff; }
+      button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+      .small { color: #555; font-size: 12px; }
+      .muted { color: #777; }
+      a { color: #0b5bd3; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      pre { background: #0f172a; color: #c7e0ff; padding: 10px; border-radius: 8px; max-height: 220px; overflow: auto; }
+      .links a { display: inline-block; margin-right: 10px; }
+    </style>
+  </head>
+  <body>
+    <header><strong>FlipProxy — Control Plane</strong> <span class="small muted">create pairs and watch events</span></header>
+    <div class="wrap">
+      <div class="card">
+        <div class="row">
+          <button id="btnCreate" class="primary">Create Pair</button>
+          <span id="pairBadge" class="small muted"></span>
+          <span style="margin-left:auto"></span>
+          <button id="btnSoft" disabled>Soft reset</button>
+          <button id="btnHard" disabled>Hard reset</button>
+        </div>
+        <div id="links" class="row links" style="margin-top:10px; display:none"></div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between">
+          <strong>Events</strong>
+          <span class="small muted">SSE: <code id="sseUrl"></code></span>
+        </div>
+        <pre id="log">(no events yet)</pre>
+      </div>
+    </div>
+
+    <script type="module">
+      let pairId = null;
+      let es = null;
+      const logEl = document.getElementById('log');
+      const linksEl = document.getElementById('links');
+      const badge = document.getElementById('pairBadge');
+      const sseCode = document.getElementById('sseUrl');
+
+      function log(msg) {
+        const now = new Date().toLocaleTimeString();
+        const line = `${now} ${msg}`;
+        if (logEl.textContent === '(no events yet)') logEl.textContent = '';
+        logEl.textContent += (logEl.textContent ? '\n' : '') + line;
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      async function createPair() {
+        const res = await fetch('/api/pairs', { method: 'POST' });
+        if (!res.ok) { log('Create pair failed: ' + res.status); return; }
+        const j = await res.json();
+        pairId = j.pairId;
+        badge.textContent = `Pair: ${pairId}`;
+        linksEl.style.display = 'block';
+        linksEl.innerHTML = '';
+        const a = document.createElement('a'); a.href = j.aJoinUrl; a.target = '_blank'; a.textContent = 'Open Client (role=a)';
+        const b = document.createElement('a'); b.href = j.bJoinUrl; b.target = '_blank'; b.textContent = 'Open Responder (role=b)';
+        linksEl.appendChild(a); linksEl.appendChild(b);
+        document.getElementById('btnSoft').disabled = false;
+        document.getElementById('btnHard').disabled = false;
+        subscribe(pairId);
+      }
+
+      function subscribe(id) {
+        if (es) { try { es.close(); } catch {} }
+        const url = `/pairs/${id}/events.log`;
+        sseCode.textContent = url;
+        es = new EventSource(url);
+        es.onmessage = (e) => {
+          try {
+            const payload = JSON.parse(e.data);
+            const ev = payload.result;
+            log(JSON.stringify(ev));
+          } catch (err) {
+            log('Bad event payload');
+          }
+        };
+        es.onerror = () => log('SSE disconnected — retrying...');
+      }
+
+      async function softReset() {
+        if (!pairId) return;
+        await fetch(`/pairs/${pairId}/reset`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ type: 'soft' }) });
+      }
+      async function hardReset() {
+        if (!pairId) return;
+        await fetch(`/pairs/${pairId}/reset`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ type: 'hard' }) });
+      }
+
+      document.getElementById('btnCreate').onclick = createPair;
+      document.getElementById('btnSoft').onclick = softReset;
+      document.getElementById('btnHard').onclick = hardReset;
+    </script>
+  </body>
+  </html>
+

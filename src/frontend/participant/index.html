@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FlipProxy Participant</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif; margin: 0; background: #f6f7fb; color: #111; }
+      header { padding: 14px 18px; background: #fff; border-bottom: 1px solid #e6e8ee; }
+      .wrap { padding: 20px; max-width: 1100px; margin: 0 auto; }
+      .card { background: #fff; border: 1px solid #e6e8ee; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+      input, select, button, textarea { background: #fff; color: #111; border: 1px solid #d4d8e2; border-radius: 8px; padding: 8px 10px; }
+      button { cursor: pointer; }
+      .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      .col { display: flex; flex-direction: column; gap: 8px; }
+      .chat { height: 360px; overflow: auto; background: #fafbff; border-radius: 8px; padding: 10px; border: 1px solid #e6e8ee; }
+      .msg { margin: 8px 0; padding: 8px 10px; border-radius: 8px; }
+      .msg.agent { background: #eef4ff; }
+      .msg.user { background: #f3f6fb; }
+      .pill { display:inline-block; padding:2px 8px; font-size:12px; border:1px solid #d4d8e2; border-radius:999px; margin-left:8px; }
+      .muted { color: #666; }
+      .small { font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <header><strong>FlipProxy — Participant</strong> <span class="muted small">join with ?pairId=...&role=a|b</span></header>
+    <div id="root" class="wrap"></div>
+    <script type="module" src="../app.tsx"></script>
+  </body>
+  </html>
+
