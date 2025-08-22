@@ -328,8 +328,9 @@ export class ScenarioPlanner {
         const atts = Array.isArray((ev as any).payload?.attachments) ? (ev as any).payload.attachments : [];
         if (ev.channel === 'user-planner') {
           const plannerId = this.deps.getPlannerAgentId?.() || 'planner';
-          const from = ev.author === 'user' ? 'user' : plannerId;
-          const to = ev.author === 'user' ? plannerId : 'user';
+          const principalLabel = `principal-for-${plannerId}`;
+          const from = ev.author === 'user' ? principalLabel : plannerId;
+          const to = ev.author === 'user' ? plannerId : principalLabel;
           lines.push(`<message from="${from}" to="${to}">`);
           if (safeText) lines.push(safeText);
           for (const a of atts) {
@@ -494,7 +495,7 @@ export class ScenarioPlanner {
 
     // Tool restrictions from deps + status gating
     const restrictions = this.deps.getToolRestrictions?.() || {};
-    let omitUserMsg = !!restrictions.omitCoreTools?.includes('sendMessageToUser');
+    let omitUserMsg = !!restrictions.omitCoreTools?.includes('sendMessageToMyPrincipal');
     let omitRemoteMsg = !!restrictions.omitCoreTools?.includes('sendMessageToRemoteAgent');
     const omitScenarioTools = new Set(restrictions.omitScenarioTools || []);
 
@@ -539,9 +540,20 @@ export class ScenarioPlanner {
       parts.push("");
     }
     if (!omitUserMsg) {
-      parts.push("// Send a message to the local user.");
-      parts.push("interface SendMessageToUserArgs { text: string; attachments?: Array<{ name: string }>; }");
-      parts.push("Tool: sendMessageToUser: SendMessageToUserArgs");
+      try {
+        const scAny: any = this.scenario;
+        const plannerId = this.deps.getPlannerAgentId?.() || this.myAgentId || '';
+        const me = Array.isArray(scAny?.agents) ? scAny.agents.find((a: any) => a?.agentId === plannerId) : null;
+        const pType = String(me?.principal?.type || '').trim();
+        const pName = String(me?.principal?.name || '').trim();
+        const typeLabel = pType ? (pType === 'individual' ? 'individual' : pType === 'organization' ? 'organization' : pType) : '';
+        const descSuffix = pName && typeLabel ? ` (${typeLabel}: ${pName})` : (pName ? ` (${pName})` : '');
+        parts.push(`// Send a message to your principal${descSuffix}.`);
+      } catch {
+        parts.push("// Send a message to your principal.");
+      }
+      parts.push("interface sendMessageToMyPrincipalArgs { text: string; attachments?: Array<{ name: string }>; }");
+      parts.push("Tool: sendMessageToMyPrincipal: sendMessageToMyPrincipalArgs");
       parts.push("");
     }
     // Always-available small helpers
@@ -825,7 +837,7 @@ export class ScenarioPlanner {
     // Core tools
     if (tool === "sleep") return;
 
-    if (tool === "sendMessageToUser") {
+    if (tool === "sendMessageToMyPrincipal") {
       const q = String(args?.text || args?.question || "").trim();
       if (q) this.emit({ type: 'message', channel: 'user-planner', author: 'planner', payload: { text: q } } as any);
       this.maybeTick();

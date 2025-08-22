@@ -36,7 +36,7 @@ export interface EventTranslationMaps {
 export class PlannerAgent extends BaseAgent<ConversationSnapshot> {
   private providerManager: any;
   private attachmentVault: AttachmentVault;
-  private toolRestrictions: ToolRestriction = { omitCoreTools: ['sendMessageToUser', 'done', 'sleep'] };
+  private toolRestrictions: ToolRestriction = { omitCoreTools: ['sendMessageToMyPrincipal', 'done', 'sleep'] };
   private debugLog: string[] = [];
   private debugSink?: (lines: string[]) => void;
 
