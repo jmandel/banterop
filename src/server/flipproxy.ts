@@ -64,7 +64,7 @@ app.get('/pairs/:pairId/server-events', async (c) => {
     p.serverEvents.add(push);
     // immediate subscribe to current epoch if present
     if (p.serverTask) push({ type: 'subscribe', pairId, epoch: p.epoch, taskId: p.serverTask.id, turn: (p.turn === 'client' ? 'a' : 'b') });
-    await stream.onAbort;
+    await new Promise<void>((resolve) => stream.onAbort(resolve));
     p.serverEvents.delete(push);
     clearInterval(ka);
   });
@@ -81,7 +81,7 @@ app.get('/pairs/:pairId/events.log', async (c) => {
     }, 15000);
     p.serverEvents.add(push);
     if (p.serverTask) push({ type: 'subscribe', pairId, epoch: p.epoch, taskId: p.serverTask.id, turn: (p.turn === 'client' ? 'a' : 'b') });
-    await stream.onAbort;
+    await new Promise<void>((resolve) => stream.onAbort(resolve));
     p.serverEvents.delete(push);
     clearInterval(ka);
   });
@@ -175,7 +175,7 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
       if (parts.length) {
         onIncomingMessage(p, t.side, { parts, messageId: String(msg.messageId || crypto.randomUUID()) });
       }
-      await stream.onAbort;
+      await new Promise<void>((resolve) => stream.onAbort(resolve));
       t.subscribers.delete(push);
     });
   }
@@ -203,7 +203,7 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
       t.subscribers.add(push);
       // initial snapshot
       push({ result: taskToA2A(t) });
-      await stream.onAbort;
+      await new Promise<void>((resolve) => stream.onAbort(resolve));
       t.subscribers.delete(push);
     });
   }
@@ -338,7 +338,7 @@ const port = Number(process.env.PORT || 3000);
 
 serve({
   port,
-  idleTimeout: 600,
+  idleTimeout: 240,
   development: isDev ? { hmr: true, console: true } : undefined,
   routes: {
     '/': controlHtml,

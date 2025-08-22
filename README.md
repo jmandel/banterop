@@ -9,7 +9,7 @@ Only the **responder tab** subscribes to a small backchannel (`server-events`) t
 - Pair management endpoints:
   - `POST /api/pairs` → create a pair and returns join links.
   - `POST /api/pairs/:pairId/reset` with `{type:'soft'|'hard'}`.
-- Responder-only backchannel: `GET /api/bridge/:pairId/server-events` (SSE).
+- Responder-only backchannel: `GET /pairs/:pairId/server-events` (SSE).
 - Front-end: React app (TSX) compiled by Bun; no bundler config required.
 
 ## Quick start
