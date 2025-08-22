@@ -271,6 +271,9 @@ export const useAppStore = create<AppState>()(
             omitCoreTools: [],
             omitScenarioTools: getOmittedTools(get())
           }),
+          onThinkingStatus: (b: boolean) => {
+            try { get().actions.setPlannerThinking(!!b); } catch {}
+          },
         });
         // preload any existing events in store
         try { (planner as any).loadEvents(get().planner.eventLog as any); } catch {}

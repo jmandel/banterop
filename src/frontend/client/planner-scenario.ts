@@ -36,6 +36,7 @@ type ScenarioPlannerDeps = {
   };
 
   onDebugPrompt?: (prompt: string) => void;
+  onThinkingStatus?: (thinking: boolean) => void;
 };
 
 // Terminal tool tracking for auto-finalization
@@ -61,6 +62,7 @@ export class ScenarioPlanner {
   private oracle: ToolSynthesisService | null = null;
   private llmProvider: LLMProvider | null = null;
   private taskOff: (() => void) | null = null;
+  private thinkingInFlight = 0;
 
   // Terminal tool state
   private terminal: TerminalState = { pending: false, status: 'neutral', attachments: [] };
@@ -71,6 +73,20 @@ export class ScenarioPlanner {
     this.llmProvider = deps.getLLMProvider();
     this.scenario = deps.getScenarioConfig?.() || null;
     this.myAgentId = deps.getPlannerAgentId?.() || this.scenario?.agents[0]?.agentId || '';
+  }
+
+  private startThinking() {
+    try {
+      this.thinkingInFlight++;
+      if (this.thinkingInFlight === 1) this.deps.onThinkingStatus?.(true);
+    } catch {}
+  }
+
+  private stopThinking() {
+    try {
+      if (this.thinkingInFlight > 0) this.thinkingInFlight--;
+      if (this.thinkingInFlight === 0) this.deps.onThinkingStatus?.(false);
+    } catch {}
   }
 
   // ---------- Public API ----------
@@ -220,101 +236,91 @@ export class ScenarioPlanner {
     this.maybeTick();
   }
 
-  // Returns true if there's a user → planner message that has not yet
-  // been followed by a planner → user message.
-  private hasUnansweredUserMessage(): boolean {
-    // Find the last user message directed at the planner
-    let lastUserMsgSeq: number | null = null;
+  // Helper: find last index where predicate matches; -1 if none
+  private lastIndexWhere(pred: (e: StrictEvent) => boolean): number {
     for (let i = this.eventLog.length - 1; i >= 0; i--) {
-      const e = this.eventLog[i] as any;
-      if (e.type === 'message' && e.channel === 'user-planner' && e.author === 'user') {
-        lastUserMsgSeq = e.seq;
-        break;
-      }
+      const ev = this.eventLog[i] as StrictEvent;
+      if (ev && pred(ev)) return i;
     }
-    if (lastUserMsgSeq == null) return false;
-
-    // Check if we (planner) have replied to user after that
-    for (let i = this.eventLog.length - 1; i >= 0; i--) {
-      const e = this.eventLog[i] as any;
-      if (e.seq <= lastUserMsgSeq) break;
-      if (e.type === 'message' && e.channel === 'user-planner' && e.author === 'planner') {
-        return false; // answered
-      }
-    }
-    return true; // no planner reply after the last user question
+    return -1;
   }
 
-  private canActNow(): boolean {
-    // 1) First-run bootstrap
-    if (this.eventLog.length === 0) return true;
-
-    // 2) Hard stop only when truly finished (done / conversation closed)
-    if (this.finished) return false;
-
-    // 3) If the user asked something we haven't answered yet → act
-    if (this.hasUnansweredUserMessage()) {
-      console.log("We have unanswered user questions")
-      return true;
-    }
-    // console.log('we do not have unanswre use mesagse', this.hasUnansweredUserMessage(), this.eventLog)
-
-    const last = this.eventLog[this.eventLog.length - 1] as any;
-
-    // 4) Immediate follow-ups after planner-local actions (tool progress)
-    if (last && last.author === 'planner' &&
-        (last.type === 'tool_call' || last.type === 'tool_result' || last.type === 'read_attachment')) {
-      return true;
-    }
-
-    // 5) Status-aware gating for remote-agent workflow
+  // Remote comms permission: allowed when status is input-required OR no task exists yet
+  private canSendRemoteNow(): boolean {
     const lastStatus = [...this.eventLog].reverse().find(e => e.type === 'status') as any;
-    const st = String(lastStatus?.payload?.state || '');
+    const status = String(lastStatus?.payload?.state || '');
+    const noTaskYet = !this.deps.task?.getTaskId?.();
+    return status === 'input-required' || noTaskYet;
+  }
 
-    // It's our turn to talk to the remote agent
-    if (st === 'input-required') return true;
+  // User comms permission with rule:
+  // - Allowed if we've never messaged the user before; OR
+  // - Allowed if anything new (user or remote) happened since last planner→user message
+  private canSendUserNow(): boolean {
+    const lastPlannerToUserIdx = this.lastIndexWhere(
+      (e) => e.type === 'message' && (e as any).channel === 'user-planner' && (e as any).author === 'planner'
+    );
 
-    return false;
+    if (lastPlannerToUserIdx === -1) return true;
+
+    const lastUserToPlannerIdx = this.lastIndexWhere(
+      (e) => e.type === 'message' && (e as any).channel === 'user-planner' && (e as any).author === 'user'
+    );
+
+    const lastAgentToPlannerIdx = this.lastIndexWhere(
+      (e) => e.type === 'message' && (e as any).channel === 'planner-agent' && (e as any).author === 'agent'
+    );
+
+    const mostRecentIncomingIdx = Math.max(lastUserToPlannerIdx, lastAgentToPlannerIdx);
+    return mostRecentIncomingIdx > lastPlannerToUserIdx;
+  }
+
+  // Action permission: stop when finished; otherwise allowed if user or remote comms allowed
+  private canActNow(): boolean {
+    if (this.finished) return false;
+    return this.canSendUserNow() || this.canSendRemoteNow();
   }
 
 
   private maybeTick() {
-    const canAct = this.canActNow();
-    const decision = !this.running
-      ? 'skip:not_running'
-      : this.busy
-        ? 'skip:busy'
-        : !canAct
-          ? 'skip:cant_act'
-          : 'proceed';
+    const allowUser = this.canSendUserNow();
+    const allowRemote = this.canSendRemoteNow();
+    const canAct = allowUser || allowRemote;
+
+    const decision = !this.running ? 'skip:not_running'
+      : this.busy ? 'skip:busy'
+      : !canAct ? 'skip:nothing_to_reply_to'
+      : 'proceed';
+
     try {
       console.log('[PlannerTick] consider',
-        { events: this.eventLog.length, running: this.running, busy: this.busy,
+        {
+          events: this.eventLog.length,
+          running: this.running,
+          busy: this.busy,
           status: (this.eventLog.slice().reverse().find(e => e.type==='status') as any)?.payload?.state,
-          hasTask: !!this.deps.task?.getTaskId?.() },
-        'decision', decision);
-      // console.log("Basedon last ev", this.eventLog.slice(-1)[0]);
+          hasTask: !!this.deps.task?.getTaskId?.(),
+          allowUser, allowRemote
+        },
+        'decision', decision
+      );
     } catch {}
 
     if (!this.running) return;
     if (this.busy) { this.pendingTick = true; return; }
     if (!canAct) return;
+
     this.busy = true;
     (async () => {
-      try {
-        await this.tickOnce();
-      } catch (e: any) {
+      try { await this.tickOnce(); }
+      catch (e: any) {
         try {
           const msg = String(e?.message || e || 'Planner error');
           this.emit({ type: 'trace', channel: 'system', author: 'system', payload: { text: `Planner error: ${msg}` } } as any);
         } catch {}
       } finally {
         this.busy = false;
-        if (this.pendingTick) {
-          this.pendingTick = false;
-          try { console.log('[PlannerTick] after-busy retick'); } catch {}
-          this.maybeTick();
-        }
+        if (this.pendingTick) { this.pendingTick = false; this.maybeTick(); }
       }
     })();
   }
@@ -669,31 +675,34 @@ export class ScenarioPlanner {
 
   private async callLLM(prompt: string): Promise<{ content: string }> {
     this.llmProvider = this.deps.getLLMProvider();
-    const maxAttempts = 3;
-    let lastErr: any = null;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        const resp = await this.llmProvider.complete({
-          messages: [
-            { role: 'system', content: 'You are a turn-based agent planner. Respond with JSON only.' },
-            { role: 'user', content: prompt },
-          ],
-          model: this.deps.getModel?.(),
-          temperature: 0.2,
-          loggingMetadata: {},
-        } as any);
-        return { content: String(resp?.content ?? '') };
-      } catch (e: any) {
-        lastErr = e;
-        if (attempt < maxAttempts) {
-          const base = 200;
-          const delay = base * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 50);
-          try { await new Promise(res => setTimeout(res, delay)); } catch {}
-          continue;
+    this.startThinking();
+    try {
+      const maxAttempts = 3;
+      let lastErr: any = null;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const resp = await this.llmProvider.complete({
+            messages: [
+              { role: 'system', content: 'You are a turn-based agent planner. Respond with JSON only.' },
+              { role: 'user', content: prompt },
+            ],
+            model: this.deps.getModel?.(),
+            temperature: 0.2,
+            loggingMetadata: {},
+          } as any);
+          return { content: String(resp?.content ?? '') };
+        } catch (e: any) {
+          lastErr = e;
+          if (attempt < maxAttempts) {
+            const base = 200;
+            const delay = base * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 50);
+            try { await new Promise(res => setTimeout(res, delay)); } catch {}
+            continue;
+          }
         }
       }
-    }
-    throw lastErr ?? new Error('LLM call failed');
+      throw lastErr ?? new Error('LLM call failed');
+    } finally { this.stopThinking(); }
   }
 
   private parseToolCallStrict(text: string): { reasoning: string; tool: string; args: any } | null {
@@ -830,16 +839,14 @@ export class ScenarioPlanner {
     }
     const { reasoning, tool, args } = parsed || this.parseAction(content);
 
-    const lastSt = [...this.eventLog].reverse().find(e => e.type === 'status') as any;
-    const statusNow = String(lastSt?.payload?.state || '');
-    const canSendRemote = !lastSt || statusNow === 'input-required';
+    const canSendRemote = this.canSendRemoteNow();
 
     // Core tools
     if (tool === "sleep") return;
 
     if (tool === "sendMessageToMyPrincipal") {
       const q = String(args?.text || args?.question || "").trim();
-      if (q) this.emit({ type: 'message', channel: 'user-planner', author: 'planner', payload: { text: q } } as any);
+      if (q) this.emit({ type: 'message', channel: 'user-planner', author: 'planner', payload: { text: q }, reasoning } as any);
       this.maybeTick();
       return;
     }
@@ -910,7 +917,8 @@ export class ScenarioPlanner {
           text,
           attachments: atts && atts.length ? atts.map((a: any)=>({ name: String(a.name), mimeType: String(a.mimeType || 'text/plain') })) : undefined,
           finality
-        }
+        },
+        reasoning
       } as any);
 
       if (this.deps.task) {
@@ -944,6 +952,7 @@ export class ScenarioPlanner {
         }
 
         const conversationHistory = this.buildXmlHistory();
+        this.startThinking();
         const result = await this.oracle.execute({
           tool: {
             toolName: toolDef.toolName,
@@ -966,6 +975,7 @@ export class ScenarioPlanner {
           omitHistory: true,
           leadingThought: reasoning || undefined,
         } as any);
+        this.stopThinking();
 
         const filenames = this.indexDocumentsFromResult(result?.output, { toolName: tool });
 
@@ -989,6 +999,7 @@ export class ScenarioPlanner {
         this.turnScratch.toolCalls.push({ callId, name: tool, args, result: result?.output });
         this.emit({ type: 'tool_result', channel: 'tool', author: 'planner', payload: { result: result?.output }, reasoning } as any);
       } catch (e: any) {
+        this.stopThinking();
         const err = { ok: false, error: String(e?.message ?? e) };
         this.turnScratch.toolCalls.push({ callId, name: tool, args, result: err });
         this.emit({ type: 'tool_result', channel: 'tool', author: 'planner', payload: { result: err }, reasoning } as any);
