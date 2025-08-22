@@ -13,6 +13,7 @@ import { BaseAgent, type TurnRecoveryMode } from '$src/agents/runtime/base-agent
 import { AssistantAgent } from '$src/agents/assistant.agent';
 import { EchoAgent } from '$src/agents/echo.agent';
 import { ScenarioDrivenAgent } from '$src/agents/scenario/scenario-driven.agent';
+import { PlannerAgent } from '$src/agents/runtime/planner-agent';
 import { ScriptAgent } from '$src/agents/script/script.agent';
 import type { TurnBasedScript } from '$src/agents/script/script.types';
 import { InProcessTransport } from '$src/agents/runtime/inprocess.transport';
@@ -145,10 +146,10 @@ export function createAgent(
     case 'default':
       // Try ScenarioDrivenAgent if we have a scenario with this agent
       if (scenario?.agents.some(a => a.agentId === agentMeta.id)) {
-        return new ScenarioDrivenAgent(transport, {
+        return new PlannerAgent(transport, {
           agentId: agentMeta.id,
           providerManager,
-          turnRecoveryMode  // Pass recovery mode to scenario agent
+          // turnRecoveryMode  // Pass recovery mode to scenario agent
         });
       }
       // Fall back to AssistantAgent
@@ -161,10 +162,7 @@ export function createAgent(
     default:
       // Unknown agent class, default to AssistantAgent
       logLine(agentMeta.id, 'factory', `Unknown agentClass '${agentClass}', using AssistantAgent`);
-      {
-        const provider = selectProvider(providerManager, agentMeta.config);
-        return new AssistantAgent(transport, provider, { turnRecoveryMode });
-      }
+      throw new Error(`Unknown agent class: ${agentClass}`);
   }
 }
 

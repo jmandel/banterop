@@ -12,11 +12,17 @@ import clientHtml from '$src/frontend/client/index.html';
 const isDev = (Bun.env.NODE_ENV || process.env.NODE_ENV) !== 'production';
 const port = Number(process.env.PORT ?? 3000);
 
+const IDLE_TIMEOUT = 60; // 1 minute idle timeout for connections
+
+// If running in dev mode, we serve the HTML directly with HMR enabled
+// Otherwise, we build the frontends and serve them statically
+// Note: this is a simplified example; in a real app you might want to use a more robust build system
 let server;
 
 if (isDev) {
   // Development mode: serve HTML directly with HMR
   server = serve({
+    idleTimeout: IDLE_TIMEOUT,
     port,
     development: {
       hmr: true,
@@ -54,6 +60,7 @@ if (isDev) {
   honoApp.use('/*', serveStatic({ root: './public' }));
   
   server = serve({
+    idleTimeout: IDLE_TIMEOUT,
     port,
     fetch: (req, srv) => honoApp.fetch(req, srv),
     websocket: apiServer.websocket,

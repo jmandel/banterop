@@ -1,292 +1,451 @@
+// src/agents/runtime/planner-agent.ts
 import { BaseAgent, type TurnContext, type TurnRecoveryMode } from './base-agent';
 import type { IAgentTransport } from './runtime.interfaces';
 import type { ConversationSnapshot } from '$src/types/orchestrator.types';
 import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
 import { ScenarioPlanner } from '$src/frontend/client/planner-scenario';
-import { AttachmentVault } from '$src/frontend/client/attachments-vault';
+import { AttachmentVault, InMemoryStorageWrapper } from '$src/frontend/client/attachments-vault';
 import type { LLMProvider } from '$src/types/llm.types';
 import type { UnifiedEvent as StrictEvent } from '$src/frontend/client/types/events';
 import { logLine } from '$src/lib/utils/logger';
+import type { MessagePayload } from '$src/types/event.types';
+import type { MessagePayload as PlannerMessagePayload } from '$src/frontend/client/types/events';
+import { encodeTextToBase64, decodeBase64ToText } from '$src/lib/utils/xplat';
 
 export interface PlannerAgentConfig {
   agentId: string;
-  providerManager: any; // LLMProviderManager - will import later
+  providerManager: any; // LLMProviderManager
   options?: {
     turnRecoveryMode?: TurnRecoveryMode;
+    debugSink?: (lines: string[]) => void; // optional cross-runtime log sink
   };
 }
 
 export interface ToolRestriction {
-  omitCoreTools?: string[];    // Core communication tools to exclude
-  omitScenarioTools?: string[]; // Scenario-specific tools to exclude
+  omitCoreTools?: string[];
+  omitScenarioTools?: string[];
 }
 
-/**
- * PlannerBackedAgent that subclasses BaseAgent and uses ScenarioPlanner
- * for all execution logic, eliminating code duplication.
- */
+export interface EventTranslationMaps {
+  supportedOrchestratorEventTypes: Set<string>;
+  supportedPlannerEventTypes: Set<string>;
+  orchestratorTraceToPlannerEvent: Record<string, string>;
+  plannerEventToOrchestratorTrace: Record<string, string>;
+}
+
 export class PlannerAgent extends BaseAgent<ConversationSnapshot> {
   private providerManager: any;
   private attachmentVault: AttachmentVault;
-  private toolRestrictions: ToolRestriction = {};
+  private toolRestrictions: ToolRestriction = { omitCoreTools: ['sendMessageToUser'] };
+  private debugLog: string[] = [];
+  private debugSink?: (lines: string[]) => void;
 
-  constructor(
-    transport: IAgentTransport,
-    cfg: PlannerAgentConfig
-  ) {
+  constructor(transport: IAgentTransport, cfg: PlannerAgentConfig) {
     super(transport, cfg.options);
     this.providerManager = cfg.providerManager;
-    this.attachmentVault = new AttachmentVault();
+    this.attachmentVault = new AttachmentVault(new InMemoryStorageWrapper());
+    this.debugSink = cfg.options?.debugSink;
+  }
+
+  private getEventTranslationMaps(): EventTranslationMaps {
+    return {
+      supportedOrchestratorEventTypes: new Set(['message', 'trace', 'system']),
+      supportedPlannerEventTypes: new Set(['message', 'tool_call', 'tool_result', 'read_attachment', 'status', 'trace']),
+      orchestratorTraceToPlannerEvent: {
+        thought: 'trace',
+        tool_call: 'tool_call',
+        tool_result: 'tool_result'
+      },
+      plannerEventToOrchestratorTrace: {
+        trace: 'thought',
+        tool_call: 'tool_call',
+        tool_result: 'tool_result'
+        // status, read_attachment are handled specially (local-only or explicit pair)
+      }
+    };
   }
 
   protected async takeTurn(ctx: TurnContext<ConversationSnapshot>): Promise<void> {
     const { conversationId, agentId } = ctx;
+    this.debugLog = [];
+    this.addDebugLog(`=== Starting Turn ${ctx.currentTurnNumber} for Agent ${agentId} ===`);
 
     try {
-      // 1. Convert BaseAgent context to planner event log
+      // 0) Populate vault from history (persisted attachments only)
+      await this.populateAttachmentVaultFromHistory(ctx.snapshot);
+      this.addDebugLog('Vault hydrated from orchestrator history');
+
+      // 1) Convert snapshot → planner events (deterministic projection)
       const plannerEvents = this.convertSnapshotToPlannerEvents(ctx.snapshot, ctx.agentId);
 
-      // 2. Extract scenario configuration
-      const plannerScenario = this.extractPlannerScenario(ctx.snapshot, ctx.agentId);
-
-      // 3. Create planner with direct scenario JSON (eliminates API base dependency)
+      // 2) Extract scenario and instantiate planner
+      const scenario = this.extractPlannerScenario(ctx.snapshot, ctx.agentId);
       const plannerInstance = new ScenarioPlanner({
-        // Task client not needed in backend
         task: null,
-        // API base and endpoint not needed when passing scenario JSON directly
-        getApiBase: undefined,
-        getEndpoint: () => '',
         getPlannerAgentId: () => ctx.agentId,
         getCounterpartAgentId: () => this.getCounterpartAgentId(ctx),
         getAdditionalInstructions: () => undefined,
-        getScenarioConfig: () => this.extractPlannerScenario(ctx.snapshot, ctx.agentId),
+        getScenarioConfig: () => scenario,
         getLLMProvider: () => this.getLLMProvider(ctx),
         vault: this.attachmentVault,
         getToolRestrictions: () => this.toolRestrictions,
-        getEnabledTools: () => this.getFilteredScenarioTools(ctx.snapshot),
-        // UI callbacks not needed in backend
-        onSystem: () => {},
-        onAskUser: () => {},
-        onPlannerThinking: () => {}
+        onDebugPrompt: (p: string) => {
+          this.addDebugLog(`LLM Prompt (${p.length} chars)`);
+        }
       });
 
-      // 4. Load events and start planner
+      // 3) Replay events and start
       plannerInstance.loadEvents(plannerEvents);
       plannerInstance.start();
 
-      // 5. Monitor for completion
       const unsubscribe = this.monitorPlannerEvents(ctx, plannerInstance);
-
       try {
         await this.waitForPlannerCompletion(plannerInstance);
       } finally {
         unsubscribe();
       }
 
+      this.addDebugLog('=== Turn completed ===');
+      this.writeDebugLog();
     } catch (error) {
-      logLine(agentId, 'error', `Error in PlannerAgent.takeTurn: ${error}`);
-      // Send error message via transport
+      this.addDebugLog(`Turn error: ${String(error)}`);
+      this.writeDebugLog();
+
+      logLine(agentId, 'error', `PlannerAgent.takeTurn error: ${error}`);
       await ctx.transport.postMessage({
         conversationId,
         agentId,
-        text: "I encountered an unexpected error. Please try again later.",
+        text: 'I encountered an unexpected error. Please try again later.',
         finality: 'turn',
         turn: ctx.currentTurnNumber || 0
       });
     }
   }
 
-  /**
-   * Convert BaseAgent conversation snapshot to planner event log
-   */
-  private convertSnapshotToPlannerEvents(
-    snapshot: ConversationSnapshot,
-    myAgentId: string
-  ): StrictEvent[] {
-    const events: StrictEvent[] = [];
+  private convertSnapshotToPlannerEvents(snapshot: ConversationSnapshot, myAgentId: string): StrictEvent[] {
+    const out: StrictEvent[] = [];
+    const sorted = [...snapshot.events].sort((a, b) => a.seq - b.seq);
 
-    // Convert existing conversation events
-    for (const event of snapshot.events) {
-      if (event.type === 'message') {
-        const channel = event.agentId === myAgentId ? 'planner-agent' : 'user-planner';
-        const author = event.agentId === myAgentId ? 'planner' : 'agent';
+    const pending: Record<string, { seq: number; timestamp: string; args: any; reasoning?: string }> = {};
+    let lastThought: string | undefined;
 
-        // Handle timestamp conversion (event.ts might be Date or string)
-        const timestamp = new Date(String(event.ts)).toISOString();
+    for (const e of sorted) {
+      const ts = new Date(String(e.ts)).toISOString();
 
-        events.push({
-          seq: event.seq,
-          timestamp,
+      if (e.type === 'message') {
+        const author = e.agentId === myAgentId ? 'planner' : 'agent';
+        out.push({
+          seq: e.seq,
+          timestamp: ts,
           type: 'message',
-          channel,
+          channel: 'planner-agent',
           author,
-          payload: {
-            text: (event.payload as any).text,
-            attachments: (event.payload as any).attachments?.map((att: any) => ({
-              name: att.name,
-              mimeType: att.contentType,
-              bytes: att.content ? btoa(att.content) : undefined
-            }))
-          }
+          payload: { text: (e.payload as any).text }
         });
+        continue;
+      }
+
+      if (e.type === 'trace' && e.agentId === myAgentId) {
+        const t = e.payload as any;
+        if (t.type === 'thought') {
+          lastThought = String(t.content || '');
+          out.push({
+            seq: e.seq,
+            timestamp: ts,
+            type: 'trace',
+            channel: 'system',
+            author: 'system',
+            payload: { text: lastThought }
+          });
+          continue;
+        }
+        if (t.type === 'tool_call') {
+          const name = String(t.name || '');
+          const args = t.args ?? {};
+          const callId = String(t.toolCallId || `call_${e.seq}`);
+          if (name === 'readAttachment') {
+            pending[callId] = { seq: e.seq, timestamp: ts, args, reasoning: lastThought };
+          }
+          out.push({
+            seq: e.seq,
+            timestamp: ts,
+            type: 'tool_call',
+            channel: 'tool',
+            author: 'planner',
+            payload: { name, args },
+            ...(lastThought ? { reasoning: lastThought } : {})
+          });
+          lastThought = undefined;
+          continue;
+        }
+        if (t.type === 'tool_result') {
+          const callId = String(t.toolCallId || '');
+          const res = t.result;
+          const pend = callId && pending[callId];
+          if (pend) {
+            const r = (res || {}) as any;
+            out.push({
+              seq: e.seq,
+              timestamp: ts,
+              type: 'read_attachment',
+              channel: 'tool',
+              author: 'planner',
+              payload: {
+                name: String(r.name || pend.args?.name || ''),
+                ok: !!r.ok,
+                size: typeof r.size === 'number' ? r.size : undefined,
+                truncated: !!r.truncated,
+                text_excerpt: typeof r.text_excerpt === 'string' ? r.text_excerpt : undefined
+              },
+              ...(pend.reasoning ? { reasoning: pend.reasoning } : {})
+            });
+            delete pending[callId];
+          }
+          out.push({
+            seq: e.seq,
+            timestamp: ts,
+            type: 'tool_result',
+            channel: 'tool',
+            author: 'planner',
+            payload: { result: res }
+          });
+          continue;
+        }
+      }
+
+      if (e.type === 'system') {
+        out.push({
+          seq: e.seq,
+          timestamp: ts,
+          type: 'trace',
+          channel: 'system',
+          author: 'system',
+          payload: { text: `System: ${JSON.stringify(e.payload)}` }
+        });
+        continue;
       }
     }
 
-    // Add synthetic "remote message arrived" event to trigger planner action
-    events.push({
-      seq: events.length > 0 ? Math.max(...events.map(e => e.seq)) + 1 : 1,
+    // add an input-rquired status
+    out.push({
+      seq: (out[out.length - 1]?.seq || 0) + 1,
       timestamp: new Date().toISOString(),
-      type: 'message',
-      channel: 'user-planner',
-      author: 'agent',
-      payload: {
-        text: 'Please continue our conversation...',
-        attachments: []
-      }
+      type: 'status',
+      channel: 'status',
+      author: 'system',
+      payload: { state: 'input-required' }
     });
 
-    return events;
+    return out;
   }
 
-  /**
-   * Extract scenario configuration from snapshot
-   */
-  private extractPlannerScenario(
-    snapshot: ConversationSnapshot,
-    myAgentId: string
-  ): ScenarioConfiguration | null {
-    if (!snapshot.scenario) {
-      return null;
-    }
-
-    // Find our agent configuration
-    const myAgentConfig = snapshot.scenario.agents.find(a => a.agentId === myAgentId);
-    if (!myAgentConfig) {
-      return null;
-    }
-
-    // Create minimal scenario config for planner
-    return {
-      metadata: snapshot.scenario.metadata,
-      agents: [myAgentConfig]
-    };
+  private extractPlannerScenario(snapshot: ConversationSnapshot, _myAgentId: string): ScenarioConfiguration | null {
+    return snapshot.scenario || null;
   }
 
-  /**
-   * Get filtered scenario tools based on context
-   */
-  private getFilteredScenarioTools(snapshot: ConversationSnapshot): any[] {
-    if (!snapshot.scenario) return [];
-
-    const myAgentConfig = snapshot.scenario.agents.find(a =>
-      a.agentId === this.providerManager?.agentId || 'planner-agent'
-    );
-
-    if (!myAgentConfig?.tools) return [];
-
-    return myAgentConfig.tools.map(tool => ({
-      name: tool.toolName,
-      description: tool.description,
-      synthesisGuidance: tool.synthesisGuidance,
-      inputSchema: tool.inputSchema,
-      endsConversation: tool.endsConversation,
-      conversationEndStatus: tool.conversationEndStatus
-    }));
-  }
-
-  /**
-   * Get LLM provider for this context
-   */
   private getLLMProvider(ctx: TurnContext<ConversationSnapshot>): LLMProvider {
-    // Get agent-specific config if available
     const runtimeAgent = ctx.snapshot.runtimeMeta?.agents?.find((a: any) => a.id === ctx.agentId);
     const model = (runtimeAgent?.config?.model as string) || undefined;
-
     return this.providerManager.getProvider({ model });
   }
 
-  /**
-   * Monitor planner events and convert to BaseAgent transport calls
-   */
+  private getCounterpartAgentId(ctx: TurnContext<ConversationSnapshot>): string | undefined {
+    if (!ctx.snapshot.scenario) return undefined;
+    const others = ctx.snapshot.scenario.agents.filter(a => a.agentId !== ctx.agentId);
+    return others[0]?.agentId;
+  }
+
+  private async populateAttachmentVaultFromHistory(snapshot: ConversationSnapshot): Promise<void> {
+    for (const event of snapshot.events) {
+      if (event.type !== 'message') continue;
+      const payload = event.payload as MessagePayload;
+      const attachments = payload.attachments || [];
+
+      for (const att of attachments) {
+        try {
+          const name = String(att.name || '').trim();
+          const docId = (att as any).docId || (att as any).id;
+          const mime = String(att.contentType || 'text/plain');
+          if (!name) continue;
+
+          let content: string | null = null;
+          if (this.transport && typeof this.transport.getAttachmentByDocId === 'function' && docId) {
+            try {
+              const row = await this.transport.getAttachmentByDocId({ conversationId: snapshot.conversation, docId });
+              if (row && typeof row.content === 'string') content = row.content;
+            } catch {}
+          }
+          if (!content && typeof (att as any).content === 'string') content = (att as any).content;
+          if (typeof content !== 'string') continue;
+
+          const b64 = encodeTextToBase64(content);
+          this.attachmentVault.addFromAgent(name, mime, b64);
+          this.addDebugLog(`Vault<-persisted: ${name} (${mime}) len=${content.length}`);
+        } catch (error) {
+          this.addDebugLog(`Vault ingest failed for attachment: ${String(error)}`);
+        }
+      }
+    }
+  }
+
   private monitorPlannerEvents(ctx: TurnContext<ConversationSnapshot>, planner: ScenarioPlanner) {
-    return (planner as any).onEvent((event: StrictEvent) => {
+    return (planner as any).onEvent(async (event: StrictEvent) => {
+      this.addDebugLog(`Planner event: ${event.type} ${event.channel}/${event.author}`);
+
+      // 1) Message from planner → orchestrator message (resolve attachments from vault as text)
       if (event.type === 'message' && event.channel === 'planner-agent') {
-        // Type guard for message payload
-        if (event.payload && typeof event.payload === 'object' && 'text' in event.payload) {
-          const messagePayload = event.payload as { text: string; attachments?: any[] };
+        const payload = event.payload as PlannerMessagePayload; // NOTE: planner-side payload (with optional finality)
+        const names = (payload.attachments || []).map(a => String(a.name)).filter(Boolean);
 
-          // Convert to BaseAgent transport call
-          ctx.transport.postMessage({
-            conversationId: ctx.conversationId,
-            agentId: ctx.agentId,
-            text: messagePayload.text,
-            finality: 'turn',
-            attachments: messagePayload.attachments?.map(att => ({
-              name: att.name,
-              contentType: att.mimeType,
-              content: att.bytes ? atob(att.bytes) : undefined
-            })),
-            turn: ctx.currentTurnNumber || 0
-          });
+        const resolved: { name: string; contentType: string; content: string }[] = [];
+        const missing: string[] = [];
+
+        for (const name of names) {
+          const rec = this.attachmentVault.getByName(name);
+          if (!rec || !rec.bytes) { missing.push(name); continue; }
+          const content = decodeBase64ToText(String(rec.bytes));
+          const mime = String(rec.mimeType || 'text/plain');
+          resolved.push({ name, contentType: mime, content });
         }
+
+        if (missing.length) {
+          this.addDebugLog(`Attachment resolution failed; missing=[${missing.join(', ')}]`);
+          return; // Fail closed; let planner correct itself on next tick
+        }
+
+        // ⬇️ Respect planner-requested finality (conversation when terminal)
+        const finality = payload.finality === 'conversation'
+          ? 'conversation'
+          : payload.finality === 'turn'
+            ? 'turn'
+            : 'turn';
+
+        await ctx.transport.postMessage({
+          conversationId: ctx.conversationId,
+          agentId: ctx.agentId,
+          text: payload.text,
+          finality,
+          attachments: resolved,
+          turn: ctx.currentTurnNumber || 0
+        });
+        return;
       }
 
-      if (event.type === 'tool_call') {
-        // Type guard for tool_call payload
-        if (event.payload && typeof event.payload === 'object' && 'name' in event.payload && 'args' in event.payload) {
-          const toolCallPayload = event.payload as { name: string; args: any };
+      // 2) Local-only events that must NOT be persisted directly
+      if (event.type === 'status') return; // UI only
 
-          // Forward trace to orchestrator
-          ctx.transport.postTrace({
-            conversationId: ctx.conversationId,
-            agentId: ctx.agentId,
-            payload: {
-              type: 'tool_call',
-              name: toolCallPayload.name,
-              args: toolCallPayload.args,
-              toolCallId: `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-            },
-            turn: ctx.currentTurnNumber || 0
-          });
-        }
+      // 3) read_attachment → persist as tool_call + tool_result for replayability
+      if (event.type === 'read_attachment') {
+        const p = event.payload as any;
+        const toolCallId = `read_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+        await ctx.transport.postTrace({
+          conversationId: ctx.conversationId,
+          agentId: ctx.agentId,
+          payload: { type: 'tool_call', name: 'readAttachment', args: { name: p.name }, toolCallId },
+          turn: ctx.currentTurnNumber || 0
+        });
+
+        await ctx.transport.postTrace({
+          conversationId: ctx.conversationId,
+          agentId: ctx.agentId,
+          payload: {
+            type: 'tool_result',
+            toolCallId,
+            result: {
+              name: p.name,
+              ok: !!p.ok,
+              size: typeof p.size === 'number' ? p.size : undefined,
+              truncated: !!p.truncated,
+              text_excerpt: typeof p.text_excerpt === 'string' ? p.text_excerpt : undefined
+            }
+          },
+          turn: ctx.currentTurnNumber || 0
+        });
+        return;
       }
+
+      // 4) Tool calls/results/thoughts → 1:1 traces
+      if (event.type === 'tool_call' && event.reasoning) {
+        await ctx.transport.postTrace({
+          conversationId: ctx.conversationId,
+          agentId: ctx.agentId,
+          payload: { type: 'thought', content: event.reasoning },
+          turn: ctx.currentTurnNumber || 0
+        });
+      }
+
+      const mapped = this.translatePlannerEventToOrchestrator(event);
+      if (!mapped) return;
+
+      await ctx.transport.postTrace({
+        conversationId: ctx.conversationId,
+        agentId: ctx.agentId,
+        payload: mapped as any,
+        turn: ctx.currentTurnNumber || 0
+      });
     });
   }
 
-  /**
-   * Wait for planner completion with timeout
-   */
+  private translatePlannerEventToOrchestrator(event: StrictEvent): any | null {
+    const maps = this.getEventTranslationMaps();
+    if (!maps.supportedPlannerEventTypes.has(event.type)) return null;
+
+    switch (event.type) {
+      case 'message':
+      case 'status':
+      case 'read_attachment':
+        return null; // handled elsewhere or local-only
+
+      case 'tool_call': {
+        const p = event.payload as { name: string; args: any };
+        return { type: 'tool_call', name: p.name, args: p.args, toolCallId: `call_${event.seq}` };
+      }
+      case 'tool_result': {
+        const p = event.payload as { result: any };
+        return { type: 'tool_result', toolCallId: `result_${event.seq}`, result: p.result };
+      }
+      case 'trace': {
+        const p = event.payload as { text: string };
+        return { type: 'thought', content: p.text };
+      }
+      default:
+        return null;
+    }
+  }
+
   private async waitForPlannerCompletion(planner: ScenarioPlanner): Promise<void> {
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Planner timeout after 30 seconds'));
-      }, 30000);
-
-      const unsubscribe = (planner as any).onEvent((event: StrictEvent) => {
-        if (event.type === 'message' && event.channel === 'planner-agent') {
+      const timeout = setTimeout(() => reject(new Error('Planner timeout after 180 seconds')), 180000);
+      let done = false;
+      const off = (planner as any).onEvent((e: StrictEvent) => {
+        if (done) return;
+        if (e.type === 'message' && e.channel === 'planner-agent') {
+          done = true;
           clearTimeout(timeout);
-          unsubscribe();
+          off();
+          try { (planner as any).stop(); } catch {}
           resolve();
         }
       });
     });
   }
 
-  /**
-   * Set tool restrictions for this planner instance
-   */
   public setToolRestrictions(restrictions: ToolRestriction): void {
     this.toolRestrictions = restrictions;
   }
 
-  /**
-   * Get the counterpart agent ID for this conversation
-   */
-  private getCounterpartAgentId(ctx: TurnContext<ConversationSnapshot>): string | undefined {
-    if (!ctx.snapshot.scenario) return undefined;
+  private addDebugLog(entry: string): void {
+    const ts = new Date().toISOString();
+    this.debugLog.push(`[${ts}] ${entry}`);
+  }
 
-    // Find other agents in the scenario (excluding ourselves)
-    const otherAgents = ctx.snapshot.scenario.agents.filter(a => a.agentId !== ctx.agentId);
-    return otherAgents[0]?.agentId;
+  private writeDebugLog(): void {
+    try {
+      if (this.debugSink) this.debugSink(this.debugLog);
+      // Always mirror a short summary to console for both Bun and browser
+      const tail = this.debugLog.slice(-5);
+      if (tail.length) console.log('[PlannerAgent] log tail:', ...tail);
+    } catch {}
   }
 }

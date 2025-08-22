@@ -15,6 +15,7 @@ import { refreshPreview as svcRefreshPreview, detectEffectiveProtocol, createCli
 import { useConfigStore } from './configStore';
 import { API_BASE } from '../api-base';
 import { BrowsersideLLMProvider } from '$src/llm/providers/browserside';
+import { ScenarioConfiguration } from '$src/types';
 
 // Minimal public shape for the app store. This mirrors SessionManager for now.
 export interface AppState {
@@ -258,18 +259,16 @@ export const useAppStore = create<AppState>()(
           task: client,
           vault: get()._internal.vault,
           // API base not needed when scenario JSON is provided directly
-          getApiBase: undefined,
-          getEndpoint: () => '',
           getModel: () => get().planner.model,
           getLLMProvider: () => provider,
           getPlannerAgentId: () => get().scenario.selectedAgents.planner,
           getCounterpartAgentId: () => get().scenario.selectedAgents.counterpart,
           getScenarioConfig: () => get().scenario.config,
-          getEnabledTools: () => getEnabledToolDefsFromStore(get()),
           getAdditionalInstructions: () => get().planner.instructions,
-          onSystem: () => {},
-          onAskUser: () => {},
-          onPlannerThinking: (b: boolean) => { set((s) => { s.planner.thinking = !!b; }); },
+          getToolRestrictions: () => ({
+            omitCoreTools: [],
+            omitScenarioTools: getOmittedTools(get())
+          }),
         });
         // preload any existing events in store
         try { (planner as any).loadEvents(get().planner.eventLog as any); } catch {}
@@ -441,6 +440,19 @@ function getEnabledToolDefsFromStore(s: AppState): Array<{ name: string; descrip
       : [];
     const enabledSet = new Set(s.scenario.enabledTools);
     return all.filter((t) => enabledSet.has(t.name));
+  } catch { return []; }
+}
+
+function getOmittedTools(s: AppState): string[] {
+  try {
+    const cfg = s.scenario.config as ScenarioConfiguration;
+    const plannerId = s.scenario.selectedAgents.planner;
+    const agent = Array.isArray(cfg?.agents) ? cfg.agents.find((a: any) => a?.agentId === plannerId) : null;
+    const allTools: string[] = Array.isArray(agent?.tools)
+      ? agent.tools.map((t: any) => String(t?.toolName || t?.name || '')).filter(Boolean)
+      : [];
+    const enabledSet = new Set(s.scenario.enabledTools);
+    return allTools.filter((toolName) => !enabledSet.has(toolName));
   } catch { return []; }
 }
 

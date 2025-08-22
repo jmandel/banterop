@@ -17,33 +17,113 @@ export type AttachmentRecord = {
 };
 
 type PersistMeta = Pick<AttachmentRecord, "digest" | "summary" | "keywords" | "last_inspected">;
-const META_KEY = "a2a.attach.meta"; // localStorage: digest -> {summary, keywords, last_inspected}
-const ATTACHMENTS_KEY = "a2a.attachments"; // localStorage: full attachment records
 
-function loadMetaMap(): Record<string, PersistMeta> {
+/**
+ * Storage interface for persistence layer
+ */
+export interface StorageWrapper {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+  clear(): void;
+  isAvailable(): boolean;
+}
+
+/**
+ * localStorage wrapper that handles browser/Node.js compatibility
+ */
+export class LocalStorageWrapper implements StorageWrapper {
+  isAvailable(): boolean {
+    return typeof localStorage !== 'undefined';
+  }
+
+  getItem(key: string): string | null {
+    if (!this.isAvailable()) return null;
+    return localStorage.getItem(key);
+  }
+
+  setItem(key: string, value: string): void {
+    if (!this.isAvailable()) return;
+    localStorage.setItem(key, value);
+  }
+
+  removeItem(key: string): void {
+    if (!this.isAvailable()) return;
+    localStorage.removeItem(key);
+  }
+
+  clear(): void {
+    if (!this.isAvailable()) return;
+    localStorage.clear();
+  }
+}
+
+/**
+ * In-memory storage wrapper for Node.js environments
+ */
+export class InMemoryStorageWrapper implements StorageWrapper {
+  private storage = new Map<string, string>();
+
+  isAvailable(): boolean {
+    return true;
+  }
+
+  getItem(key: string): string | null {
+    return this.storage.get(key) || null;
+  }
+
+  setItem(key: string, value: string): void {
+    this.storage.set(key, value);
+  }
+
+  removeItem(key: string): void {
+    this.storage.delete(key);
+  }
+
+  clear(): void {
+    this.storage.clear();
+  }
+}
+
+const META_KEY = "a2a.attach.meta"; // storage: digest -> {summary, keywords, last_inspected}
+const ATTACHMENTS_KEY = "a2a.attachments"; // storage: full attachment records
+
+function loadMetaMap(storage: StorageWrapper): Record<string, PersistMeta> {
   try {
-    const raw = localStorage.getItem(META_KEY);
+    const raw = storage.getItem(META_KEY);
     if (!raw) return {};
     const obj = JSON.parse(raw);
     return obj && typeof obj === "object" ? obj : {};
   } catch { return {}; }
 }
-function saveMetaMap(map: Record<string, PersistMeta>) {
-  try { localStorage.setItem(META_KEY, JSON.stringify(map)); } catch {}
+
+function saveMetaMap(storage: StorageWrapper, map: Record<string, PersistMeta>): void {
+  try {
+    storage.setItem(META_KEY, JSON.stringify(map));
+  } catch {}
 }
 
 export class AttachmentVault {
   private byName = new Map<string, AttachmentRecord>();
-  private metaMap = loadMetaMap();
+  private metaMap: Record<string, PersistMeta>;
   private listeners = new Set<(name?: string) => void>();
+  private storage: StorageWrapper;
 
-  constructor() {
-    this.loadFromStorage();
+  constructor(storage: StorageWrapper = new LocalStorageWrapper()) {
+    this.storage = storage;
+    this.metaMap = loadMetaMap(this.storage);
+
+    // Load from storage if available
+    if (this.storage.isAvailable()) {
+      this.loadFromStorage();
+    } else {
+      console.warn('AttachmentVault: Storage not available, using in-memory storage only');
+    }
   }
 
   private loadFromStorage() {
     try {
-      const raw = localStorage.getItem(ATTACHMENTS_KEY);
+      const raw = this.storage.getItem(ATTACHMENTS_KEY);
       if (raw) {
         const attachments = JSON.parse(raw) as AttachmentRecord[];
         attachments.forEach(att => {
@@ -57,8 +137,9 @@ export class AttachmentVault {
 
   private saveToStorage() {
     try {
+      if (!this.storage.isAvailable()) return;
       const attachments = Array.from(this.byName.values());
-      localStorage.setItem(ATTACHMENTS_KEY, JSON.stringify(attachments));
+      this.storage.setItem(ATTACHMENTS_KEY, JSON.stringify(attachments));
     } catch (e) {
       console.warn('Failed to save attachments to storage:', e);
     }
@@ -197,7 +278,7 @@ export class AttachmentVault {
         keywords: rec.keywords,
         last_inspected: rec.last_inspected,
       };
-      saveMetaMap(this.metaMap);
+      saveMetaMap(this.storage, this.metaMap);
     }
     this.saveToStorage();
   }

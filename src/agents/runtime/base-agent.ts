@@ -1,3 +1,21 @@
+// src/agents/runtime/base-agent.ts
+// Simplified BaseAgent that relies entirely on orchestrator guidance.
+// No reconciliation loop: we only act when we receive a guidance event
+// that explicitly tells *this* agent to start or continue a turn.
+//
+// Assumptions guaranteed by orchestrator:
+// - Guidance is emitted on conversation creation if startingAgentId is set.
+// - Guidance is emitted after every turn-closing message.
+// - Guidance can also be requested as a "snapshot" on subscription (includeGuidance=true).
+//
+// Behavior:
+// - If guidance.nextAgentId !== this agent, we ignore it.
+// - If guidance.kind === 'start_turn': we start a new turn immediately.
+// - If guidance.kind === 'continue_turn':
+//      - If turnRecoveryMode === 'restart', we clear the open turn (abort marker) then continue.
+//      - Else, we continue the open turn as-is.
+// - We never attempt to infer ownership or reconcile; orchestrator is the source of truth.
+
 import type { IAgentTransport, IAgentEvents } from './runtime.interfaces';
 import type { StreamEvent } from '$src/agents/clients/event-stream';
 import type { GuidanceEvent } from '$src/types/orchestrator.types';
@@ -9,25 +27,21 @@ export interface TurnContext<TSnap = any> {
   agentId: string;
   guidanceSeq: number;
   deadlineMs: number;
-  currentTurnNumber?: number; // The turn number for this action
-  snapshot: TSnap; // stable at turn start
+  currentTurnNumber?: number; // authoritative turn provided by guidance
+  snapshot: TSnap;            // snapshot at turn start (best-effort mirror)
   transport: IAgentTransport;
-  getLatestSnapshot(): TSnap; // live mirror
+  getLatestSnapshot(): TSnap; // live mirror (best-effort)
 }
 
-export type TurnRecoveryMode = 'resume' | 'restart' | ((snap: any) => 'resume' | 'restart');
+export type TurnRecoveryMode = 'resume' | 'restart';
 
 export abstract class BaseAgent<TSnap = any> {
-  private unsubscribe: (() => void) | undefined;
-  private liveSnapshot: TSnap | undefined;
-  private latestSeq = 0;
-  protected running = false;  // Made protected so derived classes can check it
-  private events: IAgentEvents | undefined;
+  private events?: IAgentEvents;
+  private liveSnapshot?: TSnap;
+  protected running = false;
   private inTurn = false;
-  private lastProcessedClosedSeq = 0;
-  // Keep base agent simple: hold at most one pending guidance while in a turn
-  private pendingGuidance: GuidanceEvent | null = null;
-  
+  private unsubscribe?: () => void;
+
   protected turnRecoveryMode: TurnRecoveryMode = 'resume';
 
   constructor(
@@ -44,311 +58,122 @@ export abstract class BaseAgent<TSnap = any> {
       logLine(agentId, 'warn', 'Agent already running');
       return;
     }
-    
     this.running = true;
     logLine(agentId, 'start', `Starting agent for conversation ${conversationId}`);
 
-    // Create event stream from transport
-    logLine(agentId, 'debug', `Creating event stream for conversation ${conversationId} with guidance=true`);
+    // Create event stream with guidance enabled (authoritative scheduling)
+    logLine(agentId, 'debug', `Creating event stream (includeGuidance=true)`);
     this.events = this.transport.createEventStream(conversationId, true);
 
-    // Get live mirror initial state
-    logLine(agentId, 'debug', `Getting initial snapshot for conversation ${conversationId}`);
+    // Initialize live snapshot (best-effort; guidance drives turns)
+    logLine(agentId, 'debug', `Fetching initial snapshot`);
     this.liveSnapshot = await this.transport.getSnapshot(conversationId, { includeScenario: true }) as TSnap;
-    logLine(agentId, 'debug', `Initial snapshot has ${(this.liveSnapshot as any)?.events?.length || 0} events`);
-    this.latestSeq = this.maxSeq(this.liveSnapshot);
-    
-    // Debug: Check if scenario is loaded for scenario-driven agents
-    const snap = this.liveSnapshot as any;
-    if (snap && !snap.scenario && snap.metadata?.scenarioId) {
-      logLine(agentId, 'warn', `Snapshot missing scenario despite scenarioId: ${snap.metadata.scenarioId}`);
-    }
 
-    // Subscribe to events first
-    logLine(agentId, 'debug', `Subscribing to events...`);
+    // Subscribe to unified events + guidance
     this.unsubscribe = this.events.subscribe(async (ev) => {
       if (!this.running) return;
-      
-      // More detailed logging for guidance events
+
+      // Guidance events (transient, not persisted)
       if ((ev as any).type === 'guidance') {
         const g = ev as GuidanceEvent;
-        logLine(agentId, 'debug', `Received GUIDANCE event: nextAgentId=${g.nextAgentId}, seq=${g.seq}, forUs=${g.nextAgentId === agentId}`);
-      } else {
-        logLine(agentId, 'debug', `Received event: ${JSON.stringify(ev).substring(0, 200)}`);
-      }
-      
-      // Apply event to live snapshot
-      this.applyEvent(this.liveSnapshot, ev);
+        const forUs = g.nextAgentId === agentId;
+        logLine(agentId, 'guidance', `Received guidance: agent=${g.nextAgentId}, kind=${g.kind}, turn=${g.turn}, forUs=${forUs}`);
+        if (!forUs) return;
 
-      // Check for conversation completion
-      if (this.isConversationComplete(ev)) {
-        logLine(agentId, 'complete', 'Conversation completed, stopping agent');
-        this.stop();
+        // Start/continue the instructed turn
+        await this.handleGuidance(conversationId, agentId, g);
         return;
       }
 
-      // Handle guidance events
-      if ((ev as GuidanceEvent).type === 'guidance') {
-        const g = ev as GuidanceEvent;
-        logLine(agentId, 'guidance', `Received COMPLETE GUIDANCE: nextAgentId=${g.nextAgentId}, seq=${g.seq}, turn=${g.turn}, kind=${g.kind}, deadlineMs=${g.deadlineMs}, forUs=${g.nextAgentId === agentId}`);
-        
-        if (g.nextAgentId !== agentId) {
-          logLine(agentId, 'debug', `Guidance not for us (looking for ${agentId})`);
-          return; // Not for us
-        }
-        
-        logLine(agentId, 'guidance', `Received guidance seq=${g.seq}, turn=${g.turn}, kind=${g.kind}`);
+      // Persisted events: append to live snapshot and detect completion
+      const ue = ev as UnifiedEvent;
+      this.applyUnifiedEventToSnapshot(ue);
 
-        // If we're currently in a turn, ignore guidance (we're already working)
-        if (this.inTurn) {
-          // Save the latest guidance for after this turn completes
-          logLine(agentId, 'debug', `Saving guidance seq=${g.seq} to apply after turn`);
-          this.pendingGuidance = g;
-          return;
-        }
-
-        // Reconcile and maybe act now
-        await this.reconcileAndMaybeAct(conversationId, agentId, g);
+      if (ue.type === 'message' && ue.finality === 'conversation') {
+        logLine(agentId, 'complete', 'Conversation completed, stopping agent');
+        this.stop();
       }
     });
-    
-    // After subscribing, check if we should take action (reconcile without guidance)
-    logLine(agentId, 'startup', 'Performing initial reconciliation');
-    await this.reconcileAndMaybeAct(conversationId, agentId, null);
+
+    // NOTE: Because includeGuidance=true, subscription will immediately
+    // receive a one-shot authoritative guidance snapshot (if applicable).
   }
 
   stop() {
     if (!this.running) return;
-    
-    this.running = false;  // Signal to interrupt any in-progress turn
-    if (this.unsubscribe) {
-      this.unsubscribe();
-      this.unsubscribe = undefined;
-    }
+    this.running = false;
+    try { this.unsubscribe?.(); } catch {}
+    this.unsubscribe = undefined;
     this.events = undefined;
     this.liveSnapshot = undefined;
   }
 
   protected abstract takeTurn(ctx: TurnContext<TSnap>): Promise<void>;
 
-  private async reconcileAndMaybeAct(conversationId: number, agentId: string, guidance: GuidanceEvent | null): Promise<void> {
-    logLine(agentId, 'reconcile', `Starting reconcile with: guidanceSeq=${guidance?.seq || 'none'}, guidanceTurn=${guidance?.turn}, guidanceKind=${guidance?.kind}, hasGuidance=${!!guidance}`);
-    
-    // Fetch fresh snapshot
-    logLine(agentId, 'reconcile', `Fetching snapshot for conversation ${conversationId}`);
-    const snapshot = await this.transport.getSnapshot(conversationId, { includeScenario: true }) as TSnap;
-    const snap = snapshot as any;
-    logLine(agentId, 'reconcile', `Got snapshot with ${snap?.events?.length || 0} events, status: ${snap?.status}`);
-    
-    // Check if completed
-    if (snap.status === 'completed') {
-      logLine(agentId, 'reconcile', 'Conversation completed, stopping');
-      this.stop();
-      return;
-    }
+  // ---- Internals ----
 
-    // Compute current turn state (open/owner) for safe recovery
-    const { hasOpenTurn, ownerAgentId } = this.getCurrentTurnState(snap);
-    logLine(agentId, 'reconcile', `hasOpenTurn=${hasOpenTurn}, owner=${ownerAgentId}`);
+  private async handleGuidance(conversationId: number, agentId: string, g: GuidanceEvent) {
+    if (!this.running) return;
 
-    // If no explicit guidance: only act if we own an open turn (startup recovery)
-    if (!guidance) {
-      logLine(agentId, 'reconcile', 'NO GUIDANCE - startup recovery path');
-      if (hasOpenTurn && ownerAgentId === agentId) {
-        const mode = typeof this.turnRecoveryMode === 'function' ? this.turnRecoveryMode(snapshot) : this.turnRecoveryMode;
-        if (mode === 'restart') {
-          const { turn } = await this.transport.clearTurn(conversationId, agentId);
-          logLine(agentId, 'abort', `Aborted turn ${turn} per restart policy (startup)`);
-        }
-        logLine(agentId, 'reconcile', 'Starting turn WITHOUT guidance (startup recovery)');
-        await this.startTurn(conversationId, agentId, null);
-      } else {
-        logLine(agentId, 'reconcile', 'No guidance and not owning open turn; idle');
-      }
-      return;
-    }
-
-    // Default guidance.kind if absent (back-compat)
-    const effectiveKind: GuidanceEvent['kind'] = (guidance as any).kind ?? (hasOpenTurn ? 'continue_turn' : 'start_turn');
-
-    // Guard against duplicate guidance when lastClosedSeq hasn't advanced
-    const currentClosed = (snap?.lastClosedSeq ?? 0) as number;
-    if (this.lastProcessedClosedSeq !== 0 && currentClosed === this.lastProcessedClosedSeq) {
-      logLine(agentId, 'reconcile', `Ignoring guidance (lastClosedSeq unchanged at ${currentClosed})`);
-      return;
-    }
-
-    if (effectiveKind === 'continue_turn') {
-      if (hasOpenTurn && ownerAgentId === agentId) {
-        const mode = typeof this.turnRecoveryMode === 'function' ? this.turnRecoveryMode(snapshot) : this.turnRecoveryMode;
-        if (mode === 'restart') {
-          const { turn } = await this.transport.clearTurn(conversationId, agentId);
-          logLine(agentId, 'abort', `Aborted turn ${turn} per restart policy`);
-        }
-        this.lastProcessedClosedSeq = currentClosed;
-        await this.startTurn(conversationId, agentId, guidance);
-      } else if (hasOpenTurn && ownerAgentId && ownerAgentId !== agentId) {
-        logLine(agentId, 'reconcile', `Guided to continue but open turn owned by ${ownerAgentId}; waiting`);
-      } else {
-        // No open turn visible (post-reboot) — start fresh per guidance
-        this.lastProcessedClosedSeq = currentClosed;
-        await this.startTurn(conversationId, agentId, guidance);
-      }
-      return;
-    }
-
-    if (effectiveKind === 'start_turn') {
-      if (hasOpenTurn) {
-        if (ownerAgentId === agentId) {
-          const { turn } = await this.transport.clearTurn(conversationId, agentId);
-          logLine(agentId, 'abort', `Cleared open turn ${turn} before starting next`);
-          this.lastProcessedClosedSeq = currentClosed;
-          await this.startTurn(conversationId, agentId, guidance);
-        } else {
-          logLine(agentId, 'reconcile', `Open turn owned by ${ownerAgentId}; waiting`);
-        }
-      } else {
-        this.lastProcessedClosedSeq = currentClosed;
-        await this.startTurn(conversationId, agentId, guidance);
-      }
-      return;
-    }
-  }
-
-  // No enqueue; base agent keeps reconciliation simple and synchronous
-
-  private async startTurn(conversationId: number, agentId: string, guidance: GuidanceEvent | null): Promise<void> {
-    logLine(agentId, 'startTurn', `Called with: guidanceSeq=${guidance?.seq || 'none'}, guidanceTurn=${guidance?.turn}, guidanceKind=${guidance?.kind}, inTurn=${this.inTurn}, hasGuidance=${!!guidance}`);
-    
-    if (!guidance) {
-      logLine(agentId, 'startTurn', 'WARNING: Starting turn WITHOUT guidance (startup recovery)');
-    }
-    
+    // Avoid concurrent turn execution
     if (this.inTurn) {
-      logLine(agentId, 'warn', 'Already in turn, skipping start');
+      logLine(agentId, 'debug', `Already in turn; ignoring guidance seq=${g.seq}`);
       return;
     }
 
-    this.inTurn = true;
-    const beforeClosed = ((this.liveSnapshot as any)?.lastClosedSeq ?? 0) as number;
+    // Optional recovery policy for continue_turn
+    if (g.kind === 'continue_turn' && this.turnRecoveryMode === 'restart') {
+      try {
+        const { turn } = await this.transport.clearTurn(conversationId, agentId);
+        logLine(agentId, 'abort', `Cleared open turn ${turn} per restart policy`);
+      } catch (err) {
+        logLine(agentId, 'warn', `Failed to clear turn before continue: ${err}`);
+      }
+    }
+
+    // Refresh a snapshot for this turn start (best-effort)
     try {
-      // Create turn context
+      this.liveSnapshot = await this.transport.getSnapshot(conversationId, { includeScenario: true }) as TSnap;
+    } catch (err) {
+      logLine(agentId, 'warn', `Failed to refresh snapshot before turn: ${err}`);
+    }
+
+    // Execute the turn
+    this.inTurn = true;
+    try {
       const ctx: TurnContext<TSnap> = {
         conversationId,
         agentId,
-        guidanceSeq: guidance?.seq || 0,
-        deadlineMs: guidance?.deadlineMs || Date.now() + 30000,
-        currentTurnNumber: guidance?.turn,
+        guidanceSeq: g.seq,
+        deadlineMs: g.deadlineMs ?? (Date.now() + 30000),
+        currentTurnNumber: g.turn,
         snapshot: this.clone(this.liveSnapshot!),
         transport: this.transport,
         getLatestSnapshot: () => this.clone(this.liveSnapshot!),
       };
-      
-      logLine(agentId, 'startTurn', `Created TurnContext with: guidanceSeq=${ctx.guidanceSeq}, currentTurnNumber=${ctx.currentTurnNumber}, hasGuidance=${!!guidance}, guidanceFields=${guidance ? Object.keys(guidance).join(',') : 'N/A'}`);
-
-      // Execute the turn
-      logLine(agentId, 'turn', 'Starting turn execution');
+      logLine(agentId, 'turn', `Executing ${g.kind} at turn=${g.turn}`);
       await this.takeTurn(ctx);
-    } catch (error) {
-      logLine(agentId, 'error', `Error in takeTurn: ${error}`);
+    } catch (err) {
+      logLine(agentId, 'error', `Error during turn execution: ${err}`);
     } finally {
       this.inTurn = false;
-      logLine(agentId, 'turn', 'Turn execution completed');
-      // If we received guidance for us while in the turn, act on it now
-      if (this.running && this.pendingGuidance) {
-        // If we just closed our own turn, drop stale mid-turn guidance for ourselves
-        const snap: any = this.liveSnapshot as any;
-        const msgs = (snap?.events || []).filter((e: any) => e.type === 'message');
-        const last = msgs.length ? msgs[msgs.length - 1] : null;
-        const shouldDrop = !!(last && last.agentId === agentId && last.finality === 'turn');
-        const g = this.pendingGuidance;
-        this.pendingGuidance = null;
-        if (!shouldDrop) {
-          try {
-            await this.reconcileAndMaybeAct(conversationId, agentId, g);
-          } catch (err) {
-            logLine(agentId, 'error', `Post-turn guidance reconcile error: ${err}`);
-          }
-        } else {
-          logLine(agentId, 'debug', 'Dropping pending mid-turn guidance as stale after closing our turn');
-        }
-      }
     }
   }
 
-  private getCurrentTurnState(snapshot: any): { hasOpenTurn: boolean; ownerAgentId: string | null } {
-    if (!snapshot?.events?.length) return { hasOpenTurn: false, ownerAgentId: null };
-    // Highest non-system turn
-    let currentTurn = 0;
-    for (const e of snapshot.events) {
-      if (e.type !== 'system' && e.turn > currentTurn) currentTurn = e.turn;
-    }
-    if (currentTurn === 0) {
-      // Fallback: some tests/snapshots omit 'turn'; infer from last event
-      const last = snapshot.events[snapshot.events.length - 1];
-      if (last && last.type === 'message' && last.finality && last.finality !== 'none') {
-        return { hasOpenTurn: false, ownerAgentId: null };
-      }
-      if (last && last.type !== 'system') {
-        return { hasOpenTurn: true, ownerAgentId: last.agentId || null };
-      }
-      return { hasOpenTurn: false, ownerAgentId: null };
-    }
-    // Closed if any message in currentTurn has finality != 'none'
-    let closed = false;
-    for (const e of snapshot.events) {
-      if (e.turn !== currentTurn) continue;
-      if (e.type === 'message' && e.finality && e.finality !== 'none') { closed = true; break; }
-    }
-    if (closed) return { hasOpenTurn: false, ownerAgentId: null };
-    // Owner = last non-system event in currentTurn
-    for (let i = snapshot.events.length - 1; i >= 0; i--) {
-      const e = snapshot.events[i];
-      if (e.turn === currentTurn && e.type !== 'system') return { hasOpenTurn: true, ownerAgentId: e.agentId || null };
-    }
-    return { hasOpenTurn: true, ownerAgentId: null };
-  }
+  private applyUnifiedEventToSnapshot(ev: UnifiedEvent) {
+    if (!this.liveSnapshot) return;
+    const snap: any = this.liveSnapshot as any;
+    snap.events = [...(snap.events ?? []), ev];
 
-  private applyEvent(snap: any, ev: StreamEvent) {
-    if (!snap) return;
-    
-    // Only apply unified events (not guidance)
-    if ('type' in ev && ev.type !== 'guidance') {
-      const unifiedEvent = ev as UnifiedEvent;
-      snap.events = [...(snap.events ?? []), unifiedEvent];
-      
-      // Update conversation status if needed
-      if (unifiedEvent.type === 'message' && unifiedEvent.finality === 'conversation') {
-        snap.status = 'completed';
-      }
-      
-      // Update latest sequence
-      if (unifiedEvent.seq) {
-        this.latestSeq = Math.max(this.latestSeq, unifiedEvent.seq);
-      }
-      
-      // Update lastClosedSeq if this message closed a turn
-      if (unifiedEvent.type === 'message' && unifiedEvent.finality !== 'none' && unifiedEvent.seq) {
-        snap.lastClosedSeq = unifiedEvent.seq;
-        logLine('snapshot', 'update', `Updated lastClosedSeq to ${unifiedEvent.seq}`);
-      }
+    if (ev.type === 'message' && ev.finality === 'conversation') {
+      snap.status = 'completed';
     }
-  }
-
-  private isConversationComplete(ev: StreamEvent): boolean {
-    if ('type' in ev && ev.type === 'message') {
-      const msg = ev as UnifiedEvent;
-      return msg.finality === 'conversation';
+    if (ev.type === 'message' && ev.finality !== 'none' && ev.seq) {
+      snap.lastClosedSeq = ev.seq;
     }
-    return false;
   }
 
   private clone<T>(obj: T): T {
     return JSON.parse(JSON.stringify(obj));
-  }
-
-  private maxSeq(snap: any): number {
-    if (!snap?.events?.length) return 0;
-    return Math.max(...snap.events.map((e: any) => e.seq || 0));
   }
 }

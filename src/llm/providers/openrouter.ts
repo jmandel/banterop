@@ -61,7 +61,7 @@ export class OpenRouterLLMProvider extends LLMProvider {
     
     const choice = completion.choices[0];
     if (!choice?.message?.content) {
-      console.error(completion, completion.choices[0]?.message);
+      // console.error(completion, completion.choices[0]?.message);
       throw new Error('No response from OpenRouter');
     }
     

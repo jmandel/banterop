@@ -1,3 +1,4 @@
+// src/frontend/client/types/events.ts
 // Unified strict event types for planner + UI
 
 export type Channel = 'user-planner' | 'planner-agent' | 'system' | 'tool' | 'status';
@@ -6,9 +7,11 @@ export type EventType = 'message' | 'tool_call' | 'tool_result' | 'read_attachme
 
 export type AttachmentLite = { name: string; mimeType: string; bytes?: string; uri?: string };
 
+// ⬇️ Add optional finality so the planner can request a conversation close.
 export type MessagePayload = {
   text: string; // non-empty
   attachments?: AttachmentLite[];
+  finality?: 'none' | 'turn' | 'conversation';
 };
 
 export type ToolCallPayload = { name: string; args: Record<string, unknown> };
@@ -106,6 +109,9 @@ export function assertEvent(e: UnifiedEvent): asserts e is UnifiedEvent {
           if (a.bytes !== undefined && typeof a.bytes !== 'string') throw new Error(`Event invariant violated: attachment.bytes must be base64 string`);
           if (a.uri !== undefined && typeof a.uri !== 'string') throw new Error(`Event invariant violated: attachment.uri must be string`);
         }
+      }
+      if (p.finality !== undefined && !['none','turn','conversation'].includes(p.finality)) {
+        throw new Error(`Event invariant violated: message.payload.finality invalid (${(p as any).finality})`);
       }
       break;
     }
