@@ -60,6 +60,9 @@ app.post('/api/pairs', async (c) => {
 app.get('/pairs/:pairId/server-events', async (c) => {
   const pairId = c.req.param('pairId');
   const p = mustPair(pairId);
+  c.header('Cache-Control', 'no-cache, no-transform');
+  c.header('Connection', 'keep-alive');
+  c.header('X-Accel-Buffering', 'no');
   return streamSSE(c, async (stream) => {
     const push = (ev: any) => stream.writeSSE({ data: JSON.stringify({ result: ev }) });
     // keepalive pings so intermediaries don't close idle SSE
@@ -79,6 +82,9 @@ app.get('/pairs/:pairId/server-events', async (c) => {
 app.get('/pairs/:pairId/events.log', async (c) => {
   const pairId = c.req.param('pairId');
   const p = mustPair(pairId);
+  c.header('Cache-Control', 'no-cache, no-transform');
+  c.header('Connection', 'keep-alive');
+  c.header('X-Accel-Buffering', 'no');
   return streamSSE(c, async (stream) => {
     const push = (ev: any) => stream.writeSSE({ data: JSON.stringify({ result: ev }) });
     const ka = setInterval(() => {
@@ -154,14 +160,22 @@ app.post('/pairs/:pairId/reset', async (c) => {
 app.post('/api/bridge/:pairId/a2a', async (c) => {
   const pairId = c.req.param('pairId');
   const p = mustPair(pairId);
-  const accept = (c.req.header('accept') || '').toLowerCase();
-  const body = await safeJson(c);
-  const method = String(body?.method || '');
-  const id = body?.id ?? null;
-  const params = body?.params || {};
+  let raw: any;
+  try {
+    raw = await c.req.json();
+  } catch {
+    return c.json(jsonrpcError(null, -32700, 'Invalid JSON payload'), 200);
+  }
+  const method = String(raw?.method || '');
+  const id = raw?.id ?? null;
+  const params = raw?.params || {};
+  if (!method) return c.json(jsonrpcError(id, -32600, 'Invalid Request'), 200);
 
   if (method === 'message/stream') {
     const msg = params?.message || {};
+    c.header('Cache-Control', 'no-cache, no-transform');
+    c.header('Connection', 'keep-alive');
+    c.header('X-Accel-Buffering', 'no');
     return streamSSE(c, async (stream) => {
       // Determine side and task; create if absent
       let side: Role | null = null;
@@ -190,16 +204,22 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
       }
       const t = task!;
       const push = (frame: A2AFrame) => {
-        stream.writeSSE({ data: JSON.stringify(frame) });
-        logEvent(p, { type: 'a2a-frame', to: asPublicRole(t.side), frame });
+        const payload = { jsonrpc: '2.0', id, result: frame.result };
+        stream.writeSSE({ data: JSON.stringify(payload) });
+        logEvent(p, { type: 'a2a-frame', to: asPublicRole(t.side), frame: payload });
       };
       t.subscribers.add(push);
       // Let caller know the task snapshot first
-      push({ result: taskToA2A(t) });
+      push({ result: taskSnapshot(t) });
       // If a message payload was provided, record & reflect
       const parts = Array.isArray(msg.parts) ? msg.parts : [];
       if (parts.length) {
-        onIncomingMessage(p, t.side, { parts, messageId: String(msg.messageId || crypto.randomUUID()) });
+        const validation = validateParts(parts);
+        if (!validation.ok) {
+          stream.writeSSE({ data: JSON.stringify(jsonrpcError(id, -32602, 'Invalid parameters', { reason: validation.reason })) });
+        } else {
+          onIncomingMessage(p, t.side, { parts, messageId: String(msg.messageId || crypto.randomUUID()) });
+        }
       }
       await new Promise<void>((resolve) => stream.onAbort(resolve));
       t.subscribers.delete(push);
@@ -210,28 +230,42 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
     const msg = params?.message || {};
     const taskId = String(msg?.taskId || '');
     const t = getTaskById(p, taskId);
-    if (!t) return c.json({ error: { message: 'task not found' } }, 404);
-    onIncomingMessage(p, t.side, { parts: msg.parts || [], messageId: String(msg.messageId || crypto.randomUUID()) });
-    return c.json({ ok: true });
+    if (!t) return c.json(jsonrpcError(id, -32001, 'Task not found'), 200);
+    const parts = Array.isArray(msg.parts) ? msg.parts : [];
+    const validation = validateParts(parts);
+    if (!validation.ok) return c.json(jsonrpcError(id, -32602, 'Invalid parameters', { reason: validation.reason }), 200);
+    onIncomingMessage(p, t.side, { parts, messageId: String(msg.messageId || crypto.randomUUID()) });
+    const historyLength = Number(params?.configuration?.historyLength ?? NaN);
+    const snap = taskSnapshot(t, Number.isFinite(historyLength) ? historyLength : undefined);
+    return c.json(jsonrpcResult(id, snap), 200);
   }
 
   if (method === 'tasks/get') {
     const t = getTaskById(p, String(params?.id || ''));
-    if (!t) return c.json({ error: { message: 'task not found' } }, 404);
-    return c.json({ result: taskToA2A(t) });
+    if (!t) return c.json(jsonrpcError(id, -32001, 'Task not found'), 200);
+    const historyLength = Number(params?.historyLength ?? NaN);
+    const snap = taskSnapshot(t, Number.isFinite(historyLength) ? historyLength : undefined);
+    return c.json(jsonrpcResult(id, snap), 200);
   }
 
   if (method === 'tasks/resubscribe') {
     const t = getTaskById(p, String(params?.id || ''));
-    if (!t) return c.text('not found', 404);
+    c.header('Cache-Control', 'no-cache, no-transform');
+    c.header('Connection', 'keep-alive');
+    c.header('X-Accel-Buffering', 'no');
     return streamSSE(c, async (stream) => {
+      if (!t) {
+        stream.writeSSE({ data: JSON.stringify(jsonrpcError(id, -32001, 'Task not found')) });
+        return;
+      }
       const push = (frame: A2AFrame) => {
-        stream.writeSSE({ data: JSON.stringify(frame) });
-        logEvent(p, { type: 'a2a-frame', to: asPublicRole(t.side), frame });
+        const payload = { jsonrpc: '2.0', id, result: frame.result };
+        stream.writeSSE({ data: JSON.stringify(payload) });
+        logEvent(p, { type: 'a2a-frame', to: asPublicRole(t.side), frame: payload });
       };
       t.subscribers.add(push);
       // initial snapshot
-      push({ result: taskToA2A(t) });
+      push({ result: taskSnapshot(t) });
       await new Promise<void>((resolve) => stream.onAbort(resolve));
       t.subscribers.delete(push);
     });
@@ -239,12 +273,12 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
 
   if (method === 'tasks/cancel') {
     const t = getTaskById(p, String(params?.id || ''));
-    if (!t) return c.json({ error: { message: 'task not found' } }, 404);
+    if (!t) return c.json(jsonrpcError(id, -32001, 'Task not found'), 200);
     setTaskStatus(t, 'canceled');
-    return c.json({ ok: true });
+    return c.json(jsonrpcResult(id, taskSnapshot(t)), 200);
   }
 
-  return c.json({ error: { message: `unknown method ${method}` } }, 400);
+  return c.json(jsonrpcError(id, -32601, 'Method not found', { method }), 200);
 });
 
 function onIncomingMessage(p: Pair, from: Role, req: { parts: A2APart[], messageId: string }) {
@@ -353,24 +387,32 @@ function setTaskStatus(t: TaskState, state: A2AStatus, message?: A2AMessage) {
   try { const pair = mustPair(t.pairId); logEvent(pair, { type: 'status', side: asPublicRole(t.side), state }); } catch {}
 }
 
-function taskToA2A(t: TaskState): A2ATask {
+function taskSnapshot(t: TaskState, historyLength?: number): A2ATask {
+  const h = t.history || [];
+  const latest = h.length ? h[h.length - 1] : undefined;
+  const tail = h.length ? h.slice(0, h.length - 1) : [];
+  const sliced = typeof historyLength === 'number' && historyLength >= 0
+    ? tail.slice(Math.max(0, tail.length - historyLength))
+    : tail;
   return {
     id: t.id,
     contextId: t.pairId,
     kind: 'task',
-    status: { state: t.status },
-    history: [...t.history],
+    status: { state: t.status, ...(latest ? { message: latest } : {}) } as any,
+    history: sliced,
     metadata: {}
-  };
+  } as any;
 }
 
 function statusUpdate(t: TaskState, state: A2AStatus, message?: A2AMessage) {
+  const terminal = (s: A2AStatus) => ['completed', 'canceled', 'failed', 'rejected'].includes(s);
   return {
     taskId: t.id,
     contextId: t.pairId,
-    status: { state, message },
-    kind: 'status-update'
-  };
+    status: { state, message, timestamp: new Date().toISOString() } as any,
+    kind: 'status-update',
+    final: terminal(state)
+  } as any;
 }
 
 function mustPair(id: string): Pair {
@@ -416,6 +458,60 @@ serve({
     ) {
       return (app as any).fetch(req, srv);
     }
+    if (url.pathname === '/.well-known/agent-card.json') {
+      const card = minimalAgentCard(new URL(req.url).origin);
+      return new Response(JSON.stringify(card, null, 2), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
     return new Response('Not Found', { status: 404 });
   },
 });
+
+// JSON-RPC helpers and validation
+function jsonrpcResult(id: any, result: any) {
+  return { jsonrpc: '2.0', id, result };
+}
+function jsonrpcError(id: any, code: number, message: string, data?: any) {
+  const err: any = { jsonrpc: '2.0', id, error: { code, message } };
+  if (data !== undefined) err.error.data = data;
+  return err;
+}
+
+function validateParts(parts: A2APart[]): { ok: true } | { ok: false; reason: string } {
+  for (const p of parts) {
+    if (!p || typeof (p as any).kind !== 'string') return { ok: false, reason: 'part missing kind' };
+    if ((p as any).kind === 'file') {
+      const f = (p as any).file || {};
+      const hasBytes = typeof f.bytes === 'string';
+      const hasUri = typeof f.uri === 'string';
+      if (hasBytes && hasUri) return { ok: false, reason: 'file part must not include both bytes and uri' };
+      if (!hasBytes && !hasUri) return { ok: false, reason: 'file part requires bytes or uri' };
+    } else if ((p as any).kind === 'text') {
+      if (typeof (p as any).text !== 'string') return { ok: false, reason: 'text part requires text' };
+    } else if ((p as any).kind === 'data') {
+      if (typeof (p as any).data !== 'object' || (p as any).data === null) return { ok: false, reason: 'data part requires object data' };
+    } else {
+      return { ok: false, reason: `unsupported part kind ${(p as any).kind}` };
+    }
+  }
+  return { ok: true };
+}
+
+function minimalAgentCard(origin: string) {
+  return {
+    protocolVersion: '0.3.0',
+    name: 'FlipProxy Bridge Agent',
+    description: 'Pairs two participants and mirrors messages using JSON-RPC and SSE.',
+    url: `${origin}/a2a/v1`,
+    preferredTransport: 'JSONRPC',
+    additionalInterfaces: [
+      { url: `${origin}/a2a/v1`, transport: 'JSONRPC' }
+    ],
+    version: '0.1.0',
+    capabilities: { streaming: true },
+    defaultInputModes: ['text/plain', 'application/json'],
+    defaultOutputModes: ['text/plain', 'application/json'],
+    skills: [
+      { id: 'flip-proxy', name: 'Turn-based Mirror', description: 'Mirrors messages between paired participants with turn control.', tags: ['relay', 'chat', 'proxy'] }
+    ]
+  } as any;
+}

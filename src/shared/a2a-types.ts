@@ -1,8 +1,21 @@
+export type A2AFileWithBytes = { bytes: string; name?: string; mimeType?: string };
+export type A2AFileWithUri = { uri: string; name?: string; mimeType?: string };
+
 export type A2APart =
   | { kind: "text"; text: string; metadata?: Record<string, any> }
-  | { kind: "file"; file: { name: string; mimeType: string; uri?: string; bytes?: string }, metadata?: Record<string, any> };
+  | { kind: "file"; file: A2AFileWithBytes | A2AFileWithUri; metadata?: Record<string, any> }
+  | { kind: "data"; data: Record<string, any>; metadata?: Record<string, any> };
 
-export type A2AStatus = "submitted" | "working" | "input-required" | "completed" | "failed" | "canceled";
+export type A2AStatus =
+  | "submitted"
+  | "working"
+  | "input-required"
+  | "completed"
+  | "failed"
+  | "canceled"
+  | "rejected"
+  | "auth-required"
+  | "unknown";
 
 export type A2AMessage = {
   role: "user" | "agent";

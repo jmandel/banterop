@@ -127,7 +127,11 @@ function App() {
       setTaskId(frame.id)
       setStatus(frame.status?.state || 'submitted')
       const msgs = (frame.history || []).map((m:any) => ({ role: m.role, text: (m.parts||[]).filter((p:any)=>p.kind==='text').map((p:any)=>p.text).join('\n') }))
-      setHistory(msgs)
+      // Include the latest message from status.message (server excludes it from history)
+      const latestText = (frame.status?.message?.parts || []).filter((p:any)=>p.kind==='text').map((p:any)=>p.text).join('\n')
+      const latestRole = frame.status?.message?.role
+      const merged = latestText ? [...msgs, { role: latestRole, text: latestText }] : msgs
+      setHistory(merged)
       return
     }
     if (frame.kind === 'status-update') {
@@ -152,15 +156,18 @@ function App() {
     const ac = new AbortController()
     streamAbort.current?.abort()
     streamAbort.current = ac
+    const previousText = text
+    setText('')
     try {
       for await (const frame of client.messageStreamParts(parts, taskId, ac.signal)) {
         handleFrame(frame as any)
       }
     } catch (e) {
       // silence on close
+      // restore input if the send failed synchronously
+      try { setText(previousText) } catch {}
     } finally {
       if (streamAbort.current === ac) streamAbort.current = null
-      setText('')
     }
   }
 

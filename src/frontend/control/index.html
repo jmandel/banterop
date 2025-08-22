@@ -58,16 +58,30 @@
       const sseCode = document.getElementById('sseUrl');
 
       let pretty = false;
-      prettyEl.onchange = () => { pretty = !!prettyEl.checked; };
-      btnCopy.onclick = async () => { try { await navigator.clipboard.writeText(logEl.textContent || ''); } catch {} };
-      function log(msg) {
-        const now = new Date().toLocaleTimeString();
-        const line = `${now} ${msg}`;
-        if (logEl.textContent === '(no events yet)') logEl.textContent = '';
-        logEl.textContent += (logEl.textContent ? '\n' : '') + line;
+      const entries = [];
+      function nowStr() { return new Date().toLocaleTimeString(); }
+      function renderLog() {
+        let out = '';
+        for (const e of entries) {
+          if (e.text != null) {
+            out += (out ? '\n' : '') + e.when + ' ' + e.text;
+          } else if (e.obj != null) {
+            if (pretty) {
+              const lines = JSON.stringify(e.obj, null, 2).split('\n');
+              out += (out ? '\n' : '') + e.when + ' ' + lines[0];
+              for (let i = 1; i < lines.length; i++) out += '\n' + lines[i];
+            } else {
+              out += (out ? '\n' : '') + e.when + ' ' + JSON.stringify(e.obj);
+            }
+          }
+        }
+        logEl.textContent = out || '(no events yet)';
         logEl.scrollTop = logEl.scrollHeight;
       }
-      function logObj(obj) { log(pretty ? JSON.stringify(obj, null, 2) : JSON.stringify(obj)); }
+      function log(msg) { entries.push({ when: nowStr(), text: msg }); renderLog(); }
+      function logObj(obj) { entries.push({ when: nowStr(), obj }); renderLog(); }
+      prettyEl.onchange = () => { pretty = !!prettyEl.checked; renderLog(); };
+      btnCopy.onclick = async () => { try { await navigator.clipboard.writeText(logEl.textContent || ''); const old=btnCopy.textContent; btnCopy.textContent='Copied'; setTimeout(()=>btnCopy.textContent=old, 600); } catch {} };
 
       async function createPair() {
         const res = await fetch('/api/pairs', { method: 'POST' });
