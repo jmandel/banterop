@@ -1,4 +1,4 @@
-// FlipProxy + Planner Plugin — Journal Types (v0.3 · Connectathon-simple)
+// FlipProxy + Planner Plugin — Journal Types (v0.4 — unified compose-only send path)
 export interface Cut { seq:number }
 
 export interface AttachmentMeta {
@@ -10,7 +10,7 @@ type PlannerWhy = { why?: string };
 
 export type Fact =
   | ({ type:'status_changed'
-     ; a2a:'initializing'|'submitted'|'working'|'input-required'|'completed'|'failed'|'canceled'
+     ; a2a:'initializing'|'submitted'|'working'|'input-required'|'completed'|'failed'|'canceled'|'rejected'|'auth-required'|'unknown'
      } & Stamp & { vis:'private' })
   | ({ type:'remote_received'
      ; messageId:string
@@ -63,16 +63,12 @@ export type Fact =
   | ({ type:'sleep'
      ; reason?:string
      } & PlannerWhy & Stamp & { vis:'private' })
-  // Planned UI event (not yet used in controls): record a dismissal of a compose intent.
   | ({ type:'compose_dismissed'
      ; composeId:string
      ; reason?:string
      } & Stamp & { vis:'private' });
 
 export type ProposedFact = Omit<Fact, keyof Stamp>;
-export type TerminalFact = Extract<ProposedFact,
-  {type:'compose_intent'} | {type:'agent_question'} | {type:'sleep'}
->;
 
 export interface PlanInput { cut:Cut; facts:ReadonlyArray<Fact> }
 
@@ -84,17 +80,4 @@ export type LlmMessage =
 export interface LlmResponse { text:string }
 export interface LlmProvider {
   chat(req:{ model?:string; messages:LlmMessage[]; temperature?:number; maxTokens?:number; signal?:AbortSignal }): Promise<LlmResponse>
-}
-
-export interface PlanContext<Cfg=unknown> {
-  readonly signal: AbortSignal;
-  hud(phase:'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting', label?:string, p?:number): void;
-  newId(prefix?:string): string;
-  readAttachment(name:string): Promise<{ mimeType:string; bytes:string } | null>;
-  config: Cfg; myAgentId:string; otherAgentId:string; model?:string; llm:LlmProvider;
-}
-
-export interface Planner<Cfg=unknown> {
-  id:string; name:string;
-  plan(input:PlanInput, ctx:PlanContext<Cfg>): Promise<ProposedFact[]>;
 }
