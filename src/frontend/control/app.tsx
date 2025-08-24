@@ -161,7 +161,7 @@ function ControlApp() {
       } else if (e.obj != null) {
         if (pretty) {
           const prettyLines = JSON.stringify(e.obj, null, 2).split('\n')
-          lines.push(prettyLines[0])
+          lines.push(prettyLines[0] ?? '')
           for (let i = 1; i < prettyLines.length; i++) {
             const ln = prettyLines[i]
             if (ln !== undefined) lines.push(ln)

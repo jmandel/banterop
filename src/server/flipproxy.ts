@@ -37,15 +37,31 @@ const pairs = new Map<string, Pair>();
 const app = new Hono();
 
 // --- Persistence (bun-storage) ---
-const [kv] = createLocalStorage(process.env.FLIPPROXY_DB || './db.sqlite');
+const [localStorage] = createLocalStorage(process.env.FLIPPROXY_DB || './db.sqlite');
 const PAIR_INDEX_KEY = 'pair:index';
+
+async function lsGet(key: string): Promise<unknown | null> {
+  try {
+    const v = localStorage.getItem(key);
+    if (v == null) return null;
+    return typeof v === 'string' ? JSON.parse(v) : v;
+  } catch { return null; }
+}
+
+async function lsSet(key: string, value: unknown): Promise<void> {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+
+async function lsRemove(key: string): Promise<void> {
+  try { localStorage.removeItem(key); } catch {}
+}
 
 async function addPairToIndex(id: string) {
   try {
-    const idx = (await kv.get(PAIR_INDEX_KEY)) as string[] | null;
+    const idx = (await lsGet(PAIR_INDEX_KEY)) as string[] | null;
     const set = new Set(idx || []);
     set.add(id);
-    await kv.set(PAIR_INDEX_KEY, Array.from(set));
+    await lsSet(PAIR_INDEX_KEY, Array.from(set));
   } catch {}
 }
 
@@ -63,12 +79,12 @@ async function persistPairMeta(p: Pair) {
       responder: p.responderTask ? { id: p.responderTask.id, status: p.responderTask.status, history: p.responderTask.history } : null,
     }
   };
-  await kv.set(`pair:meta:${p.id}`, meta);
+  await lsSet(`pair:meta:${p.id}`, meta);
   p.lastActivityMs = Date.now();
 }
 
 async function readPairMeta(id: string): Promise<any | null> {
-  try { return await kv.get(`pair:meta:${id}`); } catch { return null; }
+  return await lsGet(`pair:meta:${id}`);
 }
 
 function hydrateTask(pairId: string, side: Role, t: any | null | undefined): TaskState | undefined {
@@ -651,7 +667,7 @@ async function runWatchdog() {
   }
   // Evict from storage
   try {
-    const idx = (await kv.get(PAIR_INDEX_KEY)) as string[] | null;
+    const idx = (await lsGet(PAIR_INDEX_KEY)) as string[] | null;
     const list = Array.isArray(idx) ? idx.slice() : [];
     const keep: string[] = [];
     for (const id of list) {
@@ -661,13 +677,13 @@ async function runWatchdog() {
       if (!meta) continue;
       const lastTs = meta.lastActivityTs ? Date.parse(meta.lastActivityTs) : 0;
       if (now - lastTs > STORAGE_TTL_MS) {
-        if ((kv as any).delete) await (kv as any).delete(`pair:meta:${id}`);
+        await lsRemove(`pair:meta:${id}`);
         // do not push id to keep
       } else {
         keep.push(id);
       }
     }
-    await kv.set(PAIR_INDEX_KEY, keep);
+    await lsSet(PAIR_INDEX_KEY, keep);
   } catch {}
 }
 

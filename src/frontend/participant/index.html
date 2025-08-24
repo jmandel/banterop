@@ -13,17 +13,33 @@
       button { cursor: pointer; }
       .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
       .col { display: flex; flex-direction: column; gap: 8px; }
-      .chat { height: 360px; overflow: auto; background: #fafbff; border-radius: 8px; padding: 10px; border: 1px solid #e6e8ee; }
-      .msg { margin: 8px 0; padding: 8px 10px; border-radius: 8px; }
-      .msg.agent { background: #eef4ff; }
-      .msg.user { background: #f3f6fb; }
       .pill { display:inline-block; padding:2px 8px; font-size:12px; border:1px solid #d4d8e2; border-radius:999px; margin-left:8px; }
       .muted { color: #666; }
       .small { font-size: 12px; }
+      .btn { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid #d4d8e2; background: #fff; }
+      .btn.primary { background:#1f6feb; border-color:#1f6feb; color:#fff; }
+      .btn.ghost { background:transparent; border-color:transparent; }
+      .input { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid #d4d8e2; background: #fff; }
+      .transcript { max-height: 480px; overflow: auto; display:flex; flex-direction:column; gap:10px; }
+      .bubble { border: 1px solid #e6e8ee; background: #eef4ff; border-radius: 12px; padding: 10px; }
+      .bubble.them { background: #e8f7ef; border-color: #bfead1; }
+      .bubble.me { background: #eef4ff; border-color: #c8d9ff; }
+      .text { white-space: pre-wrap; }
+      .attachments a.att { display:inline-block; margin-right:10px; text-decoration:none; }
+      .private { border:1px solid #d9dde8; border-radius: 8px; overflow: hidden; }
+      .stripe-head { font-size:10px; text-transform: uppercase; letter-spacing: .06em; padding:4px 8px; }
+      .stripe.tool .stripe-head { background:#fde68a; color:#7c5800; }
+      .stripe.whisper .stripe-head { background:#e5e7eb; color:#374151; }
+      .stripe.question .stripe-head { background:#f5d0fe; color:#86198f; }
+      .stripe.answer .stripe-head { background:#ddd6fe; color:#5b21b6; }
+      .stripe.draft .stripe-head { background:#e5e7eb; color:#374151; }
+      .stripe-body { padding:8px 10px; }
+      .dot { display:inline-block; width:8px; height:8px; border-radius:999px; background:#1f6feb; animation:pulse 1.3s ease-in-out infinite; }
+      @keyframes pulse { 0%,100% { opacity:.3 } 50% { opacity:1 } }
     </style>
   </head>
   <body>
-    <header><strong>FlipProxy — Participant</strong> <span class="muted small">join with ?role=initiator|responder&a2a=...&tasks=...</span></header>
+    <header><strong>FlipProxy — Participant</strong> <span class="muted small">journal‑driven UI; agent assist</span></header>
     <div id="root" class="wrap"></div>
     <script type="module" src="../app.tsx"></script>
   </body>
