@@ -1,7 +1,7 @@
 export async function* readSSE(resp: Response): AsyncGenerator<string> {
   if (!resp.body) return;
-  // @ts-ignore
-  const reader = resp.body.getReader?.();
+  // Bun's Response.body has getReader in web streams API
+  const reader = (resp.body as ReadableStream<Uint8Array> | null | undefined)?.getReader?.();
   if (!reader) return;
   const decoder = new TextDecoder();
   let buf = "";
@@ -48,8 +48,8 @@ export async function* readSSE(resp: Response): AsyncGenerator<string> {
 
 export function partsToText(parts?: Array<{ kind: string; text?: string }>): string {
   return (parts ?? [])
-    .filter((p) => p?.kind === "text" && typeof (p as any).text === "string")
-    .map((p) => (p as any).text as string)
+    .filter((p) => p?.kind === "text" && typeof p.text === "string")
+    .map((p) => String(p.text))
     .join("\n")
     .trim();
 }

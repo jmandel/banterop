@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { A2APart, A2ATask, A2AStatus } from '../shared/a2a-types'
+import type { A2APart, A2ATask, A2AStatus, A2AStatusUpdate } from '../shared/a2a-types'
 import type { ServerEvent } from '../shared/backchannel-types'
 
 // Minimal A2A client (JSON-RPC over POST; SSE for streaming)
@@ -32,7 +32,8 @@ class A2AClient {
   }
 }
 
-async function* sseToObjects(stream: ReadableStream<Uint8Array>) {
+type FrameResult = A2ATask | A2AStatusUpdate | { kind:'message'; role:'user'|'agent'; parts:any[] };
+async function* sseToObjects(stream: ReadableStream<Uint8Array>): AsyncGenerator<FrameResult> {
   const reader = stream.getReader()
   const decoder = new TextDecoder()
   let buf = ''
@@ -52,7 +53,7 @@ async function* sseToObjects(stream: ReadableStream<Uint8Array>) {
       for (const line of lines) {
         if (line.startsWith('data:')) {
           const data = line.slice(5).trimStart()
-          try { const obj = JSON.parse(data); if (obj && 'result' in obj) yield (obj.result) } catch { /* ignore */ }
+          try { const obj = JSON.parse(data); if (obj && 'result' in obj) yield (obj.result as FrameResult) } catch { /* ignore */ }
         }
       }
     }
@@ -78,7 +79,7 @@ function App() {
   const [finality, setFinality] = useState<'none'|'turn'|'conversation'>('turn')
   const [banner, setBanner] = useState<string>('')
   const endpoint = useMemo(() => a2aUrl, [a2aUrl])
-  const client = useMemo(() => new A2AClient(endpoint), [endpoint])
+  const a2aClient = useMemo(() => new A2AClient(endpoint), [endpoint])
   const resubAbort = useRef<AbortController | null>(null)
   const streamAbort = useRef<AbortController | null>(null)
 
@@ -101,8 +102,8 @@ function App() {
               try {
                 // small delay so UI updates cleanly
                 await new Promise(r => setTimeout(r, 50))
-                for await (const frame of client.tasksResubscribe(msg.taskId, ac.signal)) {
-                  handleFrame(frame as any)
+                for await (const frame of a2aClient.tasksResubscribe(msg.taskId, ac.signal)) {
+                  handleFrame(frame)
                 }
               } catch {}
             })()
@@ -110,7 +111,7 @@ function App() {
             setBanner('Unsubscribed (reset) — waiting for next task...')
             setHistory([]); setTaskId(undefined); setStatus('initializing')
           } else if (msg.type === 'redirect') {
-            setBanner(`Hard reset — new links ready: Initiator ${msg.newPair.aJoinUrl} | Responder ${msg.newPair.bJoinUrl}`)
+            setBanner(`Hard reset — new links ready: Initiator ${msg.newPair.initiatorJoinUrl} | Responder ${msg.newPair.responderJoinUrl}`)
           }
         } catch (e) {
           console.error('Bad server-event payload', ev.data, e)
@@ -119,9 +120,9 @@ function App() {
       es.onerror = () => setBanner('Backchannel disconnected — reconnecting...')
       return () => { try { es.close() } catch {} }
     }
-  }, [endpoint, tasksUrl, role, client])
+  }, [endpoint, tasksUrl, role, a2aClient])
 
-  function handleFrame(frame: any) {
+  function handleFrame(frame: FrameResult) {
     if (!frame) return
     if (frame.kind === 'task') {
       setTaskId(frame.id)
@@ -135,10 +136,16 @@ function App() {
       return
     }
     if (frame.kind === 'status-update') {
-      setStatus(frame.status?.state || 'submitted')
-      if (frame.status?.message) {
-        const txt = (frame.status.message.parts || []).filter((p:any)=>p.kind==='text').map((p:any)=>p.text).join('\n')
-        if (txt) setHistory(h => [...h, { role: frame.status.message.role, text: txt }])
+      const newState = frame.status?.state || 'submitted'
+      setStatus(newState)
+      if (newState === 'canceled' && role === 'initiator') {
+        // Clear task so next send starts a new epoch
+        setTaskId(undefined)
+      }
+      const m = frame.status?.message
+      if (m) {
+        const txt = (m.parts || []).filter((p:any)=>p.kind==='text').map((p:any)=>p.text).join('\n')
+        if (txt) setHistory(h => [...h, { role: m.role, text: txt }])
       }
       return
     }
@@ -151,16 +158,16 @@ function App() {
 
   async function send() {
     if (!text.trim()) return
-    const parts: A2APart[] = [{ kind:'text', text, metadata: { 'urn:cc:a2a:v1': { finality } } }]
-    // If we have a current task, this is a normal turn. Otherwise, for 'a' we start a new epoch.
+    const parts: A2APart[] = [{ kind:'text', text, metadata: { 'https://chitchat.fhir.me/a2a-ext': { finality } } }]
+    // If we have a current task, this is a normal turn. Otherwise, for the initiator we start a new epoch.
     const ac = new AbortController()
     streamAbort.current?.abort()
     streamAbort.current = ac
     const previousText = text
     setText('')
     try {
-      for await (const frame of client.messageStreamParts(parts, taskId, ac.signal)) {
-        handleFrame(frame as any)
+      for await (const frame of a2aClient.messageStreamParts(parts, taskId, ac.signal)) {
+        handleFrame(frame)
       }
     } catch (e) {
       // silence on close
@@ -171,7 +178,35 @@ function App() {
     }
   }
 
-  const canSend = !!endpoint && ((status === 'input-required') || (!taskId && role === 'initiator'))
+  const canSend = !!endpoint && (
+    status === 'input-required' ||
+    (!taskId && role === 'initiator') ||
+    (status === 'canceled' && role === 'initiator')
+  )
+  const sendLabel = status === 'canceled' && role === 'initiator' ? 'Send on new task' : 'Send'
+
+  function clearTask() {
+    // Initiator can clear a completed task to start a new one
+    setHistory([])
+    setTaskId(undefined)
+    setStatus('initializing')
+    setBanner('Cleared — ready to start a new task.')
+  }
+
+  function isTerminalState(s: A2AStatus | 'initializing') {
+    return s === 'completed' || s === 'canceled' || s === 'failed' || s === 'rejected'
+  }
+
+  async function cancelTask() {
+    if (!taskId) return
+    try {
+      await a2aClient.cancel(taskId)
+      // Optimistic UI; server will also send a canceled status-update
+      setBanner('Cancel requested')
+    } catch (e) {
+      setBanner('Cancel failed')
+    }
+  }
   const roleName = role === 'initiator' ? 'Initiator' : 'Responder'
 
   return (
@@ -206,8 +241,8 @@ function App() {
             tabIndex={1}
             disabled={status === 'completed' || status === 'failed' || status === 'canceled'}
           />
-          <select value={finality} onChange={e => setFinality(e.target.value as any)} tabIndex={2}
-            disabled={status === 'completed' || status === 'failed' || status === 'canceled'}>
+          <select value={finality} onChange={e => setFinality(e.target.value as 'none'|'turn'|'conversation')} tabIndex={2}
+            disabled={status === 'completed' || status === 'failed' || (status === 'canceled' && role !== 'initiator')}>
             <option value="none">no finality</option>
             <option value="turn">end turn → flip</option>
             <option value="conversation">end conversation</option>
@@ -219,8 +254,18 @@ function App() {
             style={{ opacity: canSend ? 1 : 0.5, cursor: canSend ? 'pointer' : 'not-allowed' }}
             aria-disabled={!canSend}
           >
-            Send
+            {sendLabel}
           </button>
+          {taskId && isTerminalState(status) && (
+            <button onClick={clearTask} tabIndex={4} style={{ marginLeft: 8 }}>
+              Clear task
+            </button>
+          )}
+          {taskId && !isTerminalState(status) && (
+            <button onClick={cancelTask} tabIndex={5} style={{ marginLeft: 8 }}>
+              Cancel task
+            </button>
+          )}
         </div>
         <div className="small muted" style={{marginTop:8}}>
           {!endpoint ? 'No endpoint configured — open from Control Plane links.' :
@@ -236,9 +281,9 @@ function App() {
         <div><strong>How to use</strong></div>
         <ol>
           <li>Create a pair on the Control page. Open two tabs using the provided links (initiator and responder).</li>
-          <li>Type a message on the client tab and choose finality=turn to pass the token.</li>
+          <li>Type a message on the initiator tab and choose finality=turn to pass the token.</li>
           <li>The responder receives the message; they can then reply and flip the turn.</li>
-          <li>Use <em>Soft reset</em> to start a new epoch. Only the responder listens to the backchannel and re-subscribes automatically. The client remains a pure A2A app.</li>
+          <li>Use <em>Soft reset</em> to start a new epoch. Only the responder listens to the backchannel and re-subscribes automatically. The initiator remains a pure A2A app.</li>
         </ol>
       </div>
     </div>
