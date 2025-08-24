@@ -327,15 +327,32 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
 
   if (method === 'message/send') {
     const msg = params?.message || {};
-    const taskId = String(msg?.taskId || '');
-    const t = getTaskById(p, taskId);
-    if (!t) return c.json(jsonrpcError(id, -32001, 'Task not found'), 200);
+    let taskId = String(msg?.taskId || '');
+    let t = getTaskById(p, taskId);
+    if (!t) {
+      // If no task provided, treat as new epoch from initiator and create tasks
+      // This mirrors the behavior of message/stream when launched without a taskId
+      p.epoch += 1;
+      p.turn = p.startingTurn || 'initiator';
+      p.initiatorTask = newTask(pairId, 'initiator', `init:${pairId}#${p.epoch}`);
+      p.responderTask = newTask(pairId, 'responder', `resp:${pairId}#${p.epoch}`);
+      logEvent(p, { type: 'epoch-begin', epoch: p.epoch });
+      // tell responder to subscribe
+      {
+        const ev = { type:'subscribe', pairId, epoch: p.epoch, taskId: p.responderTask!.id, turn: p.turn };
+        p.serverEvents.forEach(fn => fn(ev));
+        logEvent(p, { type: 'backchannel', action: 'subscribe', epoch: p.epoch, taskId: p.responderTask!.id, turn: p.turn });
+      }
+      try { persistPairMeta(p); } catch {}
+      t = p.initiatorTask;
+      taskId = t!.id;
+    }
     const parts = Array.isArray(msg.parts) ? msg.parts : [];
     const validation = validateParts(parts);
     if (!validation.ok) return c.json(jsonrpcError(id, -32602, 'Invalid parameters', { reason: validation.reason }), 200);
-    onIncomingMessage(p, t.side, { parts, messageId: String(msg.messageId || crypto.randomUUID()) });
+    onIncomingMessage(p, t!.side, { parts, messageId: String(msg.messageId || crypto.randomUUID()) });
     const historyLength = Number(params?.configuration?.historyLength ?? NaN);
-    const snap = taskSnapshot(t, Number.isFinite(historyLength) ? historyLength : undefined);
+    const snap = taskSnapshot(t!, Number.isFinite(historyLength) ? historyLength : undefined);
     return c.json(jsonrpcResult(id, snap), 200);
   }
 

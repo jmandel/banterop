@@ -22,6 +22,9 @@ export class Journal {
   /** Append a single already-stamped fact; used internally. */
   private _pushStamped(f: Fact) { this._facts.push(f); this._seq = f.seq; this.notify(); }
 
+  /** Clear all facts (local UI state reset). */
+  clear() { this._facts = []; this._seq = 0; this.notify(); }
+
   /** Append a fact authored by harness/UI (auto-stamped). */
   append(f: ProposedFact, vis:'public'|'private'): Fact {
     const stamped = Object.assign({}, f, { seq: this._seq + 1, ts: nowIso(), id: rid('f'), vis }) as unknown as Fact;
@@ -94,7 +97,7 @@ export type HarnessCallbacks = {
   onQuestion?: (q:{ qid:string; prompt:string; required?:boolean; placeholder?:string }) => void;
 };
 
-export type SendMessageFn = (parts: A2APart[], opts:{ messageId:string }) => AsyncGenerator<FrameResult>;
+export type SendMessageFn = (parts: A2APart[], opts:{ messageId:string; signal?:AbortSignal }) => AsyncGenerator<FrameResult>;
 
 export class PlannerHarness<Cfg=unknown> {
   constructor(
@@ -110,6 +113,14 @@ export class PlannerHarness<Cfg=unknown> {
   private composing: { composeId:string; text:string; attachments?:AttachmentMeta[] } | null = null;
   private awaitingAnswerForQid: string | null = null;
   private pendingSent: { messageId:string; text:string; attachments?:AttachmentMeta[]; composeId?:string } | null = null;
+
+  /** Reset local transient state (composing, questions, pending). */
+  resetLocal() {
+    this.composing = null;
+    this.awaitingAnswerForQid = null;
+    this.pendingSent = null;
+    this.flushHud();
+  }
 
   // --- UI helpers ---
   openComposer(ci:{ composeId:string; text:string; attachments?:AttachmentMeta[] }) {
@@ -155,7 +166,6 @@ export class PlannerHarness<Cfg=unknown> {
         const st = frame.status?.state || 'submitted';
         this.journal.append({ type: 'status_changed', a2a: st } as ProposedFact, 'private');
         const m = frame.status?.message;
-        // On initial subscription, reflect latest agent message so receiver can see it
         if (m && m.role === 'agent') {
           const textParts = (m.parts || []).filter((p): p is Extract<A2APart, { kind: 'text' }> => p.kind === 'text').map(p => p.text).join('\n');
           const messageId = m.messageId || rid('m');
@@ -171,6 +181,16 @@ export class PlannerHarness<Cfg=unknown> {
               }
             }
             this.journal.append({ type: 'remote_received', messageId, text: textParts, attachments: attachments.length ? attachments : undefined } as ProposedFact, 'public');
+          }
+        }
+        // If the latest message was authored by us (role='user') and matches pendingSent, record remote_sent
+        if (m && m.role === 'user' && this.pendingSent) {
+          const textParts = (m.parts || []).filter((p): p is Extract<A2APart, { kind: 'text' }> => p.kind === 'text').map(p => p.text).join('\n');
+          const messageId = m.messageId || rid('m');
+          if (this.pendingSent.messageId === messageId) {
+            this.journal.append({ type: 'remote_sent', messageId, text: (this.pendingSent.text || textParts), attachments: this.pendingSent.attachments, composeId: this.pendingSent.composeId } as ProposedFact, 'public');
+            this.pendingSent = null;
+            this.clearComposer();
           }
         }
         return;
@@ -210,6 +230,7 @@ export class PlannerHarness<Cfg=unknown> {
 
   /** Approve & send a compose intent (will be ignored if not our turn). */
   async approveAndSend(composeId: string, finality:'none'|'turn'|'conversation'='turn') {
+    console.debug('[harness] approveAndSend start', { composeId, finality });
     const facts = this.journal.facts();
     const ci = [...facts].reverse().find((f): f is Extract<Fact, { type: 'compose_intent' }> => f.type === 'compose_intent' && f.composeId === composeId);
     if (!ci) return;
@@ -226,12 +247,13 @@ export class PlannerHarness<Cfg=unknown> {
         }
       }
     }
-    // Send via A2A; we will append remote_sent when the status-update reflecting this message arrives.
+    // Send via A2A; append remote_sent when the status-update reflecting this message arrives.
     const messageId = rid('m');
     this.pendingSent = { messageId, text: ci.text, attachments: ci.attachments, composeId };
     for await (const frame of this.sendMessage(parts, { messageId })) {
       this.ingestA2AFrame(frame);
     }
+    console.debug('[harness] approveAndSend done', { composeId });
   }
 
   /** Read attachment bytes by name at current cut. */

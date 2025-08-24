@@ -16,7 +16,8 @@ function useQuery() {
   const role = (u.searchParams.get('role') === 'responder') ? 'responder' : 'initiator';
   const a2aUrl = u.searchParams.get('a2a') || '';
   const tasksUrl = u.searchParams.get('tasks') || '';
-  return { role, a2aUrl, tasksUrl };
+  const tid = u.searchParams.get('tid') || '';
+  return { role, a2aUrl, tasksUrl, tid };
 }
 
 // UI helpers
@@ -37,11 +38,24 @@ function attachmentHrefFromBase64(name:string, mimeType:string, b64:string) {
 }
 
 function App() {
-  const { role, a2aUrl, tasksUrl } = useQuery();
+  const { role, a2aUrl, tasksUrl, tid } = useQuery();
   const endpoint = useMemo(() => a2aUrl, [a2aUrl]);
   const a2a = useMemo(() => new A2AClient(endpoint), [endpoint]);
   const [status, setStatus] = useState<A2AStatus | 'initializing'>('initializing');
   const [taskId, setTaskId] = useState<string | undefined>();
+
+  // Initialize taskId from URL param on first mount
+  useEffect(() => {
+    if (tid) setTaskId(tid);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep URL param 'tid' in sync with current taskId
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (taskId) url.searchParams.set('tid', taskId); else url.searchParams.delete('tid');
+    try { window.history.replaceState(null, '', url.toString()); } catch {}
+  }, [taskId]);
   const [facts, setFacts] = useState<Fact[]>([]);
   const [agentMode, setAgentMode] = useState<'off'|'suggest'|'auto'>('suggest');
   const [hudNow, setHudNow] = useState<string>('');
@@ -56,7 +70,13 @@ function App() {
     harnessRef.current = new PlannerHarness<{mode:'off'|'suggest'|'auto'}>(
       journalRef.current,
       SimpleDemoPlanner,
-      async function* (parts, opts) { for await (const f of a2a.messageStreamParts(parts, { taskId, messageId: opts.messageId })) yield f; },
+      async function* (parts, opts) {
+        console.debug('[send] messageSend start', { hasTask: !!taskId, messageId: opts.messageId, parts: parts.map(p=>p.kind) });
+        const snap = await a2a.messageSend(parts, { taskId, messageId: opts.messageId });
+        try { setTaskId(snap.id); } catch {}
+        console.debug('[send] messageSend done', { taskId: snap.id, status: snap.status.state });
+        yield snap;
+      },
       { mode: agentMode },
       { myAgentId: role, otherAgentId: role==='initiator'?'responder':'initiator' },
       {
@@ -75,7 +95,13 @@ function App() {
     harnessRef.current = new PlannerHarness<{mode:'off'|'suggest'|'auto'}>(
       journalRef.current,
       SimpleDemoPlanner,
-      async function* (parts, opts) { for await (const f of a2a.messageStreamParts(parts, { taskId, messageId: opts.messageId })) yield f; },
+      async function* (parts, opts) {
+        console.debug('[send] messageSend start', { hasTask: !!taskId, messageId: opts.messageId, parts: parts.map(p=>p.kind) });
+        const snap = await a2a.messageSend(parts, { taskId, messageId: opts.messageId });
+        try { setTaskId(snap.id); } catch {}
+        console.debug('[send] messageSend done', { taskId: snap.id, status: snap.status.state });
+        yield snap;
+      },
       { mode: agentMode },
       { myAgentId: role, otherAgentId: role==='initiator'?'responder':'initiator' },
       {
@@ -119,11 +145,24 @@ function App() {
           const payload = JSON.parse(ev.data);
           const msg: ServerEvent = payload.result;
           if (msg.type === 'subscribe') {
+            // New epoch: clear local UI state & journal, then resubscribe
+            try { harnessRef.current?.resetLocal(); } catch {}
+            try { journalRef.current.clear(); } catch {}
+            // Update URL with new task id so reloads work
+            try {
+              const url = new URL(window.location.href);
+              url.searchParams.set('tid', msg.taskId);
+              window.history.replaceState(null, '', url.toString());
+              setTaskId(msg.taskId);
+            } catch {}
             // Resubscribe to this task
             const ac = new AbortController();
             (async () => {
-              for await (const frame of a2a.tasksResubscribe(msg.taskId, ac.signal)) {
-                ingestFrame(frame);
+              // Immediately fetch full snapshot
+              try { const snap = await a2a.tasksGet(msg.taskId); if (snap) ingestFrame(snap); } catch {}
+              // Use SSE feed as triggers to refresh snapshot
+              for await (const _ of a2a.tasksResubscribe(msg.taskId, ac.signal)) {
+                try { const snap = await a2a.tasksGet(msg.taskId); if (snap) ingestFrame(snap); } catch {}
               }
             })();
           }
@@ -142,8 +181,28 @@ function App() {
     const ac = new AbortController();
     (async () => {
       try {
-        for await (const frame of a2a.tasksResubscribe(taskId, ac.signal)) {
-          ingestFrame(frame);
+        // Fetch full snapshot at start
+        try { const snap = await a2a.tasksGet(taskId); if (snap) ingestFrame(snap); } catch {}
+        // On any SSE event, refresh snapshot
+        for await (const _ of a2a.tasksResubscribe(taskId, ac.signal)) {
+          try { const snap = await a2a.tasksGet(taskId); if (snap) ingestFrame(snap); } catch {}
+        }
+      } catch {}
+    })();
+    return () => { try { ac.abort(); } catch {} };
+  }, [endpoint, role, taskId, a2a]);
+
+  // If we land on responder with a tid in the URL, resubscribe immediately via A2A
+  useEffect(() => {
+    if (!endpoint) return;
+    if (role !== 'responder') return;
+    if (!taskId) return;
+    const ac = new AbortController();
+    (async () => {
+      try {
+        try { const snap = await a2a.tasksGet(taskId); if (snap) ingestFrame(snap); } catch {}
+        for await (const _ of a2a.tasksResubscribe(taskId, ac.signal)) {
+          try { const snap = await a2a.tasksGet(taskId); if (snap) ingestFrame(snap); } catch {}
         }
       } catch {}
     })();
@@ -168,6 +227,22 @@ function App() {
   // We kick planner when app comes into our turn via status updates.
 
   // UI actions
+  async function cancelAndClear() {
+    try {
+      console.debug('[ui] cancelAndClear start', { role, taskId });
+      if (taskId) await a2a.cancel(taskId);
+    } catch (e) {
+      console.warn('[ui] cancelAndClear cancel failed', e);
+    }
+    try { harnessRef.current?.resetLocal(); } catch {}
+    try { journalRef.current.clear(); } catch {}
+    setTaskId(undefined);
+    setCompose(null);
+    setOpenQuestion(null);
+    setHudNow('');
+    setHudLog([]);
+    console.debug('[ui] cancelAndClear done');
+  }
   async function approveAndSend() {
     if (!compose || sending) return;
     setSending(true);
@@ -214,6 +289,12 @@ function App() {
         <div className="row">
           <div><strong>Role:</strong> <span className="pill">{role === 'initiator' ? 'Initiator' : 'Responder'}</span></div>
           <div className="pill">Status: {currentStatus}</div>
+          {taskId && <div className="pill">Task: {taskId}</div>}
+          {role === 'initiator' && taskId && (
+            <div className="row" style={{marginLeft:8}}>
+              <Button onClick={cancelAndClear}>Cancel task and clear state</Button>
+            </div>
+          )}
           <div className="row" style={{marginLeft:'auto', gap:8}}>
             <label className="small">Agent
               <select value={agentMode} onChange={e => setAgentMode(e.target.value as 'off'|'suggest'|'auto')} style={{marginLeft:6}}>

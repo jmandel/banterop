@@ -5,11 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "bun --watch src/server/flipproxy.ts",
-    "start": "bun src/server/flipproxy.ts"
+    "start": "bun src/server/flipproxy.ts",
+    "test": "bun test",
+    "typecheck": "bun x tsc --noEmit"
   },
   "dependencies": {
+    "bun-storage": "^1.1.1",
+    "bun-types": "^1.2.20",
     "hono": "^4.9.4",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@types/react-dom": "^18"
   }
 }

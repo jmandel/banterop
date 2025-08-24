@@ -20,8 +20,12 @@ export function ManualComposer({
     if (!t || disabled || busy) return;
     setBusy(true);
     try {
-      await onSend(t, finality);
+      console.debug('[manual-composer] onSend', { textLen: t.length, finality });
+      const p = onSend(t, finality);
       setText('');
+      if (p && typeof (p as Promise<void>).then === 'function') {
+        (p as Promise<void>).catch(() => {});
+      }
     } finally {
       setBusy(false);
     }
@@ -80,4 +84,3 @@ export function ManualComposer({
     </div>
   );
 }
-

@@ -31,6 +31,15 @@ export class A2AClient {
     const body = { jsonrpc:'2.0', id: crypto.randomUUID(), method: 'tasks/cancel', params: { id: taskId } };
     await fetch(this.ep(), { method:'POST', headers: { 'content-type':'application/json' }, body: JSON.stringify(body) });
   }
+  async messageSend(parts: A2APart[], opts:{ taskId?:string; messageId?:string }): Promise<A2ATask> {
+    const body = { jsonrpc:'2.0', id: crypto.randomUUID(), method: 'message/send', params: { message: { taskId: opts.taskId, messageId: opts.messageId || crypto.randomUUID(), parts } } };
+    console.debug('[a2a] messageSend', { hasTask: !!opts.taskId, messageId: (body.params as any).message.messageId, parts: parts.map(p=>p.kind) });
+    const res = await fetch(this.ep(), { method:'POST', headers: { 'content-type':'application/json' }, body: JSON.stringify(body) });
+    if (!res.ok) throw new Error('message/send failed: ' + res.status);
+    const j = await res.json();
+    console.debug('[a2a] messageSend result', { ok: res.ok, status: res.status, kind: j?.result?.kind, taskId: j?.result?.id, state: j?.result?.status?.state });
+    return j.result as A2ATask;
+  }
 }
 
 async function* sseToObjects(stream: ReadableStream<Uint8Array>): AsyncGenerator<FrameResult> {
