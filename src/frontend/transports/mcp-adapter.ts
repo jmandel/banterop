@@ -1,4 +1,4 @@
-import type { TransportAdapter, TransportSnapshot } from "./types";
+import type { TransportAdapter, TransportSnapshot, SendOptions } from "./types";
 import type { A2APart, A2AMessage, A2AStatus } from "../../shared/a2a-types";
 
 type McpToolResult = { content: Array<{ type?: string; text?: string }>; };
@@ -80,7 +80,7 @@ export class MCPAdapter implements TransportAdapter {
     return this.buildSnapshot();
   }
 
-  async send(parts: A2APart[], opts: { taskId?: string; messageId?: string; finality?: 'none'|'turn'|'conversation' }): Promise<{ taskId: string; snapshot: TransportSnapshot }> {
+  async send(parts: A2APart[], opts: SendOptions): Promise<{ taskId: string; snapshot: TransportSnapshot }> {
     if (!this.conversationId) {
       const res = await callTool(this.endpoint, 'begin_chat_thread', {});
       this.conversationId = res?.conversationId || `conv-${crypto.randomUUID()}`;
@@ -94,9 +94,10 @@ export class MCPAdapter implements TransportAdapter {
       let content = '';
       if ('bytes' in p.file) {
         try {
-          const bin = atob(p.file.bytes); const arr = new Uint8Array(len=bin.length);
-          for (let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
-          content = new TextDecoder('utf-8').decode(arr);
+            const bin = atob(p.file.bytes);
+            const arr = new Uint8Array(bin.length);
+            for (let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+            content = new TextDecoder('utf-8').decode(arr);
         } catch { content = ''; }
       } else {
         content = '[remote file: uri omitted]';
@@ -112,7 +113,7 @@ export class MCPAdapter implements TransportAdapter {
     const id = opts.messageId || `m-${crypto.randomUUID()}`;
     this.messages.push({ role:'user', parts, messageId: id, kind:'message', contextId: this.conversationId, taskId: this.conversationId });
     this.status = 'working';
-    return { taskId: this.conversationId, snapshot: this.buildSnapshot() };
+    return { taskId: this.conversationId!, snapshot: this.buildSnapshot() };
   }
 
   async cancel(taskId: string): Promise<void> {

@@ -1,6 +1,5 @@
 export async function* readSSE(resp: Response): AsyncGenerator<string> {
   if (!resp.body) return;
-  // Bun's Response.body has getReader in web streams API
   const reader = (resp.body as ReadableStream<Uint8Array> | null | undefined)?.getReader?.();
   if (!reader) return;
   const decoder = new TextDecoder();

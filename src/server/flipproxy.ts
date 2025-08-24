@@ -3,11 +3,14 @@ import { streamSSE } from "hono/streaming";
 import { serve } from "bun";
 import type { A2APart, A2AFrame, A2AMessage, A2AStatus, A2ATask } from "../shared/a2a-types";
 import { createLocalStorage } from 'bun-storage';
+import controlHtml from '../frontend/control/index.html';
+import participantHtml from '../frontend/participant/index.html';
+import { registerFlipProxyMcpBridge } from './bridge/mcp-on-flipproxy';
 
-type Role = 'initiator' | 'responder';
+export type Role = 'initiator' | 'responder';
 const asPublicRole = (s: Role) => s;
 
-type TaskState = {
+export type TaskState = {
   id: string;
   side: Role;
   pairId: string;
@@ -35,6 +38,7 @@ type Pair = {
 const pairs = new Map<string, Pair>();
 
 const app = new Hono();
+registerFlipProxyMcpBridge(app);
 
 // --- Persistence (bun-storage) ---
 const [localStorage] = createLocalStorage(process.env.FLIPPROXY_DB || './db.sqlite');
@@ -99,7 +103,7 @@ function hydrateTask(pairId: string, side: Role, t: any | null | undefined): Tas
   } as TaskState;
 }
 
-async function mustPairAsync(id: string): Promise<Pair> {
+export async function mustPairAsync(id: string): Promise<Pair> {
   const inMem = pairs.get(id);
   if (inMem) return inMem;
   const meta = await readPairMeta(id);
@@ -144,8 +148,8 @@ app.post('/api/pairs', async (c) => {
   const p: Pair = { id: pairId, epoch: 0, turn: 'initiator', startingTurn: 'initiator', serverEvents: new Set(), eventLog: new Set(), eventSeq: 0, eventHistory: [], metadata };
   pairs.set(pairId, p);
   logEvent(p, { type: 'pair-created', pairId, epoch: p.epoch });
-  const a2aUrl = `${origin}/api/bridge/${pairId}/a2a`
-  const tasksUrl = `${origin}/pairs/${pairId}/server-events`
+  const a2aUrl = `${origin}/api/bridge/${pairId}/a2a`;
+  const tasksUrl = `${origin}/pairs/${pairId}/server-events`;
   await addPairToIndex(pairId);
   await persistPairMeta(p);
   return c.json({
@@ -165,9 +169,7 @@ app.get('/pairs/:pairId/server-events', async (c) => {
   c.header('X-Accel-Buffering', 'no');
   return streamSSE(c, async (stream) => {
     const push = (ev: any) => stream.writeSSE({ data: JSON.stringify({ result: ev }) });
-    const ka = setInterval(() => {
-      try { stream.writeSSE({ event: 'ping', data: String(Date.now()) }); } catch {}
-    }, 15000);
+    const ka = setInterval(() => { try { stream.writeSSE({ event: 'ping', data: String(Date.now()) }); } catch {} }, 15000);
     p.serverEvents.add(push);
     if (p.responderTask) {
       push({ type: 'subscribe', pairId, epoch: p.epoch, taskId: p.responderTask.id, turn: p.turn });
@@ -179,7 +181,7 @@ app.get('/pairs/:pairId/server-events', async (c) => {
   });
 });
 
-// Event tail
+// Control plane event tail
 app.get('/pairs/:pairId/events.log', async (c) => {
   const pairId = c.req.param('pairId');
   const p = await mustPairAsync(pairId);
@@ -194,7 +196,9 @@ app.get('/pairs/:pairId/events.log', async (c) => {
       const sinceParam = url.searchParams.get('since');
       const since = sinceParam ? Number(sinceParam) : -1;
       const hist = p.eventHistory || [];
-      if (Number.isFinite(since)) for (const row of hist) if (row.seq > since) push(row.ev);
+      if (Number.isFinite(since)) {
+        for (const row of hist) if (row.seq > since) push(row.ev);
+      }
     } catch {}
     p.eventLog.add(push);
     await new Promise<void>((resolve) => stream.onAbort(resolve));
@@ -205,10 +209,15 @@ app.get('/pairs/:pairId/events.log', async (c) => {
 
 app.post('/pairs/:pairId/reset', async (c) => {
   const pairId = c.req.param('pairId');
+  const { type } = await safeJson(c);
   const p = await mustPairAsync(pairId);
-  // clear history, cancel tasks, bump epoch
   logEvent(p, { type: 'reset-start', reason: 'hard', prevEpoch: p.epoch, nextEpoch: p.epoch + 1 });
   p.eventHistory = [];
+  if (p.responderTask) {
+    const ev = { type: 'unsubscribe', pairId, epoch: p.epoch };
+    p.serverEvents.forEach(fn => fn(ev));
+    logEvent(p, { type: 'backchannel', action: 'unsubscribe', epoch: p.epoch });
+  }
   if (p.initiatorTask) setTaskStatus(p.initiatorTask, 'canceled');
   if (p.responderTask) setTaskStatus(p.responderTask, 'canceled');
   try { logEvent(p, { type: 'state', states: { initiator: p.initiatorTask?.status || 'canceled', responder: p.responderTask?.status || 'canceled' } }); } catch {}
@@ -231,12 +240,66 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
   const params = raw?.params || {};
   if (!method) return c.json(jsonrpcError(id, -32600, 'Invalid Request'), 200);
 
+  if (method === 'message/stream') {
+    const msg = params?.message || {};
+    c.header('Cache-Control', 'no-cache, no-transform');
+    c.header('Connection', 'keep-alive');
+    c.header('X-Accel-Buffering', 'no');
+    return streamSSE(c, async (stream) => {
+      const ka = setInterval(() => { try { stream.writeSSE({ event: 'ping', data: String(Date.now()) }); } catch {} }, 15000);
+      let side: Role | null = null;
+      let task: TaskState | undefined;
+      if (msg.taskId) {
+        task = getTaskById(p, String(msg.taskId));
+        side = task?.side || null;
+      }
+      if (!task) {
+        side = 'initiator';
+        if (!p.initiatorTask || !p.responderTask) {
+          p.epoch += 1;
+          p.turn = p.startingTurn || 'initiator';
+          p.initiatorTask = newTask(pairId, 'initiator', `init:${pairId}#${p.epoch}`);
+          p.responderTask = newTask(pairId, 'responder', `resp:${pairId}#${p.epoch}`);
+          logEvent(p, { type: 'epoch-begin', epoch: p.epoch });
+          const ev = { type:'subscribe', pairId, epoch: p.epoch, taskId: p.responderTask!.id, turn: p.turn };
+          p.serverEvents.forEach(fn => fn(ev));
+          logEvent(p, { type: 'backchannel', action: 'subscribe', epoch: p.epoch, taskId: p.responderTask!.id, turn: p.turn });
+          try { persistPairMeta(p); } catch {}
+        }
+        task = p.initiatorTask;
+      }
+      const t = task!;
+      const push = (frame: A2AFrame) => {
+        const payload = { jsonrpc: '2.0', id, result: frame.result };
+        stream.writeSSE({ data: JSON.stringify(payload) });
+      };
+      t.subscribers.add(push);
+      if (!t.primaryLogSubscriber) t.primaryLogSubscriber = push;
+      push({ result: taskSnapshot(t) });
+      const parts = Array.isArray(msg.parts) ? msg.parts : [];
+      if (parts.length) {
+        const validation = validateParts(parts);
+        if (!validation.ok) {
+          stream.writeSSE({ data: JSON.stringify(jsonrpcError(id, -32602, 'Invalid parameters', { reason: validation.reason })) });
+        } else {
+          onIncomingMessage(p, t.side, { parts, messageId: String(msg.messageId || crypto.randomUUID()) });
+        }
+      }
+      await new Promise<void>((resolve) => stream.onAbort(resolve));
+      t.subscribers.delete(push);
+      if (t.primaryLogSubscriber === push) {
+        const next = t.subscribers.values().next();
+        t.primaryLogSubscriber = next && !next.done ? next.value : undefined;
+      }
+      clearInterval(ka);
+    });
+  }
+
   if (method === 'message/send') {
     const msg = params?.message || {};
     let taskId = String(msg?.taskId || '');
     let t = getTaskById(p, taskId);
     if (!t) {
-      // new epoch from initiator
       p.epoch += 1;
       p.turn = p.startingTurn || 'initiator';
       p.initiatorTask = newTask(pairId, 'initiator', `init:${pairId}#${p.epoch}`);
@@ -253,14 +316,16 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
     const validation = validateParts(parts);
     if (!validation.ok) return c.json(jsonrpcError(id, -32602, 'Invalid parameters', { reason: validation.reason }), 200);
     onIncomingMessage(p, t!.side, { parts, messageId: String(msg.messageId || crypto.randomUUID()) });
-    const snap = taskSnapshot(t!);
+    const historyLength = Number(params?.configuration?.historyLength ?? NaN);
+    const snap = taskSnapshot(t!, Number.isFinite(historyLength) ? historyLength : undefined);
     return c.json(jsonrpcResult(id, snap), 200);
   }
 
   if (method === 'tasks/get') {
     const t = getTaskById(p, String(params?.id || ''));
     if (!t) return c.json(jsonrpcError(id, -32001, 'Task not found'), 200);
-    const snap = taskSnapshot(t);
+    const historyLength = Number(params?.historyLength ?? NaN);
+    const snap = taskSnapshot(t, Number.isFinite(historyLength) ? historyLength : undefined);
     return c.json(jsonrpcResult(id, snap), 200);
   }
 
@@ -270,8 +335,10 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
     c.header('Connection', 'keep-alive');
     c.header('X-Accel-Buffering', 'no');
     return streamSSE(c, async (stream) => {
+      const ka = setInterval(() => { try { stream.writeSSE({ event: 'ping', data: String(Date.now()) }); } catch {} }, 15000);
       if (!t) {
         stream.writeSSE({ data: JSON.stringify(jsonrpcError(id, -32001, 'Task not found')) });
+        clearInterval(ka);
         return;
       }
       const push = (frame: A2AFrame) => {
@@ -287,20 +354,31 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
         const next = t.subscribers.values().next();
         t.primaryLogSubscriber = next && !next.done ? next.value : undefined;
       }
+      clearInterval(ka);
     });
   }
 
   if (method === 'tasks/cancel') {
     const t = getTaskById(p, String(params?.id || ''));
     if (!t) return c.json(jsonrpcError(id, -32001, 'Task not found'), 200);
-    setTaskStatus(t, 'canceled');
+    // Cancel both sides of the conversation so subscribers on either task are notified
+    try {
+      if (p.initiatorTask) setTaskStatus(p.initiatorTask, 'canceled');
+      if (p.responderTask) setTaskStatus(p.responderTask, 'canceled');
+      // Log combined state to control-plane event log
+      try { logEvent(p, { type: 'state', states: { initiator: p.initiatorTask?.status || 'canceled', responder: p.responderTask?.status || 'canceled' } }); } catch {}
+      // Optional: emit an unsubscribe advisory on serverEvents so responders can stop any assumptions
+      const ev = { type: 'unsubscribe', pairId: p.id, epoch: p.epoch };
+      try { p.serverEvents.forEach(fn => fn(ev)); logEvent(p, { type:'backchannel', action:'unsubscribe', epoch:p.epoch }); } catch {}
+    } catch {}
+    // Return the snapshot for the task that requested cancel
     return c.json(jsonrpcResult(id, taskSnapshot(t)), 200);
   }
 
   return c.json(jsonrpcError(id, -32601, 'Method not found', { method }), 200);
 });
 
-function onIncomingMessage(p: Pair, from: Role, req: { parts: A2APart[], messageId: string }) {
+export function onIncomingMessage(p: Pair, from: Role, req: { parts: A2APart[], messageId: string }) {
   const cli = p.initiatorTask!, srv = p.responderTask!;
   const metadata = readExtension(req.parts);
   const finality = metadata?.finality || 'none';
@@ -317,8 +395,11 @@ function onIncomingMessage(p: Pair, from: Role, req: { parts: A2APart[], message
     kind: 'message',
   };
   fromTask.history.push(msgSender);
-  if (finality === 'none') setTaskStatus(fromTask, 'input-required', msgSender);
-  else setTaskStatus(fromTask, 'working', msgSender);
+  if (finality === 'none') {
+    setTaskStatus(fromTask, 'input-required', msgSender);
+  } else {
+    setTaskStatus(fromTask, 'working', msgSender);
+  }
 
   const msgRecv: A2AMessage = {
     role: 'agent',
@@ -330,7 +411,9 @@ function onIncomingMessage(p: Pair, from: Role, req: { parts: A2APart[], message
   };
   toTask.history.push(msgRecv);
   toTask.subscribers.forEach(fn => fn({ result: msgRecv }));
-  if (finality === 'none') setTaskStatus(toTask, 'working');
+  if (finality === 'none') {
+    setTaskStatus(toTask, 'working');
+  }
 
   if (finality === 'turn') {
     p.turn = (from === 'initiator') ? 'responder' : 'initiator';
@@ -340,9 +423,7 @@ function onIncomingMessage(p: Pair, from: Role, req: { parts: A2APart[], message
     setTaskStatus(srv, 'completed');
   }
 
-  try {
-    logEvent(p, { type: 'state', states: { initiator: cli.status, responder: srv.status } });
-  } catch {}
+  try { logEvent(p, { type: 'state', states: { initiator: cli.status, responder: srv.status } }); } catch {}
 
   try {
     const text = (req.parts || []).filter((pp:any)=>pp?.kind==='text').map((pp:any)=>pp.text).filter((t:any)=>typeof t==='string').join('\n');
@@ -352,7 +433,7 @@ function onIncomingMessage(p: Pair, from: Role, req: { parts: A2APart[], message
       finality,
       messageId: req.messageId,
       text,
-      parts: req.parts,  // include full parts for control-plane visibility
+      parts: req.parts, // include full parts per requirement
       effects: {
         initiator: { state: cli.status },
         responder: { state: srv.status }
@@ -373,8 +454,15 @@ function readExtension(parts: A2APart[]): any {
   return null;
 }
 
-function newTask(pairId: string, side: Role, id: string): TaskState {
-  const t: TaskState = { id, side, pairId, status: 'submitted', history: [], subscribers: new Set() };
+export function newTask(pairId: string, side: Role, id: string): TaskState {
+  const t: TaskState = {
+    id,
+    side,
+    pairId,
+    status: 'submitted',
+    history: [],
+    subscribers: new Set(),
+  };
   return t;
 }
 
@@ -392,17 +480,33 @@ function setTaskStatus(t: TaskState, state: A2AStatus, message?: A2AMessage) {
   try { const pair = mustPair(t.pairId); persistPairMeta(pair); } catch {}
 }
 
-function taskSnapshot(t: TaskState): A2ATask {
+function taskSnapshot(t: TaskState, historyLength?: number): A2ATask {
   const h = t.history || [];
   const latest = h.length ? h[h.length - 1] : undefined;
   const tail = h.length ? h.slice(0, h.length - 1) : [];
+  const sliced = typeof historyLength === 'number' && historyLength >= 0
+    ? tail.slice(Math.max(0, tail.length - historyLength))
+    : tail;
   const status: { state: A2AStatus; message?: A2AMessage } = latest ? { state: t.status, message: latest } : { state: t.status };
-  return { id: t.id, contextId: t.pairId, kind: 'task', status, history: tail, metadata: {} };
+  return {
+    id: t.id,
+    contextId: t.pairId,
+    kind: 'task',
+    status,
+    history: sliced,
+    metadata: {}
+  };
 }
 
-function statusUpdate(t: TaskState, state: A2AStatus, message?: A2AMessage) {
+function statusUpdate(t: TaskState, state: A2AStatus, message?: A2AMessage): import('../shared/a2a-types').A2AStatusUpdate {
   const terminal = (s: A2AStatus) => ['completed', 'canceled', 'failed', 'rejected'].includes(s);
-  return { taskId: t.id, contextId: t.pairId, status: { state, message }, kind: 'status-update', final: terminal(state) };
+  return {
+    taskId: t.id,
+    contextId: t.pairId,
+    status: { state, message },
+    kind: 'status-update' as const,
+    final: terminal(state)
+  };
 }
 
 function mustPair(id: string): Pair {
@@ -430,9 +534,6 @@ function logEvent(p: Pair, ev: any) {
   try { persistPairMeta(p); } catch {}
 }
 
-import controlHtml from '../frontend/control/index.html';
-import participantHtml from '../frontend/participant/index.html';
-
 const isDev = (Bun.env.NODE_ENV || process.env.NODE_ENV) !== 'production';
 const port = Number(process.env.PORT || 3000);
 
@@ -452,30 +553,38 @@ serve({
       url.pathname.startsWith('/api/') ||
       url.pathname === '/pairs' ||
       url.pathname.startsWith('/pairs/')
-    ) return app.fetch(req);
+    ) {
+      return app.fetch(req);
+    }
+    if (url.pathname === '/.well-known/agent-card.json') {
+      const card = minimalAgentCard(new URL(req.url).origin);
+      return new Response(JSON.stringify(card, null, 2), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
     return new Response('Not Found', { status: 404 });
   },
 });
 
-// validation
-function jsonrpcResult(id: any, result: any) { return { jsonrpc: '2.0', id, result }; }
+function jsonrpcResult(id: any, result: any) {
+  return { jsonrpc: '2.0', id, result };
+}
 function jsonrpcError(id: any, code: number, message: string, data?: any) {
   const err: any = { jsonrpc: '2.0', id, error: { code, message } };
   if (data !== undefined) err.error.data = data;
   return err;
 }
+
 function validateParts(parts: A2APart[]): { ok: true } | { ok: false; reason: string } {
   for (const p of parts) {
-    if (!p || typeof p.kind !== 'string') return { ok: false, reason: 'part missing kind' };
-    if (p.kind === 'file') {
-      const f = p.file;
+    if (!p || typeof (p as any).kind !== 'string') return { ok: false, reason: 'part missing kind' };
+    if ((p as any).kind === 'file') {
+      const f = (p as any).file;
       const hasBytes = ('bytes' in f) && typeof (f as {bytes?: unknown}).bytes === 'string';
       const hasUri = ('uri' in f) && typeof (f as {uri?: unknown}).uri === 'string';
       if (hasBytes && hasUri) return { ok: false, reason: 'file part must not include both bytes and uri' };
       if (!hasBytes && !hasUri) return { ok: false, reason: 'file part requires bytes or uri' };
-    } else if (p.kind === 'text') {
+    } else if ((p as any).kind === 'text') {
       if (typeof (p as any).text !== 'string') return { ok: false, reason: 'text part requires text' };
-    } else if (p.kind === 'data') {
+    } else if ((p as any).kind === 'data') {
       if (typeof (p as any).data !== 'object' || (p as any).data === null) return { ok: false, reason: 'data part requires object data' };
     } else {
       return { ok: false, reason: `unsupported part kind` };
@@ -483,3 +592,63 @@ function validateParts(parts: A2APart[]): { ok: true } | { ok: false; reason: st
   }
   return { ok: true };
 }
+
+function minimalAgentCard(origin: string): any {
+  return {
+    protocolVersion: '0.3.0',
+    name: 'FlipProxy Bridge Agent',
+    description: 'Pairs two participants and mirrors messages using JSON-RPC and SSE.',
+    url: `${origin}/a2a/v1`,
+    preferredTransport: 'JSONRPC',
+    additionalInterfaces: [
+      { url: `${origin}/a2a/v1`, transport: 'JSONRPC' }
+    ],
+    version: '0.1.0',
+    capabilities: { streaming: true },
+    defaultInputModes: ['text/plain', 'application/json'],
+    defaultOutputModes: ['text/plain', 'application/json'],
+    skills: [
+      { id: 'flip-proxy', name: 'Turn-based Mirror', description: 'Mirrors messages between paired participants with turn control.', tags: ['relay', 'chat', 'proxy'] }
+    ]
+  };
+}
+
+// Watchdog for TTL eviction
+const MEMORY_TTL_MS = Number(process.env.PAIR_TTL_MEMORY_MS || 30 * 60 * 1000);
+const STORAGE_TTL_MS = Number(process.env.PAIR_TTL_STORAGE_MS || 48 * 60 * 60 * 1000);
+
+function hasActiveConnections(p: Pair): boolean {
+  const taskActive = (p.initiatorTask?.subscribers?.size || 0) + (p.responderTask?.subscribers?.size || 0) > 0;
+  const logsActive = (p.serverEvents?.size || 0) + (p.eventLog?.size || 0) > 0;
+  return taskActive || logsActive;
+}
+
+async function runWatchdog() {
+  const now = Date.now();
+  for (const [id, p] of pairs) {
+    const last = p.lastActivityMs || 0;
+    if (!hasActiveConnections(p) && last && now - last > MEMORY_TTL_MS) {
+      pairs.delete(id);
+    }
+  }
+  try {
+    const idx = (await lsGet(PAIR_INDEX_KEY)) as string[] | null;
+    const list = Array.isArray(idx) ? idx.slice() : [];
+    const keep: string[] = [];
+    for (const id of list) {
+      const inMem = pairs.get(id);
+      if (inMem && hasActiveConnections(inMem)) { keep.push(id); continue; }
+      const meta = await readPairMeta(id);
+      if (!meta) continue;
+      const lastTs = meta.lastActivityTs ? Date.parse(meta.lastActivityTs) : 0;
+      if (now - lastTs > STORAGE_TTL_MS) {
+        await lsRemove(`pair:meta:${id}`);
+      } else {
+        keep.push(id);
+      }
+    }
+    await lsSet(PAIR_INDEX_KEY, keep);
+  } catch {}
+}
+
+setInterval(runWatchdog, 60_000);

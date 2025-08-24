@@ -11,19 +11,19 @@ function ControlApp() {
   const [initiatorJoinUrl, setInitiatorJoinUrl] = useState<string | undefined>()
   const [responderJoinUrl, setResponderJoinUrl] = useState<string | undefined>()
   const [entries, setEntries] = useState<LogEntry[]>([])
-  const [pretty, setPretty] = useState(true)
+  const [pretty, setPretty] = useState(false)
   const [wrap, setWrap] = useState(false)
+  const [copied, setCopied] = useState(false)
   const [sinceInput, setSinceInput] = useState<string>('0')
   const [sseStatus, setSseStatus] = useState<'idle'|'connecting'|'open'|'error'>('idle')
   const esRef = useRef<EventSource | null>(null)
   const logRef = useRef<HTMLPreElement | null>(null)
 
-  useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
-  }, [entries])
+  function log(text: string) { setEntries((e) => [...e, { when: nowStr(), text }]) }
+
+  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight }, [entries])
 
   useEffect(() => {
-    // Resume from hash
     try {
       const hash = window.location.hash.replace(/^#/, '')
       if (hash) {
@@ -50,8 +50,10 @@ function ControlApp() {
 
   async function createPair() {
     const res = await fetch('/api/pairs', { method: 'POST' })
-    if (!res.ok) return
+    if (!res.ok) { log('Create pair failed: ' + res.status); return }
     const j = await res.json()
+    // Clear current log so we only show events for the new pair
+    setEntries([])
     setPairId(j.pairId)
     setInitiatorJoinUrl(j.initiatorJoinUrl)
     setResponderJoinUrl(j.responderJoinUrl)
@@ -72,58 +74,52 @@ function ControlApp() {
       try {
         const payload = JSON.parse(e.data)
         const ev = payload.result
-        setEntries((prev) => [...prev, { when: nowStr(), obj: ev }])
-        if (typeof ev?.seq === 'number') {
-          const next = `/pairs/${ev.pairId}/events.log?since=${ev.seq}`
-          setSseUrl(next)
-          try { window.location.hash = `pair=${ev.pairId}&since=${ev.seq}` } catch {}
-        }
-      } catch { setEntries((prev) => [...prev, { when: nowStr(), text: e.data }]) }
+        log(JSON.stringify(ev, null, 2))
+      } catch {
+        log('Bad event payload')
+      }
     }
     es.onerror = () => setSseStatus('error')
   }
 
-  function resubscribeSince() {
-    if (!pairId) return
-    const since = Number(sinceInput)
-    const s = Number.isFinite(since) && since >= 0 ? since : 0
-    const url = `/pairs/${pairId}/events.log?since=${s}`
-    setSseUrl(url)
-    try { window.location.hash = `pair=${pairId}&since=${s}` } catch {}
-    subscribe(url)
-  }
-
   async function hardReset() {
     if (!pairId) return
-    await fetch(`/pairs/${pairId}/reset`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'hard' }) })
+    const res = await fetch(`/pairs/${pairId}/reset`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'hard' }) })
+    await res.json().catch(()=>{})
+    // Resubscribe from 0
     setEntries([])
     const url = `/pairs/${pairId}/events.log?since=0`
     setSseUrl(url)
     setSinceInput('0')
+    try { window.location.hash = `pair=${pairId}&since=0` } catch {}
     subscribe(url)
   }
 
-  const rendered = useMemo(() => {
+  const renderedLog = useMemo(() => {
     if (!entries.length) return '(no events yet)'
-    return entries.map(e => {
-      if (e.obj != null) {
-        return JSON.stringify(e.obj, null, pretty ? 2 : 0)
-      }
-      return e.text || ''
-    }).join('\n')
-  }, [entries, pretty])
+    const lines: string[] = []
+    for (const e of entries) if (e.text != null) lines.push(e.text)
+    return lines.join('\n')
+  }, [entries])
+
+  async function copyLog() {
+    try {
+      await navigator.clipboard.writeText(renderedLog || '')
+      // ignore UI flash for brevity
+    } catch {}
+  }
 
   return (
     <div className="wrap">
       <div className="card">
         <div className="row">
-          <button className="primary" onClick={createPair}>Create Pair</button>
-          <span className="small muted">{pairId ? `Pair: ${pairId}` : ''}</span>
+          <button id="btnCreate" className="primary" onClick={createPair}>Create Pair</button>
+          <span id="pairBadge" className="small muted">{pairId ? `Pair: ${pairId}` : ''}</span>
           <span style={{ marginLeft: 'auto' }} />
-          <button disabled={!pairId} onClick={hardReset}>Hard reset</button>
+          <button id="btnHard" disabled={!pairId} onClick={hardReset}>Hard reset</button>
         </div>
         {initiatorJoinUrl || responderJoinUrl ? (
-          <div className="row" style={{ marginTop: 10 }}>
+          <div className="row links" style={{ marginTop: 10 }}>
             {initiatorJoinUrl && <a href={initiatorJoinUrl} target="_blank">Open Initiator</a>}
             {responderJoinUrl && <a href={responderJoinUrl} target="_blank">Open Responder</a>}
           </div>
@@ -135,20 +131,20 @@ function ControlApp() {
           <div className="row" style={{gap:10, alignItems:'center'}}>
             <strong>Events</strong>
           </div>
-          <label className="small">Since <input style={{ width: 90 }} type="number" value={sinceInput} onChange={(e)=>setSinceInput(e.target.value)} onBlur={resubscribeSince} /></label>
-          <label className="small"><input type="checkbox" checked={pretty} onChange={(e) => setPretty(e.target.checked)} /> Pretty JSON</label>
-          <label className="small"><input type="checkbox" checked={wrap} onChange={(e) => setWrap(e.target.checked)} /> Wrap lines</label>
+          <div className="row" style={{ gap: 6 }}>
+            <button id="btnCopy" onClick={copyLog}>Copy</button>
+          </div>
         </div>
         {sseUrl && (
           <div className="small muted" style={{ marginTop: 6, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-            SSE: <code style={{ display:'inline-block', maxWidth:'60ch', overflow:'hidden', textOverflow:'ellipsis', verticalAlign:'bottom' }}>{sseUrl}</code>
+            SSE: <code id="sseUrl" style={{ display:'inline-block', maxWidth:'60ch', overflow:'hidden', textOverflow:'ellipsis', verticalAlign:'bottom' }}>{sseUrl}</code>
           </div>
         )}
         <pre
-          ref={logRef}
-          style={{ maxHeight: 'none', overflowX: 'auto', overflowY: 'visible', whiteSpace: wrap ? 'pre-wrap' : 'pre', overflowWrap: wrap ? 'anywhere' : 'normal' }}
+          id="log"
+          style={{ maxHeight: 'none', overflowX: 'auto', overflowY: 'visible', whiteSpace: 'pre', overflowWrap: 'normal' }}
         >
-          {rendered}
+          {renderedLog}
         </pre>
       </div>
     </div>
