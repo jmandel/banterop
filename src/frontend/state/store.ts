@@ -58,9 +58,6 @@ export const useAppStore = create<Store>((set, get) => ({
     const prev = get().taskId;
     set({ taskId });
     if (taskId && taskId !== prev) {
-      if (get().role === 'responder') {
-        set({ facts: [], seq: 0, pending: {}, knownMsg: {}, composing: undefined });
-      }
       try { get().startTicks(); } catch {}
       void get().fetchAndIngest();
     }
@@ -116,9 +113,9 @@ export const useAppStore = create<Store>((set, get) => ({
     // resolve compose
     const ci = [...facts].reverse().find((f): f is Extract<typeof f, { type:'compose_intent' }> => f.type === 'compose_intent' && f.composeId === composeId);
     if (!ci) return;
-    // build parts (message-level metadata carries finality)
+    // build parts
     const parts: A2APart[] = [];
-    parts.push({ kind:'text', text: ci.text });
+    parts.push({ kind:'text', text: ci.text, metadata: { 'https://chitchat.fhir.me/a2a-ext': { finality } } });
     if (Array.isArray(ci.attachments)) {
       for (const a of ci.attachments) {
         const resolved = resolveAttachmentBytes(facts, a.name);
