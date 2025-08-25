@@ -16,7 +16,8 @@ describe("A2ATransport", () => {
       async cancel(_id: string) { events.push(1); },
       async *ticks(_id: string, _signal?: AbortSignal) { yield; yield; }
     } as any;
-    const t = new A2ATransport(fakeClient, { role:'initiator' });
+    const t = new A2ATransport('http://fake');
+    (t as any).client = fakeClient;
 
     const sendOut = await t.send([{ kind:'text', text:'hi' }], { taskId:'tA' });
     expect(sendOut.taskId).toBe('tA');
@@ -34,4 +35,3 @@ describe("A2ATransport", () => {
     expect(yielded).toBe(2);
   });
 });
-

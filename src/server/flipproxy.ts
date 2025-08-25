@@ -40,6 +40,26 @@ const pairs = new Map<string, Pair>();
 const app = new Hono();
 registerFlipProxyMcpBridge(app);
 
+// --- Basic request logging middleware (debug slow/pending requests)
+app.use('*', async (c, next) => {
+  const start = Date.now();
+  const url = new URL(c.req.url);
+  const id = Math.random().toString(36).slice(2, 8);
+  const accept = c.req.header('accept') || '';
+  const ct = c.req.header('content-type') || '';
+  try {
+    console.log(`[req ${id}] ${c.req.method} ${url.pathname} accept=${accept} ct=${ct}`);
+    await next();
+    const ms = Date.now() - start;
+    const status = (c as any).res?.status || '-';
+    console.log(`[res ${id}] ${c.req.method} ${url.pathname} -> ${status} in ${ms}ms`);
+  } catch (e) {
+    const ms = Date.now() - start;
+    console.error(`[err ${id}] ${c.req.method} ${url.pathname} after ${ms}ms`, e);
+    throw e;
+  }
+});
+
 // --- Persistence (bun-storage) ---
 const [localStorage] = createLocalStorage(process.env.FLIPPROXY_DB || './db.sqlite');
 const PAIR_INDEX_KEY = 'pair:index';
@@ -168,6 +188,7 @@ app.get('/pairs/:pairId/server-events', async (c) => {
   c.header('Connection', 'keep-alive');
   c.header('X-Accel-Buffering', 'no');
   return streamSSE(c, async (stream) => {
+    try { console.log(`[sse open] /pairs/${'${'}pairId${'}'}/server-events`); } catch {}
     const push = (ev: any) => stream.writeSSE({ data: JSON.stringify({ result: ev }) });
     const ka = setInterval(() => { try { stream.writeSSE({ event: 'ping', data: String(Date.now()) }); } catch {} }, 15000);
     p.serverEvents.add(push);
@@ -175,7 +196,7 @@ app.get('/pairs/:pairId/server-events', async (c) => {
       push({ type: 'subscribe', pairId, epoch: p.epoch, taskId: p.responderTask.id, turn: p.turn });
       logEvent(p, { type: 'backchannel', action: 'subscribe', epoch: p.epoch, taskId: p.responderTask.id, turn: p.turn });
     }
-    await new Promise<void>((resolve) => stream.onAbort(resolve));
+    await new Promise<void>((resolve) => stream.onAbort(() => { try { console.log(`[sse abort] /pairs/${'${'}pairId${'}'}/server-events`); } catch {}; resolve(); }));
     p.serverEvents.delete(push);
     clearInterval(ka);
   });
@@ -189,6 +210,7 @@ app.get('/pairs/:pairId/events.log', async (c) => {
   c.header('Connection', 'keep-alive');
   c.header('X-Accel-Buffering', 'no');
   return streamSSE(c, async (stream) => {
+    try { console.log(`[sse open] /pairs/${'${'}pairId${'}'}/server-events`); } catch {}
     const push = (ev: any) => stream.writeSSE({ data: JSON.stringify({ result: ev }) });
     const ka = setInterval(() => { try { stream.writeSSE({ event: 'ping', data: String(Date.now()) }); } catch {} }, 15000);
     try {
@@ -201,7 +223,7 @@ app.get('/pairs/:pairId/events.log', async (c) => {
       }
     } catch {}
     p.eventLog.add(push);
-    await new Promise<void>((resolve) => stream.onAbort(resolve));
+    await new Promise<void>((resolve) => stream.onAbort(() => { try { console.log(`[sse abort] /pairs/${'${'}pairId${'}'}/events.log`); } catch {}; resolve(); }));
     p.eventLog.delete(push);
     clearInterval(ka);
   });
@@ -277,15 +299,16 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
       if (!t.primaryLogSubscriber) t.primaryLogSubscriber = push;
       push({ result: taskSnapshot(t) });
       const parts = Array.isArray(msg.parts) ? msg.parts : [];
+      const msgMeta = (msg && typeof msg === 'object' && (msg as any).metadata) || undefined;
       if (parts.length) {
         const validation = validateParts(parts);
         if (!validation.ok) {
           stream.writeSSE({ data: JSON.stringify(jsonrpcError(id, -32602, 'Invalid parameters', { reason: validation.reason })) });
         } else {
-          onIncomingMessage(p, t.side, { parts, messageId: String(msg.messageId || crypto.randomUUID()) });
+          onIncomingMessage(p, t.side, { parts, messageId: String(msg.messageId || crypto.randomUUID()), metadata: msgMeta });
         }
       }
-      await new Promise<void>((resolve) => stream.onAbort(resolve));
+      await new Promise<void>((resolve) => stream.onAbort(() => { try { console.log(`[sse abort] message/stream for pair ${'${'}pairId${'}'}`); } catch {}; resolve(); }));
       t.subscribers.delete(push);
       if (t.primaryLogSubscriber === push) {
         const next = t.subscribers.values().next();
@@ -315,7 +338,8 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
     const parts = Array.isArray(msg.parts) ? msg.parts : [];
     const validation = validateParts(parts);
     if (!validation.ok) return c.json(jsonrpcError(id, -32602, 'Invalid parameters', { reason: validation.reason }), 200);
-    onIncomingMessage(p, t!.side, { parts, messageId: String(msg.messageId || crypto.randomUUID()) });
+    const msgMeta = (msg && typeof msg === 'object' && (msg as any).metadata) || undefined;
+    onIncomingMessage(p, t!.side, { parts, messageId: String(msg.messageId || crypto.randomUUID()), metadata: msgMeta });
     const historyLength = Number(params?.configuration?.historyLength ?? NaN);
     const snap = taskSnapshot(t!, Number.isFinite(historyLength) ? historyLength : undefined);
     return c.json(jsonrpcResult(id, snap), 200);
@@ -348,7 +372,7 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
       t.subscribers.add(push);
       if (!t.primaryLogSubscriber) t.primaryLogSubscriber = push;
       push({ result: taskSnapshot(t) });
-      await new Promise<void>((resolve) => stream.onAbort(resolve));
+      await new Promise<void>((resolve) => stream.onAbort(() => { try { console.log(`[sse abort] tasks/resubscribe for ${'${'}String(params?.id || '')${'}'}`); } catch {}; resolve(); }));
       t.subscribers.delete(push);
       if (t.primaryLogSubscriber === push) {
         const next = t.subscribers.values().next();
@@ -378,9 +402,9 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
   return c.json(jsonrpcError(id, -32601, 'Method not found', { method }), 200);
 });
 
-export function onIncomingMessage(p: Pair, from: Role, req: { parts: A2APart[], messageId: string }) {
+export function onIncomingMessage(p: Pair, from: Role, req: { parts: A2APart[], messageId: string, metadata?: any }) {
   const cli = p.initiatorTask!, srv = p.responderTask!;
-  const metadata = readExtension(req.parts);
+  const metadata = readMessageExtension(req.metadata, req.parts);
   const finality = metadata?.finality || 'none';
 
   const fromTask = from === 'initiator' ? cli : srv;
@@ -426,13 +450,11 @@ export function onIncomingMessage(p: Pair, from: Role, req: { parts: A2APart[], 
   try { logEvent(p, { type: 'state', states: { initiator: cli.status, responder: srv.status } }); } catch {}
 
   try {
-    const text = (req.parts || []).filter((pp:any)=>pp?.kind==='text').map((pp:any)=>pp.text).filter((t:any)=>typeof t==='string').join('\n');
     const msg:any = {
       type: 'message',
       from: asPublicRole(from),
       finality,
       messageId: req.messageId,
-      text,
       parts: req.parts, // include full parts per requirement
       effects: {
         initiator: { state: cli.status },
@@ -453,6 +475,18 @@ function readExtension(parts: A2APart[]): any {
   }
   return null;
 }
+
+
+function readMessageExtension(msgMeta: any, parts: A2APart[]): any {
+  try {
+    if (msgMeta && typeof msgMeta === 'object') {
+      const block = (msgMeta as Record<string, any>)["https://chitchat.fhir.me/a2a-ext"];
+      if (block) return block;
+    }
+  } catch {}
+  return readExtension(parts);
+}
+
 
 export function newTask(pairId: string, side: Role, id: string): TaskState {
   const t: TaskState = {
@@ -537,6 +571,31 @@ function logEvent(p: Pair, ev: any) {
 const isDev = (Bun.env.NODE_ENV || process.env.NODE_ENV) !== 'production';
 const port = Number(process.env.PORT || 3000);
 
+
+
+// Debug endpoint to inspect open SSE subscribers and tasks
+app.get('/__debug/connections', async (c) => {
+  const out: any[] = [];
+  for (const [id, p] of pairs) {
+    out.push({
+      pairId: id,
+      epoch: p.epoch,
+      serverEventsSubscribers: p.serverEvents.size,
+      eventLogSubscribers: p.eventLog.size,
+      initiatorTask: p.initiatorTask ? {
+        id: p.initiatorTask.id,
+        status: p.initiatorTask.status,
+        subscribers: p.initiatorTask.subscribers.size
+      } : null,
+      responderTask: p.responderTask ? {
+        id: p.responderTask.id,
+        status: p.responderTask.status,
+        subscribers: p.responderTask.subscribers.size
+      } : null
+    });
+  }
+  return c.json({ version: 1, out });
+});
 serve({
   port,
   idleTimeout: 240,

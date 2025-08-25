@@ -1,236 +1,231 @@
 import { create } from 'zustand';
-import type { A2APart, A2ATask, A2AStatus, A2AMessage } from '../../shared/a2a-types';
+import type { A2APart, A2AMessage, A2AStatus } from '../../shared/a2a-types';
 import type { Fact, ProposedFact, AttachmentMeta } from '../../shared/journal-types';
-import { A2AClient, type FrameResult } from '../transports/a2a-client';
 import type { TransportAdapter, TransportSnapshot } from '../transports/types';
-import { A2ATransport } from '../transports/a2a-adapter';
-
-export type Role = 'initiator' | 'responder';
-
-type Journal = {
-  seq: number;
-  facts: Fact[];
-};
-
-type StatusLike = A2AStatus | 'waiting-for-task';
-
-type StoreState = {
-  endpoint: string;
-  role: Role;
-  taskId?: string;
-  pairId?: string;
-  status: StatusLike;
-  journal: Journal;
-  ticksRunning: boolean;
-  sending: boolean;
-  transport?: TransportAdapter;
-
-  // actions
-  configure(endpoint: string, role: Role): void;
-  ingestFrame(frame: FrameResult): void;
-  sendManual(text: string, finality: 'none'|'turn'|'conversation'): Promise<void>;
-  cancelTask(): Promise<void>;
-  startTicks(taskId?: string): void;
-  stopTicks(): void;
-  bootResponder(pairId: string): void;
-  stopBackchannel(): void;
-};
 
 function nowIso() { return new Date().toISOString(); }
 function rid(prefix?:string) { return `${prefix||'id'}-${crypto.randomUUID()}`; }
+function textOf(parts: A2APart[]) { return (parts||[]).filter(p=>p.kind==='text').map((p:any)=>p.text).join('\n'); }
 
-export const useStore = create<StoreState>((set, get) => {
-  let client: A2AClient | null = null;
-  let ticksAborter: AbortController | null = null;
-  let ticker: { taskId: string; ac: AbortController; stopped: boolean } | null = null;
-  let bc: { pairId: string; ac: AbortController } | null = null;
-  let pairCursor: number | undefined = undefined;
+type Role = 'initiator'|'responder';
 
-  function ensureClient(): A2AClient {
-    const ep = get().endpoint;
-    if (!client || (client as any)._ep !== ep) {
-      client = new A2AClient(ep);
-      (client as any)._ep = ep;
+export type Store = {
+  // meta
+  role: Role;
+  taskId?: string;
+  adapter?: TransportAdapter;
+  fetching: boolean;
+  needsRefresh: boolean;
+  // journal
+  facts: Fact[];
+  seq: number;
+  // composer
+  composing?: { composeId: string; text: string; attachments?: AttachmentMeta[] };
+  pending: Record<string, { composeId?: string }>; // messageId -> composeId
+  // helpers
+  knownMsg: Record<string, 1>;
+  // actions
+  init(role: Role, adapter: TransportAdapter, initialTaskId?: string): void;
+  setTaskId(taskId?: string): void;
+  startTicks(): void;
+  onTick(): void;
+  fetchAndIngest(): Promise<void>;
+  appendComposeIntent(text: string, attachments?: AttachmentMeta[]): string;
+  approveAndSend(composeId: string, finality: 'none'|'turn'|'conversation'): Promise<void>;
+  addUserGuidance(text: string): void;
+  cancelAndClear(): Promise<void>;
+  // selectors (as functions for convenience)
+  uiStatus(): string;
+};
+
+export const useAppStore = create<Store>((set, get) => ({
+  role: 'initiator',
+  fetching: false,
+  needsRefresh: false,
+  facts: [],
+  seq: 0,
+  pending: {},
+  knownMsg: {},
+
+  init(role, adapter, initialTaskId) {
+    set({ role, adapter, taskId: initialTaskId });
+    if (initialTaskId) {
+      try { get().setTaskId(initialTaskId); } catch {}
     }
-    return client!;
-  }
+  },
 
-  async function fetchSnapshot(taskId: string) {
-    const t = get().transport;
-    if (!t) return;
-    const snap = await t.snapshot(taskId);
-    if (snap) ingestTaskSnapshot(snap as any);
-  }
-
-  function append(f: ProposedFact, vis:'public'|'private') {
-    set((s) => {
-      const seq = s.journal.seq + 1;
-      const stamped = Object.assign({}, f, { seq, ts: nowIso(), id: rid('f'), vis }) as Fact;
-      return { journal: { seq, facts: [...s.journal.facts, stamped] } };
-    });
-  }
-
-  function ingestTaskSnapshot(task: A2ATask | TransportSnapshot) {
-    // Status
-    set({ status: task.status?.state || 'submitted' });
-    // Record latest message and tail
-    const tail = Array.isArray(task.history) ? task.history : [];
-    const latest = (task as any).status?.message ? [(task as any).status.message] : [];
-    const all = [...tail, ...latest];
-    const seen = new Set(get().journal.facts.filter(f => (f as any).messageId).map((f:any) => f.messageId));
-    for (const m of all) {
-      if (!m?.messageId || seen.has(m.messageId)) continue;
-      // attachments: if file bytes present, append attachment_added privately
-      const attachments: AttachmentMeta[] = [];
-      for (const p of (m.parts || [])) {
-        if (p.kind === 'file' && 'bytes' in p.file && typeof (p.file as any).bytes === 'string') {
-          const name = (p.file as any).name || `${(p.file as any).mimeType || 'application/octet-stream'}-${Math.random().toString(36).slice(2,7)}.bin`;
-          const mimeType = (p.file as any).mimeType || 'application/octet-stream';
-          append({ type:'attachment_added', name, mimeType, bytes:(p.file as any).bytes, origin:'inbound' }, 'private');
-          attachments.push({ name, mimeType, origin:'inbound' });
-        }
+  setTaskId(taskId) {
+    const prev = get().taskId;
+    set({ taskId });
+    if (taskId && taskId !== prev) {
+      if (get().role === 'responder') {
+        set({ facts: [], seq: 0, pending: {}, knownMsg: {}, composing: undefined });
       }
-      const text = (m.parts||[]).filter((p:any)=>p.kind==='text').map((p:any)=>p.text).join('\n');
-      if (m.role === 'agent') {
-        append({ type:'remote_received', messageId:m.messageId, text, attachments: attachments.length?attachments:undefined }, 'public');
-      } else {
-        append({ type:'remote_sent', messageId:m.messageId, text, attachments: attachments.length?attachments:undefined }, 'public');
+      try { get().startTicks(); } catch {}
+      void get().fetchAndIngest();
+    }
+  },
+
+  startTicks() {
+    const { adapter, taskId, onTick } = get();
+    if (!adapter || !taskId) return;
+    const ac = new AbortController();
+    // store cancellation token on window (simple demo); stop when page unloads
+    (window as any).__ticksAbort?.abort?.();
+    (window as any).__ticksAbort = ac;
+    (async () => {
+      for await (const _ of adapter.ticks(taskId, ac.signal)) {
+        onTick();
       }
+    })();
+    window.addEventListener('beforeunload', () => { try { ac.abort(); } catch {} }, { once: true });
+  },
+
+  onTick() {
+    const { fetching } = get();
+    if (fetching) { set({ needsRefresh: true }); return; }
+    get().fetchAndIngest();
+  },
+
+  async fetchAndIngest() {
+    const { adapter, taskId } = get();
+    if (!adapter || !taskId) return;
+    set({ fetching: true });
+    try {
+      const snap = await adapter.snapshot(taskId);
+      if (!snap) return;
+      ingestSnapshotIntoJournal(snap, set, get);
+    } finally {
+      set({ fetching: false });
+    }
+    const { needsRefresh } = get();
+    if (needsRefresh) { set({ needsRefresh: false }); await get().fetchAndIngest(); }
+  },
+
+  appendComposeIntent(text, attachments) {
+    const composeId = rid('c');
+    const pf = ({ type:'compose_intent', composeId, text, attachments } as ProposedFact);
+    stampAndAppend([pf as ProposedFact], set, get);
+    set({ composing: { composeId, text, attachments } });
+    return composeId;
+  },
+
+  async approveAndSend(composeId, finality) {
+    const { adapter, taskId, facts, pending } = get();
+    if (!adapter) return;
+    // resolve compose
+    const ci = [...facts].reverse().find((f): f is Extract<typeof f, { type:'compose_intent' }> => f.type === 'compose_intent' && f.composeId === composeId);
+    if (!ci) return;
+    // build parts (message-level metadata carries finality)
+    const parts: A2APart[] = [];
+    parts.push({ kind:'text', text: ci.text });
+    if (Array.isArray(ci.attachments)) {
+      for (const a of ci.attachments) {
+        const resolved = resolveAttachmentBytes(facts, a.name);
+        if (resolved) parts.push({ kind:'file', file: { bytes: resolved.bytes, name: a.name, mimeType: resolved.mimeType } });
+      }
+    }
+    const messageId = rid('m');
+    const { taskId: newTaskId, snapshot } = await adapter.send(parts, { taskId, messageId, finality });
+    // update local task id via setter to bootstrap driver
+    get().setTaskId(newTaskId);
+    set({ pending: { ...pending, [messageId]: { composeId } } });
+    ingestSnapshotIntoJournal(snapshot, set, get);
+    // setTaskId already started ticks and fetched
+  },
+
+  addUserGuidance(text) {
+    const gid = rid('g');
+    const pf = ({ type:'user_guidance', gid, text } as ProposedFact);
+    stampAndAppend([pf as ProposedFact], set, get);
+  },
+
+  async cancelAndClear() {
+    const { adapter, taskId } = get();
+    if (adapter && taskId) { try { await adapter.cancel(taskId); } catch {} }
+    // clear local state
+    set({ taskId: undefined, facts: [], seq: 0, pending: {}, knownMsg: {}, composing: undefined });
+  },
+
+  uiStatus() {
+    const { facts, taskId } = get();
+    if (!taskId) return "Waiting for new task";
+    for (let i = facts.length - 1; i >= 0; --i) {
+      const f = facts[i];
+      if (f.type === 'status_changed') return f.a2a;
+    }
+    return "submitted";
+  }
+}));
+
+// --- helpers ---
+
+function stampAndAppend(batch: ProposedFact[], set: any, get: any) {
+  const seq0 = get().seq || 0;
+  const now = nowIso();
+  const stamped = batch.map((f: ProposedFact, i: number) => Object.assign({}, f, { seq: seq0 + 1 + i, ts: now, id: rid('f'), vis: (f.type === 'remote_received' || f.type === 'remote_sent') ? 'public' : 'private' }));
+  set((s:any) => ({ facts: [...s.facts, ...stamped], seq: seq0 + stamped.length }));
+}
+
+function resolveAttachmentBytes(facts: Fact[], name: string): { mimeType: string; bytes: string } | null {
+  for (let i = facts.length - 1; i >= 0; --i) {
+    const f = facts[i];
+    if (f.type === 'attachment_added' && f.name === name) return { mimeType: f.mimeType, bytes: f.bytes };
+  }
+  return null;
+}
+
+function ingestSnapshotIntoJournal(snap: TransportSnapshot, set: any, get: any) {
+  const facts: Fact[] = get().facts;
+  const knownMsg: Record<string,1> = { ...(get().knownMsg || {}) };
+  const pending = { ...(get().pending || {}) };
+
+  // status_changed
+  const lastStatus = (() => { for (let i=facts.length-1;i>=0;--i) { const f = facts[i]; if (f.type==='status_changed') return f.a2a; } return undefined; })();
+  const st = snap.status?.state || 'submitted';
+  if (st !== lastStatus) {
+    stampAndAppend([{ type:'status_changed', a2a: st } as ProposedFact], set, get);
+  }
+
+  // messages in order
+  const all: A2AMessage[] = [];
+  if (Array.isArray(snap.history)) all.push(...snap.history);
+  if (snap.status?.message) all.push(snap.status.message);
+  for (const m of all) {
+    if (!m || !m.messageId || knownMsg[m.messageId]) continue;
+    knownMsg[m.messageId] = 1;
+
+    // Attachments: create attachment_added facts for inline bytes
+    const attMeta: AttachmentMeta[] = [];
+    for (const p of (m.parts || [])) {
+      if (p.kind === 'file' && 'bytes' in p.file && typeof p.file.bytes === 'string') {
+        const name = p.file.name || `${p.file.mimeType || 'application/octet-stream'}-${Math.random().toString(36).slice(2,7)}.bin`;
+        const bytes = p.file.bytes;
+        const mime = p.file.mimeType || 'application/octet-stream';
+        // avoid duplicate attachment names
+        const unique = uniqueName(name, facts);
+        stampAndAppend([{ type:'attachment_added', name: unique, mimeType: mime, bytes, origin: 'inbound' } as ProposedFact], set, get);
+        attMeta.push({ name: unique, mimeType: mime, origin:'inbound' });
+      }
+    }
+
+    if (m.role === 'agent') {
+      stampAndAppend([{ type:'remote_received', messageId: m.messageId, text: textOf(m.parts||[]), attachments: attMeta.length ? attMeta : undefined } as ProposedFact], set, get);
+    } else {
+      const link = pending[m.messageId]; // echo of our send
+      stampAndAppend([{ type:'remote_sent', messageId: m.messageId, text: textOf(m.parts||[]), attachments: attMeta.length?attMeta:undefined, composeId: link?.composeId } as ProposedFact], set, get);
+      if (link) delete pending[m.messageId];
     }
   }
 
-  return {
-    endpoint: '',
-    role: 'initiator',
-    taskId: undefined,
-    pairId: undefined,
-    status: 'waiting-for-task',
-    journal: { seq: 0, facts: [] },
-    ticksRunning: false,
-    sending: false,
+  set({ knownMsg, pending });
+}
 
-    configure(endpoint: string, role: Role) {
-      set({ endpoint, role });
-      client = new A2AClient(endpoint);
-      try {
-        // Derive pairId from endpoint /api/bridge/:pairId/a2a
-        const u = new URL(endpoint);
-        const parts = u.pathname.split('/').filter(Boolean);
-        const ix = parts.findIndex(p => p === 'bridge');
-        if (ix !== -1 && parts.length > ix + 1) set({ pairId: parts[ix + 1] });
-      } catch {}
-      const pairId = get().pairId;
-      set({ transport: new A2ATransport(client, { role, pairId }) });
-      // If a taskId already exists (e.g., persisted or restored), immediately resubscribe
-      const existingTaskId = get().taskId;
-      if (existingTaskId) {
-        try {
-          get().startTicks(existingTaskId);
-        } catch {}
-      }
-    },
-
-    ingestFrame(frame: FrameResult) {
-      if (!frame) return;
-      if ('kind' in frame) {
-        if (frame.kind === 'task') {
-          set({ taskId: frame.id });
-          ingestTaskSnapshot(frame);
-        } else if (frame.kind === 'status-update') {
-          set({ status: frame.status?.state || 'submitted' });
-          if (frame.status?.message) ingestTaskSnapshot({ id: frame.taskId, contextId: frame.contextId, status: frame.status, kind:'task', history: [] });
-        } else if (frame.kind === 'message') {
-          ingestTaskSnapshot({ id: frame.messageId || rid('m'), contextId: '', kind:'task', status: { state: 'submitted', message: { role: frame.role, parts: frame.parts, messageId: frame.messageId || rid('m'), kind:'message' } }, history: [] } as any);
-        }
-      }
-    },
-
-    async sendManual(text, finality) {
-      const parts: A2APart[] = [{ kind:'text', text, metadata: { 'https://chitchat.fhir.me/a2a-ext': { finality } } }];
-      set({ sending: true });
-      try {
-        const taskId = get().taskId;
-        const t = get().transport;
-        if (!t) throw new Error('transport not configured');
-        const out = await t.send(parts, { taskId, finality });
-        set({ taskId: out.taskId });
-        ingestTaskSnapshot(out.snapshot as any);
-        // Ensure ticks are running
-        get().startTicks(out.taskId);
-      } finally {
-        set({ sending: false });
-      }
-    },
-
-    async cancelTask() {
-      const id = get().taskId;
-      if (!id) return;
-      try {
-        const t = get().transport;
-        if (t) await t.cancel(id);
-        // After server confirms, clear local state and stop reads
-        set({ taskId: undefined, status: 'waiting-for-task', journal: { seq: 0, facts: [] } });
-        get().stopTicks();
-      } catch (e) {
-        console.error('[store] cancel failed', e);
-      }
-    },
-
-    startTicks(taskId?: string) {
-      const id = taskId || get().taskId;
-      if (!id) return;
-      // idempotent start for the same task
-      if (ticker && ticker.taskId === id && !ticker.stopped) return;
-      // stop previous if switching tasks
-      if (ticker) { try { ticker.stopped = true; ticker.ac.abort(); } catch {} ticker = null; }
-      const ac = new AbortController();
-      ticker = { taskId: id, ac, stopped: false };
-      set({ ticksRunning: true });
-      (async () => {
-        const t = get().transport;
-        if (!t) return;
-        // Fetch an initial snapshot immediately to sync status/UI without waiting for first tick
-        try { const snap = await t.snapshot(id); if (snap) ingestTaskSnapshot(snap as any); } catch {}
-        for await (const _ of t.ticks(id, ac.signal)) {
-          try { const snap = await t.snapshot(id); if (snap) ingestTaskSnapshot(snap as any); } catch {}
-        }
-      })().catch(err => console.error('[store] tick loop failed', err));
-    },
-
-    stopTicks() {
-      set({ ticksRunning: false });
-      try { ticksAborter?.abort(); } catch {}
-      ticksAborter = null;
-      if (ticker) { try { ticker.stopped = true; ticker.ac.abort(); } catch {}; ticker = null; }
-    },
-
-    // Responder: watch pair control events and adopt announced taskId
-    bootResponder(pairId: string) {
-      if (bc && bc.pairId === pairId) return;
-      // restart watcher
-      if (bc) { try { bc.ac.abort(); } catch {} bc = null; }
-      const ac = new AbortController();
-      bc = { pairId, ac };
-      (async () => {
-        const c = ensureClient();
-        for await (const ev of c.pairEvents(pairId, pairCursor ?? 0, ac.signal)) {
-          if (ev && typeof ev.seq === 'number') pairCursor = ev.seq;
-          if (ev?.type === 'backchannel' && ev?.action === 'subscribe' && typeof ev.taskId === 'string') {
-            if (String(ev.taskId || '').startsWith('resp:')) {
-              if (get().taskId !== ev.taskId) {
-                set({ taskId: ev.taskId });
-                get().startTicks(ev.taskId);
-                // Eagerly pull snapshot so status isn't left as 'waiting-for-task'
-                try { await fetchSnapshot(ev.taskId); } catch {}
-              }
-            }
-          }
-        }
-      })().catch(err => console.error('[store] backchannel loop failed', err));
-    },
-
-    stopBackchannel() {
-      if (bc) { try { bc.ac.abort(); } catch {}; bc = null; }
-    }
-  };
-});
+function uniqueName(name: string, facts: Fact[]): string {
+  if (!facts.some(f => f.type==='attachment_added' && f.name===name)) return name;
+  const stem = name.replace(/\.[^./]+$/, '');
+  const ext = (name.match(/\.[^./]+$/) || [''])[0];
+  let i = 2;
+  while (facts.some(f => f.type==='attachment_added' && f.name===`${stem} (${i})${ext}`)) i++;
+  return `${stem} (${i})${ext}`;
+}

@@ -1,6 +1,6 @@
 # FlipProxy Demo (Bun + Hono + React)
 
-A tiny mirror relay (**flip proxy**) that pairs two tabs and reflects messages between them using a minimal A2A-like API. Only the responder listens to a small backchannel; the initiator is a pure A2A Client.
+A tiny mirror relay (**flip proxy**) that pairs two tabs and reflects messages between them using a minimal A2A-like API. Only the responder listens to a small backchannel; the initiator is a pure A2A Client. An optional MCP-compatible HTTP bridge is available alongside the A2A endpoint for initiator-side integrations.
 
 ## Current Features
 - JSON-RPC: `message/stream` (SSE), `tasks/resubscribe` (SSE), `tasks/get`, `tasks/cancel`.
@@ -73,7 +73,7 @@ Send messages and choose finality (`turn` to pass the token; `conversation` to c
 - Watchdog runs every 60s.
 
 ## API Summary
-- `POST /api/pairs` (optional `{ metadata?: object }`) → `{ pairId, initiatorJoinUrl, responderJoinUrl, serverEventsUrl }`
+- `POST /api/pairs` (optional `{ metadata?: object }`) → `{ pairId, initiatorJoinUrl, responderJoinUrl, serverEventsUrl, mcpUrl }`
 - `GET /api/pairs/:pairId/metadata` → `{ metadata }`
 - `POST /pairs/:pairId/reset` (hard only) → `{ ok, epoch }`
 - `GET /pairs/:pairId/server-events` (SSE; responder backchannel)
@@ -81,10 +81,51 @@ Send messages and choose finality (`turn` to pass the token; `conversation` to c
 - `POST /api/bridge/:pairId/a2a` JSON-RPC:
   - `message/stream` (SSE), `message/send`, `tasks/get`, `tasks/resubscribe`, `tasks/cancel`.
 
+### MCP Bridge (initiator-side)
+- `POST /api/bridge/:pairId/mcp`
+  - Same base as A2A (relative to initiator API base: `/api/bridge/:pairId/…`).
+  - Accepts MCP Streamable HTTP requests and returns JSON responses for tool invocations.
+  - Tools exposed:
+    - `begin_chat_thread()` → `{ conversationId }` for the current epoch’s initiator task.
+    - `send_message_to_chat_thread({ conversationId, message, attachments? })` → `{ guidance, status: "working" }`.
+    - `check_replies({ conversationId, waitMs=10000 })` → `{ messages, guidance, status, conversation_ended }`.
+
+Example (tool invocation via MCP HTTP transport payloads):
+
+```bash
+# Begin thread
+curl -sS -X POST \
+  -H 'content-type: application/json' \
+  localhost:3000/api/bridge/<PAIR_ID>/mcp \
+  -d '{
+    "method": "tools/call",
+    "params": { "name": "begin_chat_thread", "arguments": {} }
+  }'
+
+# Send message
+curl -sS -X POST \
+  -H 'content-type: application/json' \
+  localhost:3000/api/bridge/<PAIR_ID>/mcp \
+  -d '{
+    "method": "tools/call",
+    "params": { "name": "send_message_to_chat_thread", "arguments": { "conversationId": "init:<PAIR_ID>#<EPOCH>", "message": "Hello", "attachments": [] } }
+  }'
+
+# Check replies (long-poll 10s)
+curl -sS -X POST \
+  -H 'content-type: application/json' \
+  localhost:3000/api/bridge/<PAIR_ID>/mcp \
+  -d '{
+    "method": "tools/call",
+    "params": { "name": "check_replies", "arguments": { "conversationId": "init:<PAIR_ID>#<EPOCH>", "waitMs": 10000 } }
+  }'
+```
+
 ## Project layout
 ```
 src/
   server/flipproxy.ts   # Hono API + Bun.serve dev routes + bun-storage persistence
+  server/bridge/mcp-on-flipproxy.ts  # MCP bridge mounted at /api/bridge/:pairId/mcp
   shared/               # shared types across server + frontend
     a2a-types.ts
     backchannel-types.ts

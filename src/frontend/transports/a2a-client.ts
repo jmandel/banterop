@@ -9,8 +9,10 @@ export class A2AClient {
   constructor(private endpoint: string) {}
   private ep() { return this.endpoint }
 
-  async *messageStreamParts(parts: A2APart[], opts:{ taskId?:string; messageId?:string; signal?:AbortSignal }={}) {
-    const body = { jsonrpc: '2.0', id: crypto.randomUUID(), method: 'message/stream', params: { message: { messageId: opts.messageId || crypto.randomUUID(), ...(opts.taskId ? { taskId: opts.taskId } : {}), parts } } };
+  async *messageStreamParts(parts: A2APart[], opts:{ taskId?:string; messageId?:string; metadata?: any; signal?:AbortSignal }={}) {
+    const msg: any = { messageId: opts.messageId || crypto.randomUUID(), ...(opts.taskId ? { taskId: opts.taskId } : {}), parts };
+    if (opts.metadata) msg.metadata = opts.metadata;
+    const body = { jsonrpc: '2.0', id: crypto.randomUUID(), method: 'message/stream', params: { message: msg } };
     const res = await fetch(this.ep(), { method: 'POST', headers: { 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify(body), signal: opts.signal });
     if (!res.ok || !res.body) throw new Error('message/stream failed: ' + res.status);
     for await (const obj of sseToObjects(res.body)) yield obj;
@@ -77,8 +79,10 @@ export class A2AClient {
     const body = { jsonrpc:'2.0', id: crypto.randomUUID(), method: 'tasks/cancel', params: { id: taskId } };
     await fetch(this.ep(), { method:'POST', headers: { 'content-type':'application/json' }, body: JSON.stringify(body) });
   }
-  async messageSend(parts: A2APart[], opts:{ taskId?:string; messageId?:string }): Promise<A2ATask> {
-    const body = { jsonrpc:'2.0', id: crypto.randomUUID(), method: 'message/send', params: { message: { taskId: opts.taskId, messageId: opts.messageId || crypto.randomUUID(), parts } } };
+  async messageSend(parts: A2APart[], opts:{ taskId?:string; messageId?:string; metadata?: any }): Promise<A2ATask> {
+    const msg: any = { taskId: opts.taskId, messageId: opts.messageId || crypto.randomUUID(), parts };
+    if (opts.metadata) msg.metadata = opts.metadata;
+    const body = { jsonrpc:'2.0', id: crypto.randomUUID(), method: 'message/send', params: { message: msg } };
     const res = await fetch(this.ep(), { method:'POST', headers: { 'content-type':'application/json' }, body: JSON.stringify(body) });
     if (!res.ok) throw new Error('message/send failed: ' + res.status);
     const j = await res.json();
@@ -146,4 +150,3 @@ function sleep(ms: number, signal?: AbortSignal) {
     if (signal) signal.addEventListener('abort', () => { try { clearTimeout(t); } catch {}; rej(signal.reason); }, { once: true });
   });
 }
-
