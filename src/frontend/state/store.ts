@@ -16,6 +16,7 @@ export type Store = {
   adapter?: TransportAdapter;
   fetching: boolean;
   needsRefresh: boolean;
+  plannerId: 'simple'|'llm';
   // journal
   facts: Fact[];
   seq: number;
@@ -30,6 +31,7 @@ export type Store = {
   startTicks(): void;
   onTick(): void;
   fetchAndIngest(): Promise<void>;
+  setPlanner(id:'simple'|'llm'): void;
   appendComposeIntent(text: string, attachments?: AttachmentMeta[]): string;
   approveAndSend(composeId: string, finality: 'none'|'turn'|'conversation'): Promise<void>;
   addUserGuidance(text: string): void;
@@ -42,6 +44,7 @@ export const useAppStore = create<Store>((set, get) => ({
   role: 'initiator',
   fetching: false,
   needsRefresh: false,
+  plannerId: 'simple',
   facts: [],
   seq: 0,
   pending: {},
@@ -54,10 +57,15 @@ export const useAppStore = create<Store>((set, get) => ({
     }
   },
 
+  setPlanner(id) { set({ plannerId: id }); },
+
   setTaskId(taskId) {
     const prev = get().taskId;
     set({ taskId });
     if (taskId && taskId !== prev) {
+      // New task → clear local journal state so histories don't mix
+      try { console.debug('[store] switching taskId', { prev, next: taskId }); } catch {}
+      set({ facts: [], seq: 0, pending: {}, knownMsg: {}, composing: undefined });
       try { get().startTicks(); } catch {}
       void get().fetchAndIngest();
     }

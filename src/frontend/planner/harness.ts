@@ -113,6 +113,12 @@ export class PlannerHarness<Cfg=unknown> {
   private composing: { composeId:string; text:string; attachments?:AttachmentMeta[] } | null = null;
   private awaitingAnswerForQid: string | null = null;
   private pendingSent: { messageId:string; text:string; attachments?:AttachmentMeta[]; composeId?:string } | null = null;
+  // Auto-plan trigger tracking
+  private autoEnabled = false;
+  private autoUnsub: (() => boolean) | null = null;
+  private autoScheduled = false;
+  private lastStatusPlannedSeq = 0; // last input-required status seq we planned for
+  private lastWhisperPlannedSeq = 0; // last user_guidance seq we planned for
 
   /** Reset local transient state (composing, questions, pending). */
   resetLocal() {
@@ -148,6 +154,7 @@ export class PlannerHarness<Cfg=unknown> {
     const gid = rid('g');
     this.journal.append({ type:'user_guidance', gid, text } as ProposedFact, 'private');
     // Any new event should wake planner
+    try { console.debug('[harness] user_guidance appended', { gid, len: text.length }); } catch {}
     this.kick();
   }
 
@@ -155,6 +162,7 @@ export class PlannerHarness<Cfg=unknown> {
   answerQuestion(qid:string, text:string) {
     this.awaitingAnswerForQid = null;
     this.journal.append({ type:'agent_answer', qid, text } as ProposedFact, 'private');
+    try { console.debug('[harness] agent_answer appended', { qid, len: text.length }); } catch {}
     this.kick();
   }
 
@@ -266,18 +274,109 @@ export class PlannerHarness<Cfg=unknown> {
     return null;
   }
 
+  /** Enable auto-planning: harness owns when to plan based on journal state. */
+  enableAutoPlan() {
+    if (this.autoEnabled) return;
+    this.autoEnabled = true;
+    // Subscribe to any journal change; coalesce to microtask
+    try { console.debug('[harness] autoPlan enable'); } catch {}
+    this.autoUnsub = this.journal.onAnyNewEvent(() => {
+      const facts = this.journal.facts();
+      const seq = facts.length ? facts[facts.length - 1].seq : 0;
+      try { console.debug('[harness] autoPlan event', { seq, len: facts.length }, facts); } catch {}
+      this.scheduleAutoConsider();
+    });
+    // Initial consider (deferred)
+    this.scheduleAutoConsider();
+  }
+
+  /** Disable auto-planning and clear subscriptions. */
+  disableAutoPlan() {
+    if (!this.autoEnabled) return;
+    this.autoEnabled = false;
+    try { this.autoUnsub?.(); } catch {}
+    this.autoUnsub = null;
+    this.autoScheduled = false;
+    try { console.debug('[harness] autoPlan disable'); } catch {}
+  }
+
+  private scheduleAutoConsider() {
+    if (!this.autoEnabled || this.autoScheduled) return;
+    this.autoScheduled = true;
+    const facts = this.journal.facts();
+    const seq = facts.length ? facts[facts.length - 1].seq : 0;
+    try { console.debug('[harness] autoPlan schedule', { seq }, facts); } catch {}
+    queueMicrotask(() => { this.autoScheduled = false; this.considerAutoPlan(); });
+  }
+
+  /** Decide whether to run a planning pass based on triggers we own. */
+  private considerAutoPlan() {
+    if (!this.autoEnabled) return;
+    const facts = this.journal.facts();
+    const n = facts.length;
+    if (!n) return;
+
+    // Trigger 1: latest status is input-required, plan once per such status
+    let lastStatusSeq = 0;
+    let lastStatusValue: string | undefined;
+    for (let i = n - 1; i >= 0; --i) {
+      const f = facts[i];
+      if (f.type === 'status_changed') { lastStatusSeq = f.seq; lastStatusValue = (f as any).a2a; break; }
+    }
+
+    // Trigger 2: latest user whisper (user_guidance), plan once per whisper
+    let lastWhisperSeq = 0;
+    for (let i = n - 1; i >= 0; --i) {
+      const f = facts[i];
+      if (f.type === 'user_guidance') { lastWhisperSeq = f.seq; break; }
+    }
+    const reasons: string[] = [];
+    if (lastWhisperSeq <= this.lastWhisperPlannedSeq) reasons.push('no-new-whisper');
+    if (lastStatusValue !== 'input-required') reasons.push('status-not-input-required');
+    else if (lastStatusSeq <= this.lastStatusPlannedSeq) reasons.push('no-new-status');
+    try {
+      console.debug('[harness] autoPlan consider', {
+        facts: n,
+        status: lastStatusValue,
+        lastStatusSeq,
+        lastStatusPlannedSeq: this.lastStatusPlannedSeq,
+        lastWhisperSeq,
+        lastWhisperPlannedSeq: this.lastWhisperPlannedSeq,
+        reasons,
+      }, facts);
+    } catch {}
+    // Decide priority: whisper first, else input-required
+    if (lastWhisperSeq > this.lastWhisperPlannedSeq) {
+      this.lastWhisperPlannedSeq = lastWhisperSeq;
+      try { console.debug('[harness] autoPlan trigger: whisper', { seq: lastWhisperSeq }, facts); } catch {}
+      void this.kick();
+      return;
+    }
+    if (lastStatusValue === 'input-required' && lastStatusSeq > this.lastStatusPlannedSeq) {
+      this.lastStatusPlannedSeq = lastStatusSeq;
+      try { console.debug('[harness] autoPlan trigger: input-required', { seq: lastStatusSeq }, facts); } catch {}
+      void this.kick();
+      return;
+    }
+    try { console.debug('[harness] autoPlan: no trigger', { reasons }, facts); } catch {}
+  }
+
   /** Kick one planning pass if there are no outstanding questions. */
   async kick() {
+    try { console.debug('[harness] kick() start'); } catch {}
     // Outstanding question gate
     const facts = this.journal.facts();
     const openQ = [...facts].reverse().find((f): f is Extract<Fact, { type: 'agent_question' }> => f.type === 'agent_question' && !facts.some(g => g.type === 'agent_answer' && g.qid === f.qid));
     if (openQ) {
       this.awaitingAnswerForQid = openQ.qid;
+      try { console.debug('[harness] kick gate: open question', { qid: openQ.qid }); } catch {}
       if (this.cbs.onQuestion) this.cbs.onQuestion({ qid: openQ.qid, prompt: openQ.prompt, required: openQ.required, placeholder: openQ.placeholder });
       return;
     }
     // Prepare a cut
     const cut = this.journal.head();
+    const lastTypes = facts.slice(-5).map(f=>f.type).join(',');
+    try { console.debug('[harness] planning on cut', { cut: cut.seq, facts: facts.length, lastTypes }, facts); } catch {}
     const controller = new AbortController();
     const unsub = this.journal.onAnyNewEvent(() => controller.abort());
     const ctx: PlanContext<any> = {
@@ -295,15 +394,18 @@ export class PlannerHarness<Cfg=unknown> {
     let out: ProposedFact[] = [];
     try {
       out = await this.planner.plan(input, ctx);
+      try { console.debug('[harness] planner result', { count: (out||[]).length, types: (out||[]).map(o=>o.type) }, out); } catch {}
     } finally {
       unsub();
       this.flushHud();
     }
     if (!out || !out.length) return;
-    if (!validateBatch(out, this.journal.facts())) return;
+    if (!validateBatch(out, this.journal.facts())) { try { console.debug('[harness] validateBatch failed'); } catch {}; return; }
 
     const visResolver = (f:ProposedFact) => (f.type === 'remote_received' || f.type === 'remote_sent') ? 'public' : 'private';
-    if (!this.journal.casAppend(cut.seq, out, visResolver)) {
+    const ok = this.journal.casAppend(cut.seq, out, visResolver);
+    try { console.debug('[harness] commit', { ok, cut: cut.seq, types: out.map(o=>o.type).join(',') }, out); } catch {}
+    if (!ok) {
       // Head moved → planner will be kicked again by the very event that moved the head.
       return;
     }

@@ -5,6 +5,7 @@ import type { A2APart } from '../../shared/a2a-types';
 import { useAppStore } from '../state/store';
 import { A2AAdapter } from '../transports/a2a-adapter';
 import { MCPAdapter } from '../transports/mcp-adapter';
+import { startPlannerController } from '../planner/controller';
 
 type Role = 'initiator'|'responder';
 
@@ -37,6 +38,8 @@ function App() {
   useEffect(() => {
     const adapter = transport === 'mcp' ? new MCPAdapter(mcpUrl) : new A2AAdapter(a2aUrl);
     store.init(role as Role, adapter, undefined);
+    // Start planner only for responder; initiator remains manual
+    if (role === 'responder') startPlannerController();
   }, [role, transport, a2aUrl, mcpUrl]);
 
   // Backchannel for responder (A2A) – listen for subscribe to learn taskId
@@ -105,6 +108,7 @@ function App() {
           <div><strong>Role:</strong> <span className="pill">{role === 'initiator' ? 'Initiator' : 'Responder'}</span></div>
           <div className="pill">Status: {uiStatus}</div>
           <div className="pill">Task: {taskId || '—'}</div>
+          <PlannerSelector />
           {role==='initiator' && (
             <button className="btn" onClick={clearTask} disabled={!taskId}>Clear task</button>
           )}
@@ -294,3 +298,17 @@ function ManualComposer({ disabled, hint, placeholder, onSend, sending }:{ disab
 
 const root = createRoot(document.getElementById('root')!);
 root.render(<App />);
+
+function PlannerSelector() {
+  const pid = useAppStore(s => s.plannerId);
+  const setPlanner = useAppStore(s => s.setPlanner);
+  return (
+    <div className="row" style={{ gap: 6, alignItems:'center' }}>
+      <span className="small muted">Planner:</span>
+      <select value={pid} onChange={e => setPlanner(e.target.value as any)}>
+        <option value="simple">Simple Demo</option>
+        <option value="llm">LLM Drafter</option>
+      </select>
+    </div>
+  );
+}
