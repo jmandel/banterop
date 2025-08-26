@@ -2,7 +2,8 @@ import type { A2APart } from './a2a-types';
 import { A2A_EXT_URL } from './core';
 
 export function partsText(parts?: A2APart[]): string {
-  return (parts ?? []).filter(p => p.kind === 'text').map(p => (p as any).text as string).join('\n').trim();
+  // Preserve user-intended leading/trailing whitespace; callers can trim if desired.
+  return (parts ?? []).filter(p => p.kind === 'text').map(p => (p as any).text as string).join('\n');
 }
 
 export function readExtFromParts(parts?: A2APart[]): any | null {

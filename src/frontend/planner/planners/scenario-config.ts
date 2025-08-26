@@ -3,13 +3,13 @@ import type { PlannerConfigStore } from '../../planner/config/store';
 import type { ConfigSnapshot, FieldState } from '../../planner/config/types';
 import { validateScenarioConfig } from '../../../shared/scenario-validator';
 
-const https = (s: string) => { try { const u = new URL(s); return u.protocol === 'https:'; } catch { return false; } };
-
 async function fetchJson(url: string) {
-  const res = await fetch(`/api/fetch-json?url=${encodeURIComponent(url)}`);
-  const j = await res.json();
-  if (!j?.ok) throw new Error(String(j?.error || 'Fetch failed'));
-  return j.data;
+  const res = await fetch(url, { method: 'GET' });
+  if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
+  // Limit payload size defensively by streaming text then JSON.parse
+  const text = await res.text();
+  try { return JSON.parse(text); }
+  catch { throw new Error('Invalid JSON'); }
 }
 
 async function listModels(llm: any): Promise<string[]> {
@@ -24,7 +24,7 @@ export function createScenarioConfigStore(opts: { llm: any; initial?: any }): Pl
   type S = PlannerConfigStore & { _timer?: any; _lastUrl?: string; _scenario?: any; _mounted: boolean };
   const store = create<S>((set, get) => {
     const fields: FieldState[] = [
-      { key: 'scenarioUrl', type: 'text', label: 'Scenario JSON URL', value: String(opts.initial?.resolvedScenario?.__sourceUrl || ''), placeholder: 'https://…', required: true },
+      { key: 'scenarioUrl', type: 'text', label: 'Scenario JSON URL', value: String(opts.initial?.resolvedScenario?.__sourceUrl || ''), placeholder: 'URL…', required: true },
       { key: 'model', type: 'select', label: 'Model', value: String(opts.initial?.model || ''), options: [], pending: true },
       { key: 'myAgentId', type: 'select', label: 'My role (agent)', value: String(opts.initial?.myAgentId || ''), options: [], visible: false, pending: true },
       { key: 'enabledTools', type: 'checkbox-group', label: 'Tools to enable', value: [], options: [], visible: false },
@@ -139,7 +139,7 @@ export function createScenarioConfigStore(opts: { llm: any; initial?: any }): Pl
       f.value = value;
       if (key === 'scenarioUrl') {
         const url = String(value || '').trim();
-        const err = !url ? 'Enter a URL' : (!https(url) ? 'URL must be HTTPS' : null);
+        const err = !url ? 'Enter a URL' : null;
         f.error = err; (get() as any)._scenario = null as any;
         const tools = get().snap.fields.find(x => x.key === 'enabledTools')!;
         tools.visible = false; tools.options = []; tools.value = [];

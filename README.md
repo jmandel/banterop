@@ -58,7 +58,7 @@ Send messages and choose finality (`turn` to pass the token; `conversation` to c
   - Clear task (terminal states): clears local history and taskId to start fresh.
 
 ## Persistence (bun-storage)
-- DB: `FLIPPROXY_DB` (default `./db.sqlite`).
+- DB: `FLIPPROXY_DB` (default `:memory:`).
 - Stored under `pair:meta:<id>`:
   - id, epoch, turn, startingTurn, `eventSeq` (monotonic), `lastActivityTs`.
   - `metadata` (opaque JSON from pair creation).
@@ -72,6 +72,8 @@ Send messages and choose finality (`turn` to pass the token; `conversation` to c
 - Memory TTL (`PAIR_TTL_MEMORY_MS`, default 30m): evict idle pairs from memory (no active SSE or A2A streams).
 - Storage TTL (`PAIR_TTL_STORAGE_MS`, default 48h): delete stale `pair:meta:<id>` and remove id from `pair:index`.
 - Watchdog runs every 60s.
+
+Note: tests run against an in-memory database by default and do not write `.sqlite` files. To opt-in to disk persistence tests locally, run with `FLIPPROXY_TEST_PERSISTENCE=1 bun test`.
 
 ## API Summary
 - `POST /api/pairs` (optional `{ metadata?: object }`) →

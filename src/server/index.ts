@@ -9,7 +9,6 @@ import { createPairsService, type PairsService } from './core/pairs'
 import { wellKnownRoutes } from './routes/wellKnown'
 import { pairsRoutes } from './routes/pairs'
 import { a2aRoutes } from './routes/a2a'
-import { fetchJsonRoutes } from './routes/fetchJson'
 import { mcpRoutes } from './routes/mcp'
 import { serve } from 'bun'
 import controlHtml from '../frontend/control/index.html'
@@ -41,7 +40,6 @@ app.route('/.well-known', wellKnownRoutes())
 app.route('/api', pairsRoutes())
 app.route('/api', a2aRoutes())
 app.route('/api', mcpRoutes())
-app.route('/api', fetchJsonRoutes())
 app.route('/api', pairsRoutes(true))
 
 // Bun.serve handles HTML routes and delegates everything else to Hono

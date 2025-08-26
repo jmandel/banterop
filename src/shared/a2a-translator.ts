@@ -1,6 +1,7 @@
 import type { A2APart, A2AMessage, A2ATask, A2AStatusUpdate } from './a2a-types';
 import type { ProposedFact, AttachmentMeta } from './journal-types';
 import { partsText } from './a2a-helpers';
+import { b64ByteLength } from './codec';
 
 // Accepts any of the three frame shapes the client sees:
 type Frame = A2ATask | A2AStatusUpdate | { kind:'message'; role:'user'|'agent'; parts:A2APart[]; messageId?:string };
@@ -47,12 +48,15 @@ function messageToFacts(m: A2AMessage): ProposedFact[] {
 
   for (const p of parts) {
     if (p.kind === 'file' && 'bytes' in (p as any).file) {
-      const bytes = String((p as any).file.bytes || '');
-      const name = String((p as any).file.name || `file-${Math.random().toString(36).slice(2,7)}.bin`);
-      const mimeType = String((p as any).file.mimeType || 'application/octet-stream');
+      const f: any = (p as any).file || {};
+      const bytes = String(f.bytes || '');
+      const name = String(f.name || `file-${Math.random().toString(36).slice(2,7)}.bin`);
+      const mimeType = String(f.mimeType || 'application/octet-stream');
       proposed.push({ type:'attachment_added', name, mimeType, bytes, origin:'inbound' } as ProposedFact);
-      const decodedLen = Math.floor((bytes.length * 3) / 4) - (bytes.endsWith('==') ? 2 : bytes.endsWith('=') ? 1 : 0);
-      atts.push({ name, mimeType, origin:'inbound', size: decodedLen });
+      const size = typeof f.size === 'number' && Number.isFinite(f.size)
+        ? Number(f.size)
+        : b64ByteLength(bytes);
+      atts.push(size != null ? { name, mimeType, origin:'inbound', size } : { name, mimeType, origin:'inbound' });
     }
   }
 
@@ -63,3 +67,5 @@ function messageToFacts(m: A2AMessage): ProposedFact[] {
   }
   return proposed;
 }
+
+// (moved) b64ByteLength now lives in shared/codec.ts
