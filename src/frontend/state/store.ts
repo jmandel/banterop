@@ -43,10 +43,12 @@ export type Store = {
   fetchAndIngest(): Promise<void>;
   setPlanner(id:'off'|'llm-drafter'|'scenario-v0.3'|'simple-demo'): void;
   setPlannerMode(mode:'approve'|'auto'): void;
+  setPlannerApplied(applied: any, ready: boolean): void;
   // legacy staging functions removed; planners with config stores persist directly
   appendComposeIntent(text: string, attachments?: AttachmentMeta[]): string;
   sendCompose(composeId: string, finality: 'none'|'turn'|'conversation'): Promise<void>;
   addUserGuidance(text: string): void;
+  addUserAnswer(qid: string, text: string): void;
   dismissCompose(composeId: string): void;
   kickoffConversationWithPlanner(): void;
   cancelAndClear(): Promise<void>;
@@ -92,6 +94,41 @@ export const useAppStore = create<Store>((set, get) => ({
   },
   setPlannerMode(mode) { set({ plannerMode: mode }); },
 
+  setPlannerApplied(applied, ready) {
+    const pid = get().plannerId;
+    set((s:any) => ({
+      appliedByPlanner: { ...s.appliedByPlanner, [pid]: applied },
+      readyByPlanner: { ...s.readyByPlanner, [pid]: ready },
+    }));
+    // Reflect setup in URL hash for deep links (UI-agnostic)
+    try {
+      const mode = get().plannerMode;
+      // Sanitize large blobs like resolvedScenario
+      let appliedForUrl: any = applied;
+      try {
+        if (pid === 'scenario-v0.3') {
+          const slim: any = {};
+          const scenUrl = String((applied as any)?.scenarioUrl || '');
+          if (scenUrl) slim.scenarioUrl = scenUrl;
+          const model = String((applied as any)?.model || '');
+          if (model) slim.model = model;
+          const myAgentId = String((applied as any)?.myAgentId || '');
+          if (myAgentId) slim.myAgentId = myAgentId;
+          const tools = (applied as any)?.enabledTools;
+          if (Array.isArray(tools) && tools.length) slim.enabledTools = tools;
+          appliedForUrl = slim;
+        } else if (applied && typeof applied === 'object') {
+          // Generic: drop known heavy keys if present
+          const { resolvedScenario, ...rest } = applied as any;
+          appliedForUrl = rest;
+        }
+      } catch {}
+      const setup = { planner: { id: pid, mode, ready: true, applied: appliedForUrl } };
+      const enc = encodeURIComponent(JSON.stringify(setup));
+      try { window.location.hash = `setup=${enc}`; } catch {}
+    } catch {}
+  },
+
   setTaskId(taskId) {
     const prev = get().taskId;
     set({ taskId });
@@ -112,8 +149,15 @@ export const useAppStore = create<Store>((set, get) => ({
     (window as any).__ticksAbort?.abort?.();
     (window as any).__ticksAbort = ac;
     (async () => {
-      for await (const _ of adapter.ticks(taskId, ac.signal)) {
-        onTick();
+      try {
+        for await (const _ of adapter.ticks(taskId, ac.signal)) {
+          onTick();
+        }
+      } catch (err: any) {
+        // Swallow aborts; log unexpected errors in dev
+        if (!(err && (err.name === 'AbortError' || String(err).includes('AbortError')))) {
+          try { console.debug('[ticks] ended', String(err?.message || err)); } catch {}
+        }
       }
     })();
     window.addEventListener('beforeunload', () => { try { ac.abort(); } catch {} }, { once: true });
@@ -206,6 +250,11 @@ export const useAppStore = create<Store>((set, get) => ({
     const gid = rid('g');
     const pf = ({ type:'user_guidance', gid, text } as ProposedFact);
     stampAndAppend(set, get, [pf as ProposedFact]);
+  },
+
+  addUserAnswer(qid, text) {
+    const pf = ({ type:'user_answer', qid: String(qid || ''), text: String(text || '') } as ProposedFact);
+    stampAndAppend(set, get, [pf]);
   },
 
   dismissCompose(composeId: string) {

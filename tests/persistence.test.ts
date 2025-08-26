@@ -4,10 +4,13 @@ import { startServer, stopServer, Spawned, decodeA2AUrl, tmpDbPath } from "./uti
 
 // Persistence tests write a temporary on-disk DB and verify recovery across restart.
 
+// Always run persistence tests
+const describeMaybe = describe as any;
+
 let S: Spawned;
 let DB: string;
 
-describe("Persistence", () => {
+describeMaybe("Persistence", () => {
   beforeAll(async () => {
     DB = tmpDbPath();
     S = await startServer({ dbPath: DB });

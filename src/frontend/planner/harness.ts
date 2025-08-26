@@ -78,6 +78,7 @@ export class PlannerHarness<Cfg = unknown> {
       const f = facts[i];
       if (f.type === 'user_answer') { lastUserAnswerSeq = f.seq; break; }
     }
+    // no agent_answer trigger; UI emits user_answer directly
 
     const statusTriggered = (lastStatus === 'input-required') && (lastStatusSeq > this.lastStatusPlannedSeq);
     const inboundTriggered = (lastPublic === 'remote_received') && (lastInboundSeq > this.lastInboundPlannedSeq);

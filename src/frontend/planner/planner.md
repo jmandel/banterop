@@ -73,3 +73,44 @@ The harness plans only once per logical trigger instance:
 - Current planners wired with config stores:
   - LLM Drafter
   - Scenario Planner v0.3
+
+## Applied Config Lifecycle (Generic UI + Store)
+
+- Save & Apply: The Setup card calls `setPlannerApplied(applied, ready)` on the app store.
+  - Store updates `appliedByPlanner[plannerId]` and `readyByPlanner[plannerId]`.
+  - Store also writes a compact deep-link payload to `window.location.hash` as `#setup=...`.
+    - Payload is planner-agnostic: `{ planner: { id, mode, ready: true, applied } }`.
+    - Sanitization: large fields like `resolvedScenario` are dropped from the hash; planner-specific essentials are retained (see Scenario below).
+
+- Deep-link bootstrap: On page load, the Participant UI parses `#setup=...` and seeds the store (planner id/mode/applied/ready). This ensures a copied URL can reconstruct the setup.
+
+- Harness wiring: The planner controller watches store changes and rebuilds the harness when planner id/applied/ready change, translating `applied` via the planner’s `toHarnessCfg`.
+
+## `opts.initial` Convention (Planner Config Stores)
+
+- Definition: `opts.initial` is the previously applied config (from the store or `#setup=`) passed into `createConfigStore({ llm, initial })`.
+- Use: Each planner’s config store uses it to prefill fields and drive initialization behaviors.
+  - The generic UI does not interpret planner-specific shapes; it simply passes `appliedByPlanner[plannerId]` as `initial`.
+  - Config stores define how to interpret `initial` and what to expose in `exportApplied()`.
+
+## Scenario Planner v0.3 — Setup Behaviors
+
+- Auto-load by URL: If `initial.scenarioUrl` is provided but `initial.resolvedScenario` is not, the scenario config store fetches and validates the JSON on mount (no extra user step).
+- Preserve selections: On first derive after loading a scenario:
+  - `myAgentId`: If provided in `initial` and valid for the loaded scenario, it’s kept; otherwise the first agent is selected.
+  - `enabledTools`: If provided in `initial`, it is filtered to valid tools and used; otherwise defaults to “all tools” for the selected agent.
+- One-time application: An internal `_appliedInitial` flag ensures initial selections apply once and are not overwritten on subsequent derives.
+- Deep-link sanitization: When serializing `#setup=...`, only lightweight scenario fields are persisted: `{ scenarioUrl, model, myAgentId?, enabledTools? }`.
+
+## Responsibilities Recap
+
+- Generic UI/Store:
+  - Renders setup using generic fields; saves via `setPlannerApplied()`.
+  - Owns deep-link serialization (`#setup=`) and bootstrap.
+  - Orchestrates harness lifecycle; no planner-specific logic.
+- Planner Config Stores:
+  - Define fields, validation, and dynamic options (e.g., load scenario, derive agents/tools).
+  - Interpret `opts.initial`; return `{ applied, ready }`.
+- Planner Implementations:
+  - Implement `plan(input, ctx)` to produce journal facts.
+  - Provide `toHarnessCfg(applied)` to map setup to runtime config.

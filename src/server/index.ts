@@ -31,7 +31,7 @@ app.use('*', cors())
 app.use('*', logger())
 
 const db = createPersistence(env)
-const events = createEventStore()
+const events = createEventStore({ maxPerPair: Number(process.env.FLIPPROXY_EVENTS_MAX || 5000) })
 const pairs = createPairsService({ db, events, baseUrl: env.BASE_URL })
 
 app.use('*', async (c, next) => { c.set('db', db); c.set('events', events); c.set('pairs', pairs); await next() })

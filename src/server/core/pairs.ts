@@ -3,8 +3,9 @@ import type { Finality } from './finality'
 import { extractFinality, computeStates } from './finality'
 import { validateParts } from './validators'
 import { initTaskId, respTaskId, parseTaskId } from './ids'
+import { createEventStore } from './events'
 
-type Deps = { db: Persistence; events: { push: Function; stream: Function }; baseUrl: string }
+type Deps = { db: Persistence; events: ReturnType<typeof createEventStore>; baseUrl: string }
 
 export type TaskSnapshot = {
   id: string
@@ -19,14 +20,39 @@ export type PairsService = ReturnType<typeof createPairsService>
 export function createPairsService({ db, events }: Deps) {
   const metadata = new Map<string, any>()
 
-  function toSnapshot(row: TaskRow): TaskSnapshot {
+  function sanitizeHistoryLength(v: unknown): number {
+    const MAX = 10_000;
+    const n = typeof v === 'number' ? v : Number(v);
+    if (!Number.isFinite(n)) return MAX;
+    if (n < 0) return 0;
+    return Math.min(Math.floor(n), MAX);
+  }
+
+  function toSnapshot(row: TaskRow, historyLength?: number): TaskSnapshot {
+    let currentMsgId: string | undefined = undefined
+    try { currentMsgId = row.message ? (JSON.parse(row.message).messageId) : undefined } catch {}
+    const limit = typeof historyLength === 'number' ? sanitizeHistoryLength(historyLength) : 10_000
+    const hist = buildHistory(row.pair_id, row.epoch, currentMsgId, limit)
+
     return {
       id: row.task_id,
       contextId: row.pair_id,
       kind: 'task',
       status: { state: row.state as TaskState, message: row.message ? JSON.parse(row.message) : undefined },
-      history: [],
+      history: hist,
     }
+  }
+
+  function buildHistory(pairId: string, epoch: number, excludeMessageId: string | undefined, limit: number): any[] {
+    const msgs = events.listMessagesForEpoch(pairId, epoch)
+    const out: any[] = []
+    for (const m of msgs) {
+      if (excludeMessageId && m.messageId === excludeMessageId) continue
+      out.push(m.message)
+    }
+    if (limit <= 0) return []
+    if (out.length <= limit) return out
+    return out.slice(out.length - limit)
   }
 
   function ensureEpoch(pairId: string): { epoch: number } {
@@ -132,8 +158,8 @@ export function createPairsService({ db, events }: Deps) {
     },
 
     async messageSend(pairId: string, m: any, configuration?: { historyLength?: number }) {
-    const hasTaskId = !!m?.taskId
-    const { epoch } = hasTaskId ? ensureEpoch(pairId) : ensureEpochForSend(pairId)
+      const hasTaskId = !!m?.taskId
+      const { epoch } = hasTaskId ? ensureEpoch(pairId) : ensureEpochForSend(pairId)
 
       const senderId = m?.taskId ?? initTaskId(pairId, epoch)
       const { role: senderRole } = parseTaskId(senderId)
@@ -171,8 +197,12 @@ export function createPairsService({ db, events }: Deps) {
         if (otherRow) db.upsertTask({ ...otherRow, message: JSON.stringify(mirrored) })
       } catch {}
 
+      // Record canonical message event for history (by epoch)
+      events.push(pairId, { type: 'message', epoch, messageId: msg.messageId, message: msg })
+
       const snapRow = db.getTask(senderId)!
-      return { kind:'task', ...toSnapshot(snapRow) }
+      const limit = sanitizeHistoryLength(configuration?.historyLength)
+      return toSnapshot(snapRow, limit)
     },
 
     messageStream(pairId: string, m?: any) {
@@ -182,40 +212,21 @@ export function createPairsService({ db, events }: Deps) {
 
         if (!m || (Array.isArray(m.parts) && m.parts.length === 0)) {
           const snap = db.getTask(initTaskId(pairId, epoch))!
-          yield { kind:'task', ...toSnapshot(snap) }
+          const limit = 10_000 // default when no configuration provided
+          yield toSnapshot(snap, limit)
           return
         }
 
         const senderId = m.taskId ?? initTaskId(pairId, epoch)
-        const senderRole = parseTaskId(senderId).role
-
         const result = await self.messageSend(pairId, { ...(m||{}), taskId: senderId }, m?.configuration)
         yield result
-
-        const otherRole = senderRole === 'init' ? 'resp' : 'init'
-        const otherId = otherRole === 'init' ? initTaskId(pairId, epoch) : respTaskId(pairId, epoch)
-
-        const orig = m
-        const mirrored = {
-          role: 'agent',
-          parts: (orig.parts ?? []).map((p:any) => p && p.kind === 'text' ? { kind:'text', text: p.text } : p),
-          messageId: crypto.randomUUID(),
-          taskId: otherId,
-          contextId: pairId,
-          kind: 'message',
-          metadata: orig.metadata,
-        }
-
-        const row = db.getTask(otherId)!
-        db.upsertTask({ ...row, message: JSON.stringify(mirrored) })
-
         yield { kind:'status-update', status:{ state: 'working' } }
       })()
     },
 
     tasksResubscribe(pairId: string, id: string) {
       const row = db.getTask(id)
-      const initial = row ? { kind:'task', ...toSnapshot(row) } : { kind:'task', id, contextId: pairId, status:{ state:'submitted' }, history:[] }
+      const initial = row ? toSnapshot(row) : { kind:'task', id, contextId: pairId, status:{ state:'submitted' }, history:[] }
 
       const stream = (async function* () {
         yield initial

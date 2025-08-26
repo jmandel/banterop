@@ -21,10 +21,11 @@ async function listModels(llm: any): Promise<string[]> {
 }
 
 export function createScenarioConfigStore(opts: { llm: any; initial?: any }): PlannerConfigStore {
-  type S = PlannerConfigStore & { _timer?: any; _lastUrl?: string; _scenario?: any; _mounted: boolean };
+  type S = PlannerConfigStore & { _timer?: any; _lastUrl?: string; _scenario?: any; _mounted: boolean; _appliedInitial?: boolean };
   const store = create<S>((set, get) => {
+    const initialScenarioUrl = String((opts.initial as any)?.scenarioUrl || (opts.initial as any)?.resolvedScenario?.__sourceUrl || '');
     const fields: FieldState[] = [
-      { key: 'scenarioUrl', type: 'text', label: 'Scenario JSON URL', value: String(opts.initial?.resolvedScenario?.__sourceUrl || ''), placeholder: 'URL…', required: true },
+      { key: 'scenarioUrl', type: 'text', label: 'Scenario JSON URL', value: initialScenarioUrl, placeholder: 'URL…', required: true },
       { key: 'model', type: 'select', label: 'Model', value: String(opts.initial?.model || ''), options: [], pending: true },
       { key: 'myAgentId', type: 'select', label: 'My role (agent)', value: String(opts.initial?.myAgentId || ''), options: [], visible: false, pending: true },
       { key: 'enabledTools', type: 'checkbox-group', label: 'Tools to enable', value: [], options: [], visible: false },
@@ -80,7 +81,14 @@ export function createScenarioConfigStore(opts: { llm: any; initial?: any }): Pl
       const toolsField = get().snap.fields.find(x => x.key === 'enabledTools')!;
       toolsField.visible = tools.length > 0;
       toolsField.options = tools.map((t:any) => ({ value: String(t?.toolName || ''), label: toolLabel(t) }));
-      toolsField.value = toolNames;
+      // If initial enabledTools were provided, prefer them once; else default to all for convenience
+      const initialEnabled = (opts.initial && Array.isArray((opts.initial as any).enabledTools)) ? (opts.initial as any).enabledTools as string[] : null;
+      if (!get()._appliedInitial && initialEnabled && initialEnabled.length) {
+        const filtered = initialEnabled.filter(x => toolNames.includes(String(x)));
+        toolsField.value = filtered.length ? filtered : toolNames;
+      } else {
+        toolsField.value = toolNames;
+      }
 
       const title = String(scen?.metadata?.title || scen?.metadata?.id || '');
       const agentsSummary = (scen?.agents ?? []).map((a: any) => a?.agentId).filter(Boolean).join(' ↔ ');
@@ -119,6 +127,8 @@ export function createScenarioConfigStore(opts: { llm: any; initial?: any }): Pl
           (get() as any)._scenario = chosen;
           deriveFromScenario(chosen);
           urlField.error = null;
+          // Mark that we've applied initial selections once
+          set({ _appliedInitial: true } as any);
         }
       } catch (e: any) {
         if (get()._lastUrl !== me) return;
@@ -185,6 +195,7 @@ export function createScenarioConfigStore(opts: { llm: any; initial?: any }): Pl
       const val = (k: string) => get().snap.fields.find(x => x.key === k)!.value;
       const applied = {
         resolvedScenario: (get() as any)._scenario,
+        scenarioUrl: String(val('scenarioUrl') || ''),
         model: String(val('model') || ''),
         myAgentId: String(val('myAgentId') || ''),
         enabledTools: (val('enabledTools') as string[]) || [],
@@ -197,6 +208,10 @@ export function createScenarioConfigStore(opts: { llm: any; initial?: any }): Pl
     if (opts.initial?.resolvedScenario) {
       (get() as any)._scenario = opts.initial.resolvedScenario;
       deriveFromScenario(opts.initial.resolvedScenario);
+      set({ _appliedInitial: true } as any);
+    } else if (initialScenarioUrl) {
+      // If only a URL is provided, automatically fetch and validate it
+      queueMicrotask(() => { void validateUrl(initialScenarioUrl); });
     }
 
     return { snap, setField, exportApplied, destroy, _mounted: true } as any as S;

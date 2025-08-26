@@ -13,9 +13,9 @@ export async function waitUntil(fn: () => Promise<boolean>, timeoutMs = 10000, i
 
 export function randomPort(): number { return 3000 + Math.floor(Math.random() * 3000); }
 
-export async function startServer(opts?: { dbPath?: string }): Promise<Spawned> {
+export async function startServer(opts?: { dbPath?: string; env?: Record<string,string> }): Promise<Spawned> {
   const port = randomPort();
-  const env = { ...process.env, PORT: String(port), FLIPPROXY_DB: opts?.dbPath ?? ':memory:' } as Record<string, string>;
+  const env = { ...process.env, PORT: String(port), FLIPPROXY_DB: opts?.dbPath ?? ':memory:', ...(opts?.env || {}) } as Record<string, string>;
   const proc = Bun.spawn(["bun", "src/server/index.ts"], {
     env,
     stdout: "ignore",

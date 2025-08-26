@@ -9,15 +9,14 @@ export async function sse(c: Context, stream: AsyncIterable<any>, opts?:{ rpcId?
       const write = (obj:any) => controller.enqueue(enc.encode(`data: ${JSON.stringify(obj)}\n\n`))
       try {
         for await (const chunk of stream) {
-          const payload: RpcFrame = opts?.rpcId != null ? { jsonrpc:'2.0', id: opts.rpcId, result: chunk } : chunk
+          const payload = opts?.rpcId != null ? { jsonrpc:'2.0', id: opts.rpcId, result: chunk } : chunk
           write(payload)
         }
       } catch (err) {
-        const payload: RpcFrame = opts?.rpcId != null ? { jsonrpc:'2.0', id: opts.rpcId, error:{ code:-32000, message:String(err) } } : { error:String(err) }
+        const payload = opts?.rpcId != null ? { jsonrpc:'2.0', id: opts.rpcId, error:{ code:-32000, message:String(err) } } : { error:String(err) }
         write(payload)
       } finally { controller.close() }
     }
   })
   return new Response(body, { status:200, headers })
 }
-

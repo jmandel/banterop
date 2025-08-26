@@ -24,28 +24,23 @@ const minimalScenario = {
   ]
 }
 
-describe('ScenarioPlanner — whisper as answer', () => {
-  it('emits agent_answer when user whisper matches Answer <qid>:', async () => {
+describe('ScenarioPlanner — user_answer answers agent_question', () => {
+  it('does not gate on open question when matching user_answer exists', async () => {
     const facts: Fact[] = [
-      stamp({ type:'status_changed', a2a: 'input-required' }, 1),
-      stamp({ type:'agent_question', qid:'q123', prompt:'Provide info?' }, 2),
-      stamp({ type:'user_guidance', gid:'g1', text:'Answer q123: yes, proceed' }, 3),
+      stamp({ type:'agent_question', qid:'q123', prompt:'Provide info?' }, 1),
+      stamp({ type:'user_answer', qid:'q123', text:'yes, proceed' }, 2),
     ]
-    const input: PlanInput = { cut: { seq: 3 }, facts }
+    const input: PlanInput = { cut: { seq: 2 }, facts }
     const ctx: PlanContext<any> = {
       hud(){}, newId:(p?:string)=> (p||'id') + Math.random().toString(36).slice(2,6),
       readAttachment: async () => null,
       config: { scenario: minimalScenario },
-      myAgentId: 'planner', otherAgentId: 'counterpart', model: 'test',
+      model: 'test',
       llm: dummyLLM,
     }
     const out = await ScenarioPlannerV03.plan(input, ctx)
-    expect(out.length).toBe(1)
-    expect(out[0].type).toBe('agent_answer')
-    if (out[0].type === 'agent_answer') {
-      expect(out[0].qid).toBe('q123')
-      expect(out[0].text).toContain('yes, proceed')
-    }
+    // Must not return the gating sleep that waits for user's answer
+    const waiting = out.find(o => o.type === 'sleep' && typeof (o as any).reason === 'string' && (o as any).reason.includes("Waiting on user's answer"))
+    expect(waiting).toBeUndefined()
   })
 })
-

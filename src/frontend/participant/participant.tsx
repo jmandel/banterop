@@ -8,6 +8,7 @@ import { MCPAdapter } from '../transports/mcp-adapter';
 import { startPlannerController } from '../planner/controller';
 import { resolvePlanner } from '../planner/registry';
 import { makeChitchatProvider, DEFAULT_CHITCHAT_ENDPOINT } from '../../shared/llm-provider';
+import { b64ToUtf8, normalizeB64 } from '../../shared/codec';
 
 type Role = 'initiator'|'responder';
 
@@ -36,12 +37,58 @@ function App() {
   const store = useAppStore();
   const [sending, setSending] = useState(false);
 
+  type UrlSetup = {
+    planner?: {
+      id?: 'llm-drafter'|'scenario-v0.3'|'simple-demo'|'off';
+      mode?: 'approve'|'auto';
+      ready?: boolean;
+      applied?: any;
+      config?: any;
+    };
+    llm?: { model?: string };
+    kickoff?: 'if-ready'|'always'|'never';
+  };
+
+  function parseSetupFromLocation(): UrlSetup | null {
+    const h = new URL(window.location.href).hash.replace(/^#/, '');
+    if (!/^setup=/.test(h)) return null;
+    const raw = h.slice('setup='.length);
+    // Try URL-decoded JSON
+    try {
+      const maybe = decodeURIComponent(raw);
+      if (maybe.trim().startsWith('{')) {
+        const obj = JSON.parse(maybe);
+        return (obj && (obj as any).setup) ? (obj as any).setup : (obj as any);
+      }
+    } catch {}
+    // Try Base64URL JSON
+    try {
+      const json = b64ToUtf8(normalizeB64(raw));
+      const obj = JSON.parse(json);
+      return (obj && (obj as any).setup) ? (obj as any).setup : (obj as any);
+    } catch {}
+    return null;
+  }
+
+  // Hold parsed URL setup for planner bootstrap; do not seed store with partials
+  const [urlSetup, setUrlSetup] = useState<UrlSetup | null>(null);
+  function applySetupFromUrl(setup: UrlSetup) {
+    if (!setup?.planner) return;
+    const pid = (setup.planner.id || 'off') as any;
+    useAppStore.getState().setPlanner(pid);
+    if (setup.planner.mode) useAppStore.getState().setPlannerMode(setup.planner.mode);
+    // Keep as local bootstrap only; config store will use it as opts.initial
+    setUrlSetup(setup);
+  }
+
   // init transport & role
   useEffect(() => {
     const adapter = transport === 'mcp' ? new MCPAdapter(mcpUrl) : new A2AAdapter(a2aUrl);
     store.init(role as Role, adapter, undefined);
     // Start planner controller for both roles; harness owns triggers/guards
     startPlannerController();
+    // Apply URL setup (if provided)
+    try { const setup = parseSetupFromLocation(); if (setup) applySetupFromUrl(setup); } catch {}
   }, [role, transport, a2aUrl, mcpUrl]);
 
   // Backchannel (responder, A2A): delegate to store attach/detach
@@ -108,8 +155,8 @@ function App() {
         </div>
       </div>
 
-      <TaskRibbon />
-      <PlannerSetupCard />
+  <TaskRibbon />
+  <PlannerSetupCard urlSetup={urlSetup} />
 
       <DebugPanel />
       <div className="card">
@@ -161,14 +208,14 @@ function App() {
                   <div className="stripe-head">
                     {f.type === 'user_guidance' && 'Private • Whisper'}
                     {f.type === 'agent_question' && 'Private • Agent Question'}
-                    {f.type === 'agent_answer' && 'Private • Answer'}
+                    {f.type === 'user_answer' && 'Private • Answer'}
                     {f.type === 'compose_intent' && (isDismissed ? 'Private • Draft (dismissed)' : 'Private • Draft')}
                   </div>
                   <div className="stripe-body">
                     {f.type === 'user_guidance' && <div className="text">{f.text}</div>}
                     {f.type === 'user_answer' && <div className="text">{(f as any).text}</div>}
                     {f.type === 'agent_question' && (()=>{
-                      const answered = facts.some(x => x.type === 'agent_answer' && (x as any).qid === (f as any).qid && x.seq > f.seq);
+                      const answered = facts.some(x => x.type === 'user_answer' && (x as any).qid === (f as any).qid && x.seq > f.seq);
                       return <QuestionInline q={f as any} answered={answered} />;
                     })()}
                     {f.type === 'compose_intent' && (
@@ -284,7 +331,7 @@ function QuestionInline({ q, answered }:{ q:{ qid:string; prompt:string; placeho
   const [submitted, setSubmitted] = useState(false);
   function submit() {
     if (answered || submitted) return;
-    useAppStore.getState().addUserGuidance(`Answer ${q.qid}: ${txt}`);
+    useAppStore.getState().addUserAnswer(q.qid, txt);
     setSubmitted(true);
   }
   return (
@@ -362,12 +409,19 @@ root.render(<App />);
 function TaskRibbon() {
   const taskId = useAppStore(s => s.taskId);
   const uiStatus = useAppStore(s => s.uiStatus());
+  function statusBadgeText(s: string): string {
+    if (s === 'working') return 'Remote Agent is Working';
+    if (s === 'input-required') return 'Remote Agent is Waiting for Us';
+    // pass through other statuses
+    if (s === 'submitted') return 'Not started';
+    return s;
+  }
   return (
     <div className="card">
       <div className="row" style={{ alignItems:'center', gap: 10 }}>
         <strong>Task</strong>
         <span className="pill">ID: {taskId || '—'}</span>
-        <span className="pill">Status: {uiStatus}</span>
+        <span className="pill">Status: {statusBadgeText(uiStatus)}</span>
       </div>
     </div>
   );
@@ -402,7 +456,7 @@ function PlannerModeSelector() {
   );
 }
 
-function PlannerSetupCard() {
+function PlannerSetupCard({ urlSetup }: { urlSetup: any | null }) {
   const pid = useAppStore(s => s.plannerId);
   const planner: any = resolvePlanner(pid);
   const applied = useAppStore(s => s.appliedByPlanner[pid]);
@@ -421,16 +475,26 @@ function PlannerSetupCard() {
   const llm = React.useMemo(() => makeChitchatProvider(DEFAULT_CHITCHAT_ENDPOINT), []);
   const [cfg, setCfg] = React.useState<any>(null);
   const plannerKey = planner && typeof planner.id === 'string' ? String(planner.id) : 'none';
+  const urlInitial = React.useMemo(() => {
+    const u = urlSetup && urlSetup.planner && urlSetup.planner.id === pid ? (urlSetup.planner.applied || urlSetup.planner.config) : null;
+    // Allow top-level llm override to sneak into initial
+    if (u && urlSetup?.llm?.model && typeof u === 'object') { try { (u as any).model = String(urlSetup.llm.model || ''); } catch {} }
+    return u;
+  }, [urlSetup, pid]);
+
+  const autoApplyRequested = !!(urlSetup && urlSetup.planner && urlSetup.planner.id === pid && urlSetup.planner.ready);
+
   React.useEffect(() => {
     if (planner && typeof (planner as any).createConfigStore === 'function') {
-      const s = (planner as any).createConfigStore({ llm, initial: applied });
+      const initialForCfg = applied || urlInitial || undefined;
+      const s = (planner as any).createConfigStore({ llm, initial: initialForCfg });
       setCfg(s);
       return () => { try { s.destroy(); } catch {} };
     }
     setCfg(null);
     return () => {};
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plannerKey]);
+  }, [plannerKey, urlInitial]);
 
   // Subscribe to cfg store to keep snapshot reactive
   const subscribe = React.useCallback((onStoreChange: () => void) => {
@@ -443,18 +507,48 @@ function PlannerSetupCard() {
   }, [cfg]);
   const snap = React.useSyncExternalStore(subscribe, getSnapshot);
 
-  if (cfg) {
-    const canBegin = ready && role === 'initiator' && !taskId;
-    function save() {
-      try {
-        const { applied, ready } = cfg.exportApplied();
+  // Hooks below must be unconditional (not inside conditionals)
+  const canBegin = ready && role === 'initiator' && !taskId;
+  const [autoApplied, setAutoApplied] = React.useState(false);
+  const kickoffPref = React.useMemo(() => {
+    const ks = urlSetup && urlSetup.planner && urlSetup.planner.id === pid ? (urlSetup.kickoff || 'never') : 'never';
+    return ks as 'never'|'always'|'if-ready';
+  }, [urlSetup, pid]);
+  const [kicked, setKicked] = React.useState(false);
+
+  const save = React.useCallback(() => {
+    if (!cfg) return;
+    try {
+      const { applied: appliedOut, ready: readyOut } = cfg.exportApplied();
+      try { useAppStore.getState().setPlannerApplied(appliedOut, readyOut); } catch {
+        // Fallback for older stores
         useAppStore.setState((s: any) => ({
-          appliedByPlanner: { ...s.appliedByPlanner, [pid]: applied },
-          readyByPlanner: { ...s.readyByPlanner, [pid]: ready },
+          appliedByPlanner: { ...s.appliedByPlanner, [pid]: appliedOut },
+          readyByPlanner: { ...s.readyByPlanner, [pid]: readyOut },
         }));
-        setCollapsed(true);
-      } catch { /* errors are inline in fields */ }
+      }
+      setCollapsed(true);
+    } catch { /* errors are inline in fields */ }
+  }, [cfg, pid]);
+
+  // If URL requested ready/auto-apply, apply once cfg is ready (canSave && !pending)
+  React.useEffect(() => {
+    if (!cfg || !autoApplyRequested || autoApplied) return;
+    const snapNow = cfg?.snap;
+    if (snapNow && snapNow.canSave && !snapNow.pending) {
+      try { save(); setAutoApplied(true); } catch {}
     }
+  }, [cfg, autoApplyRequested, autoApplied, save, snap?.canSave, snap?.pending]);
+
+  // Optional kickoff based on URL preference (after ready/apply)
+  React.useEffect(() => {
+    if (kicked) return;
+    if (role !== 'initiator' || taskId) return;
+    const shouldKick = kickoffPref === 'always' || (kickoffPref === 'if-ready' && ready);
+    if (shouldKick) { try { useAppStore.getState().kickoffConversationWithPlanner(); setKicked(true); } catch {} }
+  }, [kickoffPref, ready, role, taskId, kicked]);
+
+  if (cfg) {
     function handleSubmit(e: React.FormEvent) {
       e.preventDefault();
       if (!snap?.canSave || snap?.pending) return;
