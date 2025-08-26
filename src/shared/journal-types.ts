@@ -51,6 +51,10 @@ export type Fact =
      ; qid:string
      ; text:string
      } & Stamp)
+  | ({ type:'user_answer'
+     ; qid:string
+     ; text:string
+     } & Stamp)
   | ({ type:'user_guidance'
      ; gid:string
      ; text:string
@@ -91,7 +95,6 @@ export type PlanContext<Cfg = unknown> = {
   newId: (prefix?: string) => string;
   readAttachment: (name: string) => Promise<{ mimeType: string; bytes: string } | null>;
   config?: Cfg;
-  myAgentId?: string;
   otherAgentId?: string;
   model?: string;
   llm: LlmProvider;

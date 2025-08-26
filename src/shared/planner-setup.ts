@@ -1,6 +1,5 @@
 export type PlannerSetupState = {
   plannerId: 'off' | 'llm-drafter' | 'scenario-v0.3' | 'simple-demo';
-  stagedByPlanner: Record<string, any>;
   appliedByPlanner: Record<string, any>;
   readyByPlanner: Record<string, boolean>;
 };

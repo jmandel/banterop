@@ -66,7 +66,7 @@ function logLine(f: Fact, myId?: string, otherId?: string): string | null {
 }
 
 function buildPrompt(input: PlanInput, ctx: PlanContext<Cfg>): { system: string; user: string } {
-  const who = ctx.myAgentId || 'me';
+  const who = 'me';
   const other = ctx.otherAgentId || 'other';
   const status = latestStatus(input.facts);
   const baseSystem = (ctx.config?.systemPrompt
@@ -77,8 +77,9 @@ function buildPrompt(input: PlanInput, ctx: PlanContext<Cfg>): { system: string;
   lines.push(`I am drafting the next message as ${who}, to ${other}.`);
   lines.push(`Current status: ${status}.`);
   lines.push('');
-  lines.push('Conversation history (newest last):');
+  lines.push('Conversation history (public, newest last):');
   for (const f of input.facts) {
+    if (f.type !== 'remote_received' && f.type !== 'remote_sent') continue;
     const line = logLine(f, who, other);
     if (line) lines.push(line);
   }

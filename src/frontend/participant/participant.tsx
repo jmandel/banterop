@@ -6,7 +6,8 @@ import { useAppStore } from '../state/store';
 import { A2AAdapter } from '../transports/a2a-adapter';
 import { MCPAdapter } from '../transports/mcp-adapter';
 import { startPlannerController } from '../planner/controller';
-import { PlannerRegistry } from '../planner/registry';
+import { resolvePlanner } from '../planner/registry';
+import { makeChitchatProvider, DEFAULT_CHITCHAT_ENDPOINT } from '../../shared/llm-provider';
 
 type Role = 'initiator'|'responder';
 
@@ -137,33 +138,43 @@ function App() {
                 </div>
               );
             }
-            if (f.type === 'agent_question' || f.type === 'agent_answer' || f.type === 'compose_intent' || f.type === 'user_guidance') {
-              // Hide approved/sent/dismissed drafts
-              if (f.type === 'compose_intent' && (approved.has(f.composeId) || sentComposeIds.has(f.composeId))) return <div key={f.id} style={{display:'none'}} />;
-              if (f.type === 'compose_intent') {
-                const dismissed = [...facts].some(x => x.type === 'compose_dismissed' && (x as any).composeId === f.composeId);
-                if (dismissed) return <div key={f.id} style={{display:'none'}} />;
+            if (f.type === 'agent_question' || f.type === 'user_answer' || f.type === 'compose_intent' || f.type === 'user_guidance') {
+              // Hide Q&A whispers like: "Answer <qid>: <text>"
+              if (f.type === 'user_guidance') {
+                const t = String((f as any).text || '');
+                if (/^\s*Answer\s+[^:]+\s*:/.test(t)) return <div key={f.id} style={{display:'none'}} />;
               }
+              // Hide approved/sent drafts; show dismissed drafts faded (intermediate state)
+              if (f.type === 'compose_intent' && (approved.has(f.composeId) || sentComposeIds.has(f.composeId))) return <div key={f.id} style={{display:'none'}} />;
               const stripeClass =
                 f.type === 'user_guidance' ? 'stripe whisper' :
                 f.type === 'agent_question' ? 'stripe question' :
-                f.type === 'agent_answer' ? 'stripe answer' : 'stripe draft';
+                f.type === 'user_answer' ? 'stripe answer' : 'stripe draft';
+              const isDismissed = (f.type === 'compose_intent') && [...facts].some(x => x.type === 'compose_dismissed' && (x as any).composeId === f.composeId);
+              // If a newer compose_intent exists, hide this dismissed one entirely
+              if (f.type === 'compose_intent' && isDismissed) {
+                const hasNewerDraft = [...facts].some(x => x.type === 'compose_intent' && x.seq > f.seq);
+                if (hasNewerDraft) return <div key={f.id} style={{display:'none'}} />;
+              }
               return (
-                <div key={f.id} className={'private ' + stripeClass}>
+                <div key={f.id} className={'private ' + stripeClass} style={isDismissed ? { opacity: 0.5 } : undefined}>
                   <div className="stripe-head">
                     {f.type === 'user_guidance' && 'Private • Whisper'}
                     {f.type === 'agent_question' && 'Private • Agent Question'}
                     {f.type === 'agent_answer' && 'Private • Answer'}
-                    {f.type === 'compose_intent' && 'Private • Draft'}
+                    {f.type === 'compose_intent' && (isDismissed ? 'Private • Draft (dismissed)' : 'Private • Draft')}
                   </div>
                   <div className="stripe-body">
                     {f.type === 'user_guidance' && <div className="text">{f.text}</div>}
-                    {f.type === 'agent_answer' && <div className="text">{f.text}</div>}
-                    {f.type === 'agent_question' && (
-                      <QuestionInline q={f} />
-                    )}
+                    {f.type === 'user_answer' && <div className="text">{(f as any).text}</div>}
+                    {f.type === 'agent_question' && (()=>{
+                      const answered = facts.some(x => x.type === 'agent_answer' && (x as any).qid === (f as any).qid && x.seq > f.seq);
+                      return <QuestionInline q={f as any} answered={answered} />;
+                    })()}
                     {f.type === 'compose_intent' && (
-                      <DraftInline composeId={f.composeId} text={f.text} />
+                      isDismissed
+                        ? <div className="text">{f.text}</div>
+                        : <DraftInline composeId={f.composeId} text={f.text} />
                     )}
                   </div>
                 </div>
@@ -210,12 +221,22 @@ function DraftInline({ composeId, text }:{ composeId:string; text:string }) {
   const [finality, setFinality] = useState<'none'|'turn'|'conversation'>('turn');
   const [sending, setSending] = useState(false);
   const err = useAppStore(s => s.sendErrorByCompose.get(composeId));
+  const pid = useAppStore(s => s.plannerId);
+  const ready = useAppStore(s => !!s.readyByPlanner[s.plannerId]);
   async function approve() {
     setSending(true);
     try { await useAppStore.getState().sendCompose(composeId, finality); }
     finally { setSending(false); }
   }
   async function retry() { await approve(); }
+  function regenerate() {
+    try { useAppStore.getState().dismissCompose(composeId); } catch {}
+    // Nudge controller by changing appliedByPlanner identity (no-op clone)
+    useAppStore.setState((s: any) => {
+      const curr = s.appliedByPlanner[pid];
+      return { appliedByPlanner: { ...s.appliedByPlanner, [pid]: curr ? { ...curr } : {} } };
+    });
+  }
   return (
     <div>
       <div className="text">{text}</div>
@@ -226,6 +247,9 @@ function DraftInline({ composeId, text }:{ composeId:string; text:string }) {
           <option value="conversation">end conversation</option>
         </select>
         <button className="btn" onClick={()=>void approve()} disabled={sending}>{sending ? 'Sending…' : 'Approve & Send'}</button>
+        {ready && (
+          <button className="btn ghost" onClick={regenerate} title="Dismiss current draft and ask the planner to generate a new suggestion">Regenerate suggestion</button>
+        )}
       </div>
       {err && (
         <div className="small" style={{ color:'#b91c1c', marginTop:6 }}>
@@ -255,15 +279,20 @@ function Whisper({ onSend }:{ onSend:(t:string)=>void }) {
   );
 }
 
-function QuestionInline({ q }:{ q:{ qid:string; prompt:string; placeholder?:string } }) {
+function QuestionInline({ q, answered }:{ q:{ qid:string; prompt:string; placeholder?:string }, answered:boolean }) {
   const [txt, setTxt] = useState('');
-  function submit() { useAppStore.getState().addUserGuidance(`Answer ${q.qid}: ${txt}`); }
+  const [submitted, setSubmitted] = useState(false);
+  function submit() {
+    if (answered || submitted) return;
+    useAppStore.getState().addUserGuidance(`Answer ${q.qid}: ${txt}`);
+    setSubmitted(true);
+  }
   return (
     <div>
       <div className="text" style={{marginBottom:6}}>{q.prompt}</div>
       <div className="row">
-        <input className="input" style={{flex:1}} placeholder={q.placeholder || 'Type your answer'} value={txt} onChange={e=>setTxt(e.target.value)} onKeyDown={(e)=>{ if (e.key==='Enter') submit(); }} />
-        <button className="btn" onClick={submit}>Answer</button>
+        <input className="input" style={{flex:1}} placeholder={q.placeholder || 'Type your answer'} value={txt} onChange={e=>setTxt(e.target.value)} onKeyDown={(e)=>{ if (e.key==='Enter') submit(); }} disabled={answered || submitted} />
+        <button className="btn" onClick={submit} disabled={answered || submitted}>{answered ? 'Answered' : (submitted ? 'Sending…' : 'Answer')}</button>
       </div>
       <div className="small muted" style={{marginTop:4}}>Private: your answer isn’t sent to the other side.</div>
     </div>
@@ -375,15 +404,12 @@ function PlannerModeSelector() {
 
 function PlannerSetupCard() {
   const pid = useAppStore(s => s.plannerId);
-  const staged = useAppStore(s => s.stagedByPlanner[pid]);
+  const planner: any = resolvePlanner(pid);
   const applied = useAppStore(s => s.appliedByPlanner[pid]);
   const ready = useAppStore(s => !!s.readyByPlanner[pid]);
   const taskId = useAppStore(s => s.taskId);
   const role = useAppStore(s => s.role);
   const hud = useAppStore(s => s.hud);
-  const facts = useAppStore(s => s.facts);
-  const set = useAppStore.getState();
-  const [errors, setErrors] = React.useState<{ targetWords?: string }>({});
   const [collapsed, setCollapsed] = React.useState<boolean>(ready);
 
   React.useEffect(() => {
@@ -391,213 +417,138 @@ function PlannerSetupCard() {
     if (ready) setCollapsed(true);
   }, [ready]);
 
-  // Detect unsent draft (ignoring dismissed); walk back until a remote_sent
-  const hasUnsentDraft = React.useMemo(() => {
-    const dismissed = new Set<string>();
-    for (const f of facts) if (f.type === 'compose_dismissed') dismissed.add((f as any).composeId);
-    for (let i = facts.length - 1; i >= 0; --i) {
-      const f = facts[i];
-      if (f.type === 'remote_sent') break;
-      if (f.type === 'compose_intent') {
-        if (!dismissed.has((f as any).composeId)) return true;
+  // Generic planner card via config store — always call hooks in stable order
+  const llm = React.useMemo(() => makeChitchatProvider(DEFAULT_CHITCHAT_ENDPOINT), []);
+  const [cfg, setCfg] = React.useState<any>(null);
+  const plannerKey = planner && typeof planner.id === 'string' ? String(planner.id) : 'none';
+  React.useEffect(() => {
+    if (planner && typeof (planner as any).createConfigStore === 'function') {
+      const s = (planner as any).createConfigStore({ llm, initial: applied });
+      setCfg(s);
+      return () => { try { s.destroy(); } catch {} };
+    }
+    setCfg(null);
+    return () => {};
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plannerKey]);
+
+  // Subscribe to cfg store to keep snapshot reactive
+  const subscribe = React.useCallback((onStoreChange: () => void) => {
+    if (cfg && typeof cfg.subscribe === 'function') return cfg.subscribe(onStoreChange);
+    return () => {};
+  }, [cfg]);
+  const emptySnapRef = React.useRef<any>({ fields: [], canSave: false, pending: false, dirty: false });
+  const getSnapshot = React.useCallback(() => {
+    return cfg ? cfg.snap : emptySnapRef.current;
+  }, [cfg]);
+  const snap = React.useSyncExternalStore(subscribe, getSnapshot);
+
+  if (cfg) {
+    const canBegin = ready && role === 'initiator' && !taskId;
+    function save() {
+      try {
+        const { applied, ready } = cfg.exportApplied();
+        useAppStore.setState((s: any) => ({
+          appliedByPlanner: { ...s.appliedByPlanner, [pid]: applied },
+          readyByPlanner: { ...s.readyByPlanner, [pid]: ready },
+        }));
+        setCollapsed(true);
+      } catch { /* errors are inline in fields */ }
+    }
+    function handleSubmit(e: React.FormEvent) {
+      e.preventDefault();
+      if (!snap?.canSave || snap?.pending) return;
+      save();
+    }
+    function handleKeyDown(e: React.KeyboardEvent) {
+      if (e.key !== 'Enter') return;
+      const t = e.target as any;
+      const tag = String((t?.tagName || '')).toUpperCase();
+      const type = String(t?.type || '').toLowerCase();
+      const isTextInput = tag === 'INPUT' && type === 'text';
+      const isTextarea = tag === 'TEXTAREA';
+      // Only allow Enter-to-save from single-line text inputs
+      if (!isTextInput || isTextarea) {
+        e.preventDefault();
       }
     }
-    return false;
-  }, [facts]);
-
-  // LLM Drafter card
-  if (pid === 'llm-drafter') {
-    function validate() {
-      const e: { targetWords?: string } = {};
-      const tw = Number(staged?.targetWords || 0);
-      if (!Number.isFinite(tw) || tw < 0) e.targetWords = 'Enter 0 to disable, or a positive number.';
-      if (Number.isFinite(tw) && tw !== 0 && (tw < 10 || tw > 1000)) e.targetWords = 'Enter a number between 10 and 1000, or 0 to disable.';
-      setErrors(e);
-      return Object.keys(e).length === 0;
-    }
-
-    function save() {
-      if (!validate()) return;
-      set.saveAndApplyPlannerCfg(pid);
-      try { setCollapsed(true); } catch {}
-    }
-
-    const canBegin = ready && role === 'initiator' && !taskId && !hasUnsentDraft;
-    const sysA = String(staged?.systemAppend || '');
-    const twS = Number(staged?.targetWords || 0);
-    const sysB = String(applied?.systemAppend || '');
-    const twB = Number(applied?.targetWords || 0);
-    const dirty = !!staged && (applied == null || sysA !== sysB || twS !== twB);
-    const hasErrors = !!errors.targetWords;
-
     return (
-      <div className="card" style={{ marginTop: 10 }}>
-        <div style={{ display:'flex', alignItems:'center', gap: 10 }}>
-          <button className="btn ghost" onClick={()=> setCollapsed(v=>!v)} aria-label={collapsed ? 'Expand planner setup' : 'Collapse planner setup'}>
+      <form onSubmit={handleSubmit} onKeyDown={handleKeyDown} className="card" style={{ marginTop: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={() => setCollapsed(v => !v)}
+            aria-label={collapsed ? 'Expand planner setup' : 'Collapse planner setup'}
+            style={{ fontSize: 18, width: 34, height: 34, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+          >
             {collapsed ? '▸' : '▾'}
           </button>
-          <strong>Planner — LLM Drafter</strong>
+          <strong>Planner — {planner?.name || '—'}</strong>
           <span className="small muted" style={{ marginLeft: 8 }}>
             {ready ? 'Ready' : 'Not configured'}
-            {collapsed ? (()=>{
-              const cfgForSummary = staged ?? applied ?? {};
-              const reg = (PlannerRegistry as any)[pid];
-              const s = reg?.summary ? reg.summary(cfgForSummary) : '';
-              return s ? ` • ${s}` : '';
-            })() : ''}
+            {collapsed && ((planner as any)?.summarizeApplied?.(applied) || snap?.summary) ? ` • ${(planner as any)?.summarizeApplied?.(applied) || snap.summary}` : ''}
           </span>
           <span style={{ marginLeft: 'auto' }} />
           {hud && hud.phase !== 'idle' && (
-            <div className="row" style={{ gap:8, alignItems:'center' }}>
+            <div className="row" style={{ gap: 8, alignItems: 'center' }}>
               <span className="pill">{hud.phase}{hud.label ? ` — ${hud.label}` : ''}</span>
               {typeof hud.p === 'number' && (
                 <div style={{ width: 160, height: 6, background: '#eef1f7', borderRadius: 4 }}>
-                  <div style={{ width: `${Math.round(Math.max(0, Math.min(1, hud.p))*100)}%`, height: '100%', background:'#5b7cff', borderRadius: 4 }} />
+                  <div style={{ width: `${Math.round(Math.max(0, Math.min(1, hud.p)) * 100)}%`, height: '100%', background: '#5b7cff', borderRadius: 4 }} />
                 </div>
               )}
             </div>
           )}
           {!collapsed && (
-            <button className="btn" onClick={save} disabled={!staged || !dirty || hasErrors}>Save & Apply</button>
+            <button className="btn" type="submit" disabled={!snap?.canSave || snap?.pending}>Save & Apply</button>
           )}
-          {canBegin && <button className="btn" onClick={()=> set.kickoffConversationWithPlanner()}>Begin conversation</button>}
+          {canBegin && <button className="btn" onClick={() => useAppStore.getState().kickoffConversationWithPlanner()}>Begin conversation</button>}
         </div>
         {!collapsed && (
-          <div
-            style={{
-              marginTop: 10,
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 12,
-              alignItems: 'flex-start',
-            }}
-          >
-            <div style={{ flex: '2 1 420px', minWidth: 280, maxWidth: 640 }}>
-              <label className="small" style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>
-                System prompt (append)
-              </label>
-              <textarea
-                className="input"
-                placeholder="Optional: appended to the built‑in system prompt"
-                value={String(staged?.systemAppend || '')}
-                onChange={(e) => set.stagePlannerCfg(pid, { systemAppend: e.target.value })}
-                style={{ width: '100%', minHeight: 80, resize: 'vertical', boxSizing: 'border-box' }}
-              />
-              <div className="small muted" style={{ marginTop: 4 }}>
-                Optional text appended to the system prompt.
+          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {snap.fields.filter((f: any) => f.visible !== false).map((f: any) => (
+              <div key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 680 }}>
+                <label className="small" style={{ fontWeight: 600 }}>{f.label}</label>
+                {renderField(f, cfg.setField)}
+                {f.help && <div className="small muted">{f.help}</div>}
+                {f.error && <div className="small" style={{ color: '#c62828' }}>{f.error}</div>}
+                {f.pending && <div className="small muted">Validating…</div>}
               </div>
-            </div>
-            <div style={{ flex: '1 1 220px', minWidth: 200, maxWidth: 320 }}>
-              <label className="small" style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>
-                Target length (words)
-              </label>
-              <input
-                className="input"
-                type="number"
-                min={0}
-                step={10}
-                value={Number(staged?.targetWords || 0)}
-                onChange={(e) => {
-                  set.stagePlannerCfg(pid, { targetWords: Number(e.target.value || 0) });
-                }}
-                onBlur={validate}
-                style={{ width: '100%', boxSizing: 'border-box' }}
-                placeholder="0 (no target)"
-              />
-              {errors.targetWords ? (
-                <div className="small" style={{ color: '#c62828', marginTop: 4 }}>{errors.targetWords}</div>
-              ) : (
-                <div className="small muted" style={{ marginTop: 4 }}>Aim near this length; set 0 to disable.</div>
-              )}
-            </div>
+            ))}
+            {snap.preview && <div className="small muted">Preview: {JSON.stringify(snap.preview)}</div>}
           </div>
         )}
-      </div>
+      </form>
     );
   }
 
-  // Scenario Planner card
-  if (pid !== 'scenario-v0.3') return null;
+  // No config UI for planners without createConfigStore
+  return null;
+}
 
-  function saveScenario() {
-    set.saveAndApplyPlannerCfg(pid);
-    try { setCollapsed(true); } catch {}
-  }
-
-  const canBegin = ready && role === 'initiator' && !taskId && !hasUnsentDraft;
-  const hasError = !!staged?.error;
-  const dirtyScenario = !!staged; // keep simple: allow save when staged exists and URL present
-
-  return (
-    <div className="card" style={{ marginTop: 10 }}>
-      <div style={{ display:'flex', alignItems:'center', gap: 10 }}>
-        <button className="btn ghost" onClick={()=> setCollapsed(v=>!v)} aria-label={collapsed ? 'Expand planner setup' : 'Collapse planner setup'}>
-          {collapsed ? '▸' : '▾'}
-        </button>
-        <strong>Planner — Scenario Planner</strong>
-        <span className="small muted" style={{ marginLeft: 8 }}>
-          {ready ? 'Ready' : 'Not configured'}
-          {collapsed ? (()=>{
-            const cfgForSummary = staged ?? applied ?? {};
-            const reg = (PlannerRegistry as any)[pid];
-            const s = reg?.summary ? reg.summary(cfgForSummary) : '';
-            return s ? ` • ${s}` : '';
-          })() : ''}
-        </span>
-        <span style={{ marginLeft: 'auto' }} />
-        {hud && hud.phase !== 'idle' && (
-          <div className="row" style={{ gap:8, alignItems:'center' }}>
-            <span className="pill">{hud.phase}{hud.label ? ` — ${hud.label}` : ''}</span>
-            {typeof hud.p === 'number' && (
-              <div style={{ width: 160, height: 6, background: '#eef1f7', borderRadius: 4 }}>
-                <div style={{ width: `${Math.round(Math.max(0, Math.min(1, hud.p))*100)}%`, height: '100%', background:'#5b7cff', borderRadius: 4 }} />
-              </div>
-            )}
-          </div>
-        )}
-        {!collapsed && (
-          <button className="btn" onClick={saveScenario} disabled={!staged || !String(staged?.scenarioUrl||'').trim() || hasError}>Save & Apply</button>
-        )}
-        {canBegin && <button className="btn" onClick={()=> set.kickoffConversationWithPlanner()}>Begin conversation</button>}
-      </div>
-      {!collapsed && (
-        <div style={{ marginTop: 10, display:'flex', flexDirection:'column', gap:10 }}>
-          <div className="row" style={{ gap: 8 }}>
-            <input
-              className="input"
-              placeholder="Scenario JSON URL (https://…)"
-              value={String(staged?.scenarioUrl || '')}
-              onChange={(e)=> set.stagePlannerCfg(pid, { scenarioUrl: e.target.value })}
-              style={{ flex: 1 }}
-            />
-            <input
-              className="input"
-              placeholder="Model override (optional)"
-              value={String(staged?.model || '')}
-              onChange={(e)=> set.stagePlannerCfg(pid, { model: e.target.value })}
-              style={{ width: 220 }}
-            />
-          </div>
-          {staged?.error && (
-            <div className="small" style={{ color:'#c62828' }}>{String(staged.error)}</div>
-          )}
-          <div className="row" style={{ gap: 12 }}>
-            <label className="small" style={{ display:'flex', alignItems:'center', gap:6 }}>
-              <input type="checkbox" checked={staged?.includeWhy !== false} onChange={(e)=> set.stagePlannerCfg(pid, { includeWhy: e.target.checked })} /> Include “why” annotations
-            </label>
-            <label className="small" style={{ display:'flex', alignItems:'center', gap:6 }}>
-              <input type="checkbox" checked={!!staged?.allowInitiation} onChange={(e)=> set.stagePlannerCfg(pid, { allowInitiation: e.target.checked })} /> Allow initiation
-            </label>
-          </div>
-          {staged?.preview && (
-            <div className="small muted">
-              Scenario: {staged.preview.title || staged.preview.id} — Agents: {Array.isArray(staged.preview.agents) ? staged.preview.agents.join(' ↔ ') : '—'} (tools: {Array.isArray(staged.preview.toolCounts) ? staged.preview.toolCounts.join(', ') : '—'})
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+function renderField(f: any, setField: (k: string, v: any) => void) {
+  if (f.type === 'text') return <input className="input" value={String(f.value || '')} placeholder={f.placeholder || ''} onChange={e => setField(f.key, e.target.value)} />;
+  if (f.type === 'checkbox') return (
+    <input type="checkbox" checked={!!f.value} onChange={e => setField(f.key, e.target.checked)} />
   );
+  if (f.type === 'select') return <select className="input" value={String(f.value || '')} onChange={e => setField(f.key, e.target.value)}>
+    {(f.options || []).map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
+  </select>;
+  if (f.type === 'checkbox-group') {
+    const sel = new Set<string>(Array.isArray(f.value) ? f.value : []);
+    const toggle = (v: string) => { const next = new Set(sel); next.has(v) ? next.delete(v) : next.add(v); setField(f.key, Array.from(next)); };
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px,1fr))', gap: 8 }}>
+        {(f.options || []).map((o: any) => (
+          <label key={o.value} className="small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input type="checkbox" checked={sel.has(o.value)} onChange={() => toggle(o.value)} /> {o.label}
+          </label>
+        ))}
+      </div>
+    );
+  }
+  return null;
 }
 
 function DebugPanel() {

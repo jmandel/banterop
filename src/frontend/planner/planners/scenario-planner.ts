@@ -28,19 +28,12 @@ import type { ScenarioConfiguration, Tool as ScenarioTool } from '../../../types
 
 export interface ScenarioPlannerConfig {
   scenario: ScenarioConfiguration;
-
-  /**
-   * If true, the planner may initiate the conversation (propose a compose_intent)
-   * when there is no prior remote/public traffic and the status allows it.
-   * Default: false (conservative).
-   */
-  allowInitiation?: boolean;
-
   /** Optional model override; otherwise ctx.model is used. */
   model?: string;
-
-  /** If true, include tool/event traces as short 'why' strings on planner facts. Default: true. */
-  includeWhy?: boolean;
+  /** Optional list of tool names to enforce; if omitted, all tools enabled. */
+  enabledTools?: string[];
+  /** Which agent we are playing as (agentId). Defaults to first agent. */
+  myAgentId?: string;
 }
 
 export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
@@ -50,7 +43,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
   async plan(input: PlanInput, ctx: PlanContext<ScenarioPlannerConfig>): Promise<ProposedFact[]> {
     const { facts } = input;
     const cfg = ctx.config || ({} as ScenarioPlannerConfig);
-    const includeWhy = cfg.includeWhy !== false;
+    const includeWhy = true;
 
     // --- HUD: planning lifecycle
     ctx.hud('planning', 'Scanning state');
@@ -120,17 +113,16 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
     // 4) Build prompt from scenario + history + tools catalogue
     ctx.hud('reading', 'Preparing prompt', 0.2);
     const scenario = cfg.scenario;
-    const myId = ctx.myAgentId || scenario?.agents?.[0]?.agentId || 'planner';
-    const counterpartId = ctx.otherAgentId || (scenario?.agents?.find(a => a.agentId !== myId)?.agentId ?? 'counterpart');
+    const myId = cfg.myAgentId || scenario?.agents?.[0]?.agentId || 'planner';
+    const counterpartId = (scenario?.agents?.find(a => a.agentId !== myId)?.agentId) || (scenario?.agents?.[1]?.agentId) || 'counterpart';
 
     const filesAtCut = listAttachmentMetasAtCut(facts);
     const xmlHistory = buildXmlHistory(facts, myId, counterpartId);
     const availableFilesXml = buildAvailableFilesXml(filesAtCut);
 
-    const hasPublic = facts.some(f => f.type === 'remote_received' || f.type === 'remote_sent');
-    const mayInitiate = !!cfg.allowInitiation;
-    const allowSendToRemote = status === 'input-required' && (hasPublic || mayInitiate);
-    const toolsCatalog = buildToolsCatalog(scenario, { allowSendToRemote });
+    const allowSendToRemote = status === 'input-required';
+    const enabledTools = Array.isArray((ctx.config as any)?.enabledTools) ? (ctx.config as any).enabledTools as string[] : undefined;
+    const toolsCatalog = buildToolsCatalog(scenario, myId, { allowSendToRemote }, enabledTools);
 
     const prompt = buildPlannerPrompt(scenario, myId, counterpartId, xmlHistory, availableFilesXml, toolsCatalog);
 
@@ -248,6 +240,10 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       default: {
         // Scenario tool?
         const toolName = decision.tool;
+        const enabled = Array.isArray((ctx.config as any)?.enabledTools) ? (ctx.config as any).enabledTools as string[] : undefined;
+        if (enabled && !enabled.includes(toolName)) {
+          return [sleepFact(`Tool '${toolName}' disabled`, includeWhy, reasoning)];
+        }
         const tdef = findScenarioTool(scenario, myId, toolName);
         if (!tdef) {
           return [sleepFact(`Unknown tool '${toolName}' → sleep.`, includeWhy, reasoning)];
@@ -418,8 +414,8 @@ function findOpenQuestion(facts: ReadonlyArray<Fact>): { qid: string } | null {
   }
   if (!lastQid) return null;
   for (let i = facts.length - 1; i >= 0; i--) {
-    const f = facts[i];
-    if (f.type === 'agent_answer' && f.qid === lastQid) return null;
+    const f = facts[i] as any;
+    if (f.type === 'user_answer' && f.qid === lastQid) return null;
   }
   return { qid: lastQid };
 }
@@ -455,8 +451,9 @@ function buildXmlHistory(facts: ReadonlyArray<Fact>, me: string, other: string):
       lines.push(`<tool_result>${escapeXml(JSON.stringify(f.ok ? f.result ?? {} : { ok: false, error: f.error }))}</tool_result>`);
     } else if (f.type === 'agent_question') {
       lines.push(`<message from="${me}" to="user"><private_question>${escapeXml(f.prompt)}</private_question></message>`);
-    } else if (f.type === 'agent_answer') {
-      lines.push(`<message from="user" to="${me}"><private_answer>${escapeXml(f.text)}</private_answer></message>`);
+    } else if ((f as any).type === 'user_answer') {
+      const ua = f as any;
+      lines.push(`<message from="user" to="${me}"><private_answer>${escapeXml(ua.text)}</private_answer></message>`);
     }
   }
   return lines.join('\n');
@@ -510,7 +507,7 @@ function buildPlannerPrompt(
 // Tools catalog presented to LLM
 // -----------------------------
 
-function buildToolsCatalog(scenario: ScenarioConfiguration, opts: { allowSendToRemote: boolean }) {
+function buildToolsCatalog(scenario: ScenarioConfiguration, myAgentId: string, opts: { allowSendToRemote: boolean }, enabledTools?: string[]) {
   const lines: string[] = [];
   lines.push('<TOOLS>');
   lines.push('Respond with exactly ONE JSON object: { reasoning: string, action: { tool: string, args: object } }');
@@ -538,11 +535,9 @@ function buildToolsCatalog(scenario: ScenarioConfiguration, opts: { allowSendToR
   lines.push('Tool: sleep: SleepArgs');
   lines.push('');
 
-  // Scenario tools
-  const me = scenario?.agents?.[0];
-  const mine = scenario?.agents || [];
-  const withTools = mine.flatMap(a => a.agentId === (me?.agentId || a.agentId) ? [a] : []);
-  const tools = withTools[0]?.tools || [];
+  // Scenario tools for the selected agent
+  const me = (scenario?.agents || []).find(a => a.agentId === myAgentId) || scenario?.agents?.[0];
+  const tools = (me?.tools || []).filter((t:any) => !enabledTools || enabledTools.includes(t.toolName));
   if (tools.length) {
     lines.push('Scenario-Specific Tools:');
     for (const t of tools) {

@@ -62,3 +62,14 @@ The harness plans only once per logical trigger instance:
 - Subscribe to store changes and call `schedulePlan()` on `seq` increments.
 - Do not implement triggers/guards; never call `runPlanningPass()` directly.
 
+## Config Stores (Setup UI)
+
+- Each planner can optionally expose a config companion on the exported planner object:
+  - `createConfigStore({ llm, initial }) => PlannerConfigStore`
+  - `toHarnessCfg(applied) => PlannerCfg`
+  - `summarizeApplied?(applied) => string`
+- The Setup card renders generically using `FieldState[]` from the store snapshot and calls `setField()` as the user types.
+- `exportApplied()` returns `{ applied, ready }` for persistence in `appliedByPlanner` and readiness in `readyByPlanner`.
+- Current planners wired with config stores:
+  - LLM Drafter
+  - Scenario Planner v0.3

@@ -9,7 +9,7 @@ export class PlannerHarness<Cfg = unknown> {
     private hud: (phase: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting', label?: string, p?: number) => void,
     private planner: Planner<Cfg>,
     private cfg: Cfg,
-    private ids: { myAgentId?: string; otherAgentId?: string; model?: string } = {},
+    private ids: { otherAgentId?: string; model?: string } = {},
     private llmProvider?: LlmProvider,
   ) {}
 
@@ -18,6 +18,7 @@ export class PlannerHarness<Cfg = unknown> {
   private lastStatusPlannedSeq = 0;
   private lastInboundPlannedSeq = 0;
   private lastWhisperPlannedSeq = 0;
+  private lastUserAnswerPlannedSeq = 0;
   private lastOutboundPlannedSeq = 0;
   private lastHead = 0;
 
@@ -66,20 +67,26 @@ export class PlannerHarness<Cfg = unknown> {
       if (f.type === 'remote_received') { lastPublic = 'remote_received'; lastInboundSeq = f.seq; break; }
       if (f.type === 'remote_sent') { lastPublic = 'remote_sent'; lastOutboundSeq = f.seq; break; }
     }
-    // Latest whisper
+    // Latest whisper / user answer
     let lastWhisperSeq = 0;
+    let lastUserAnswerSeq = 0;
     for (let i = facts.length - 1; i >= 0; --i) {
       const f = facts[i];
       if (f.type === 'user_guidance') { lastWhisperSeq = f.seq; break; }
+    }
+    for (let i = facts.length - 1; i >= 0; --i) {
+      const f = facts[i];
+      if (f.type === 'user_answer') { lastUserAnswerSeq = f.seq; break; }
     }
 
     const statusTriggered = (lastStatus === 'input-required') && (lastStatusSeq > this.lastStatusPlannedSeq);
     const inboundTriggered = (lastPublic === 'remote_received') && (lastInboundSeq > this.lastInboundPlannedSeq);
     const outboundTriggered = (lastPublic === 'remote_sent') && (lastOutboundSeq > this.lastOutboundPlannedSeq);
     const whisperTriggered = lastWhisperSeq > this.lastWhisperPlannedSeq;
+    const userAnswerTriggered = lastUserAnswerSeq > this.lastUserAnswerPlannedSeq;
 
     // Only plan when a trigger fired
-    if (!(statusTriggered || inboundTriggered || outboundTriggered || whisperTriggered)) return;
+    if (!(statusTriggered || inboundTriggered || outboundTriggered || whisperTriggered || userAnswerTriggered)) return;
     // Status must be input-required
     if (lastStatus !== 'input-required') return;
     // Unsent compose gate (ignore dismissed): if there's a compose with no remote_sent after it, park
@@ -97,7 +104,7 @@ export class PlannerHarness<Cfg = unknown> {
       return false;
     })();
     // If whisper arrived while a draft is present, dismiss the latest unsent draft now (single one), then return.
-    if (whisperTriggered && hasUnsentCompose) {
+    if ((whisperTriggered || userAnswerTriggered) && hasUnsentCompose) {
       const latestUnsent = (() => {
         const dismissed2 = dismissed;
         for (let i = facts.length - 1; i >= 0; --i) {
@@ -128,7 +135,6 @@ export class PlannerHarness<Cfg = unknown> {
       newId: (prefix?: string) => rid(prefix || 'id'),
       readAttachment: (name: string) => this.readAttachment(name),
       config: this.cfg,
-      myAgentId: this.ids.myAgentId,
       otherAgentId: this.ids.otherAgentId,
       model: this.ids.model,
       llm: this.llmProvider || DevNullLLM,
@@ -159,6 +165,7 @@ export class PlannerHarness<Cfg = unknown> {
       if (inboundTriggered) this.lastInboundPlannedSeq = lastInboundSeq;
       if (outboundTriggered) this.lastOutboundPlannedSeq = lastOutboundSeq;
       if (whisperTriggered) this.lastWhisperPlannedSeq = lastWhisperSeq;
+      if (userAnswerTriggered) this.lastUserAnswerPlannedSeq = lastUserAnswerSeq;
     }
     try { this.hud('idle'); } catch {}
   }

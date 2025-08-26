@@ -63,6 +63,49 @@ describe("A2A JSON-RPC", () => {
     expect(jg.result.status.message).toBeTruthy();
   });
 
+  it("message/send without taskId creates epoch and uses initiator id", async () => {
+    const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
+    const j = await r.json();
+    const pairId = j.pairId as string;
+    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+
+    // Send without taskId — should auto-create epoch and use init:<pair>#1
+    const body = { jsonrpc:'2.0', id:'m0', method:'message/send', params:{ message:{ parts:[textPart('auto turn','turn')], messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } };
+    const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify(body) });
+    expect(res.ok).toBeTrue();
+    const jr = await res.json();
+    expect(jr.result.kind).toBe('task');
+    expect(String(jr.result.id)).toBe(`init:${pairId}#1`);
+
+    // Responder exists and is input-required
+    const respId = `resp:${pairId}#1`;
+    const r2 = await fetch(a2a, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ jsonrpc:'2.0', id:'g', method:'tasks/get', params:{ id: respId } }) });
+    const j2 = await r2.json();
+    expect(j2.result.id).toBe(respId);
+    expect(j2.result.status.state).toBe('input-required');
+  });
+
+  it("message/send without taskId starts next epoch if tasks already exist", async () => {
+    const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
+    const j = await r.json();
+    const pairId = j.pairId as string;
+    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+
+    // Create epoch #1 via a no-op stream (no taskId)
+    {
+      const res = await fetch(a2a, { method:'POST', headers: { 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params: { message: { role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
+      for await (const _ of parseSse<any>(res.body!)) break; // snapshot only
+    }
+
+    // Now send without taskId — should bump to epoch #2
+    const body = { jsonrpc:'2.0', id:'m1', method:'message/send', params:{ message:{ parts:[textPart('next','turn')], messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } };
+    const res2 = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify(body) });
+    expect(res2.ok).toBeTrue();
+    const jr = await res2.json();
+    expect(jr.result.kind).toBe('task');
+    expect(String(jr.result.id)).toBe(`init:${pairId}#2`);
+  });
+
   it("message/send mirrors message so responder tasks/get has status.message", async () => {
     const { pairId, a2a } = await createPairAndA2A();
     // Start epoch by streaming empty (creates tasks)

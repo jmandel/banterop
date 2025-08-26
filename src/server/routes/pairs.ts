@@ -48,10 +48,19 @@ export function pairsRoutes(includeNonApi = false) {
         async start(controller) {
           const enc = new TextEncoder()
           const write = (obj:any) => controller.enqueue(enc.encode(`data: ${JSON.stringify({ result: obj })}\n\n`))
-          const stream = c.get('events').stream(pairId, 0) as AsyncIterable<any>
+          const events = c.get('events')
+          const pairs = c.get('pairs')
           const ping = setInterval(() => { try { controller.enqueue(enc.encode(`event: ping\ndata: ${Date.now()}\n\n`)) } catch {} }, 15000)
           try {
-            for await (const ev of stream) {
+            // On connect, emit subscribe for the current epoch only
+            try {
+              const ensured = await (pairs as any).ensureEpochTasksForPair(pairId)
+              write({ type:'subscribe', pairId, epoch: ensured.epoch, taskId: ensured.responderTaskId, turn: 'initiator' })
+            } catch {}
+            // Stream future events only (no backlog)
+            const lastSeqArr = (events as any).listSince(pairId, 0)
+            const lastSeq = Array.isArray(lastSeqArr) && lastSeqArr.length ? Number(lastSeqArr[lastSeqArr.length - 1].seq || 0) : 0
+            for await (const ev of (events as any).stream(pairId, lastSeq)) {
               const e = ev.result
               if (e?.type === 'epoch-begin' && typeof e.epoch === 'number') {
                 const taskId = `resp:${pairId}#${e.epoch}`

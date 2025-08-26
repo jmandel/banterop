@@ -2,16 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
 import { startServer, stopServer, Spawned, decodeA2AUrl, tmpDbPath } from "./utils";
 
-// Gate this suite behind an explicit opt-in to avoid creating on-disk DBs
-// during normal `bun test` runs. Enable with FLIPPROXY_TEST_PERSISTENCE=1.
-const PERSISTENCE_ENABLED = process.env.FLIPPROXY_TEST_PERSISTENCE === '1';
+// Persistence tests write a temporary on-disk DB and verify recovery across restart.
 
 let S: Spawned;
 let DB: string;
 
-const d = (PERSISTENCE_ENABLED ? describe : describe.skip);
-
-d("Persistence", () => {
+describe("Persistence", () => {
   beforeAll(async () => {
     DB = tmpDbPath();
     S = await startServer({ dbPath: DB });

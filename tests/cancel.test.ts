@@ -107,4 +107,28 @@ describe("Cancel semantics", () => {
     const gg2 = await g2.json();
     expect(gg2.result.status.state).toBe('canceled');
   });
+
+  it("after cancel, message/send without taskId starts next epoch", async () => {
+    const r = await fetch(S.base + "/api/pairs", { method:'POST' });
+    const j = await r.json();
+    const pairId = j.pairId as string;
+    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    const initTaskId = `init:${pairId}#1`;
+    const respTaskId = `resp:${pairId}#1`;
+
+    // Create tasks by sending a no-op stream
+    {
+      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start', method:'message/stream', params:{ message:{ role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
+      for await (const _ of parseSse<any>(res.body!)) break;
+    }
+
+    // Cancel both sides via tasks/cancel
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'c', method:'tasks/cancel', params:{ id: initTaskId } }) });
+
+    // Now send without taskId → should bump epoch to #2 and return init:<pair>#2
+    const send = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m0', method:'message/send', params:{ message:{ parts:[textPart('new','turn')], messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
+    expect(send.ok).toBeTrue();
+    const js = await send.json();
+    expect(js.result.id).toBe(`init:${pairId}#2`);
+  });
 });

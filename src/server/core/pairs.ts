@@ -42,6 +42,22 @@ export function createPairsService({ db, events }: Deps) {
     return { epoch: p.epoch }
   }
 
+  function isTerminal(state: TaskState | undefined): boolean {
+    return state === 'completed' || state === 'canceled' || (state as any) === 'failed' || (state as any) === 'rejected'
+  }
+
+  // When sending without taskId, start a new epoch if current tasks are terminal
+  function ensureEpochForSend(pairId: string): { epoch: number } {
+    const p = db.getPair(pairId)
+    if (!p) throw new Error('pair not found')
+    if (p.epoch === 0) return ensureEpoch(pairId)
+    const next = (p.epoch || 0) + 1
+    db.setPairEpoch(pairId, next)
+    db.createEpochTasks(pairId, next)
+    events.push(pairId, { type:'epoch-begin', epoch: next })
+    return { epoch: next }
+  }
+
   async function upsertStates(pairId:string, epoch:number, states:{ init:TaskState; resp:TaskState }, sender:'init'|'resp', msg:any | undefined) {
     const initId = initTaskId(pairId, epoch)
     const respId = respTaskId(pairId, epoch)
@@ -116,7 +132,8 @@ export function createPairsService({ db, events }: Deps) {
     },
 
     async messageSend(pairId: string, m: any, configuration?: { historyLength?: number }) {
-      const { epoch } = ensureEpoch(pairId)
+    const hasTaskId = !!m?.taskId
+    const { epoch } = hasTaskId ? ensureEpoch(pairId) : ensureEpochForSend(pairId)
 
       const senderId = m?.taskId ?? initTaskId(pairId, epoch)
       const { role: senderRole } = parseTaskId(senderId)
@@ -172,7 +189,7 @@ export function createPairsService({ db, events }: Deps) {
         const senderId = m.taskId ?? initTaskId(pairId, epoch)
         const senderRole = parseTaskId(senderId).role
 
-        const result = await self.messageSend(pairId, m, m?.configuration)
+        const result = await self.messageSend(pairId, { ...(m||{}), taskId: senderId }, m?.configuration)
         yield result
 
         const otherRole = senderRole === 'init' ? 'resp' : 'init'
