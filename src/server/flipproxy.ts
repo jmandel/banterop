@@ -7,6 +7,9 @@ import { createLocalStorage } from 'bun-storage';
 import controlHtml from '../frontend/control/index.html';
 import participantHtml from '../frontend/participant/index.html';
 import { registerFlipProxyMcpBridge } from './bridge/mcp-on-flipproxy';
+import { mkdirSync } from 'fs';
+import path from 'path';
+import { validateParts as sharedValidateParts } from '../shared/parts-validator';
 
 export type Role = 'initiator' | 'responder';
 const asPublicRole = (s: Role) => s;
@@ -62,7 +65,9 @@ app.use('*', async (c, next) => {
 });
 
 // --- Persistence (bun-storage) ---
-const [localStorage] = createLocalStorage(process.env.FLIPPROXY_DB || './db.sqlite');
+const dbPath = process.env.FLIPPROXY_DB || './db/flipproxy.sqlite';
+try { mkdirSync(path.dirname(dbPath), { recursive: true }); } catch {}
+const [localStorage] = createLocalStorage(dbPath);
 const PAIR_INDEX_KEY = 'pair:index';
 
 async function lsGet(key: string): Promise<unknown | null> {
@@ -170,15 +175,36 @@ app.post('/api/pairs', async (c) => {
   pairs.set(pairId, p);
   logEvent(p, { type: 'pair-created', pairId, epoch: p.epoch });
   const a2aUrl = `${origin}/api/bridge/${pairId}/a2a`;
+  const mcpUrl = `${origin}/api/bridge/${pairId}/mcp`;
+  const agentCardUrl = `${origin}/.well-known/agent-card.json`;
   const tasksUrl = `${origin}/pairs/${pairId}/server-events`;
   await addPairToIndex(pairId);
   await persistPairMeta(p);
   return c.json({
     pairId,
-    initiatorJoinUrl: `${origin}/participant/?role=initiator&a2a=${encodeURIComponent(a2aUrl)}`,
-    responderJoinUrl: `${origin}/participant/?role=responder&a2a=${encodeURIComponent(a2aUrl)}&tasks=${encodeURIComponent(tasksUrl)}`,
-    serverEventsUrl: tasksUrl
+    endpoints: {
+      a2a: a2aUrl,
+      mcp: mcpUrl,
+      a2aAgentCard: agentCardUrl,
+    },
+    links: {
+      initiator: {
+        joinA2a: `${origin}/participant/?role=initiator&a2a=${encodeURIComponent(a2aUrl)}`,
+        joinMcp: `${origin}/participant/?role=initiator&transport=mcp&mcp=${encodeURIComponent(mcpUrl)}`,
+      },
+      responder: {
+        joinA2a: `${origin}/participant/?role=responder&a2a=${encodeURIComponent(a2aUrl)}&tasks=${encodeURIComponent(tasksUrl)}`,
+      },
+    },
   });
+});
+
+// Pair metadata (opaque controller-provided metadata)
+app.get('/api/pairs/:pairId/metadata', async (c) => {
+  const pairId = c.req.param('pairId');
+  const meta = await readPairMeta(pairId);
+  if (!meta) return c.json({ error: { message: 'pair not found' } }, 404);
+  return c.json({ metadata: meta.metadata ?? null });
 });
 
 // Backchannel for responder
@@ -211,7 +237,7 @@ app.get('/pairs/:pairId/events.log', async (c) => {
   c.header('Connection', 'keep-alive');
   c.header('X-Accel-Buffering', 'no');
   return streamSSE(c, async (stream) => {
-    try { console.log(`[sse open] /pairs/${'${'}pairId${'}'}/server-events`); } catch {}
+    try { console.log(`[sse open] /pairs/${'${'}pairId${'}'}/events.log`); } catch {}
     const push = (ev: any) => stream.writeSSE({ data: JSON.stringify({ result: ev }) });
     const ka = setInterval(() => { try { stream.writeSSE({ event: 'ping', data: String(Date.now()) }); } catch {} }, 15000);
     try {
@@ -307,7 +333,7 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
       const parts = Array.isArray(msg.parts) ? msg.parts : [];
       const msgMeta = (msg && typeof msg === 'object' && (msg as any).metadata) || undefined;
       if (parts.length) {
-        const validation = validateParts(parts);
+        const validation = sharedValidateParts(parts);
         if (!validation.ok) {
           stream.writeSSE({ data: JSON.stringify(jsonrpcError(id, -32602, 'Invalid parameters', { reason: validation.reason })) });
         } else {
@@ -342,7 +368,7 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
       taskId = t!.id;
     }
     const parts = Array.isArray(msg.parts) ? msg.parts : [];
-    const validation = validateParts(parts);
+    const validation = sharedValidateParts(parts);
     if (!validation.ok) return c.json(jsonrpcError(id, -32602, 'Invalid parameters', { reason: validation.reason }), 200);
     const msgMeta = (msg && typeof msg === 'object' && (msg as any).metadata) || undefined;
     onIncomingMessage(p, t!.side, { parts, messageId: String(msg.messageId || crypto.randomUUID()), metadata: msgMeta });
@@ -643,25 +669,7 @@ function jsonrpcError(id: any, code: number, message: string, data?: any) {
   return err;
 }
 
-function validateParts(parts: A2APart[]): { ok: true } | { ok: false; reason: string } {
-  for (const p of parts) {
-    if (!p || typeof (p as any).kind !== 'string') return { ok: false, reason: 'part missing kind' };
-    if ((p as any).kind === 'file') {
-      const f = (p as any).file;
-      const hasBytes = ('bytes' in f) && typeof (f as {bytes?: unknown}).bytes === 'string';
-      const hasUri = ('uri' in f) && typeof (f as {uri?: unknown}).uri === 'string';
-      if (hasBytes && hasUri) return { ok: false, reason: 'file part must not include both bytes and uri' };
-      if (!hasBytes && !hasUri) return { ok: false, reason: 'file part requires bytes or uri' };
-    } else if ((p as any).kind === 'text') {
-      if (typeof (p as any).text !== 'string') return { ok: false, reason: 'text part requires text' };
-    } else if ((p as any).kind === 'data') {
-      if (typeof (p as any).data !== 'object' || (p as any).data === null) return { ok: false, reason: 'data part requires object data' };
-    } else {
-      return { ok: false, reason: `unsupported part kind` };
-    }
-  }
-  return { ok: true };
-}
+// removed inline validateParts in favor of shared implementation
 
 function minimalAgentCard(origin: string): any {
   return {

@@ -1,113 +1,88 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
-
-type LogEntry = { when: string; text?: string; obj?: any }
-
-function nowStr() { return new Date().toLocaleTimeString() }
+import { useControlStore } from './store'
 
 function ControlApp() {
-  const [pairId, setPairId] = useState<string | undefined>(undefined)
-  const [sseUrl, setSseUrl] = useState<string | undefined>(undefined)
-  const [initiatorJoinUrl, setInitiatorJoinUrl] = useState<string | undefined>()
-  const [responderJoinUrl, setResponderJoinUrl] = useState<string | undefined>()
-  const [entries, setEntries] = useState<LogEntry[]>([])
-  const [pretty, setPretty] = useState(false)
-  const [wrap, setWrap] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [sinceInput, setSinceInput] = useState<string>('0')
-  const [sseStatus, setSseStatus] = useState<'idle'|'connecting'|'open'|'error'>('idle')
-  const esRef = useRef<EventSource | null>(null)
-  const logRef = useRef<HTMLPreElement | null>(null)
-
-  function log(text: string) { setEntries((e) => [...e, { when: nowStr(), text }]) }
-
-  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight }, [entries])
+  const pairId = useControlStore(s => s.pairId)
+  const sseUrl = useControlStore(s => s.sseUrl)
+  const initiatorJoinUrl = useControlStore(s => s.initiatorJoinUrl)
+  const responderJoinUrl = useControlStore(s => s.responderJoinUrl)
+  const pretty = useControlStore(s => s.pretty)
+  const wrap = useControlStore(s => s.wrap)
+  const since = useControlStore(s => s.since)
+  const status = useControlStore(s => s.status)
+  const entries = useControlStore(s => s.entries)
+  const setPretty = useControlStore(s => s.setPretty)
+  const setWrap = useControlStore(s => s.setWrap)
+  const setSince = useControlStore(s => s.setSince)
+  const setPair = useControlStore(s => s.setPair)
+  const subscribe = useControlStore(s => s.subscribe)
+  const unsubscribe = useControlStore(s => s.unsubscribe)
+  const clear = useControlStore(s => s.clear)
+  const copy = useControlStore(s => s.copy)
+  const download = useControlStore(s => s.download)
 
   useEffect(() => {
-    try {
-      const hash = window.location.hash.replace(/^#/, '')
-      if (hash) {
-        const params = new URLSearchParams(hash)
-        const hPair = params.get('pair') || undefined
-        const hSince = params.get('since')
-        if (hPair) {
-          setPairId(hPair)
-          const origin = window.location.origin
-          const a2aUrl = `${origin}/api/bridge/${hPair}/a2a`
-          const tasksUrl = `${origin}/pairs/${hPair}/server-events`
-          setInitiatorJoinUrl(`${origin}/participant/?role=initiator&a2a=${encodeURIComponent(a2aUrl)}`)
-          setResponderJoinUrl(`${origin}/participant/?role=responder&a2a=${encodeURIComponent(a2aUrl)}&tasks=${encodeURIComponent(tasksUrl)}`)
-          const since = hSince ? Number(hSince) : 0
-          setSinceInput(String(Number.isFinite(since) ? since : 0))
-          const url = `/pairs/${hPair}/events.log?since=${Number.isFinite(since) ? since : 0}`
-          setSseUrl(url)
-          subscribe(url)
+    const onLoad = () => {
+      try {
+        const hash = window.location.hash.replace(/^#/, '')
+        if (hash) {
+          const params = new URLSearchParams(hash)
+          const hPair = params.get('pair') || undefined
+          const hSince = params.get('since')
+          if (hPair) {
+            setPair(hPair)
+            const origin = window.location.origin
+            const a2aUrl = `${origin}/api/bridge/${hPair}/a2a`
+            const tasksUrl = `${origin}/pairs/${hPair}/server-events`
+            useControlStore.setState({
+              initiatorJoinUrl: `${origin}/participant/?role=initiator&a2a=${encodeURIComponent(a2aUrl)}`,
+              responderJoinUrl: `${origin}/participant/?role=responder&a2a=${encodeURIComponent(a2aUrl)}&tasks=${encodeURIComponent(tasksUrl)}`,
+            })
+            const s = hSince ? Number(hSince) : 0
+            setSince(Number.isFinite(s) ? s : 0)
+            const url = `/pairs/${hPair}/events.log?since=${Number.isFinite(s) ? s : 0}`
+            subscribe(url)
+          }
         }
-      }
-    } catch {}
-    return () => { try { esRef.current?.close() } catch {} }
+      } catch {}
+    }
+    onLoad()
+    return () => { try { unsubscribe() } catch {} }
   }, [])
 
   async function createPair() {
     const res = await fetch('/api/pairs', { method: 'POST' })
-    if (!res.ok) { log('Create pair failed: ' + res.status); return }
+    if (!res.ok) return
     const j = await res.json()
-    // Clear current log so we only show events for the new pair
-    setEntries([])
-    setPairId(j.pairId)
-    setInitiatorJoinUrl(j.initiatorJoinUrl)
-    setResponderJoinUrl(j.responderJoinUrl)
+    clear()
+    setPair(j.pairId)
+    useControlStore.setState({
+      initiatorJoinUrl: j.links?.initiator?.joinA2a,
+      responderJoinUrl: j.links?.responder?.joinA2a,
+    })
     const url = `/pairs/${j.pairId}/events.log?since=0`
-    setSseUrl(url)
     try { window.location.hash = `pair=${j.pairId}&since=0` } catch {}
-    setSinceInput('0')
+    setSince(0)
     subscribe(url)
-  }
-
-  function subscribe(url: string) {
-    try { esRef.current?.close() } catch {}
-    const es = new EventSource(url)
-    esRef.current = es
-    setSseStatus('connecting')
-    es.onopen = () => setSseStatus('open')
-    es.onmessage = (e) => {
-      try {
-        const payload = JSON.parse(e.data)
-        const ev = payload.result
-        log(JSON.stringify(ev, null, 2))
-      } catch {
-        log('Bad event payload')
-      }
-    }
-    es.onerror = () => setSseStatus('error')
   }
 
   async function hardReset() {
     if (!pairId) return
-    const res = await fetch(`/pairs/${pairId}/reset`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'hard' }) })
-    await res.json().catch(()=>{})
-    // Resubscribe from 0
-    setEntries([])
+    await fetch(`/pairs/${pairId}/reset`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'hard' }) }).catch(()=>{})
+    clear()
     const url = `/pairs/${pairId}/events.log?since=0`
-    setSseUrl(url)
-    setSinceInput('0')
     try { window.location.hash = `pair=${pairId}&since=0` } catch {}
+    setSince(0)
     subscribe(url)
   }
 
-  const renderedLog = useMemo(() => {
+  const renderedLog = React.useMemo(() => {
     if (!entries.length) return '(no events yet)'
     const lines: string[] = []
-    for (const e of entries) if (e.text != null) lines.push(e.text)
+    for (const e of entries) lines.push(pretty ? JSON.stringify(e.ev, null, 2) : JSON.stringify(e.ev))
     return lines.join('\n')
-  }, [entries])
-
-  async function copyLog() {
-    try {
-      await navigator.clipboard.writeText(renderedLog || '')
-      // ignore UI flash for brevity
-    } catch {}
-  }
+  }, [entries, pretty])
 
   return (
     <div className="wrap">
@@ -130,9 +105,18 @@ function ControlApp() {
         <div className="row" style={{ alignItems: 'center', gap: 10, justifyContent:'space-between' }}>
           <div className="row" style={{gap:10, alignItems:'center'}}>
             <strong>Events</strong>
+            <span className="pill" title={`SSE: ${status}`}>{status}</span>
           </div>
-          <div className="row" style={{ gap: 6 }}>
-            <button id="btnCopy" onClick={copyLog}>Copy</button>
+          <div className="row" style={{ gap: 6, alignItems:'center' }}>
+            <label className="small">Since</label>
+            <input className="input" style={{ width: 80 }} value={String(since)} onChange={(e)=>setSince(Number(e.target.value||0))} onBlur={()=>{ if (pairId!=null) subscribe(`/pairs/${pairId}/events.log?since=${since||0}`) }} />
+            <label className="small">Pretty</label>
+            <input type="checkbox" checked={pretty} onChange={(e)=>setPretty(e.target.checked)} />
+            <label className="small">Wrap</label>
+            <input type="checkbox" checked={wrap} onChange={(e)=>setWrap(e.target.checked)} />
+            <button onClick={()=>copy()}>Copy</button>
+            <button onClick={()=>clear()}>Clear</button>
+            <button onClick={()=>download()}>Download</button>
           </div>
         </div>
         {sseUrl && (
@@ -140,12 +124,7 @@ function ControlApp() {
             SSE: <code id="sseUrl" style={{ display:'inline-block', maxWidth:'60ch', overflow:'hidden', textOverflow:'ellipsis', verticalAlign:'bottom' }}>{sseUrl}</code>
           </div>
         )}
-        <pre
-          id="log"
-          style={{ maxHeight: 'none', overflowX: 'auto', overflowY: 'visible', whiteSpace: 'pre', overflowWrap: 'normal' }}
-        >
-          {renderedLog}
-        </pre>
+        <pre id="log" style={{ maxHeight: 'none', overflowX: wrap ? 'auto' : 'auto', overflowY: 'visible', whiteSpace: wrap ? 'pre-wrap' : 'pre', overflowWrap: wrap ? 'anywhere' : 'normal' }}>{renderedLog}</pre>
       </div>
     </div>
   )

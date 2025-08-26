@@ -51,7 +51,8 @@ function messageToFacts(m: A2AMessage): ProposedFact[] {
       const name = String((p as any).file.name || `file-${Math.random().toString(36).slice(2,7)}.bin`);
       const mimeType = String((p as any).file.mimeType || 'application/octet-stream');
       proposed.push({ type:'attachment_added', name, mimeType, bytes, origin:'inbound' } as ProposedFact);
-      atts.push({ name, mimeType, origin:'inbound', size: bytes.length });
+      const decodedLen = Math.floor((bytes.length * 3) / 4) - (bytes.endsWith('==') ? 2 : bytes.endsWith('=') ? 1 : 0);
+      atts.push({ name, mimeType, origin:'inbound', size: decodedLen });
     }
   }
 
@@ -62,4 +63,3 @@ function messageToFacts(m: A2AMessage): ProposedFact[] {
   }
   return proposed;
 }
-

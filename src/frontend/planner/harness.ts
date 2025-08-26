@@ -30,7 +30,7 @@ export class PlannerHarness<Cfg = unknown> {
 
   private async readAttachment(name: string): Promise<{ mimeType: string; bytes: string } | null> {
     const facts = this.getFacts();
-    for (let i = facts.length - 1; i >= 0; --i) {
+    for (let i = 0; i < facts.length; i++) {
       const f = facts[i];
       if (f.type === 'attachment_added' && f.name === name) return { mimeType: f.mimeType, bytes: f.bytes };
     }
@@ -95,6 +95,30 @@ export class PlannerHarness<Cfg = unknown> {
       }
       return false;
     })();
+    // If whisper arrived while a draft is present, dismiss the latest unsent draft now (single one), then return.
+    if (whisperTriggered && hasUnsentCompose) {
+      const latestUnsent = (() => {
+        const dismissed2 = dismissed;
+        for (let i = facts.length - 1; i >= 0; --i) {
+          const f = facts[i];
+          if (f.type === 'compose_intent') {
+            const ci = f as any;
+            if (dismissed2.has(ci.composeId)) continue;
+            // ensure no remote_sent after it
+            let sentAfter = false;
+            for (let j = i + 1; j < facts.length; j++) { if (facts[j].type === 'remote_sent') { sentAfter = true; break; } }
+            if (!sentAfter) return String(ci.composeId || '');
+          }
+        }
+        return '';
+      })();
+      if (latestUnsent) {
+        const ok = this.append([{ type:'compose_dismissed', composeId: latestUnsent } as any], { casBaseSeq: cut.seq });
+        // Do not update whisper counters here so a subsequent pass will plan with the whisper trigger
+        if (ok) return; else return;
+      }
+      // If couldn't find the draft defensively, fall through to standard guard (which will park)
+    }
     if (hasUnsentCompose) return;
 
     const ctx: PlanContext<any> = {

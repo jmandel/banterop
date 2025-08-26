@@ -43,22 +43,11 @@ function App() {
     startPlannerController();
   }, [role, transport, a2aUrl, mcpUrl]);
 
-  // Backchannel for responder (A2A) – listen for subscribe to learn taskId
+  // Backchannel (responder, A2A): delegate to store attach/detach
   useEffect(() => {
-    if (transport !== 'a2a') return;
-    if (role === 'responder' && tasksUrl) {
-      const es = new EventSource(tasksUrl);
-      es.onmessage = (ev) => {
-        try {
-          const payload = JSON.parse(ev.data);
-          const msg = payload.result;
-          if (msg?.type === 'subscribe' && msg.taskId) {
-            // Store owns driver start + initial fetch on setTaskId
-            useAppStore.getState().setTaskId(msg.taskId);
-          }
-        } catch {}
-      };
-      return () => { try { es.close(); } catch {} };
+    if (transport === 'a2a' && role === 'responder' && tasksUrl) {
+      useAppStore.getState().attachBackchannel(tasksUrl);
+      return () => { try { useAppStore.getState().detachBackchannel(); } catch {} };
     }
   }, [role, tasksUrl, transport]);
 
@@ -123,7 +112,7 @@ function App() {
 
       <DebugPanel />
       <div className="card">
-        <div className="transcript">
+        <div className="transcript" aria-live="polite">
           {!facts.length && <div className="small muted">No events yet.</div>}
           {facts.map((f) => {
             if (f.type === 'remote_received' || f.type === 'remote_sent') {
@@ -135,7 +124,7 @@ function App() {
                   {Array.isArray(f.attachments) && f.attachments.length > 0 && (
                     <div className="attachments small">
                       {f.attachments.map((a:AttachmentMeta) => {
-                        const added = [...facts].reverse().find(x => x.type === 'attachment_added' && x.name === a.name);
+                        const added = facts.find(x => x.type === 'attachment_added' && (x as any).name === a.name);
                         const href = added && added.type === 'attachment_added' ? attachmentHrefFromBase64(a.name, added.mimeType, added.bytes) : null;
                         return (
                           <a key={a.name} className="att" href={href || '#'} target="_blank" rel="noreferrer" onClick={e => { if (!href) e.preventDefault(); }}>

@@ -5,7 +5,7 @@ import type { TransportAdapter } from '../transports/types';
 import { a2aToFacts } from '../../shared/a2a-translator';
 import { validateParts } from '../../shared/parts-validator';
 import { nowIso, rid } from '../../shared/core';
-import { uniqueName } from '../../shared/a2a-helpers';
+// import { uniqueName } from '../../shared/a2a-helpers';
 // Planner registry for defaults
 import { PlannerRegistry } from '../planner/registry';
 
@@ -51,6 +51,9 @@ export type Store = {
   dismissCompose(composeId: string): void;
   kickoffConversationWithPlanner(): void;
   cancelAndClear(): Promise<void>;
+  // backchannel
+  attachBackchannel(tasksUrl: string): void;
+  detachBackchannel(): void;
   // journal API
   append(batch: ProposedFact[], opts?: { casBaseSeq?: number }): boolean;
   head(): number;
@@ -246,6 +249,7 @@ export const useAppStore = create<Store>((set, get) => ({
     const { adapter, taskId } = get();
     try { if (adapter && taskId) await adapter.cancel(taskId); } catch {}
     try { (window as any).__ticksAbort?.abort?.(); } catch {}
+    try { get().detachBackchannel(); } catch {}
     set({
       taskId: undefined,
       seq: 0,
@@ -261,6 +265,27 @@ export const useAppStore = create<Store>((set, get) => ({
       composing: undefined,
     });
   },
+
+  // --- backchannel management (responder) ---
+  attachBackchannel(tasksUrl: string) {
+    get().detachBackchannel();
+    if (!tasksUrl) return;
+    const es = new EventSource(tasksUrl);
+    (window as any).__tasksUrlES = es;
+    es.onmessage = (ev) => {
+      try {
+        const payload = JSON.parse(ev.data);
+        const msg = payload.result;
+        if (msg?.type === 'subscribe' && msg.taskId) {
+          useAppStore.getState().setTaskId(String(msg.taskId));
+        }
+      } catch {}
+    };
+    es.onerror = () => {
+      // optional: UI status integration could go here
+    };
+  },
+  detachBackchannel() { try { ((window as any).__tasksUrlES as EventSource | undefined)?.close?.(); } catch {} finally { try { delete (window as any).__tasksUrlES; } catch {} } },
 
   uiStatus() {
     const { facts, taskId } = get();
@@ -316,8 +341,7 @@ function stampAndAppend(set: any, get: any, proposed: ProposedFact[]) {
       if (mid) known.add(mid);
     }
     if (p.type === 'attachment_added') {
-      const n = uniqueName((p as any).name, existingNames);
-      if (n !== (p as any).name) (p as any).name = n;
+      // Do not rename; allow duplicates. Track names only for consistency.
       existingNames.add((p as any).name);
     }
     if (p.type === 'status_changed') {
@@ -338,7 +362,10 @@ function stampAndAppend(set: any, get: any, proposed: ProposedFact[]) {
   const inflight = new Map<string,{composeId:string}>(get().inFlightSends as Map<string,{composeId:string}>);
   const approved = new Set<string>(get().composeApproved as Set<string>);
   for (const f of stamped) {
-    if (f.type === 'attachment_added') attachmentsIndex.set((f as any).name, { mimeType: (f as any).mimeType, bytesBase64: (f as any).bytes });
+    if (f.type === 'attachment_added') {
+      const nm = (f as any).name as string;
+      if (!attachmentsIndex.has(nm)) attachmentsIndex.set(nm, { mimeType: (f as any).mimeType, bytesBase64: (f as any).bytes });
+    }
     if (f.type === 'remote_sent') {
       const link = inflight.get((f as any).messageId);
       if (link) {

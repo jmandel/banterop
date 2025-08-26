@@ -8,7 +8,7 @@ A tiny mirror relay (**flip proxy**) that pairs two tabs and reflects messages b
   - Sender sets `message.metadata['https://chitchat.fhir.me/a2a-ext'].finality` to `none|turn|conversation`.
   - Bridge updates task status and echoes the hint in streaming frames.
 - Pair management:
-  - `POST /api/pairs` (optional `{ metadata?: object }`) → creates a pair and returns join links.
+  - `POST /api/pairs` (optional `{ metadata?: object }`) → creates a pair and returns structured endpoints and join links.
   - `POST /pairs/:pairId/reset` (hard reset only) → cancels current tasks, bumps epoch; next initiator send starts a fresh epoch for the same pair.
 - Backchannel (responder only): `GET /pairs/:pairId/server-events` (SSE).
 - Control-plane event log (live only): `GET /pairs/:pairId/events.log?since=<seq>` (SSE)
@@ -44,8 +44,8 @@ Send messages and choose finality (`turn` to pass the token; `conversation` to c
   - `[epoch-begin] epoch=2`
   - `[reset-start] reason=hard 1→2`, `[reset-complete] epoch=2`
   - `[backchannel] subscribe epoch=1 task=resp:... turn=initiator`
-  - `[message] from=initiator finality=turn next=responder text="hi"`
   - `[state] initiator=input-required responder=working`
+  - Note: This reference implementation does not emit separate `[message]` events. The latest message content is available within the `[state]` event’s embedded task `status.message`.
 - Legend: “?” button opens a sheet describing event types.
 
 ## Participant app (A2A Client)
@@ -66,6 +66,7 @@ Send messages and choose finality (`turn` to pass the token; `conversation` to c
 - Index: `pair:index` → array of pairIds.
 - JIT hydration: when a pair is referenced and not in memory, meta is loaded from storage to rebuild live state (tasks + histories).
 - No event replay: events.log/server-events stream live events only (no historical replay across restarts).
+  - Persisted meta stores task `status` as a string (A2AStatus). Runtime snapshots and events embed `{ state, message? }` objects. This is intentional.
 
 ### TTL eviction
 - Memory TTL (`PAIR_TTL_MEMORY_MS`, default 30m): evict idle pairs from memory (no active SSE or A2A streams).
@@ -73,7 +74,8 @@ Send messages and choose finality (`turn` to pass the token; `conversation` to c
 - Watchdog runs every 60s.
 
 ## API Summary
-- `POST /api/pairs` (optional `{ metadata?: object }`) → `{ pairId, initiatorJoinUrl, responderJoinUrl, serverEventsUrl, mcpUrl }`
+- `POST /api/pairs` (optional `{ metadata?: object }`) →
+  - `{ pairId, endpoints: { a2a, mcp, a2aAgentCard }, links: { initiator: { joinA2a, joinMcp }, responder: { joinA2a } } }`
 - `GET /api/pairs/:pairId/metadata` → `{ metadata }`
 - `POST /pairs/:pairId/reset` (hard only) → `{ ok, epoch }`
 - `GET /pairs/:pairId/server-events` (SSE; responder backchannel)
@@ -140,6 +142,8 @@ src/
 - Event log is live-only; the server keeps only an in-memory buffer (default 1000) for the current process. It is cleared on hard reset and not persisted across restarts.
 - Pair meta + full task histories are persisted; restarts do not lose chats.
 - Finality semantics: `turn` flips who is `input-required`; `conversation` completes both tasks; `none` keeps sender `input-required` and receiver `working`.
+ - File parts: reference implementation only supports inline `bytes` (base64). URIs are not supported for attachments.
+ - Security: pairs are not authenticated; anyone with a `pairId` could access backchannel/logs if reachable. Use for demos only.
 
 ## Testing
 - bun test
