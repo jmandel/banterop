@@ -4,6 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { A2APart } from '../../shared/a2a-types';
 import { mustPairAsync, onIncomingMessage, newTask } from '../flipproxy';
+import { A2A_EXT_URL } from '../../shared/core';
 
 export function registerFlipProxyMcpBridge(app: Hono) {
   app.post('/api/bridge/:pairId/mcp', async (c) => {
@@ -30,7 +31,7 @@ export function registerFlipProxyMcpBridge(app: Hono) {
 async function buildMcpServerForPair(pairId: string): Promise<McpServer> {
   const s = new McpServer({ name: 'flipproxy-mcp', version: '0.1.0' });
 
-  s.registerTool('begin_chat_thread', { inputSchema: { type:'object', properties:{}, additionalProperties:false }, description: `Begin chat thread for existing pair ${pairId}` }, async () => {
+  s.registerTool('begin_chat_thread', { inputSchema: { type:'object', properties:{}, additionalProperties:false } as any, description: `Begin chat thread for existing pair ${pairId}` }, async () => {
     const { initiatorTaskId } = await ensureEpochTasksForPair(pairId);
     return jsonContent({ conversationId: String(initiatorTaskId) });
   });
@@ -58,7 +59,7 @@ async function buildMcpServerForPair(pairId: string): Promise<McpServer> {
       },
       required: ['conversationId'],
       additionalProperties: false
-    },
+    } as any,
     description: `Send message as initiator for pair ${pairId}`
   }, async (params: any) => {
     const conversationId = String(params?.conversationId ?? '');
@@ -73,7 +74,7 @@ async function buildMcpServerForPair(pairId: string): Promise<McpServer> {
     if (conversationId !== tInit) return jsonContent({ ok:false, error:`conversationId does not match current epoch (expected ${tInit})` });
 
     const parts: A2APart[] = [];
-    parts.push({ kind:'text', text: message, metadata: { 'https://chitchat.fhir.me/a2a-ext': { finality: 'turn' } } } as any);
+    parts.push({ kind:'text', text: message, metadata: { [A2A_EXT_URL]: { finality: 'turn' } } } as any);
     for (const a of attachments) {
       parts.push({
         kind:'file',
@@ -96,7 +97,7 @@ async function buildMcpServerForPair(pairId: string): Promise<McpServer> {
       },
       required: ['conversationId'],
       additionalProperties: false
-    },
+    } as any,
     description: 'Poll for replies since your last initiator message.'
   }, async (params: any) => {
     const conversationId = String(params?.conversationId ?? '');
@@ -207,6 +208,9 @@ function computeGuidance(p:any, status:'working'|'input-required'|'completed'): 
   return 'Waiting for the responder to finish or reply. Call check_replies again.';
 }
 
+// Minimal JSON content helper for MCP responses (type-erased for runtime-only use)
+function jsonContent(obj: any): any { return obj as any; }
+
 function waitForNextAgentMessageOnInitiator(initTask:any, waitMs:number): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     let resolved = false;
@@ -284,7 +288,7 @@ function createNodeResponseCollector() {
     toFetchResponse(): Response {
       const body = concat(chunks);
       const h = new Headers(); headers.forEach((v,k)=>h.set(k,v));
-      return new Response(new Blob([body]), { status: statusCode, headers: h });
+      return new Response(new Blob([body as any]), { status: statusCode, headers: h });
     }
   };
   return { res };

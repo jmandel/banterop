@@ -1,6 +1,7 @@
 import type { TransportAdapter, TransportSnapshot, SendOptions } from "./types";
 import type { A2APart, A2ATask } from "../../shared/a2a-types";
 import { A2AClient } from "./a2a-client";
+import { A2A_EXT_URL } from "../../shared/core";
 
 function toSnap(t: A2ATask | null): TransportSnapshot | null {
   if (!t) return null;
@@ -13,7 +14,7 @@ export class A2AAdapter implements TransportAdapter {
   constructor(endpoint: string) { this.client = new A2AClient(endpoint); }
   kind(): 'a2a' { return 'a2a'; }
   async send(parts: A2APart[], opts: SendOptions): Promise<{ taskId: string; snapshot: TransportSnapshot }> {
-    const metadata = opts.finality ? { 'https://chitchat.fhir.me/a2a-ext': { finality: opts.finality } } : undefined;
+    const metadata = opts.finality ? { [A2A_EXT_URL]: { finality: opts.finality } } as any : undefined;
     const snap = await this.client.messageSend(parts, { taskId: opts.taskId, messageId: opts.messageId, metadata });
     return { taskId: snap.id, snapshot: toSnap(snap)! };
   }

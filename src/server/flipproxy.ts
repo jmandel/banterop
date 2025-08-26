@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { serve } from "bun";
 import type { A2APart, A2AFrame, A2AMessage, A2AStatus, A2ATask } from "../shared/a2a-types";
+import { A2A_EXT_URL } from "../shared/core";
 import { createLocalStorage } from 'bun-storage';
 import controlHtml from '../frontend/control/index.html';
 import participantHtml from '../frontend/participant/index.html';
@@ -242,7 +243,12 @@ app.post('/pairs/:pairId/reset', async (c) => {
   }
   if (p.initiatorTask) setTaskStatus(p.initiatorTask, 'canceled');
   if (p.responderTask) setTaskStatus(p.responderTask, 'canceled');
-  try { logEvent(p, { type: 'state', states: { initiator: p.initiatorTask?.status || 'canceled', responder: p.responderTask?.status || 'canceled' } }); } catch {}
+  try {
+    // For reset, emit simplified summary state (string values) to match tests
+    const i = p.initiatorTask?.status || 'canceled';
+    const r = p.responderTask?.status || 'canceled';
+    logEvent(p, { type: 'state', states: { initiator: i, responder: r } });
+  } catch {}
   p.epoch += 1;
   p.initiatorTask = undefined;
   p.responderTask = undefined;
@@ -390,7 +396,12 @@ app.post('/api/bridge/:pairId/a2a', async (c) => {
       if (p.initiatorTask) setTaskStatus(p.initiatorTask, 'canceled');
       if (p.responderTask) setTaskStatus(p.responderTask, 'canceled');
       // Log combined state to control-plane event log
-      try { logEvent(p, { type: 'state', states: { initiator: p.initiatorTask?.status || 'canceled', responder: p.responderTask?.status || 'canceled' } }); } catch {}
+      try {
+        // For cancel, emit simplified summary state (string values) to match tests
+        const i = p.initiatorTask?.status || 'canceled';
+        const r = p.responderTask?.status || 'canceled';
+        logEvent(p, { type: 'state', states: { initiator: i, responder: r } });
+      } catch {}
       // Optional: emit an unsubscribe advisory on serverEvents so responders can stop any assumptions
       const ev = { type: 'unsubscribe', pairId: p.id, epoch: p.epoch };
       try { p.serverEvents.forEach(fn => fn(ev)); logEvent(p, { type:'backchannel', action:'unsubscribe', epoch:p.epoch }); } catch {}
@@ -447,22 +458,14 @@ export function onIncomingMessage(p: Pair, from: Role, req: { parts: A2APart[], 
     setTaskStatus(srv, 'completed');
   }
 
-  try { logEvent(p, { type: 'state', states: { initiator: cli.status, responder: srv.status } }); } catch {}
-
   try {
-    const msg:any = {
-      type: 'message',
-      from: asPublicRole(from),
-      finality,
-      messageId: req.messageId,
-      parts: req.parts, // include full parts per requirement
-      effects: {
-        initiator: { state: cli.status },
-        responder: { state: srv.status }
+    logEvent(p, {
+      type: 'state',
+      states: {
+        initiator: briefTask(cli, true),
+        responder: briefTask(srv, true),
       }
-    };
-    if (finality === 'turn') msg.nextTurn = asPublicRole(p.turn);
-    logEvent(p, msg);
+    });
   } catch {}
   try { persistPairMeta(p); } catch {}
 }
@@ -470,7 +473,7 @@ export function onIncomingMessage(p: Pair, from: Role, req: { parts: A2APart[], 
 function readExtension(parts: A2APart[]): any {
   for (const p of parts) {
     const meta = (p && (p as { metadata?: Record<string, any> }).metadata) || {};
-    const block = (meta as Record<string, any>)?.["https://chitchat.fhir.me/a2a-ext"];
+    const block = (meta as Record<string, any>)?.[A2A_EXT_URL];
     if (block) return block;
   }
   return null;
@@ -480,7 +483,7 @@ function readExtension(parts: A2APart[]): any {
 function readMessageExtension(msgMeta: any, parts: A2APart[]): any {
   try {
     if (msgMeta && typeof msgMeta === 'object') {
-      const block = (msgMeta as Record<string, any>)["https://chitchat.fhir.me/a2a-ext"];
+      const block = (msgMeta as Record<string, any>)[A2A_EXT_URL];
       if (block) return block;
     }
   } catch {}
@@ -596,7 +599,7 @@ app.get('/__debug/connections', async (c) => {
   }
   return c.json({ version: 1, out });
 });
-serve({
+const server = serve({
   port,
   idleTimeout: 240,
   development: isDev ? { hmr: true, console: true } : undefined,
@@ -622,6 +625,14 @@ serve({
     return new Response('Not Found', { status: 404 });
   },
 });
+
+try {
+  const host = (server as any)?.hostname || 'localhost';
+  const url = `http://${host}:${server.port}`;
+  console.log(`[flipproxy] Listening at ${url}`);
+  console.log(`[flipproxy] Participant UI: ${url}/participant/`);
+  console.log(`[flipproxy] Control UI:     ${url}/control/`);
+} catch {}
 
 function jsonrpcResult(id: any, result: any) {
   return { jsonrpc: '2.0', id, result };
@@ -711,3 +722,15 @@ async function runWatchdog() {
 }
 
 setInterval(runWatchdog, 60_000);
+
+// Create a minimal task subset shaped like an A2A task for logging
+function briefTask(t: TaskState | undefined, includeMessage = false) {
+  const state = t?.status;
+  if (!t) return { id: undefined, status: { state } };
+  if (includeMessage) {
+    const h = Array.isArray(t.history) ? t.history : [];
+    const message = h.length ? h[h.length - 1] : undefined;
+    return message ? { id: t.id, status: { state, message } } : { id: t.id, status: { state } };
+  }
+  return { id: t.id, status: { state } };
+}

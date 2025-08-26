@@ -5,6 +5,8 @@ type Cfg = {
   model?: string;
   temperature?: number;
   systemPrompt?: string;
+  systemAppend?: string;
+  targetWords?: number;
 };
 
 const DEFAULT_ENDPOINT = "https://chitchat.fhir.me/api/llm/complete";
@@ -57,8 +59,7 @@ function logLine(f: Fact, myId?: string, otherId?: string): string | null {
       return `PRIVATE tool_result: ${f.ok ? 'ok' : 'error'}`;
     case 'sleep':
       return `SLEEP: ${f.reason || ''}`;
-    case 'compose_dismissed':
-      return `PRIVATE draft-dismissed: ${f.composeId}`;
+    // no dismissal fact for drafts (UI hides on approval)
     default:
       return null;
   }
@@ -68,8 +69,10 @@ function buildPrompt(input: PlanInput, ctx: PlanContext<Cfg>): { system: string;
   const who = ctx.myAgentId || 'me';
   const other = ctx.otherAgentId || 'other';
   const status = latestStatus(input.facts);
-  const system = (ctx.config?.systemPrompt
+  const baseSystem = (ctx.config?.systemPrompt
     || `I write the next message in a professional, turn-based exchange. I will return only the message text, in first-person singular, without code fences or JSON.`);
+  const append = (ctx.config?.systemAppend || '').trim();
+  const system = append ? `${baseSystem}\n\n${append}` : baseSystem;
   const lines: string[] = [];
   lines.push(`I am drafting the next message as ${who}, to ${other}.`);
   lines.push(`Current status: ${status}.`);
@@ -80,6 +83,8 @@ function buildPrompt(input: PlanInput, ctx: PlanContext<Cfg>): { system: string;
     if (line) lines.push(line);
   }
   lines.push('');
+  const tWords = Number(ctx.config?.targetWords || 0);
+  if (tWords > 0) lines.push(`Aim for about ${tWords} words (±20%).`);
   lines.push('Write the next message to the other side.');
   lines.push('Output ONLY the message body.');
   const user = lines.join('\n');
@@ -97,8 +102,10 @@ async function callLLM(prompt: { system: string; user: string }, cfg: Cfg, signa
     const j: any = await res.json();
     const text =
       (j && typeof j === 'object' && j.result && typeof j.result.text === 'string' && j.result.text)
+      || (j && typeof j === 'object' && j.result && typeof j.result.content === 'string' && j.result.content)
       || (j && Array.isArray(j.choices) && j.choices[0]?.message?.content)
-      || (typeof j.text === 'string' ? j.text : null);
+      || (typeof j.text === 'string' ? j.text : null)
+      || (typeof j.content === 'string' ? j.content : null);
     if (!text) return null;
     const cleaned = String(text).trim().replace(/^```[a-z]*\n?|```$/g, '').trim();
     return cleaned || null;

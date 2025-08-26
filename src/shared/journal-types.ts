@@ -5,68 +5,68 @@ export interface AttachmentMeta {
   name:string; mimeType:string; origin?:'inbound'|'user'|'synthesized'; size?:number;
 }
 
-type Stamp = { seq:number; ts:string; id:string; vis:'public'|'private' }
+type Stamp = { seq:number; ts:string; id:string }
 type PlannerWhy = { why?: string };
 
 export type Fact =
   | ({ type:'status_changed'
      ; a2a:'initializing'|'submitted'|'working'|'input-required'|'completed'|'failed'|'canceled'|'rejected'|'auth-required'|'unknown'
-     } & Stamp & { vis:'private' })
+     } & Stamp)
   | ({ type:'remote_received'
      ; messageId:string
      ; text:string
      ; attachments?:AttachmentMeta[]
-     } & Stamp & { vis:'public' })
+     } & Stamp)
   | ({ type:'remote_sent'
      ; messageId:string
      ; text:string
      ; attachments?:AttachmentMeta[]
-     ; composeId?:string
-     } & Stamp & { vis:'public' })
+     ; composeId?: string
+     } & Stamp)
   | ({ type:'attachment_added'
      ; name:string
      ; mimeType:string
      ; bytes:string
      ; origin:'inbound'|'user'|'synthesized'
      ; producedBy?:{ callId:string; name:string; args:Record<string,unknown> }
-     } & Stamp & { vis:'private' })
+     } & Stamp)
   | ({ type:'tool_call'
      ; callId:string
      ; name:string
      ; args:Record<string,unknown>
-     } & PlannerWhy & Stamp & { vis:'private' })
+     } & PlannerWhy & Stamp)
   | ({ type:'tool_result'
      ; callId:string
      ; ok:boolean
      ; result?:unknown
      ; error?:string
-     } & PlannerWhy & Stamp & { vis:'private' })
+     } & PlannerWhy & Stamp)
   | ({ type:'agent_question'
      ; qid:string
      ; prompt:string
      ; required?:boolean
      ; placeholder?:string
-     } & PlannerWhy & Stamp & { vis:'private' })
+     } & PlannerWhy & Stamp)
   | ({ type:'agent_answer'
      ; qid:string
      ; text:string
-     } & Stamp & { vis:'private' })
+     } & Stamp)
   | ({ type:'user_guidance'
      ; gid:string
      ; text:string
-     } & Stamp & { vis:'private' })
+     } & Stamp)
   | ({ type:'compose_intent'
      ; composeId:string
      ; text:string
      ; attachments?:AttachmentMeta[]
-     } & PlannerWhy & Stamp & { vis:'private' })
-  | ({ type:'sleep'
-     ; reason?:string
-     } & PlannerWhy & Stamp & { vis:'private' })
+     ; finalityHint?: 'none'|'turn'|'conversation'
+     } & PlannerWhy & Stamp)
   | ({ type:'compose_dismissed'
      ; composeId:string
+     } & Stamp)
+  | ({ type:'sleep'
      ; reason?:string
-     } & Stamp & { vis:'private' });
+     } & PlannerWhy & Stamp);
 
 export type ProposedFact = Omit<Fact, keyof Stamp>;
 

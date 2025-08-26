@@ -1,4 +1,5 @@
 import type { A2APart, A2ATask, A2AStatusUpdate } from "../../shared/a2a-types";
+import { parseSse } from "../../shared/sse";
 
 export type FrameResult =
   | A2ATask
@@ -15,13 +16,13 @@ export class A2AClient {
     const body = { jsonrpc: '2.0', id: crypto.randomUUID(), method: 'message/stream', params: { message: msg } };
     const res = await fetch(this.ep(), { method: 'POST', headers: { 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify(body), signal: opts.signal });
     if (!res.ok || !res.body) throw new Error('message/stream failed: ' + res.status);
-    for await (const obj of sseToObjects(res.body)) yield obj;
+    for await (const obj of parseSse<FrameResult>(res.body)) yield obj;
   }
   async *tasksResubscribe(taskId: string, signal?: AbortSignal) {
     const body = { jsonrpc: '2.0', id: crypto.randomUUID(), method: 'tasks/resubscribe', params: { id: taskId } };
     const res = await fetch(this.ep(), { method: 'POST', headers: { 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify(body), signal });
     if (!res.ok || !res.body) throw new Error('resubscribe failed: ' + res.status);
-    for await (const obj of sseToObjects(res.body)) yield obj;
+    for await (const obj of parseSse<FrameResult>(res.body)) yield obj;
   }
   // Resilient forever-loop of resubscribe ticks with backoff
   async *ticks(taskId: string, signal?: AbortSignal): AsyncGenerator<void> {
@@ -53,7 +54,7 @@ export class A2AClient {
       try {
         const res = await fetch(url, { method: 'GET', headers: { 'accept':'text/event-stream' }, signal });
         if (!res.ok || !res.body) throw new Error('events.log failed: ' + res.status);
-        for await (const ev of sseToAny(res.body)) {
+        for await (const ev of parseSse<any>(res.body)) {
           attempt = 0;
           if (ev && typeof ev === 'object' && 'seq' in ev && Number.isFinite((ev as any).seq)) {
             const seq = Number((ev as any).seq);
@@ -90,59 +91,7 @@ export class A2AClient {
   }
 }
 
-async function* sseToObjects(stream: ReadableStream<Uint8Array>): AsyncGenerator<FrameResult> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    for (;;) {
-      const i = buf.indexOf('\n\n');
-      const j = buf.indexOf('\r\n\r\n');
-      const idx = i !== -1 ? i : (j !== -1 ? j : -1);
-      const dlen = i !== -1 ? 2 : (j !== -1 ? 4 : 0);
-      if (idx === -1) break;
-      const chunk = buf.slice(0, idx);
-      buf = buf.slice(idx + dlen);
-      const lines = chunk.replace(/\r/g, '').split('\n');
-      for (const line of lines) {
-        if (line.startsWith('data:')) {
-          const data = line.slice(5).trimStart();
-          try { const obj = JSON.parse(data); if (obj && 'result' in obj) yield (obj.result as FrameResult); } catch {}
-        }
-      }
-    }
-  }
-}
-
-async function* sseToAny(stream: ReadableStream<Uint8Array>): AsyncGenerator<any> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    for (;;) {
-      const i = buf.indexOf('\n\n');
-      const j = buf.indexOf('\r\n\r\n');
-      const idx = i !== -1 ? i : (j !== -1 ? j : -1);
-      const dlen = i !== -1 ? 2 : (j !== -1 ? 4 : 0);
-      if (idx === -1) break;
-      const chunk = buf.slice(0, idx);
-      buf = buf.slice(idx + dlen);
-      const lines = chunk.replace(/\r/g, '').split('\n');
-      for (const line of lines) {
-        if (line.startsWith('data:')) {
-          const data = line.slice(5).trimStart();
-          try { const obj = JSON.parse(data); if (obj && 'result' in obj) yield (obj.result as any); } catch {}
-        }
-      }
-    }
-  }
-}
+// removed legacy SSE parsers in favor of shared parseSse
 
 function sleep(ms: number, signal?: AbortSignal) {
   return new Promise<void>((res, rej) => {

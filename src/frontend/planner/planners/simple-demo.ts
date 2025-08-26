@@ -9,11 +9,19 @@ function lastRemoteReceived(input: PlanInput): { text:string; attachments?:Attac
 }
 
 function hasUnsentCompose(input:PlanInput): boolean {
-  // If there is a compose_intent that hasn't resulted in a remote_sent with same composeId
-  const lastCompose = [...input.facts].reverse().find((f): f is Extract<typeof f, {type:'compose_intent'}> => f.type === 'compose_intent');
-  if (!lastCompose) return false;
-  const sent = input.facts.some(f => f.type === 'remote_sent' && f.composeId === lastCompose.composeId);
-  return !sent;
+  // If there is a compose_intent that hasn't resulted in any remote_sent AFTER it
+  for (let i = input.facts.length - 1; i >= 0; --i) {
+    const f = input.facts[i];
+    if (f.type === 'compose_intent') {
+      const composeSeq = f.seq;
+      for (let j = i + 1; j < input.facts.length; j++) {
+        const g = input.facts[j];
+        if (g.type === 'remote_sent') return false; // remote_sent after compose → not unsent
+      }
+      return true; // no remote_sent after compose
+    }
+  }
+  return false;
 }
 
 export const SimpleDemoPlanner: Planner<{ mode:'off'|'suggest'|'auto' }> = {

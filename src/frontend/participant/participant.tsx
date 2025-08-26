@@ -1,11 +1,12 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { AttachmentMeta, Fact } from '../../shared/journal-types';
+import type { AttachmentMeta } from '../../shared/journal-types';
 import type { A2APart } from '../../shared/a2a-types';
 import { useAppStore } from '../state/store';
 import { A2AAdapter } from '../transports/a2a-adapter';
 import { MCPAdapter } from '../transports/mcp-adapter';
 import { startPlannerController } from '../planner/controller';
+import { PlannerRegistry } from '../planner/registry';
 
 type Role = 'initiator'|'responder';
 
@@ -38,8 +39,8 @@ function App() {
   useEffect(() => {
     const adapter = transport === 'mcp' ? new MCPAdapter(mcpUrl) : new A2AAdapter(a2aUrl);
     store.init(role as Role, adapter, undefined);
-    // Start planner only for responder; initiator remains manual
-    if (role === 'responder') startPlannerController();
+    // Start planner controller for both roles; harness owns triggers/guards
+    startPlannerController();
   }, [role, transport, a2aUrl, mcpUrl]);
 
   // Backchannel for responder (A2A) – listen for subscribe to learn taskId
@@ -69,7 +70,7 @@ function App() {
   async function handleManualSend(text: string, finality: 'none'|'turn'|'conversation') {
     const composeId = useAppStore.getState().appendComposeIntent(text);
     setSending(true);
-    try { await useAppStore.getState().approveAndSend(composeId, finality); }
+    try { await useAppStore.getState().sendCompose(composeId, finality); }
     finally { setSending(false); }
   }
   function sendWhisper(text: string) {
@@ -81,8 +82,11 @@ function App() {
   }
 
   // Transcript rendering
-  const sentComposeIds = useMemo(() => {
-    const s = new Set<string>(); for (const f of facts) if (f.type==='remote_sent' && f.composeId) s.add(f.composeId); return s;
+  const approved = useAppStore(s => s.composeApproved);
+  const sentComposeIds = React.useMemo(() => {
+    const s = new Set<string>();
+    for (const f of facts) if (f.type === 'remote_sent' && (f as any).composeId) s.add((f as any).composeId as string);
+    return s;
   }, [facts]);
 
   // Compute composer gating and messaging
@@ -106,15 +110,18 @@ function App() {
       <div className="card">
         <div className="row">
           <div><strong>Role:</strong> <span className="pill">{role === 'initiator' ? 'Initiator' : 'Responder'}</span></div>
-          <div className="pill">Status: {uiStatus}</div>
-          <div className="pill">Task: {taskId || '—'}</div>
           <PlannerSelector />
+          <PlannerModeSelector />
           {role==='initiator' && (
             <button className="btn" onClick={clearTask} disabled={!taskId}>Clear task</button>
           )}
         </div>
       </div>
 
+      <TaskRibbon />
+      <PlannerSetupCard />
+
+      <DebugPanel />
       <div className="card">
         <div className="transcript">
           {!facts.length && <div className="small muted">No events yet.</div>}
@@ -142,8 +149,11 @@ function App() {
               );
             }
             if (f.type === 'agent_question' || f.type === 'agent_answer' || f.type === 'compose_intent' || f.type === 'user_guidance') {
-              if (f.type === 'compose_intent' && sentComposeIds.has(f.composeId)) {
-                return <div key={f.id} style={{display:'none'}} />;
+              // Hide approved/sent/dismissed drafts
+              if (f.type === 'compose_intent' && (approved.has(f.composeId) || sentComposeIds.has(f.composeId))) return <div key={f.id} style={{display:'none'}} />;
+              if (f.type === 'compose_intent') {
+                const dismissed = [...facts].some(x => x.type === 'compose_dismissed' && (x as any).composeId === f.composeId);
+                if (dismissed) return <div key={f.id} style={{display:'none'}} />;
               }
               const stripeClass =
                 f.type === 'user_guidance' ? 'stripe whisper' :
@@ -190,17 +200,49 @@ function App() {
   );
 }
 
+function HudBar() {
+  const hud = useAppStore(s => s.hud);
+  if (!hud) return null;
+  const pct = typeof hud.p === 'number' ? Math.max(0, Math.min(1, hud.p)) : null;
+  return (
+    <div className="row" style={{ marginTop: 8, gap: 8, alignItems:'center' }}>
+      <span className="small muted">HUD:</span>
+      <span className="pill">{hud.phase}{hud.label ? ` — ${hud.label}` : ''}</span>
+      {pct !== null && (
+        <div style={{ flex: 1, maxWidth: 200, height: 6, background: '#eef1f7', borderRadius: 4 }}>
+          <div style={{ width: `${Math.round(pct*100)}%`, height: '100%', background:'#5b7cff', borderRadius: 4 }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DraftInline({ composeId, text }:{ composeId:string; text:string }) {
-  const sending = false;
+  const [finality, setFinality] = useState<'none'|'turn'|'conversation'>('turn');
+  const [sending, setSending] = useState(false);
+  const err = useAppStore(s => s.sendErrorByCompose.get(composeId));
   async function approve() {
-    await useAppStore.getState().approveAndSend(composeId, 'turn');
+    setSending(true);
+    try { await useAppStore.getState().sendCompose(composeId, finality); }
+    finally { setSending(false); }
   }
+  async function retry() { await approve(); }
   return (
     <div>
       <div className="text">{text}</div>
       <div className="row" style={{marginTop:8, gap:8}}>
+        <select value={finality} onChange={(e)=>setFinality(e.target.value as any)}>
+          <option value="none">no finality</option>
+          <option value="turn">end turn → flip</option>
+          <option value="conversation">end conversation</option>
+        </select>
         <button className="btn" onClick={()=>void approve()} disabled={sending}>{sending ? 'Sending…' : 'Approve & Send'}</button>
       </div>
+      {err && (
+        <div className="small" style={{ color:'#b91c1c', marginTop:6 }}>
+          {err} <button className="btn ghost" onClick={()=>void retry()}>Retry</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -299,6 +341,20 @@ function ManualComposer({ disabled, hint, placeholder, onSend, sending }:{ disab
 const root = createRoot(document.getElementById('root')!);
 root.render(<App />);
 
+function TaskRibbon() {
+  const taskId = useAppStore(s => s.taskId);
+  const uiStatus = useAppStore(s => s.uiStatus());
+  return (
+    <div className="card">
+      <div className="row" style={{ alignItems:'center', gap: 10 }}>
+        <strong>Task</strong>
+        <span className="pill">ID: {taskId || '—'}</span>
+        <span className="pill">Status: {uiStatus}</span>
+      </div>
+    </div>
+  );
+}
+
 function PlannerSelector() {
   const pid = useAppStore(s => s.plannerId);
   const setPlanner = useAppStore(s => s.setPlanner);
@@ -306,9 +362,190 @@ function PlannerSelector() {
     <div className="row" style={{ gap: 6, alignItems:'center' }}>
       <span className="small muted">Planner:</span>
       <select value={pid} onChange={e => setPlanner(e.target.value as any)}>
-        <option value="simple">Simple Demo</option>
-        <option value="llm">LLM Drafter</option>
+        <option value="off">Off</option>
+        <option value="llm-drafter">LLM Drafter</option>
       </select>
     </div>
+  );
+}
+
+function PlannerModeSelector() {
+  const mode = useAppStore(s => s.plannerMode);
+  const setMode = useAppStore(s => s.setPlannerMode);
+  return (
+    <div className="row" style={{ gap: 6, alignItems:'center' }}>
+      <span className="small muted">Mode:</span>
+      <select value={mode} onChange={e => setMode(e.target.value as any)} title="Planner approval mode">
+        <option value="approve">Approve each turn</option>
+        <option value="auto">Auto-approve</option>
+      </select>
+    </div>
+  );
+}
+
+function PlannerSetupCard() {
+  const pid = useAppStore(s => s.plannerId);
+  const staged = useAppStore(s => s.stagedByPlanner[pid]);
+  const applied = useAppStore(s => s.appliedByPlanner[pid]);
+  const ready = useAppStore(s => !!s.readyByPlanner[pid]);
+  const taskId = useAppStore(s => s.taskId);
+  const role = useAppStore(s => s.role);
+  const hud = useAppStore(s => s.hud);
+  const facts = useAppStore(s => s.facts);
+  const set = useAppStore.getState();
+  const [errors, setErrors] = React.useState<{ targetWords?: string }>({});
+  const [collapsed, setCollapsed] = React.useState<boolean>(ready);
+
+  React.useEffect(() => {
+    // Auto-collapse once planner becomes ready
+    if (ready) setCollapsed(true);
+  }, [ready]);
+
+  // Detect unsent draft (ignoring dismissed); walk back until a remote_sent
+  const hasUnsentDraft = React.useMemo(() => {
+    const dismissed = new Set<string>();
+    for (const f of facts) if (f.type === 'compose_dismissed') dismissed.add((f as any).composeId);
+    for (let i = facts.length - 1; i >= 0; --i) {
+      const f = facts[i];
+      if (f.type === 'remote_sent') break;
+      if (f.type === 'compose_intent') {
+        if (!dismissed.has((f as any).composeId)) return true;
+      }
+    }
+    return false;
+  }, [facts]);
+
+  if (pid !== 'llm-drafter') return null;
+
+  function validate() {
+    const e: { targetWords?: string } = {};
+    const tw = Number(staged?.targetWords || 0);
+    if (!Number.isFinite(tw) || tw < 0) e.targetWords = 'Enter 0 to disable, or a positive number.';
+    if (Number.isFinite(tw) && tw !== 0 && (tw < 10 || tw > 1000)) e.targetWords = 'Enter a number between 10 and 1000, or 0 to disable.';
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  }
+
+  function save() {
+    if (!validate()) return;
+    set.saveAndApplyPlannerCfg(pid);
+    // Consistent UX: collapse after successful save
+    try { setCollapsed(true); } catch {}
+  }
+
+  const canBegin = ready && role === 'initiator' && !taskId && !hasUnsentDraft;
+  const sysA = String(staged?.systemAppend || '');
+  const twS = Number(staged?.targetWords || 0);
+  const sysB = String(applied?.systemAppend || '');
+  const twB = Number(applied?.targetWords || 0);
+  const dirty = !!staged && (applied == null || sysA !== sysB || twS !== twB);
+  const hasErrors = !!errors.targetWords;
+
+  return (
+    <div className="card" style={{ marginTop: 10 }}>
+      <div style={{ display:'flex', alignItems:'center', gap: 10 }}>
+        <button className="btn ghost" onClick={()=> setCollapsed(v=>!v)} aria-label={collapsed ? 'Expand planner setup' : 'Collapse planner setup'}>
+          {collapsed ? '▸' : '▾'}
+        </button>
+        <strong>Planner — LLM Drafter</strong>
+        <span className="small muted" style={{ marginLeft: 8 }}>
+          {ready ? 'Ready' : 'Not configured'}
+          {collapsed ? (()=>{
+            const cfgForSummary = staged ?? applied ?? {};
+            const reg = (PlannerRegistry as any)[pid];
+            const s = reg?.summary ? reg.summary(cfgForSummary) : '';
+            return s ? ` • ${s}` : '';
+          })() : ''}
+        </span>
+        <span style={{ marginLeft: 'auto' }} />
+        {hud && hud.phase !== 'idle' && (
+          <div className="row" style={{ gap:8, alignItems:'center' }}>
+            <span className="pill">{hud.phase}{hud.label ? ` — ${hud.label}` : ''}</span>
+            {typeof hud.p === 'number' && (
+              <div style={{ width: 160, height: 6, background: '#eef1f7', borderRadius: 4 }}>
+                <div style={{ width: `${Math.round(Math.max(0, Math.min(1, hud.p))*100)}%`, height: '100%', background:'#5b7cff', borderRadius: 4 }} />
+              </div>
+            )}
+          </div>
+        )}
+        {!collapsed && (
+          <button className="btn" onClick={save} disabled={!staged || !dirty || hasErrors}>Save & Apply</button>
+        )}
+        {canBegin && <button className="btn" onClick={()=> set.kickoffConversationWithPlanner()}>Begin conversation</button>}
+      </div>
+      {!collapsed && (
+        <div
+          style={{
+            marginTop: 10,
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 12,
+            alignItems: 'flex-start',
+          }}
+        >
+          <div style={{ flex: '2 1 420px', minWidth: 280, maxWidth: 640 }}>
+            <label className="small" style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>
+              System prompt (append)
+            </label>
+            <textarea
+              className="input"
+              placeholder="Optional: appended to the built‑in system prompt"
+              value={String(staged?.systemAppend || '')}
+              onChange={(e) => set.stagePlannerCfg(pid, { systemAppend: e.target.value })}
+              style={{ width: '100%', minHeight: 80, resize: 'vertical', boxSizing: 'border-box' }}
+            />
+            <div className="small muted" style={{ marginTop: 4 }}>
+              Optional text appended to the system prompt.
+            </div>
+          </div>
+          <div style={{ flex: '1 1 220px', minWidth: 200, maxWidth: 320 }}>
+            <label className="small" style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>
+              Target length (words)
+            </label>
+            <input
+              className="input"
+              type="number"
+              min={0}
+              step={10}
+              value={Number(staged?.targetWords || 0)}
+              onChange={(e) => {
+                set.stagePlannerCfg(pid, { targetWords: Number(e.target.value || 0) });
+              }}
+              onBlur={validate}
+              style={{ width: '100%', boxSizing: 'border-box' }}
+              placeholder="0 (no target)"
+            />
+            {errors.targetWords ? (
+              <div className="small" style={{ color: '#c62828', marginTop: 4 }}>{errors.targetWords}</div>
+            ) : (
+              <div className="small muted" style={{ marginTop: 4 }}>Aim near this length; set 0 to disable.</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DebugPanel() {
+  const facts = useAppStore(s => s.facts);
+  const seq = useAppStore(s => s.seq);
+  const taskId = useAppStore(s => s.taskId);
+  const [copied, setCopied] = useState(false);
+  const payload = JSON.stringify({ taskId, seq, facts }, null, 2);
+  async function copy() {
+    try { await navigator.clipboard.writeText(payload); setCopied(true); setTimeout(()=>setCopied(false), 1200); } catch {}
+  }
+  return (
+    <aside className="debug-panel" aria-label="Debug facts panel">
+      <div className="debug-header">
+        <strong style={{ color:'#e3f0ff' }}>Journal</strong>
+        <span style={{ marginLeft:'auto', fontSize:12, color:'#93c5fd' }}>seq {seq}</span>
+        <button className="debug-btn" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
+      </div>
+      <div className="debug-body">
+        <pre className="debug-pre">{payload}</pre>
+      </div>
+    </aside>
   );
 }

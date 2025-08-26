@@ -1,11 +1,13 @@
 import { create } from 'zustand';
-import type { A2APart, A2AMessage, A2AStatus } from '../../shared/a2a-types';
+import type { A2APart, A2AStatus } from '../../shared/a2a-types';
 import type { Fact, ProposedFact, AttachmentMeta } from '../../shared/journal-types';
-import type { TransportAdapter, TransportSnapshot } from '../transports/types';
-
-function nowIso() { return new Date().toISOString(); }
-function rid(prefix?:string) { return `${prefix||'id'}-${crypto.randomUUID()}`; }
-function textOf(parts: A2APart[]) { return (parts||[]).filter(p=>p.kind==='text').map((p:any)=>p.text).join('\n'); }
+import type { TransportAdapter } from '../transports/types';
+import { a2aToFacts } from '../../shared/a2a-translator';
+import { validateParts } from '../../shared/parts-validator';
+import { nowIso, rid } from '../../shared/core';
+import { uniqueName } from '../../shared/a2a-helpers';
+// Planner registry for defaults
+import { PlannerRegistry } from '../planner/registry';
 
 type Role = 'initiator'|'responder';
 
@@ -16,39 +18,66 @@ export type Store = {
   adapter?: TransportAdapter;
   fetching: boolean;
   needsRefresh: boolean;
-  plannerId: 'simple'|'llm';
+  plannerId: 'off'|'llm-drafter'|'simple-demo';
+  plannerMode: 'approve'|'auto';
+  // planner setup
+  stagedByPlanner: Record<string, any>;
+  appliedByPlanner: Record<string, any>;
+  readyByPlanner: Record<string, boolean>;
   // journal
   facts: Fact[];
   seq: number;
   // composer
   composing?: { composeId: string; text: string; attachments?: AttachmentMeta[] };
-  pending: Record<string, { composeId?: string }>; // messageId -> composeId
   // helpers
-  knownMsg: Record<string, 1>;
+  knownMsg: Set<string>;
+  attachmentsIndex: Map<string,{ mimeType:string; bytesBase64:string }>;
+  composeApproved: Set<string>;
+  inFlightSends: Map<string,{ composeId: string }>;
+  sendErrorByCompose: Map<string,string>;
   // actions
   init(role: Role, adapter: TransportAdapter, initialTaskId?: string): void;
   setTaskId(taskId?: string): void;
   startTicks(): void;
   onTick(): void;
   fetchAndIngest(): Promise<void>;
-  setPlanner(id:'simple'|'llm'): void;
+  setPlanner(id:'off'|'llm-drafter'|'simple-demo'): void;
+  setPlannerMode(mode:'approve'|'auto'): void;
+  stagePlannerCfg(id:string, partial: any): void;
+  saveAndApplyPlannerCfg(id:string): void;
   appendComposeIntent(text: string, attachments?: AttachmentMeta[]): string;
-  approveAndSend(composeId: string, finality: 'none'|'turn'|'conversation'): Promise<void>;
+  sendCompose(composeId: string, finality: 'none'|'turn'|'conversation'): Promise<void>;
   addUserGuidance(text: string): void;
+  dismissCompose(composeId: string): void;
+  kickoffConversationWithPlanner(): void;
   cancelAndClear(): Promise<void>;
+  // journal API
+  append(batch: ProposedFact[], opts?: { casBaseSeq?: number }): boolean;
+  head(): number;
   // selectors (as functions for convenience)
   uiStatus(): string;
+  // HUD
+  setHud(phase: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting', label?: string, p?: number): void;
+  hud: { phase: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting'; label?: string; p?: number } | null;
 };
 
 export const useAppStore = create<Store>((set, get) => ({
   role: 'initiator',
   fetching: false,
   needsRefresh: false,
-  plannerId: 'simple',
+  plannerId: 'off',
+  plannerMode: 'approve',
+  stagedByPlanner: {},
+  appliedByPlanner: {},
+  readyByPlanner: {},
   facts: [],
   seq: 0,
-  pending: {},
-  knownMsg: {},
+  hud: null,
+  knownMsg: new Set<string>(),
+  attachmentsIndex: new Map(),
+  composeApproved: new Set<string>(),
+  inFlightSends: new Map(),
+  sendErrorByCompose: new Map(),
 
   init(role, adapter, initialTaskId) {
     set({ role, adapter, taskId: initialTaskId });
@@ -57,7 +86,14 @@ export const useAppStore = create<Store>((set, get) => ({
     }
   },
 
-  setPlanner(id) { set({ plannerId: id }); },
+  setPlanner(id) {
+    set({ plannerId: id });
+    const def = (PlannerRegistry as any)[id]?.defaults;
+    if (def && !get().stagedByPlanner[id]) {
+      set((s:any)=>({ stagedByPlanner: { ...s.stagedByPlanner, [id]: { ...def } } }));
+    }
+  },
+  setPlannerMode(mode) { set({ plannerMode: mode }); },
 
   setTaskId(taskId) {
     const prev = get().taskId;
@@ -65,7 +101,7 @@ export const useAppStore = create<Store>((set, get) => ({
     if (taskId && taskId !== prev) {
       // New task → clear local journal state so histories don't mix
       try { console.debug('[store] switching taskId', { prev, next: taskId }); } catch {}
-      set({ facts: [], seq: 0, pending: {}, knownMsg: {}, composing: undefined });
+      set({ facts: [], seq: 0, knownMsg: new Set(), attachmentsIndex: new Map(), composing: undefined, composeApproved: new Set(), inFlightSends: new Map(), sendErrorByCompose: new Map() });
       try { get().startTicks(); } catch {}
       void get().fetchAndIngest();
     }
@@ -99,7 +135,8 @@ export const useAppStore = create<Store>((set, get) => ({
     try {
       const snap = await adapter.snapshot(taskId);
       if (!snap) return;
-      ingestSnapshotIntoJournal(snap, set, get);
+      const proposed = a2aToFacts(snap as any);
+      stampAndAppend(set, get, proposed);
     } finally {
       set({ fetching: false });
     }
@@ -107,49 +144,122 @@ export const useAppStore = create<Store>((set, get) => ({
     if (needsRefresh) { set({ needsRefresh: false }); await get().fetchAndIngest(); }
   },
 
+  stagePlannerCfg(id, partial) {
+    set((s:any)=>({ stagedByPlanner: { ...s.stagedByPlanner, [id]: { ...(s.stagedByPlanner[id]||{}), ...(partial||{}) } } }));
+  },
+
+  saveAndApplyPlannerCfg(id) {
+    const s = get();
+    const staged = s.stagedByPlanner[id] || {};
+    set((prev:any)=>({
+      appliedByPlanner: { ...prev.appliedByPlanner, [id]: { ...staged } },
+      readyByPlanner:   { ...prev.readyByPlanner, [id]: true }
+    }));
+    // Dismiss outstanding unsent drafts so the planner can regenerate with new cfg
+    const unsent = findUnsentComposes(get().facts);
+    for (const ci of unsent) get().dismissCompose(ci.composeId);
+  },
+
   appendComposeIntent(text, attachments) {
     const composeId = rid('c');
     const pf = ({ type:'compose_intent', composeId, text, attachments } as ProposedFact);
-    stampAndAppend([pf as ProposedFact], set, get);
+    stampAndAppend(set, get, [pf as ProposedFact]);
     set({ composing: { composeId, text, attachments } });
     return composeId;
   },
 
-  async approveAndSend(composeId, finality) {
-    const { adapter, taskId, facts, pending } = get();
-    if (!adapter) return;
-    // resolve compose
+  async sendCompose(composeId, finality) {
+    const { adapter, taskId, facts, attachmentsIndex } = get();
+    if (!adapter) throw new Error('no adapter');
     const ci = [...facts].reverse().find((f): f is Extract<typeof f, { type:'compose_intent' }> => f.type === 'compose_intent' && f.composeId === composeId);
-    if (!ci) return;
-    // build parts
+    if (!ci) throw new Error('compose not found');
     const parts: A2APart[] = [];
-    parts.push({ kind:'text', text: ci.text, metadata: { 'https://chitchat.fhir.me/a2a-ext': { finality } } });
+    parts.push({ kind:'text', text: ci.text } as any);
     if (Array.isArray(ci.attachments)) {
       for (const a of ci.attachments) {
-        const resolved = resolveAttachmentBytes(facts, a.name);
-        if (resolved) parts.push({ kind:'file', file: { bytes: resolved.bytes, name: a.name, mimeType: resolved.mimeType } });
+        const rec = attachmentsIndex.get(a.name);
+        if (rec) parts.push({ kind:'file', file:{ bytes: rec.bytesBase64, name: a.name, mimeType: rec.mimeType } } as any);
+        else try { console.warn('[sendCompose] missing attachment bytes for', a.name); } catch {}
       }
     }
+    const v = validateParts(parts);
+    if (!v.ok) throw new Error(`invalid parts: ${v.reason}`);
     const messageId = rid('m');
-    const { taskId: newTaskId, snapshot } = await adapter.send(parts, { taskId, messageId, finality });
-    // update local task id via setter to bootstrap driver
-    get().setTaskId(newTaskId);
-    set({ pending: { ...pending, [messageId]: { composeId } } });
-    ingestSnapshotIntoJournal(snapshot, set, get);
-    // setTaskId already started ticks and fetched
+    set((s:any)=>({
+      composeApproved: new Set<string>(s.composeApproved as Set<string>).add(composeId),
+      inFlightSends: new Map<string,{composeId:string}>(s.inFlightSends as Map<string,{composeId:string}>).set(messageId, { composeId }),
+      sendErrorByCompose: (()=>{ const m = new Map<string,string>(s.sendErrorByCompose as Map<string,string>); m.delete(composeId); return m; })(),
+    }));
+    const fin = (finality || ci.finalityHint || 'turn') as 'none'|'turn'|'conversation';
+    let lastErr: any;
+    let result: { taskId: string; snapshot: any } | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try { result = await adapter.send(parts, { taskId, messageId, finality: fin }); lastErr = null; break; }
+      catch (e) { lastErr = e; await new Promise(r => setTimeout(r, 200 * (2 ** attempt) + Math.random() * 100)); }
+    }
+    if (lastErr) {
+      set((s:any)=>({
+        composeApproved: (()=>{ const next = new Set<string>(s.composeApproved as Set<string>); next.delete(composeId); return next; })(),
+        inFlightSends: (()=>{ const m = new Map<string,{composeId:string}>(s.inFlightSends as Map<string,{composeId:string}>); m.delete(messageId); return m; })(),
+        sendErrorByCompose: new Map<string,string>(s.sendErrorByCompose as Map<string,string>).set(composeId, String((lastErr as any)?.message || 'Send failed'))
+      }));
+      throw lastErr;
+    }
+
+    // Success: adopt new taskId if starting a fresh conversation, start ticks, and ingest snapshot immediately
+    const newTaskId = result?.taskId;
+    if (!taskId && newTaskId) {
+      set({ taskId: newTaskId });
+      try { get().startTicks(); } catch {}
+    }
+    const snap = result?.snapshot;
+    if (snap) {
+      const proposed = a2aToFacts(snap as any);
+      stampAndAppend(set, get, proposed);
+    }
   },
 
   addUserGuidance(text) {
     const gid = rid('g');
     const pf = ({ type:'user_guidance', gid, text } as ProposedFact);
-    stampAndAppend([pf as ProposedFact], set, get);
+    stampAndAppend(set, get, [pf as ProposedFact]);
+  },
+
+  dismissCompose(composeId: string) {
+    const pf = ({ type:'compose_dismissed', composeId } as ProposedFact);
+    stampAndAppend(set, get, [pf]);
+  },
+
+  kickoffConversationWithPlanner() {
+    const { taskId, plannerId, readyByPlanner } = get();
+    if (taskId) return;
+    if (plannerId === 'off') return;
+    if (!readyByPlanner[plannerId]) return;
+    const facts = get().facts;
+    const hasAnyStatus = facts.some(f => f.type === 'status_changed');
+    const unsent = findUnsentComposes(facts);
+    if (hasAnyStatus || unsent.length) return;
+    stampAndAppend(set, get, [{ type:'status_changed', a2a:'input-required' } as ProposedFact]);
   },
 
   async cancelAndClear() {
     const { adapter, taskId } = get();
-    if (adapter && taskId) { try { await adapter.cancel(taskId); } catch {} }
-    // clear local state
-    set({ taskId: undefined, facts: [], seq: 0, pending: {}, knownMsg: {}, composing: undefined });
+    try { if (adapter && taskId) await adapter.cancel(taskId); } catch {}
+    try { (window as any).__ticksAbort?.abort?.(); } catch {}
+    set({
+      taskId: undefined,
+      seq: 0,
+      facts: [],
+      knownMsg: new Set<string>(),
+      attachmentsIndex: new Map<string,{mimeType:string;bytesBase64:string}>(),
+      composeApproved: new Set<string>(),
+      inFlightSends: new Map<string,{composeId:string}>(),
+      sendErrorByCompose: new Map<string,string>(),
+      hud: null,
+      fetching: false,
+      needsRefresh: false,
+      composing: undefined,
+    });
   },
 
   uiStatus() {
@@ -160,77 +270,99 @@ export const useAppStore = create<Store>((set, get) => ({
       if (f.type === 'status_changed') return f.a2a;
     }
     return "submitted";
-  }
+  },
+  append(batch, opts) {
+    const baseSeq = typeof opts?.casBaseSeq === 'number' ? opts!.casBaseSeq : get().seq;
+    if ((get().seq || 0) !== baseSeq) return false;
+    stampAndAppend(set, get, batch);
+    try {
+      const mode = get().plannerMode;
+      if (mode === 'auto') {
+        for (const pf of batch) {
+          if (pf && pf.type === 'compose_intent') {
+            const ci = pf as any as { composeId:string; finalityHint?: 'none'|'turn'|'conversation' };
+            queueMicrotask(() => { try { void get().sendCompose(ci.composeId, (ci.finalityHint || 'turn') as any); } catch {} });
+          }
+        }
+      }
+    } catch {}
+    return true;
+  },
+  head() { return get().seq || 0; },
+  setHud(phase, label, p) { set({ hud: { phase, label, p } }); },
 }));
 
 // --- helpers ---
 
-function stampAndAppend(batch: ProposedFact[], set: any, get: any) {
+function stampAndAppend(set: any, get: any, proposed: ProposedFact[]) {
+  if (!proposed.length) return;
+  // Dedup BEFORE stamping: skip known messageIds so we don't burn seq numbers
+  const known = get().knownMsg as Set<string>;
+  const existingNames = new Set<string>(get().facts.filter((f:Fact)=>f.type==='attachment_added').map((f:any)=>f.name));
+  // Track latest known status to drop redundant status_changed events
+  let currStatus: string | undefined = (() => {
+    const facts: Fact[] = get().facts;
+    for (let i = facts.length - 1; i >= 0; --i) {
+      const f = facts[i];
+      if (f.type === 'status_changed') return (f as any).a2a as string;
+    }
+    return undefined;
+  })();
+  const filtered: ProposedFact[] = [];
+  for (const p of proposed) {
+    if (p.type === 'remote_received' || p.type === 'remote_sent') {
+      const mid = (p as any).messageId;
+      if (mid && known.has(mid)) continue;
+      if (mid) known.add(mid);
+    }
+    if (p.type === 'attachment_added') {
+      const n = uniqueName((p as any).name, existingNames);
+      if (n !== (p as any).name) (p as any).name = n;
+      existingNames.add((p as any).name);
+    }
+    if (p.type === 'status_changed') {
+      const st = (p as any).a2a as string;
+      if (typeof st === 'string' && st === currStatus) {
+        // Drop redundant status_changed
+        continue;
+      }
+      currStatus = st;
+    }
+    filtered.push(p);
+  }
+  if (!filtered.length) return;
   const seq0 = get().seq || 0;
-  const now = nowIso();
-  const stamped = batch.map((f: ProposedFact, i: number) => Object.assign({}, f, { seq: seq0 + 1 + i, ts: now, id: rid('f'), vis: (f.type === 'remote_received' || f.type === 'remote_sent') ? 'public' : 'private' }));
-  set((s:any) => ({ facts: [...s.facts, ...stamped], seq: seq0 + stamped.length }));
-}
-
-function resolveAttachmentBytes(facts: Fact[], name: string): { mimeType: string; bytes: string } | null {
-  for (let i = facts.length - 1; i >= 0; --i) {
-    const f = facts[i];
-    if (f.type === 'attachment_added' && f.name === name) return { mimeType: f.mimeType, bytes: f.bytes };
-  }
-  return null;
-}
-
-function ingestSnapshotIntoJournal(snap: TransportSnapshot, set: any, get: any) {
-  const facts: Fact[] = get().facts;
-  const knownMsg: Record<string,1> = { ...(get().knownMsg || {}) };
-  const pending = { ...(get().pending || {}) };
-
-  // status_changed
-  const lastStatus = (() => { for (let i=facts.length-1;i>=0;--i) { const f = facts[i]; if (f.type==='status_changed') return f.a2a; } return undefined; })();
-  const st = snap.status?.state || 'submitted';
-  if (st !== lastStatus) {
-    stampAndAppend([{ type:'status_changed', a2a: st } as ProposedFact], set, get);
-  }
-
-  // messages in order
-  const all: A2AMessage[] = [];
-  if (Array.isArray(snap.history)) all.push(...snap.history);
-  if (snap.status?.message) all.push(snap.status.message);
-  for (const m of all) {
-    if (!m || !m.messageId || knownMsg[m.messageId]) continue;
-    knownMsg[m.messageId] = 1;
-
-    // Attachments: create attachment_added facts for inline bytes
-    const attMeta: AttachmentMeta[] = [];
-    for (const p of (m.parts || [])) {
-      if (p.kind === 'file' && 'bytes' in p.file && typeof p.file.bytes === 'string') {
-        const name = p.file.name || `${p.file.mimeType || 'application/octet-stream'}-${Math.random().toString(36).slice(2,7)}.bin`;
-        const bytes = p.file.bytes;
-        const mime = p.file.mimeType || 'application/octet-stream';
-        // avoid duplicate attachment names
-        const unique = uniqueName(name, facts);
-        stampAndAppend([{ type:'attachment_added', name: unique, mimeType: mime, bytes, origin: 'inbound' } as ProposedFact], set, get);
-        attMeta.push({ name: unique, mimeType: mime, origin:'inbound' });
+  const ts = nowIso();
+  const stamped = filtered.map((p,i) => ({ ...(p as any), seq: seq0 + 1 + i, ts, id: rid('f') })) as Fact[];
+  const attachmentsIndex = new Map<string,{mimeType:string;bytesBase64:string}>(get().attachmentsIndex as Map<string,{mimeType:string;bytesBase64:string}>);
+  const inflight = new Map<string,{composeId:string}>(get().inFlightSends as Map<string,{composeId:string}>);
+  const approved = new Set<string>(get().composeApproved as Set<string>);
+  for (const f of stamped) {
+    if (f.type === 'attachment_added') attachmentsIndex.set((f as any).name, { mimeType: (f as any).mimeType, bytesBase64: (f as any).bytes });
+    if (f.type === 'remote_sent') {
+      const link = inflight.get((f as any).messageId);
+      if (link) {
+        (f as any).composeId = link.composeId;
+        inflight.delete((f as any).messageId);
       }
     }
-
-    if (m.role === 'agent') {
-      stampAndAppend([{ type:'remote_received', messageId: m.messageId, text: textOf(m.parts||[]), attachments: attMeta.length ? attMeta : undefined } as ProposedFact], set, get);
-    } else {
-      const link = pending[m.messageId]; // echo of our send
-      stampAndAppend([{ type:'remote_sent', messageId: m.messageId, text: textOf(m.parts||[]), attachments: attMeta.length?attMeta:undefined, composeId: link?.composeId } as ProposedFact], set, get);
-      if (link) delete pending[m.messageId];
-    }
   }
-
-  set({ knownMsg, pending });
+  set((s:any)=>({ facts: [...s.facts, ...stamped], seq: seq0 + stamped.length, attachmentsIndex, knownMsg: known, inFlightSends: inflight, composeApproved: approved }));
 }
 
-function uniqueName(name: string, facts: Fact[]): string {
-  if (!facts.some(f => f.type==='attachment_added' && f.name===name)) return name;
-  const stem = name.replace(/\.[^./]+$/, '');
-  const ext = (name.match(/\.[^./]+$/) || [''])[0];
-  let i = 2;
-  while (facts.some(f => f.type==='attachment_added' && f.name===`${stem} (${i})${ext}`)) i++;
-  return `${stem} (${i})${ext}`;
+// legacy ingest removed; use a2aToFacts + stampAndAppend
+
+function findUnsentComposes(facts: Fact[]): Array<{ composeId: string; finalityHint?: 'none'|'turn'|'conversation' }> {
+  // consider compose 'unsent' only if not dismissed and no remote_sent after it
+  const dismissed = new Set<string>(facts.filter(f=>f.type==='compose_dismissed').map((f:any)=>f.composeId));
+  const out: Array<{ composeId: string; finalityHint?: 'none'|'turn'|'conversation' }> = [];
+  for (let i = facts.length - 1; i >= 0; --i) {
+    const f = facts[i];
+    if (f.type === 'remote_sent') break;
+    if (f.type === 'compose_intent') {
+      const ci = f as any;
+      if (!dismissed.has(ci.composeId)) out.unshift({ composeId: ci.composeId, finalityHint: ci.finalityHint });
+    }
+  }
+  return out;
 }

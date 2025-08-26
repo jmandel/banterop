@@ -1,272 +1,35 @@
-import type { Fact, ProposedFact, TerminalFact, Cut, Planner, PlanInput, PlanContext, LlmProvider, AttachmentMeta } from "../../shared/journal-types";
-import type { FrameResult } from "../transports/a2a-client";
-import type { A2APart } from "../../shared/a2a-types";
+import type { Fact, ProposedFact, Planner, PlanInput, PlanContext, LlmProvider } from "../../shared/journal-types";
+import { rid } from "../../shared/core";
 
-export type HudEvent = { ts:string; phase:'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting'; label?:string; p?:number };
-
-function nowIso() { return new Date().toISOString(); }
-function rid(prefix?:string) { return `${prefix||'id'}-${crypto.randomUUID()}`; }
-
-export class Journal {
-  private _facts: Fact[] = [];
-  private _seq = 0;
-  private listeners = new Set<() => void>();
-
-  head(): Cut { return { seq: this._seq }; }
-  facts(): ReadonlyArray<Fact> { return this._facts; }
-
-  onAnyNewEvent(fn: () => void) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
-
-  private notify() { this.listeners.forEach(fn => { try { fn(); } catch {} }); }
-
-  /** Append a single already-stamped fact; used internally. */
-  private _pushStamped(f: Fact) { this._facts.push(f); this._seq = f.seq; this.notify(); }
-
-  /** Clear all facts (local UI state reset). */
-  clear() { this._facts = []; this._seq = 0; this.notify(); }
-
-  /** Append a fact authored by harness/UI (auto-stamped). */
-  append(f: ProposedFact, vis:'public'|'private'): Fact {
-    const stamped = Object.assign({}, f, { seq: this._seq + 1, ts: nowIso(), id: rid('f'), vis }) as unknown as Fact;
-    this._pushStamped(stamped);
-    return stamped;
-  }
-
-  /** Append a batch under seq-only CAS. */
-  casAppend(baseSeq: number, batch: ProposedFact[], visResolver:(f:ProposedFact)=>'public'|'private'): boolean {
-    if (this._seq !== baseSeq) return FalseLike();
-    const nextSeqStart = this._seq + 1;
-    const stamped = batch.map((f, i) => Object.assign({}, f, { seq: nextSeqStart + i, ts: nowIso(), id: rid('f'), vis: visResolver(f) })) as unknown as Fact[];
-    for (const s of stamped) this._pushStamped(s);
-    return true;
-  }
-}
-
-function FalseLike(): false { return false; }
-
-// Type guards for ProposedFact variants used below
-type PF<K extends ProposedFact['type']> = Extract<ProposedFact, { type: K }>;
-function isToolResult(f: ProposedFact): f is PF<'tool_result'> { return f.type === 'tool_result'; }
-function isAttachmentAdded(f: ProposedFact): f is PF<'attachment_added'> { return f.type === 'attachment_added'; }
-function isComposeIntent(f: ProposedFact): f is PF<'compose_intent'> { return f.type === 'compose_intent'; }
-function isRemotePublic(f: ProposedFact): f is PF<'remote_received'> | PF<'remote_sent'> { return f.type === 'remote_received' || f.type === 'remote_sent'; }
-
-// --- Validation (brief 4 & 10) ---
-export function validateBatch(batch: ProposedFact[], history: ReadonlyArray<Fact>): boolean {
-  if (batch.length) {
-    const t = batch[batch.length - 1].type;
-    if (t !== 'compose_intent' && t !== 'agent_question' && t !== 'sleep') return false;
-  }
-  for (const f of batch) {
-    if (f.type === 'agent_answer' || f.type === 'remote_sent') return false;
-  }
-  // Tool result linkage
-  const ok = new Set<string>();
-  for (const f of batch) {
-    if (f.type === 'tool_result') {
-      const tr = f as unknown as { type:'tool_result'; callId:string; ok:boolean };
-      if (tr.ok) ok.add(tr.callId);
-    }
-  }
-  const existsEarlierOk = (id: string) => history.some(x => x.type === 'tool_result' && x.callId === id && x.ok);
-  for (const f of batch) {
-    if (f.type === 'attachment_added' && (f as unknown as { origin:'inbound'|'user'|'synthesized' }).origin === 'synthesized') {
-      const aa = f as unknown as { producedBy?: { callId: string } };
-      const call = aa.producedBy?.callId;
-      if (!call) return false;
-      if (!(ok.has(call) || existsEarlierOk(call))) return false;
-    }
-  }
-  // compose attachments resolvable
-  const introduced = new Set<string>();
-  for (const f of batch) if (f.type === 'attachment_added') introduced.add((f as unknown as { name:string }).name);
-  const known = new Set(history.filter(x => x.type === 'attachment_added').map(x => x.name));
-  for (const f of batch) if (f.type === 'compose_intent' && (f as unknown as { attachments?: AttachmentMeta[] }).attachments) {
-    const ci = f as unknown as { attachments?: AttachmentMeta[] };
-    for (const a of ci.attachments || []) if (!known.has(a.name) && !introduced.has(a.name)) return false;
-  }
-  return true;
-}
-
-// --- Harness ---
-export type HarnessCallbacks = {
-  onHud?: (ev: HudEvent) => void;
-  onHudFlush?: (evs: HudEvent[]) => void;
-  onComposerOpened?: (compose: { composeId:string; text:string; attachments?:AttachmentMeta[] }) => void;
-  onComposerCleared?: () => void;
-  onQuestion?: (q:{ qid:string; prompt:string; required?:boolean; placeholder?:string }) => void;
-};
-
-export type SendMessageFn = (parts: A2APart[], opts:{ messageId:string; signal?:AbortSignal }) => AsyncGenerator<FrameResult>;
-
-export class PlannerHarness<Cfg=unknown> {
+export class PlannerHarness<Cfg = unknown> {
   constructor(
-    private journal: Journal,
+    private getFacts: () => ReadonlyArray<Fact>,
+    private getHead: () => number,
+    private append: (batch: ProposedFact[], opts?: { casBaseSeq?: number }) => boolean,
+    private hud: (phase: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting', label?: string, p?: number) => void,
     private planner: Planner<Cfg>,
-    private sendMessage: SendMessageFn,
     private cfg: Cfg,
-    private ids: { myAgentId: string; otherAgentId: string; model?: string },
-    private cbs: HarnessCallbacks = {}
+    private ids: { myAgentId?: string; otherAgentId?: string; model?: string } = {}
   ) {}
 
-  private hudLog: HudEvent[] = [];
-  private composing: { composeId:string; text:string; attachments?:AttachmentMeta[] } | null = null;
-  private awaitingAnswerForQid: string | null = null;
-  private pendingSent: { messageId:string; text:string; attachments?:AttachmentMeta[]; composeId?:string } | null = null;
-  // Auto-plan trigger tracking
-  private autoEnabled = false;
-  private autoUnsub: (() => boolean) | null = null;
-  private autoScheduled = false;
-  private lastStatusPlannedSeq = 0; // last input-required status seq we planned for
-  private lastWhisperPlannedSeq = 0; // last user_guidance seq we planned for
+  private planSched = false;
+  // Idempotence counters
+  private lastStatusPlannedSeq = 0;
+  private lastInboundPlannedSeq = 0;
+  private lastWhisperPlannedSeq = 0;
+  private lastOutboundPlannedSeq = 0;
+  private lastHead = 0;
 
-  /** Reset local transient state (composing, questions, pending). */
-  resetLocal() {
-    this.composing = null;
-    this.awaitingAnswerForQid = null;
-    this.pendingSent = null;
-    this.flushHud();
+  // Coalescing scheduler: call this often; we run at most once per microtask
+  schedulePlan(): Promise<void> {
+    if (this.planSched) return Promise.resolve();
+    this.planSched = true;
+    queueMicrotask(() => { this.planSched = false; void this.runPlanningPass(); });
+    return Promise.resolve();
   }
 
-  // --- UI helpers ---
-  openComposer(ci:{ composeId:string; text:string; attachments?:AttachmentMeta[] }) {
-    this.composing = ci;
-    if (this.cbs.onComposerOpened) this.cbs.onComposerOpened(ci);
-  }
-  clearComposer() {
-    this.composing = null;
-    if (this.cbs.onComposerCleared) this.cbs.onComposerCleared();
-  }
-  getComposer() { return this.composing; }
-
-  hud(phase:HudEvent['phase'], label?:string, p?:number) {
-    const ev: HudEvent = { ts: nowIso(), phase, label, p };
-    this.hudLog.push(ev);
-    if (this.cbs.onHud) this.cbs.onHud(ev);
-  }
-  flushHud() {
-    if (this.cbs.onHudFlush && this.hudLog.length) this.cbs.onHudFlush(this.hudLog.slice());
-    this.hudLog = [];
-  }
-
-  /** Append an explicit user whisper/guidance. */
-  addUserGuidance(text:string) {
-    const gid = rid('g');
-    this.journal.append({ type:'user_guidance', gid, text } as ProposedFact, 'private');
-    // Any new event should wake planner
-    try { console.debug('[harness] user_guidance appended', { gid, len: text.length }); } catch {}
-    this.kick();
-  }
-
-  /** Answer an agent question; commits and wakes planner. */
-  answerQuestion(qid:string, text:string) {
-    this.awaitingAnswerForQid = null;
-    this.journal.append({ type:'agent_answer', qid, text } as ProposedFact, 'private');
-    try { console.debug('[harness] agent_answer appended', { qid, len: text.length }); } catch {}
-    this.kick();
-  }
-
-  /** Map A2A frames into journal facts. */
-  ingestA2AFrame(frame: FrameResult) {
-    if (!frame) return;
-    if ('kind' in frame) {
-      if (frame.kind === 'task') {
-        const st = frame.status?.state || 'submitted';
-        this.journal.append({ type: 'status_changed', a2a: st } as ProposedFact, 'private');
-        const m = frame.status?.message;
-        if (m && m.role === 'agent') {
-          const textParts = (m.parts || []).filter((p): p is Extract<A2APart, { kind: 'text' }> => p.kind === 'text').map(p => p.text).join('\n');
-          const messageId = m.messageId || rid('m');
-          // Avoid duplicates: if already recorded, skip
-          const already = this.journal.facts().some(ff => ff.type === 'remote_received' && ff.messageId === messageId);
-          if (!already) {
-            const attachments: AttachmentMeta[] = [];
-            for (const p of (m.parts || [])) {
-              if (p.kind === 'file' && 'bytes' in p.file && typeof p.file.bytes === 'string') {
-                const name = p.file.name || `${p.file.mimeType || 'application/octet-stream'}-${Math.random().toString(36).slice(2, 7)}.bin`;
-                this.journal.append({ type: 'attachment_added', name, mimeType: p.file.mimeType || 'application/octet-stream', bytes: p.file.bytes, origin: 'inbound' } as ProposedFact, 'private');
-                attachments.push({ name, mimeType: p.file.mimeType || 'application/octet-stream', origin: 'inbound' });
-              }
-            }
-            this.journal.append({ type: 'remote_received', messageId, text: textParts, attachments: attachments.length ? attachments : undefined } as ProposedFact, 'public');
-          }
-        }
-        // If the latest message was authored by us (role='user') and matches pendingSent, record remote_sent
-        if (m && m.role === 'user' && this.pendingSent) {
-          const textParts = (m.parts || []).filter((p): p is Extract<A2APart, { kind: 'text' }> => p.kind === 'text').map(p => p.text).join('\n');
-          const messageId = m.messageId || rid('m');
-          if (this.pendingSent.messageId === messageId) {
-            this.journal.append({ type: 'remote_sent', messageId, text: (this.pendingSent.text || textParts), attachments: this.pendingSent.attachments, composeId: this.pendingSent.composeId } as ProposedFact, 'public');
-            this.pendingSent = null;
-            this.clearComposer();
-          }
-        }
-        return;
-      }
-      if (frame.kind === 'status-update') {
-        const st = frame.status?.state || 'submitted';
-        this.journal.append({ type: 'status_changed', a2a: st } as ProposedFact, 'private');
-        const m = frame.status?.message;
-        if (m && m.role === 'user') {
-          const textParts = (m.parts || []).filter((p): p is Extract<A2APart, { kind: 'text' }> => p.kind === 'text').map(p => p.text).join('\n');
-          const messageId = m.messageId || rid('m');
-          if (this.pendingSent && this.pendingSent.messageId === messageId) {
-            this.journal.append({ type: 'remote_sent', messageId, text: (this.pendingSent.text || textParts), attachments: this.pendingSent.attachments, composeId: this.pendingSent.composeId } as ProposedFact, 'public');
-            this.pendingSent = null;
-            this.clearComposer();
-          }
-        }
-        return;
-      }
-      if (frame.kind === 'message') {
-        const textParts = (frame.parts || []).filter((p): p is Extract<A2APart, { kind: 'text' }> => p.kind === 'text').map(p => p.text).join('\n');
-        const messageId = frame.messageId || rid('m');
-        const attachments: AttachmentMeta[] = [];
-        const parts = (frame.parts || []);
-        for (const p of parts) {
-          if (p.kind === 'file' && 'bytes' in p.file && typeof p.file.bytes === 'string') {
-            const name = p.file.name || `${p.file.mimeType || 'application/octet-stream'}-${Math.random().toString(36).slice(2, 7)}.bin`;
-            this.journal.append({ type: 'attachment_added', name, mimeType: p.file.mimeType || 'application/octet-stream', bytes: p.file.bytes, origin: 'inbound' } as ProposedFact, 'private');
-            attachments.push({ name, mimeType: p.file.mimeType || 'application/octet-stream', origin: 'inbound' });
-          }
-        }
-        this.journal.append({ type: 'remote_received', messageId, text: textParts, attachments: attachments.length ? attachments : undefined } as ProposedFact, 'public');
-        return;
-      }
-    }
-  }
-
-  /** Approve & send a compose intent (will be ignored if not our turn). */
-  async approveAndSend(composeId: string, finality:'none'|'turn'|'conversation'='turn') {
-    console.debug('[harness] approveAndSend start', { composeId, finality });
-    const facts = this.journal.facts();
-    const ci = [...facts].reverse().find((f): f is Extract<Fact, { type: 'compose_intent' }> => f.type === 'compose_intent' && f.composeId === composeId);
-    if (!ci) return;
-    // Build A2A parts
-    const parts: A2APart[] = [];
-    const textPart: Extract<A2APart, { kind: 'text' }> = { kind: 'text', text: ci.text, metadata: { 'https://chitchat.fhir.me/a2a-ext': { finality } } };
-    parts.push(textPart);
-    if (Array.isArray(ci.attachments)) {
-      for (const a of ci.attachments) {
-        const resolved = await this.readAttachment(a.name);
-        if (resolved) {
-          const filePart: Extract<A2APart, { kind: 'file' }> = { kind: 'file', file: { bytes: resolved.bytes, name: a.name, mimeType: resolved.mimeType } };
-          parts.push(filePart);
-        }
-      }
-    }
-    // Send via A2A; append remote_sent when the status-update reflecting this message arrives.
-    const messageId = rid('m');
-    this.pendingSent = { messageId, text: ci.text, attachments: ci.attachments, composeId };
-    for await (const frame of this.sendMessage(parts, { messageId })) {
-      this.ingestA2AFrame(frame);
-    }
-    console.debug('[harness] approveAndSend done', { composeId });
-  }
-
-  /** Read attachment bytes by name at current cut. */
-  async readAttachment(name:string): Promise<{ mimeType:string; bytes:string } | null> {
-    const facts = this.journal.facts();
+  private async readAttachment(name: string): Promise<{ mimeType: string; bytes: string } | null> {
+    const facts = this.getFacts();
     for (let i = facts.length - 1; i >= 0; --i) {
       const f = facts[i];
       if (f.type === 'attachment_added' && f.name === name) return { mimeType: f.mimeType, bytes: f.bytes };
@@ -274,115 +37,70 @@ export class PlannerHarness<Cfg=unknown> {
     return null;
   }
 
-  /** Enable auto-planning: harness owns when to plan based on journal state. */
-  enableAutoPlan() {
-    if (this.autoEnabled) return;
-    this.autoEnabled = true;
-    // Subscribe to any journal change; coalesce to microtask
-    try { console.debug('[harness] autoPlan enable'); } catch {}
-    this.autoUnsub = this.journal.onAnyNewEvent(() => {
-      const facts = this.journal.facts();
-      const seq = facts.length ? facts[facts.length - 1].seq : 0;
-      try { console.debug('[harness] autoPlan event', { seq, len: facts.length }, facts); } catch {}
-      this.scheduleAutoConsider();
-    });
-    // Initial consider (deferred)
-    this.scheduleAutoConsider();
-  }
-
-  /** Disable auto-planning and clear subscriptions. */
-  disableAutoPlan() {
-    if (!this.autoEnabled) return;
-    this.autoEnabled = false;
-    try { this.autoUnsub?.(); } catch {}
-    this.autoUnsub = null;
-    this.autoScheduled = false;
-    try { console.debug('[harness] autoPlan disable'); } catch {}
-  }
-
-  private scheduleAutoConsider() {
-    if (!this.autoEnabled || this.autoScheduled) return;
-    this.autoScheduled = true;
-    const facts = this.journal.facts();
-    const seq = facts.length ? facts[facts.length - 1].seq : 0;
-    try { console.debug('[harness] autoPlan schedule', { seq }, facts); } catch {}
-    queueMicrotask(() => { this.autoScheduled = false; this.considerAutoPlan(); });
-  }
-
-  /** Decide whether to run a planning pass based on triggers we own. */
-  private considerAutoPlan() {
-    if (!this.autoEnabled) return;
-    const facts = this.journal.facts();
-    const n = facts.length;
-    if (!n) return;
-
-    // Trigger 1: latest status is input-required, plan once per such status
-    let lastStatusSeq = 0;
-    let lastStatusValue: string | undefined;
-    for (let i = n - 1; i >= 0; --i) {
-      const f = facts[i];
-      if (f.type === 'status_changed') { lastStatusSeq = f.seq; lastStatusValue = (f as any).a2a; break; }
+  async runPlanningPass() {
+    const headNow = this.getHead();
+    if (headNow < this.lastHead) {
+      this.lastStatusPlannedSeq = 0;
+      this.lastInboundPlannedSeq = 0;
+      this.lastOutboundPlannedSeq = 0;
+      this.lastWhisperPlannedSeq = 0;
     }
+    this.lastHead = headNow;
 
-    // Trigger 2: latest user whisper (user_guidance), plan once per whisper
+    const facts = this.getFacts();
+    if (!facts.length) return;
+    const cut = { seq: headNow };
+
+    // --- Trigger detection and guards ---
+    // Latest status
+    let lastStatusSeq = 0; let lastStatus: string | undefined;
+    for (let i = facts.length - 1; i >= 0; --i) {
+      const f = facts[i];
+      if (f.type === 'status_changed') { lastStatusSeq = f.seq; lastStatus = (f as any).a2a; break; }
+    }
+    // Latest public + inbound/outbound
+    let lastPublic: 'remote_received'|'remote_sent'|null = null; let lastInboundSeq = 0; let lastOutboundSeq = 0;
+    for (let i = facts.length - 1; i >= 0; --i) {
+      const f = facts[i];
+      if (f.type === 'remote_received') { lastPublic = 'remote_received'; lastInboundSeq = f.seq; break; }
+      if (f.type === 'remote_sent') { lastPublic = 'remote_sent'; lastOutboundSeq = f.seq; break; }
+    }
+    // Latest whisper
     let lastWhisperSeq = 0;
-    for (let i = n - 1; i >= 0; --i) {
+    for (let i = facts.length - 1; i >= 0; --i) {
       const f = facts[i];
       if (f.type === 'user_guidance') { lastWhisperSeq = f.seq; break; }
     }
-    const reasons: string[] = [];
-    if (lastWhisperSeq <= this.lastWhisperPlannedSeq) reasons.push('no-new-whisper');
-    if (lastStatusValue !== 'input-required') reasons.push('status-not-input-required');
-    else if (lastStatusSeq <= this.lastStatusPlannedSeq) reasons.push('no-new-status');
-    try {
-      console.debug('[harness] autoPlan consider', {
-        facts: n,
-        status: lastStatusValue,
-        lastStatusSeq,
-        lastStatusPlannedSeq: this.lastStatusPlannedSeq,
-        lastWhisperSeq,
-        lastWhisperPlannedSeq: this.lastWhisperPlannedSeq,
-        reasons,
-      }, facts);
-    } catch {}
-    // Decide priority: whisper first, else input-required
-    if (lastWhisperSeq > this.lastWhisperPlannedSeq) {
-      this.lastWhisperPlannedSeq = lastWhisperSeq;
-      try { console.debug('[harness] autoPlan trigger: whisper', { seq: lastWhisperSeq }, facts); } catch {}
-      void this.kick();
-      return;
-    }
-    if (lastStatusValue === 'input-required' && lastStatusSeq > this.lastStatusPlannedSeq) {
-      this.lastStatusPlannedSeq = lastStatusSeq;
-      try { console.debug('[harness] autoPlan trigger: input-required', { seq: lastStatusSeq }, facts); } catch {}
-      void this.kick();
-      return;
-    }
-    try { console.debug('[harness] autoPlan: no trigger', { reasons }, facts); } catch {}
-  }
 
-  /** Kick one planning pass if there are no outstanding questions. */
-  async kick() {
-    try { console.debug('[harness] kick() start'); } catch {}
-    // Outstanding question gate
-    const facts = this.journal.facts();
-    const openQ = [...facts].reverse().find((f): f is Extract<Fact, { type: 'agent_question' }> => f.type === 'agent_question' && !facts.some(g => g.type === 'agent_answer' && g.qid === f.qid));
-    if (openQ) {
-      this.awaitingAnswerForQid = openQ.qid;
-      try { console.debug('[harness] kick gate: open question', { qid: openQ.qid }); } catch {}
-      if (this.cbs.onQuestion) this.cbs.onQuestion({ qid: openQ.qid, prompt: openQ.prompt, required: openQ.required, placeholder: openQ.placeholder });
-      return;
-    }
-    // Prepare a cut
-    const cut = this.journal.head();
-    const lastTypes = facts.slice(-5).map(f=>f.type).join(',');
-    try { console.debug('[harness] planning on cut', { cut: cut.seq, facts: facts.length, lastTypes }, facts); } catch {}
-    const controller = new AbortController();
-    const unsub = this.journal.onAnyNewEvent(() => controller.abort());
+    const statusTriggered = (lastStatus === 'input-required') && (lastStatusSeq > this.lastStatusPlannedSeq);
+    const inboundTriggered = (lastPublic === 'remote_received') && (lastInboundSeq > this.lastInboundPlannedSeq);
+    const outboundTriggered = (lastPublic === 'remote_sent') && (lastOutboundSeq > this.lastOutboundPlannedSeq);
+    const whisperTriggered = lastWhisperSeq > this.lastWhisperPlannedSeq;
+
+    // Only plan when a trigger fired
+    if (!(statusTriggered || inboundTriggered || outboundTriggered || whisperTriggered)) return;
+    // Status must be input-required
+    if (lastStatus !== 'input-required') return;
+    // Unsent compose gate (ignore dismissed): if there's a compose with no remote_sent after it, park
+    const dismissed = new Set<string>(facts.filter(f=>f.type==='compose_dismissed').map((f:any)=>f.composeId));
+    const hasUnsentCompose = (() => {
+      for (let i = facts.length - 1; i >= 0; --i) {
+        const f = facts[i];
+        if (f.type === 'compose_intent') {
+          const ci = f as any;
+          if (dismissed.has(ci.composeId)) continue;
+          for (let j = i + 1; j < facts.length; j++) { if (facts[j].type === 'remote_sent') return false; }
+          return true;
+        }
+      }
+      return false;
+    })();
+    if (hasUnsentCompose) return;
+
     const ctx: PlanContext<any> = {
-      signal: controller.signal,
-      hud: (phase: HudEvent['phase'], label?: string, p?: number) => this.hud(phase, label, p),
-      newId: (prefix?:string) => rid(prefix),
+      signal: undefined,
+      hud: (phase, label, p) => this.hud(phase, label, p),
+      newId: (prefix?: string) => rid(prefix || 'id'),
       readAttachment: (name: string) => this.readAttachment(name),
       config: this.cfg,
       myAgentId: this.ids.myAgentId,
@@ -390,40 +108,35 @@ export class PlannerHarness<Cfg=unknown> {
       model: this.ids.model,
       llm: DevNullLLM,
     };
-    const input: PlanInput = { cut, facts: this.journal.facts() };
+    const input: PlanInput = { cut, facts };
     let out: ProposedFact[] = [];
     try {
       out = await this.planner.plan(input, ctx);
-      try { console.debug('[harness] planner result', { count: (out||[]).length, types: (out||[]).map(o=>o.type) }, out); } catch {}
-    } finally {
-      unsub();
-      this.flushHud();
+    } catch {
+      out = [];
     }
     if (!out || !out.length) return;
-    if (!validateBatch(out, this.journal.facts())) { try { console.debug('[harness] validateBatch failed'); } catch {}; return; }
 
-    const visResolver = (f:ProposedFact) => (f.type === 'remote_received' || f.type === 'remote_sent') ? 'public' : 'private';
-    const ok = this.journal.casAppend(cut.seq, out, visResolver);
-    try { console.debug('[harness] commit', { ok, cut: cut.seq, types: out.map(o=>o.type).join(',') }, out); } catch {}
-    if (!ok) {
-      // Head moved → planner will be kicked again by the very event that moved the head.
-      return;
+    // Skip redundant sleep (prevents tight loops): do not append a single sleep if last fact is also sleep
+    if (out.length === 1 && out[0]?.type === 'sleep') {
+      const last = facts[facts.length - 1];
+      if (last && last.type === 'sleep') {
+        try { console.debug('[planner] skip redundant sleep'); } catch {}
+        return;
+      }
     }
-    // Materialize only after commit
-    const last = out[out.length - 1];
-    if (last.type === 'compose_intent') {
-      const ci = last as unknown as { composeId: string; text: string; attachments?: AttachmentMeta[] };
-      this.openComposer({ composeId: ci.composeId, text: ci.text, attachments: ci.attachments });
+
+    // Log planner output shape for debugging loops
+    try { console.debug('[planner] result', { count: out.length, types: out.map(o => o.type) }); } catch {}
+    const ok = this.append(out, { casBaseSeq: cut.seq });
+    if (ok) {
+      if (statusTriggered) this.lastStatusPlannedSeq = lastStatusSeq;
+      if (inboundTriggered) this.lastInboundPlannedSeq = lastInboundSeq;
+      if (outboundTriggered) this.lastOutboundPlannedSeq = lastOutboundSeq;
+      if (whisperTriggered) this.lastWhisperPlannedSeq = lastWhisperSeq;
     }
-    if (last.type === 'agent_question' && this.cbs.onQuestion) {
-      const aq = last as unknown as { qid: string; prompt: string; required?: boolean; placeholder?: string };
-      this.cbs.onQuestion({ qid: aq.qid, prompt: aq.prompt, required: aq.required, placeholder: aq.placeholder });
-    }
-    // sleep → do nothing
+    try { this.hud('idle'); } catch {}
   }
 }
 
-// Simple LLM provider placeholder
-export const DevNullLLM: LlmProvider = {
-  async chat() { return { text: "" }; }
-};
+export const DevNullLLM: LlmProvider = { async chat() { return { text: "" }; } };
