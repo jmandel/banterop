@@ -15,8 +15,7 @@ export function randomPort(): number { return 3000 + Math.floor(Math.random() * 
 
 export async function startServer(opts?: { dbPath?: string }): Promise<Spawned> {
   const port = randomPort();
-  const env = { ...process.env, PORT: String(port) } as Record<string, string>;
-  if (opts?.dbPath) env.FLIPPROXY_DB = opts.dbPath;
+  const env = { ...process.env, PORT: String(port), FLIPPROXY_DB: opts?.dbPath ?? ':memory:' } as Record<string, string>;
   const proc = Bun.spawn(["bun", "src/server/flipproxy.ts"], {
     env,
     stdout: "ignore",
@@ -46,4 +45,3 @@ export function tmpDbPath(): string {
   const name = `db-${Math.random().toString(36).slice(2,9)}.sqlite`;
   return `${Bun.cwd || process.cwd()}/${name}`;
 }
-

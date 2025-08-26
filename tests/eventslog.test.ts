@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { readSSE } from "../src/shared/a2a-utils";
+import { parseSse } from "../src/shared/sse";
 import { startServer, stopServer, Spawned, decodeA2AUrl } from "./utils";
 
 let S: Spawned;
@@ -20,8 +20,7 @@ describe("Control-plane event log", () => {
       const es = await fetch(S.base + `/pairs/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
       expect(es.ok).toBeTrue();
       let got = false;
-      for await (const data of readSSE(es)) {
-        const ev = JSON.parse(data).result;
+      for await (const ev of parseSse<any>(es.body!)) {
         expect(ev.pairId).toBe(pairId);
         expect(typeof ev.seq).toBe('number');
         expect(ev.type).toBe('pair-created');
@@ -33,10 +32,10 @@ describe("Control-plane event log", () => {
     }
 
     // Start epoch by streaming a no-op message
-    const a2a = decodeA2AUrl(j.initiatorJoinUrl);
+    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
     {
       const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start', method:'message/stream', params:{ message:{ role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
-      for await (const _ of readSSE(res)) break;
+      for await (const _ of parseSse<any>(res.body!)) break;
     }
 
     // Hard reset: keep same pair, log is cleared, tasks canceled
@@ -48,8 +47,7 @@ describe("Control-plane event log", () => {
       const ac2 = new AbortController();
       const es2 = await fetch(S.base + `/pairs/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac2.signal });
       let unsub=false, gotCombined=false;
-      for await (const data of readSSE(es2)) {
-        const ev = JSON.parse(data).result;
+      for await (const ev of parseSse<any>(es2.body!)) {
         if (ev.type === 'backchannel' && ev.action === 'unsubscribe') unsub = true;
         if (ev.type === 'state' && ev.states && ev.states.initiator === 'canceled' && ev.states.responder === 'canceled') {
           gotCombined = true;
@@ -64,8 +62,7 @@ describe("Control-plane event log", () => {
     {
       const ac3 = new AbortController();
       const es3 = await fetch(S.base + `/pairs/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac3.signal });
-      for await (const data of readSSE(es3)) {
-        const ev = JSON.parse(data).result;
+      for await (const ev of parseSse<any>(es3.body!)) {
         if (ev.type === 'reset-complete' && typeof ev.epoch === 'number') { resetEpoch = ev.epoch; ac3.abort(); break; }
       }
       expect(resetEpoch).toBeGreaterThan(0);
@@ -73,7 +70,7 @@ describe("Control-plane event log", () => {
     const initTaskId2 = `init:${pairId}#${resetEpoch + 1}`;
     {
       const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start2', method:'message/stream', params:{ message:{ role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
-      for await (const _ of readSSE(res)) break;
+      for await (const _ of parseSse<any>(res.body!)) break;
       const rget = await fetch(a2a, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ jsonrpc:'2.0', id:'g', method:'tasks/get', params:{ id: initTaskId2 } }) });
       const jg = await rget.json();
       expect(jg.result.id).toBe(initTaskId2);

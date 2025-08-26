@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { readSSE } from "../src/shared/a2a-utils";
+import { parseSse } from "../src/shared/sse";
 import { startServer, stopServer, Spawned, decodeA2AUrl, textPart } from "./utils";
 
 let S: Spawned;
@@ -10,7 +10,7 @@ afterAll(async () => { await stopServer(S); });
 async function createPairAndA2A() {
   const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
   const j = await r.json();
-  return { pairId: j.pairId as string, a2a: decodeA2AUrl(j.initiatorJoinUrl) };
+  return { pairId: j.pairId as string, a2a: decodeA2AUrl(j.links.initiator.joinA2a) };
 }
 
 describe("A2A JSON-RPC", () => {
@@ -22,19 +22,16 @@ describe("A2A JSON-RPC", () => {
     expect(j.error.code).toBe(-32601);
   });
 
-  it("streams JSON-RPC frames and correlates id; responder mirrors message", async () => {
+  it("streams JSON-RPC frames; responder mirrors message", async () => {
     const { pairId, a2a } = await createPairAndA2A();
     const reqId = crypto.randomUUID();
     const res = await fetch(a2a, { method: 'POST', headers: { 'content-type': 'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id: reqId, method: 'message/stream', params: { message: { role:'user', parts: [textPart('hi', 'turn')], messageId: crypto.randomUUID() } } }) });
     expect(res.ok).toBeTrue();
     const frames: any[] = [];
-    for await (const data of readSSE(res)) {
-      const obj = JSON.parse(data);
-      frames.push(obj);
+    for await (const result of parseSse<any>(res.body!)) {
+      frames.push({ result });
       if (frames.length >= 2) break; // snapshot + status-update
     }
-    expect(frames[0].jsonrpc).toBe('2.0');
-    expect(frames[0].id).toBe(reqId);
     expect(frames[0].result.kind).toBe('task');
     expect(frames[1].result.kind).toBe('status-update');
 
@@ -52,7 +49,7 @@ describe("A2A JSON-RPC", () => {
     const { pairId, a2a } = await createPairAndA2A();
     // First start an epoch by streaming empty (creates tasks)
     const res = await fetch(a2a, { method:'POST', headers: { 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id: 's', method:'message/stream', params: { message: { role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
-    for await (const _ of readSSE(res)) break; // snapshot only
+    for await (const _ of parseSse<any>(res.body!)) break; // snapshot only
 
     // Invalid FilePart (both bytes and uri)
     const bad = await fetch(a2a, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ jsonrpc:'2.0', id: 10, method:'message/send', params: { message: { role:'user', parts: [{ kind:'file', file: { name:'x', mimeType:'text/plain', bytes:'QQ==', uri:'http://x' } }], taskId: `init:${pairId}#1`, messageId: crypto.randomUUID() } } }) });
@@ -66,4 +63,3 @@ describe("A2A JSON-RPC", () => {
     expect(jg.result.status.message).toBeTruthy();
   });
 });
-

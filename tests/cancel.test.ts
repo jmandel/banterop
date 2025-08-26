@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { readSSE } from "../src/shared/a2a-utils";
+import { parseSse } from "../src/shared/sse";
 import { startServer, stopServer, Spawned, decodeA2AUrl, textPart } from "./utils";
 
 let S: Spawned;
@@ -14,14 +14,14 @@ describe("Cancel semantics", () => {
     expect(r.ok).toBeTrue();
     const j = await r.json();
     const pairId = j.pairId as string;
-    const a2a = decodeA2AUrl(j.initiatorJoinUrl);
+    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
     const initTaskId = `init:${pairId}#1`;
     const respTaskId = `resp:${pairId}#1`;
 
     // Start epoch by streaming a first message (turn) so both tasks exist
     {
       const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start', method:'message/stream', params:{ message:{ role:'user', parts:[textPart('hello','turn')], messageId: crypto.randomUUID() } } }) });
-      for await (const _ of readSSE(res)) break; // initial snapshot
+      for await (const _ of parseSse<any>(res.body!)) break; // initial snapshot
     }
 
     // Start responder resubscribe stream
@@ -33,12 +33,10 @@ describe("Cancel semantics", () => {
     let sawCanceledUpdate = false;
     const reader = (async () => {
       let seenFirst = false;
-      for await (const data of readSSE(sub)) {
-        const obj = JSON.parse(data);
-        const frame = obj.result;
-        if (!seenFirst) { seenFirst = true; continue; }
-        if (frame?.kind === 'status-update' && frame?.status?.state === 'canceled') { sawCanceledUpdate = true; acSub.abort(); break; }
-      }
+    for await (const frame of parseSse<any>(sub.body!)) {
+      if (!seenFirst) { seenFirst = true; continue; }
+      if (frame?.kind === 'status-update' && frame?.status?.state === 'canceled') { sawCanceledUpdate = true; acSub.abort(); break; }
+    }
     })();
 
     // Issue cancel from initiator
@@ -57,8 +55,7 @@ describe("Cancel semantics", () => {
       const es = await fetch(S.base + `/pairs/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
       expect(es.ok).toBeTrue();
       let unsub=false, combined=false;
-      for await (const data of readSSE(es)) {
-        const ev = JSON.parse(data).result;
+      for await (const ev of parseSse<any>(es.body!)) {
         if (ev.type === 'backchannel' && ev.action === 'unsubscribe') unsub = true;
         if (ev.type === 'state' && ev.states && ev.states.initiator === 'canceled' && ev.states.responder === 'canceled') combined = true;
         if (unsub && combined) { ac.abort(); break; }
@@ -81,14 +78,14 @@ describe("Cancel semantics", () => {
     const r = await fetch(S.base + "/api/pairs", { method:'POST' });
     const j = await r.json();
     const pairId = j.pairId as string;
-    const a2a = decodeA2AUrl(j.initiatorJoinUrl);
+    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
     const initTaskId = `init:${pairId}#1`;
     const respTaskId = `resp:${pairId}#1`;
 
     // Create tasks by sending a no-op stream start
     {
       const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start', method:'message/stream', params:{ message:{ role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
-      for await (const _ of readSSE(res)) break;
+      for await (const _ of parseSse<any>(res.body!)) break;
     }
 
     // First cancel

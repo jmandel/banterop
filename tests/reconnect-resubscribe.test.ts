@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { readSSE } from "../src/shared/a2a-utils";
+import { parseSse } from "../src/shared/sse";
 import { startServer, stopServer, Spawned, decodeA2AUrl, textPart } from "./utils";
 
 let S: Spawned;
@@ -12,7 +12,7 @@ describe('Resubscribe reconnect', () => {
     const r = await fetch(S.base + '/api/pairs', { method:'POST' });
     const j = await r.json();
     const pairId = j.pairId as string;
-    const a2a = decodeA2AUrl(j.initiatorJoinUrl);
+    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
     const respId = `resp:${pairId}#1`;
 
     // Start epoch
@@ -22,7 +22,7 @@ describe('Resubscribe reconnect', () => {
     const ac1 = new AbortController();
     const sub1 = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, signal: ac1.signal, body: JSON.stringify({ jsonrpc:'2.0', id:'sub1', method:'tasks/resubscribe', params:{ id: respId } }) });
     let gotSnap1 = false;
-    for await (const data of readSSE(sub1)) { gotSnap1 = true; ac1.abort(); break; }
+    for await (const _ of parseSse<any>(sub1.body!)) { gotSnap1 = true; ac1.abort(); break; }
     expect(gotSnap1).toBeTrue();
 
     // Send another message from responder (turn back), then reopen and expect frames
@@ -32,8 +32,7 @@ describe('Resubscribe reconnect', () => {
     const sub2 = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, signal: ac2.signal, body: JSON.stringify({ jsonrpc:'2.0', id:'sub2', method:'tasks/resubscribe', params:{ id: respId } }) });
     expect(sub2.ok).toBeTrue();
     let gotFrame2 = false;
-    for await (const data of readSSE(sub2)) { gotFrame2 = true; ac2.abort(); break; }
+    for await (const _ of parseSse<any>(sub2.body!)) { gotFrame2 = true; ac2.abort(); break; }
     expect(gotFrame2).toBeTrue();
   });
 });
-

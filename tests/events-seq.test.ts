@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { readSSE } from "../src/shared/a2a-utils";
+import { parseSse } from "../src/shared/sse";
 import { startServer, stopServer, Spawned } from "./utils";
 
 let S: Spawned;
@@ -18,7 +18,7 @@ describe('events.log invariants', () => {
     {
       const ac = new AbortController();
       const es = await fetch(S.base + `/pairs/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
-      for await (const data of readSSE(es)) { const ev = JSON.parse(data).result; firstSeq = Number(ev?.seq || 0); ac.abort(); break; }
+      for await (const ev of parseSse<any>(es.body!)) { firstSeq = Number(ev?.seq || 0); ac.abort(); break; }
       expect(firstSeq).toBeGreaterThan(0);
     }
 
@@ -31,7 +31,7 @@ describe('events.log invariants', () => {
       const ac = new AbortController();
       const es = await fetch(S.base + `/pairs/${pairId}/events.log?since=${firstSeq}`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
       let nextSeq = 0;
-      for await (const data of readSSE(es)) { const ev = JSON.parse(data).result; nextSeq = Number(ev?.seq || 0); ac.abort(); break; }
+      for await (const ev of parseSse<any>(es.body!)) { nextSeq = Number(ev?.seq || 0); ac.abort(); break; }
       expect(nextSeq).toBeGreaterThan(firstSeq);
     }
   });

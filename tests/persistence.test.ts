@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { readSSE } from "../src/shared/a2a-utils";
+import { parseSse } from "../src/shared/sse";
 import { startServer, stopServer, Spawned, decodeA2AUrl, tmpDbPath } from "./utils";
 
 let S: Spawned;
@@ -17,13 +17,13 @@ describe("Persistence", () => {
     const r = await fetch(S.base + "/api/pairs", { method:'POST' });
     const j = await r.json();
     const pairId = j.pairId as string;
-    const a2a = decodeA2AUrl(j.initiatorJoinUrl);
+    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
     const initTaskId = `init:${pairId}#1`;
 
     // Create epoch #1 via a no-op stream
     {
       const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start', method:'message/stream', params:{ message:{ role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
-      for await (const _ of readSSE(res)) break;
+      for await (const _ of parseSse<any>(res.body!)) break;
     }
 
     // Restart server with same DB
@@ -38,4 +38,3 @@ describe("Persistence", () => {
     expect(jg.result.contextId).toBe(pairId);
   });
 });
-
