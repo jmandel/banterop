@@ -17,7 +17,7 @@ describe('events.log invariants', () => {
     let firstSeq = 0;
     {
       const ac = new AbortController();
-      const es = await fetch(S.base + `/pairs/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
+      const es = await fetch(S.base + `/api/pairs/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
       for await (const ev of parseSse<any>(es.body!)) { firstSeq = Number(ev?.seq || 0); ac.abort(); break; }
       expect(firstSeq).toBeGreaterThan(0);
     }
@@ -29,7 +29,7 @@ describe('events.log invariants', () => {
     // Reconnect since=firstSeq and assert first observed seq > baseline
     {
       const ac = new AbortController();
-      const es = await fetch(S.base + `/pairs/${pairId}/events.log?since=${firstSeq}`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
+      const es = await fetch(S.base + `/api/pairs/${pairId}/events.log?since=${firstSeq}`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
       let nextSeq = 0;
       for await (const ev of parseSse<any>(es.body!)) { nextSeq = Number(ev?.seq || 0); ac.abort(); break; }
       expect(nextSeq).toBeGreaterThan(firstSeq);

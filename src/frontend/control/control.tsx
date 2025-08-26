@@ -34,14 +34,14 @@ function ControlApp() {
             setPair(hPair)
             const origin = window.location.origin
             const a2aUrl = `${origin}/api/bridge/${hPair}/a2a`
-            const tasksUrl = `${origin}/pairs/${hPair}/server-events`
+            const tasksUrl = `${origin}/api/pairs/${hPair}/server-events`
             useControlStore.setState({
               initiatorJoinUrl: `${origin}/participant/?role=initiator&a2a=${encodeURIComponent(a2aUrl)}`,
               responderJoinUrl: `${origin}/participant/?role=responder&a2a=${encodeURIComponent(a2aUrl)}&tasks=${encodeURIComponent(tasksUrl)}`,
             })
             const s = hSince ? Number(hSince) : 0
             setSince(Number.isFinite(s) ? s : 0)
-            const url = `/pairs/${hPair}/events.log?since=${Number.isFinite(s) ? s : 0}`
+            const url = `/api/pairs/${hPair}/events.log?since=${Number.isFinite(s) ? s : 0}`
             subscribe(url)
           }
         }
@@ -61,7 +61,7 @@ function ControlApp() {
       initiatorJoinUrl: j.links?.initiator?.joinA2a,
       responderJoinUrl: j.links?.responder?.joinA2a,
     })
-    const url = `/pairs/${j.pairId}/events.log?since=0`
+    const url = `/api/pairs/${j.pairId}/events.log?since=0`
     try { window.location.hash = `pair=${j.pairId}&since=0` } catch {}
     setSince(0)
     subscribe(url)
@@ -69,9 +69,9 @@ function ControlApp() {
 
   async function hardReset() {
     if (!pairId) return
-    await fetch(`/pairs/${pairId}/reset`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'hard' }) }).catch(()=>{})
+    await fetch(`/api/pairs/${pairId}/reset`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'hard' }) }).catch(()=>{})
     clear()
-    const url = `/pairs/${pairId}/events.log?since=0`
+    const url = `/api/pairs/${pairId}/events.log?since=0`
     try { window.location.hash = `pair=${pairId}&since=0` } catch {}
     setSince(0)
     subscribe(url)
@@ -109,7 +109,7 @@ function ControlApp() {
           </div>
           <div className="row" style={{ gap: 6, alignItems:'center' }}>
             <label className="small">Since</label>
-            <input className="input" style={{ width: 80 }} value={String(since)} onChange={(e)=>setSince(Number(e.target.value||0))} onBlur={()=>{ if (pairId!=null) subscribe(`/pairs/${pairId}/events.log?since=${since||0}`) }} />
+            <input className="input" style={{ width: 80 }} value={String(since)} onChange={(e)=>setSince(Number(e.target.value||0))} onBlur={()=>{ if (pairId!=null) subscribe(`/api/pairs/${pairId}/events.log?since=${since||0}`) }} />
             <label className="small">Pretty</label>
             <input type="checkbox" checked={pretty} onChange={(e)=>setPretty(e.target.checked)} />
             <label className="small">Wrap</label>

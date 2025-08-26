@@ -62,4 +62,25 @@ describe("A2A JSON-RPC", () => {
     expect(jg.result.kind).toBe('task');
     expect(jg.result.status.message).toBeTruthy();
   });
+
+  it("message/send mirrors message so responder tasks/get has status.message", async () => {
+    const { pairId, a2a } = await createPairAndA2A();
+    // Start epoch by streaming empty (creates tasks)
+    const res = await fetch(a2a, { method:'POST', headers: { 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id: 's', method:'message/stream', params: { message: { role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
+    for await (const _ of parseSse<any>(res.body!)) break; // snapshot only
+
+    // Send a message via message/send (turn)
+    const send = await fetch(a2a, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ jsonrpc:'2.0', id:'m', method:'message/send', params:{ message:{ parts:[textPart('hello','turn')], taskId: `init:${pairId}#1`, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
+    expect(send.ok).toBeTrue();
+
+    // Responder should see mirrored message in status.message
+    const respTaskId = `resp:${pairId}#1`;
+    const r2 = await fetch(a2a, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ jsonrpc:'2.0', id:'g', method:'tasks/get', params:{ id: respTaskId } }) });
+    const j2 = await r2.json();
+    expect(j2.result.status.state).toBe('input-required');
+    const m = j2.result.status.message;
+    expect(!!m).toBeTrue();
+    const lastText = (m.parts||[]).filter((p:any)=>p.kind==='text').map((p:any)=>p.text).join('\n');
+    expect(lastText).toBe('hello');
+  });
 });

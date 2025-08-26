@@ -16,7 +16,7 @@ export function randomPort(): number { return 3000 + Math.floor(Math.random() * 
 export async function startServer(opts?: { dbPath?: string }): Promise<Spawned> {
   const port = randomPort();
   const env = { ...process.env, PORT: String(port), FLIPPROXY_DB: opts?.dbPath ?? ':memory:' } as Record<string, string>;
-  const proc = Bun.spawn(["bun", "src/server/flipproxy.ts"], {
+  const proc = Bun.spawn(["bun", "src/server/index.ts"], {
     env,
     stdout: "ignore",
     stderr: "inherit",

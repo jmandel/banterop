@@ -2,16 +2,22 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
 import { startServer, stopServer, Spawned, decodeA2AUrl, tmpDbPath } from "./utils";
 
+// Gate this suite behind an explicit opt-in to avoid creating on-disk DBs
+// during normal `bun test` runs. Enable with FLIPPROXY_TEST_PERSISTENCE=1.
+const PERSISTENCE_ENABLED = process.env.FLIPPROXY_TEST_PERSISTENCE === '1';
+
 let S: Spawned;
 let DB: string;
 
-beforeAll(async () => {
-  DB = tmpDbPath();
-  S = await startServer({ dbPath: DB });
-});
-afterAll(async () => { await stopServer(S); });
+const d = (PERSISTENCE_ENABLED ? describe : describe.skip);
 
-describe("Persistence", () => {
+d("Persistence", () => {
+  beforeAll(async () => {
+    DB = tmpDbPath();
+    S = await startServer({ dbPath: DB });
+  });
+  afterAll(async () => { await stopServer(S); });
+
   it("persists pair meta and tasks across restart", async () => {
     // Create a pair and start an epoch to create tasks
     const r = await fetch(S.base + "/api/pairs", { method:'POST' });

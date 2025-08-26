@@ -22,7 +22,7 @@ describe("Pairs API", () => {
 
     // events.log backlog since=0 contains pair-created as first event
     const ac = new AbortController();
-    const es = await fetch(S.base + `/pairs/${j.pairId}/events.log?since=0`, { headers: { accept:'text/event-stream' }, signal: ac.signal });
+    const es = await fetch(S.base + `/api/pairs/${j.pairId}/events.log?since=0`, { headers: { accept:'text/event-stream' }, signal: ac.signal });
     expect(es.ok).toBeTrue();
     let got = false;
     for await (const ev of parseSse<any>(es.body!)) {

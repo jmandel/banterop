@@ -55,6 +55,32 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
     // --- HUD: planning lifecycle
     ctx.hud('planning', 'Scanning state');
 
+    // Handle whisper-as-answer: if latest agent_question has a later user_guidance matching
+    // /^Answer <qid>:\s*(.*)/i and no agent_answer exists yet, append an agent_answer now.
+    const pendingQ = (() => {
+      let lastQIdx = -1; let lastQid = '';
+      for (let i = facts.length - 1; i >= 0; --i) { const f = facts[i]; if (f.type === 'agent_question') { lastQIdx = i; lastQid = f.qid; break; } }
+      if (lastQIdx < 0 || !lastQid) return null as null | { idx:number; qid:string };
+      // If answered already, skip
+      for (let i = facts.length - 1; i > lastQIdx; --i) { const f = facts[i]; if (f.type === 'agent_answer' && f.qid === lastQid) return null; }
+      return { idx: lastQIdx, qid: lastQid };
+    })();
+    if (pendingQ) {
+      const { idx, qid } = pendingQ;
+      for (let i = facts.length - 1; i > idx; --i) {
+        const f = facts[i];
+        if (f.type === 'user_guidance') {
+          const m = String(f.text || '').match(new RegExp(`^\\s*Answer\\s+${qid.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\$&')}\\s*:\\s*(.*)`, 'i'));
+          if (m) {
+            const text = m[1]?.trim() || '';
+            if (text) {
+              return [{ type:'agent_answer', qid, text } as ProposedFact];
+            }
+          }
+        }
+      }
+    }
+
     // 0) Gate on unanswered agent_question (harness likely gates too, but be safe)
     const openQ = findOpenQuestion(facts);
     if (openQ) {
@@ -101,9 +127,10 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
     const xmlHistory = buildXmlHistory(facts, myId, counterpartId);
     const availableFilesXml = buildAvailableFilesXml(filesAtCut);
 
-    const toolsCatalog = buildToolsCatalog(scenario, {
-      allowSendToRemote: status === 'input-required',
-    });
+    const hasPublic = facts.some(f => f.type === 'remote_received' || f.type === 'remote_sent');
+    const mayInitiate = !!cfg.allowInitiation;
+    const allowSendToRemote = status === 'input-required' && (hasPublic || mayInitiate);
+    const toolsCatalog = buildToolsCatalog(scenario, { allowSendToRemote });
 
     const prompt = buildPlannerPrompt(scenario, myId, counterpartId, xmlHistory, availableFilesXml, toolsCatalog);
 

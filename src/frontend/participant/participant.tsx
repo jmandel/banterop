@@ -353,6 +353,7 @@ function PlannerSelector() {
       <select value={pid} onChange={e => setPlanner(e.target.value as any)}>
         <option value="off">Off</option>
         <option value="llm-drafter">LLM Drafter</option>
+        <option value="scenario-v0.3">Scenario Planner</option>
       </select>
     </div>
   );
@@ -404,31 +405,128 @@ function PlannerSetupCard() {
     return false;
   }, [facts]);
 
-  if (pid !== 'llm-drafter') return null;
+  // LLM Drafter card
+  if (pid === 'llm-drafter') {
+    function validate() {
+      const e: { targetWords?: string } = {};
+      const tw = Number(staged?.targetWords || 0);
+      if (!Number.isFinite(tw) || tw < 0) e.targetWords = 'Enter 0 to disable, or a positive number.';
+      if (Number.isFinite(tw) && tw !== 0 && (tw < 10 || tw > 1000)) e.targetWords = 'Enter a number between 10 and 1000, or 0 to disable.';
+      setErrors(e);
+      return Object.keys(e).length === 0;
+    }
 
-  function validate() {
-    const e: { targetWords?: string } = {};
-    const tw = Number(staged?.targetWords || 0);
-    if (!Number.isFinite(tw) || tw < 0) e.targetWords = 'Enter 0 to disable, or a positive number.';
-    if (Number.isFinite(tw) && tw !== 0 && (tw < 10 || tw > 1000)) e.targetWords = 'Enter a number between 10 and 1000, or 0 to disable.';
-    setErrors(e);
-    return Object.keys(e).length === 0;
+    function save() {
+      if (!validate()) return;
+      set.saveAndApplyPlannerCfg(pid);
+      try { setCollapsed(true); } catch {}
+    }
+
+    const canBegin = ready && role === 'initiator' && !taskId && !hasUnsentDraft;
+    const sysA = String(staged?.systemAppend || '');
+    const twS = Number(staged?.targetWords || 0);
+    const sysB = String(applied?.systemAppend || '');
+    const twB = Number(applied?.targetWords || 0);
+    const dirty = !!staged && (applied == null || sysA !== sysB || twS !== twB);
+    const hasErrors = !!errors.targetWords;
+
+    return (
+      <div className="card" style={{ marginTop: 10 }}>
+        <div style={{ display:'flex', alignItems:'center', gap: 10 }}>
+          <button className="btn ghost" onClick={()=> setCollapsed(v=>!v)} aria-label={collapsed ? 'Expand planner setup' : 'Collapse planner setup'}>
+            {collapsed ? '▸' : '▾'}
+          </button>
+          <strong>Planner — LLM Drafter</strong>
+          <span className="small muted" style={{ marginLeft: 8 }}>
+            {ready ? 'Ready' : 'Not configured'}
+            {collapsed ? (()=>{
+              const cfgForSummary = staged ?? applied ?? {};
+              const reg = (PlannerRegistry as any)[pid];
+              const s = reg?.summary ? reg.summary(cfgForSummary) : '';
+              return s ? ` • ${s}` : '';
+            })() : ''}
+          </span>
+          <span style={{ marginLeft: 'auto' }} />
+          {hud && hud.phase !== 'idle' && (
+            <div className="row" style={{ gap:8, alignItems:'center' }}>
+              <span className="pill">{hud.phase}{hud.label ? ` — ${hud.label}` : ''}</span>
+              {typeof hud.p === 'number' && (
+                <div style={{ width: 160, height: 6, background: '#eef1f7', borderRadius: 4 }}>
+                  <div style={{ width: `${Math.round(Math.max(0, Math.min(1, hud.p))*100)}%`, height: '100%', background:'#5b7cff', borderRadius: 4 }} />
+                </div>
+              )}
+            </div>
+          )}
+          {!collapsed && (
+            <button className="btn" onClick={save} disabled={!staged || !dirty || hasErrors}>Save & Apply</button>
+          )}
+          {canBegin && <button className="btn" onClick={()=> set.kickoffConversationWithPlanner()}>Begin conversation</button>}
+        </div>
+        {!collapsed && (
+          <div
+            style={{
+              marginTop: 10,
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 12,
+              alignItems: 'flex-start',
+            }}
+          >
+            <div style={{ flex: '2 1 420px', minWidth: 280, maxWidth: 640 }}>
+              <label className="small" style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>
+                System prompt (append)
+              </label>
+              <textarea
+                className="input"
+                placeholder="Optional: appended to the built‑in system prompt"
+                value={String(staged?.systemAppend || '')}
+                onChange={(e) => set.stagePlannerCfg(pid, { systemAppend: e.target.value })}
+                style={{ width: '100%', minHeight: 80, resize: 'vertical', boxSizing: 'border-box' }}
+              />
+              <div className="small muted" style={{ marginTop: 4 }}>
+                Optional text appended to the system prompt.
+              </div>
+            </div>
+            <div style={{ flex: '1 1 220px', minWidth: 200, maxWidth: 320 }}>
+              <label className="small" style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>
+                Target length (words)
+              </label>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                step={10}
+                value={Number(staged?.targetWords || 0)}
+                onChange={(e) => {
+                  set.stagePlannerCfg(pid, { targetWords: Number(e.target.value || 0) });
+                }}
+                onBlur={validate}
+                style={{ width: '100%', boxSizing: 'border-box' }}
+                placeholder="0 (no target)"
+              />
+              {errors.targetWords ? (
+                <div className="small" style={{ color: '#c62828', marginTop: 4 }}>{errors.targetWords}</div>
+              ) : (
+                <div className="small muted" style={{ marginTop: 4 }}>Aim near this length; set 0 to disable.</div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
   }
 
-  function save() {
-    if (!validate()) return;
+  // Scenario Planner card
+  if (pid !== 'scenario-v0.3') return null;
+
+  function saveScenario() {
     set.saveAndApplyPlannerCfg(pid);
-    // Consistent UX: collapse after successful save
     try { setCollapsed(true); } catch {}
   }
 
   const canBegin = ready && role === 'initiator' && !taskId && !hasUnsentDraft;
-  const sysA = String(staged?.systemAppend || '');
-  const twS = Number(staged?.targetWords || 0);
-  const sysB = String(applied?.systemAppend || '');
-  const twB = Number(applied?.targetWords || 0);
-  const dirty = !!staged && (applied == null || sysA !== sysB || twS !== twB);
-  const hasErrors = !!errors.targetWords;
+  const hasError = !!staged?.error;
+  const dirtyScenario = !!staged; // keep simple: allow save when staged exists and URL present
 
   return (
     <div className="card" style={{ marginTop: 10 }}>
@@ -436,7 +534,7 @@ function PlannerSetupCard() {
         <button className="btn ghost" onClick={()=> setCollapsed(v=>!v)} aria-label={collapsed ? 'Expand planner setup' : 'Collapse planner setup'}>
           {collapsed ? '▸' : '▾'}
         </button>
-        <strong>Planner — LLM Drafter</strong>
+        <strong>Planner — Scenario Planner</strong>
         <span className="small muted" style={{ marginLeft: 8 }}>
           {ready ? 'Ready' : 'Not configured'}
           {collapsed ? (()=>{
@@ -458,58 +556,44 @@ function PlannerSetupCard() {
           </div>
         )}
         {!collapsed && (
-          <button className="btn" onClick={save} disabled={!staged || !dirty || hasErrors}>Save & Apply</button>
+          <button className="btn" onClick={saveScenario} disabled={!staged || !String(staged?.scenarioUrl||'').trim() || hasError}>Save & Apply</button>
         )}
         {canBegin && <button className="btn" onClick={()=> set.kickoffConversationWithPlanner()}>Begin conversation</button>}
       </div>
       {!collapsed && (
-        <div
-          style={{
-            marginTop: 10,
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 12,
-            alignItems: 'flex-start',
-          }}
-        >
-          <div style={{ flex: '2 1 420px', minWidth: 280, maxWidth: 640 }}>
-            <label className="small" style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>
-              System prompt (append)
-            </label>
-            <textarea
-              className="input"
-              placeholder="Optional: appended to the built‑in system prompt"
-              value={String(staged?.systemAppend || '')}
-              onChange={(e) => set.stagePlannerCfg(pid, { systemAppend: e.target.value })}
-              style={{ width: '100%', minHeight: 80, resize: 'vertical', boxSizing: 'border-box' }}
-            />
-            <div className="small muted" style={{ marginTop: 4 }}>
-              Optional text appended to the system prompt.
-            </div>
-          </div>
-          <div style={{ flex: '1 1 220px', minWidth: 200, maxWidth: 320 }}>
-            <label className="small" style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>
-              Target length (words)
-            </label>
+        <div style={{ marginTop: 10, display:'flex', flexDirection:'column', gap:10 }}>
+          <div className="row" style={{ gap: 8 }}>
             <input
               className="input"
-              type="number"
-              min={0}
-              step={10}
-              value={Number(staged?.targetWords || 0)}
-              onChange={(e) => {
-                set.stagePlannerCfg(pid, { targetWords: Number(e.target.value || 0) });
-              }}
-              onBlur={validate}
-              style={{ width: '100%', boxSizing: 'border-box' }}
-              placeholder="0 (no target)"
+              placeholder="Scenario JSON URL (https://…)"
+              value={String(staged?.scenarioUrl || '')}
+              onChange={(e)=> set.stagePlannerCfg(pid, { scenarioUrl: e.target.value })}
+              style={{ flex: 1 }}
             />
-            {errors.targetWords ? (
-              <div className="small" style={{ color: '#c62828', marginTop: 4 }}>{errors.targetWords}</div>
-            ) : (
-              <div className="small muted" style={{ marginTop: 4 }}>Aim near this length; set 0 to disable.</div>
-            )}
+            <input
+              className="input"
+              placeholder="Model override (optional)"
+              value={String(staged?.model || '')}
+              onChange={(e)=> set.stagePlannerCfg(pid, { model: e.target.value })}
+              style={{ width: 220 }}
+            />
           </div>
+          {staged?.error && (
+            <div className="small" style={{ color:'#c62828' }}>{String(staged.error)}</div>
+          )}
+          <div className="row" style={{ gap: 12 }}>
+            <label className="small" style={{ display:'flex', alignItems:'center', gap:6 }}>
+              <input type="checkbox" checked={staged?.includeWhy !== false} onChange={(e)=> set.stagePlannerCfg(pid, { includeWhy: e.target.checked })} /> Include “why” annotations
+            </label>
+            <label className="small" style={{ display:'flex', alignItems:'center', gap:6 }}>
+              <input type="checkbox" checked={!!staged?.allowInitiation} onChange={(e)=> set.stagePlannerCfg(pid, { allowInitiation: e.target.checked })} /> Allow initiation
+            </label>
+          </div>
+          {staged?.preview && (
+            <div className="small muted">
+              Scenario: {staged.preview.title || staged.preview.id} — Agents: {Array.isArray(staged.preview.agents) ? staged.preview.agents.join(' ↔ ') : '—'} (tools: {Array.isArray(staged.preview.toolCounts) ? staged.preview.toolCounts.join(', ') : '—'})
+            </div>
+          )}
         </div>
       )}
     </div>

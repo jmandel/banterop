@@ -1,5 +1,5 @@
 export type PlannerSetupState = {
-  plannerId: 'off' | 'llm-drafter' | 'simple-demo';
+  plannerId: 'off' | 'llm-drafter' | 'scenario-v0.3' | 'simple-demo';
   stagedByPlanner: Record<string, any>;
   appliedByPlanner: Record<string, any>;
   readyByPlanner: Record<string, boolean>;
@@ -15,4 +15,3 @@ export function isReady(state: PlannerSetupState) {
   const id = state.plannerId;
   return id !== 'off' && !!state.readyByPlanner[id];
 }
-

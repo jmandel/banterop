@@ -52,7 +52,7 @@ describe("Cancel semantics", () => {
     // Verify events.log shows unsubscribe and combined canceled state
     {
       const ac = new AbortController();
-      const es = await fetch(S.base + `/pairs/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
+      const es = await fetch(S.base + `/api/pairs/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
       expect(es.ok).toBeTrue();
       let unsub=false, combined=false;
       for await (const ev of parseSse<any>(es.body!)) {

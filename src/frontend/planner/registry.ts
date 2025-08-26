@@ -1,5 +1,6 @@
 import { LLMDrafterPlanner } from './planners/llm-drafter';
 import { SimpleDemoPlanner } from './planners/simple-demo';
+import { ScenarioPlannerV03 } from './planners/scenario-planner';
 
 export type PlannerRegistryEntry = {
   id: string;
@@ -30,6 +31,29 @@ export const PlannerRegistry: Record<string, PlannerRegistryEntry> = {
       return parts.join(' • ');
     },
   },
+  'scenario-v0.3': {
+    id: 'scenario-v0.3',
+    name: 'Scenario Planner',
+    defaults: { scenarioUrl: '', includeWhy: true, allowInitiation: false, model: '' },
+    toHarnessCfg: (applied?: any) => ({
+      scenario: applied?.resolvedScenario,
+      includeWhy: applied?.includeWhy !== false,
+      allowInitiation: !!applied?.allowInitiation,
+      model: String(applied?.model || ''),
+    }),
+    summary: (cfg?: any) => {
+      try {
+        const s = cfg?.scenario || cfg?.resolvedScenario;
+        const title = s?.metadata?.title || '';
+        const id = s?.metadata?.id || '';
+        const parts: string[] = [];
+        parts.push(`Scenario: ${title || id || '—'}`);
+        parts.push(`Initiation: ${cfg?.allowInitiation ? 'enabled' : 'disabled'}`);
+        parts.push(`Why: ${cfg?.includeWhy === false ? 'off' : 'on'}`);
+        return parts.join(' • ');
+      } catch { return ''; }
+    },
+  },
   'simple-demo': {
     id: 'simple-demo',
     name: 'Simple Demo Planner',
@@ -41,6 +65,7 @@ export const PlannerRegistry: Record<string, PlannerRegistryEntry> = {
 
 export function resolvePlanner(id: string) {
   if (id === 'llm-drafter') return LLMDrafterPlanner;
+  if (id === 'scenario-v0.3') return ScenarioPlannerV03;
   if (id === 'simple-demo') return SimpleDemoPlanner;
   return SimpleDemoPlanner;
 }

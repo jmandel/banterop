@@ -9,7 +9,8 @@ export class PlannerHarness<Cfg = unknown> {
     private hud: (phase: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting', label?: string, p?: number) => void,
     private planner: Planner<Cfg>,
     private cfg: Cfg,
-    private ids: { myAgentId?: string; otherAgentId?: string; model?: string } = {}
+    private ids: { myAgentId?: string; otherAgentId?: string; model?: string } = {},
+    private llmProvider?: LlmProvider,
   ) {}
 
   private planSched = false;
@@ -130,7 +131,7 @@ export class PlannerHarness<Cfg = unknown> {
       myAgentId: this.ids.myAgentId,
       otherAgentId: this.ids.otherAgentId,
       model: this.ids.model,
-      llm: DevNullLLM,
+      llm: this.llmProvider || DevNullLLM,
     };
     const input: PlanInput = { cut, facts };
     let out: ProposedFact[] = [];

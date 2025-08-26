@@ -39,10 +39,12 @@ describe('Finality transitions', () => {
     const initId = `init:${pairId}#1`;
     const respId = `resp:${pairId}#1`;
 
-    // Initiator sends with finality=turn
+    // Initiator sends with finality=turn → responder input-required, initiator working
     await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s1', method:'message/send', params:{ message:{ parts:[textPart('one','turn')], taskId: initId, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
     const r1 = await tasksGet(a2a, respId);
     expect(r1.status.state).toBe('input-required');
+    const i1 = await tasksGet(a2a, initId);
+    expect(i1.status.state).toBe('working');
 
     // Responder replies with finality=turn
     await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s2', method:'message/send', params:{ message:{ parts:[textPart('two','turn')], taskId: respId, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });

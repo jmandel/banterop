@@ -8,6 +8,7 @@ import { nowIso, rid } from '../../shared/core';
 // import { uniqueName } from '../../shared/a2a-helpers';
 // Planner registry for defaults
 import { PlannerRegistry } from '../planner/registry';
+import { validateScenarioConfig } from '../../shared/scenario-validator';
 
 type Role = 'initiator'|'responder';
 
@@ -18,7 +19,7 @@ export type Store = {
   adapter?: TransportAdapter;
   fetching: boolean;
   needsRefresh: boolean;
-  plannerId: 'off'|'llm-drafter'|'simple-demo';
+  plannerId: 'off'|'llm-drafter'|'scenario-v0.3'|'simple-demo';
   plannerMode: 'approve'|'auto';
   // planner setup
   stagedByPlanner: Record<string, any>;
@@ -41,7 +42,7 @@ export type Store = {
   startTicks(): void;
   onTick(): void;
   fetchAndIngest(): Promise<void>;
-  setPlanner(id:'off'|'llm-drafter'|'simple-demo'): void;
+  setPlanner(id:'off'|'llm-drafter'|'scenario-v0.3'|'simple-demo'): void;
   setPlannerMode(mode:'approve'|'auto'): void;
   stagePlannerCfg(id:string, partial: any): void;
   saveAndApplyPlannerCfg(id:string): void;
@@ -154,11 +155,72 @@ export const useAppStore = create<Store>((set, get) => ({
   saveAndApplyPlannerCfg(id) {
     const s = get();
     const staged = s.stagedByPlanner[id] || {};
+    if (id === 'scenario-v0.3') {
+      (async () => {
+        const url = String(staged?.scenarioUrl || '').trim();
+        const includeWhy = staged?.includeWhy !== false;
+        const allowInitiation = !!staged?.allowInitiation;
+        const model = String(staged?.model || '');
+        if (!url) {
+          set((prev:any)=>({ stagedByPlanner: { ...prev.stagedByPlanner, [id]: { ...(prev.stagedByPlanner[id]||{}), error: 'Enter a Scenario JSON URL' } } }));
+          return;
+        }
+        // Try direct fetch; fallback to proxy
+        let data: any = null;
+        let err: string | null = null;
+        async function fetchJson(u: string) {
+          const res = await fetch(u, { method:'GET' });
+          const ct = String(res.headers.get('content-type')||'');
+          const isJsonish = ct.includes('application/json') || ct.includes('application/ld+json') || ct.includes('text/plain');
+          if (!res.ok) throw new Error(`Fetch error ${res.status}`);
+          const text = await res.text();
+          try { return isJsonish ? JSON.parse(text) : JSON.parse(text); } catch { throw new Error('Invalid JSON'); }
+        }
+        try {
+          data = await fetchJson(url);
+        } catch (e:any) {
+          try {
+            const proxy = `/api/fetch-json?url=${encodeURIComponent(url)}`;
+            const res = await fetch(proxy, { method:'GET' });
+            const j = await res.json();
+            if (!j?.ok) throw new Error(String(j?.error || 'Proxy error'));
+            data = j.data;
+          } catch (e2:any) {
+            err = String(e2?.message || e2 || 'Fetch failed');
+          }
+        }
+        if (err) {
+          set((prev:any)=>({ stagedByPlanner: { ...prev.stagedByPlanner, [id]: { ...(prev.stagedByPlanner[id]||{}), error: err, preview: undefined } } }));
+          return;
+        }
+        const v = validateScenarioConfig(data);
+        if (!v.ok) {
+          set((prev:any)=>({ stagedByPlanner: { ...prev.stagedByPlanner, [id]: { ...(prev.stagedByPlanner[id]||{}), error: v.errors.join('\n').slice(0, 1000), preview: undefined } } }));
+          return;
+        }
+        const scen = v.value;
+        const preview = {
+          id: scen.metadata.id,
+          title: scen.metadata.title,
+          agents: Array.isArray(scen.agents) ? scen.agents.map((a:any)=>String(a?.agentId || '')) : [],
+          toolCounts: Array.isArray(scen.agents) ? scen.agents.map((a:any)=>Array.isArray(a?.tools) ? a.tools.length : 0) : [],
+        };
+        set((prev:any)=>({
+          stagedByPlanner: { ...prev.stagedByPlanner, [id]: { ...(prev.stagedByPlanner[id]||{}), error: undefined, preview } },
+          appliedByPlanner: { ...prev.appliedByPlanner, [id]: { resolvedScenario: scen, includeWhy, allowInitiation, model } },
+          readyByPlanner:   { ...prev.readyByPlanner, [id]: true }
+        }));
+        // Dismiss outstanding unsent drafts so the planner can regenerate with new cfg
+        const unsent = findUnsentComposes(get().facts);
+        for (const ci of unsent) get().dismissCompose(ci.composeId);
+      })();
+      return;
+    }
+    // default: shallow apply for other planners
     set((prev:any)=>({
       appliedByPlanner: { ...prev.appliedByPlanner, [id]: { ...staged } },
       readyByPlanner:   { ...prev.readyByPlanner, [id]: true }
     }));
-    // Dismiss outstanding unsent drafts so the planner can regenerate with new cfg
     const unsent = findUnsentComposes(get().facts);
     for (const ci of unsent) get().dismissCompose(ci.composeId);
   },
