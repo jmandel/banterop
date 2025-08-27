@@ -1,10 +1,12 @@
 import { create } from 'zustand';
 import type { A2APart, A2AStatus } from '../../shared/a2a-types';
 import type { Fact, ProposedFact, AttachmentMeta } from '../../shared/journal-types';
+import type { PlannerApplied } from '../planner/types';
 import type { TransportAdapter } from '../transports/types';
 import { a2aToFacts } from '../../shared/a2a-translator';
 import { validateParts } from '../../shared/parts-validator';
 import { nowIso, rid } from '../../shared/core';
+import { encodeSetup } from '../../shared/setup-hash';
 // import { uniqueName } from '../../shared/a2a-helpers';
 // Planner registry for defaults
 // PlannerRegistry no longer used for staging; config handled by planner stores
@@ -43,7 +45,7 @@ export type Store = {
   fetchAndIngest(): Promise<void>;
   setPlanner(id:'off'|'llm-drafter'|'scenario-v0.3'|'simple-demo'): void;
   setPlannerMode(mode:'approve'|'auto'): void;
-  setPlannerApplied(applied: any, ready: boolean): void;
+  setPlannerApplied(applied: PlannerApplied | any, ready: boolean): void;
   // legacy staging functions removed; planners with config stores persist directly
   appendComposeIntent(text: string, attachments?: AttachmentMeta[]): string;
   sendCompose(composeId: string, finality: 'none'|'turn'|'conversation'): Promise<void>;
@@ -124,8 +126,8 @@ export const useAppStore = create<Store>((set, get) => ({
         }
       } catch {}
       const setup = { planner: { id: pid, mode, ready: true, applied: appliedForUrl } };
-      const enc = encodeURIComponent(JSON.stringify(setup));
-      try { window.location.hash = `setup=${enc}`; } catch {}
+      const hash = encodeSetup(setup);
+      if (hash) try { window.location.hash = hash; } catch {}
     } catch {}
   },
 
@@ -323,8 +325,8 @@ export const useAppStore = create<Store>((set, get) => ({
   detachBackchannel() { try { ((window as any).__tasksUrlES as EventSource | undefined)?.close?.(); } catch {} finally { try { delete (window as any).__tasksUrlES; } catch {} } },
 
   uiStatus() {
-    const { facts, taskId } = get();
-    if (!taskId) return "Waiting for new task";
+    const { facts, taskId, role } = get();
+    if (!taskId) return role === 'initiator' ? "Send a message to begin a new task" : "Waiting for new task";
     for (let i = facts.length - 1; i >= 0; --i) {
       const f = facts[i];
       if (f.type === 'status_changed') return f.a2a;

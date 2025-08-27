@@ -3,11 +3,16 @@ import type { PlannerConfigStore } from '../../planner/config/store';
 import type { ConfigSnapshot, FieldState } from '../../planner/config/types';
 
 async function listModels(llm: any): Promise<string[]> {
+  const curated = ['openai/gpt-oss-120b:nitro', 'qwen/qwen3-235b-a22b-2507:nitro'];
   try {
     const xs = await llm?.listModels?.();
-    if (Array.isArray(xs) && xs.length) return xs.map(String);
+    if (Array.isArray(xs) && xs.length) {
+      const uniq = new Set<string>(xs.map(String));
+      for (const m of curated) uniq.add(m);
+      return Array.from(uniq);
+    }
   } catch {}
-  return ['openai/gpt-oss-120b:nitro'];
+  return curated;
 }
 
 export function createLLMDrafterConfigStore(opts: { llm: any; initial?: any }): PlannerConfigStore {

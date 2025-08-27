@@ -43,5 +43,7 @@ export function textPart(text: string, finality: 'none'|'turn'|'conversation' = 
 
 export function tmpDbPath(): string {
   const name = `db-${Math.random().toString(36).slice(2,9)}.sqlite`;
-  return `${Bun.cwd || process.cwd()}/${name}`;
+  // Prefer OS tmpdir to avoid cluttering repo root
+  const tmp = (Bun as any).tmpdir?.() || process.env.TMPDIR || "/tmp";
+  return `${tmp}/${name}`;
 }

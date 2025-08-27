@@ -4,11 +4,13 @@ import type { AttachmentMeta } from '../../shared/journal-types';
 import type { A2APart } from '../../shared/a2a-types';
 import { useAppStore } from '../state/store';
 import { A2AAdapter } from '../transports/a2a-adapter';
+import { statusLabel } from './status-labels';
 import { MCPAdapter } from '../transports/mcp-adapter';
 import { startPlannerController } from '../planner/controller';
 import { resolvePlanner } from '../planner/registry';
 import { makeChitchatProvider, DEFAULT_CHITCHAT_ENDPOINT } from '../../shared/llm-provider';
 import { b64ToUtf8, normalizeB64 } from '../../shared/codec';
+import { decodeSetup } from '../../shared/setup-hash';
 
 type Role = 'initiator'|'responder';
 
@@ -53,26 +55,9 @@ function App() {
     kickoff?: 'if-ready'|'always'|'never';
   };
 
-  function parseSetupFromLocation(): UrlSetup | null {
-    const h = new URL(window.location.href).hash.replace(/^#/, '');
-    if (!/^setup=/.test(h)) return null;
-    const raw = h.slice('setup='.length);
-    // Try URL-decoded JSON
-    try {
-      const maybe = decodeURIComponent(raw);
-      if (maybe.trim().startsWith('{')) {
-        const obj = JSON.parse(maybe);
-        return (obj && (obj as any).setup) ? (obj as any).setup : (obj as any);
-      }
-    } catch {}
-    // Try Base64URL JSON
-    try {
-      const json = b64ToUtf8(normalizeB64(raw));
-      const obj = JSON.parse(json);
-      return (obj && (obj as any).setup) ? (obj as any).setup : (obj as any);
-    } catch {}
-    return null;
-  }
+function parseSetupFromLocation(): UrlSetup | null {
+  try { return decodeSetup(window.location.hash) as any; } catch { return null; }
+}
 
   // Hold parsed URL setup for planner bootstrap; do not seed store with partials
   const [urlSetup, setUrlSetup] = useState<UrlSetup | null>(null);
@@ -139,7 +124,7 @@ function App() {
     if (['completed','canceled','failed','rejected'].includes(uiStatus)) {
       return `Task ${uiStatus}.`;
     }
-    if (uiStatus === 'working') return 'Other side is working…';
+    if (uiStatus === 'working') return statusLabel(uiStatus);
     if (uiStatus === 'auth-required') return 'Authentication required…';
     if (uiStatus === 'unknown') return 'Waiting…';
     // Default not-your-turn message
@@ -427,13 +412,7 @@ root.render(<App />);
 function TaskRibbon() {
   const taskId = useAppStore(s => s.taskId);
   const uiStatus = useAppStore(s => s.uiStatus());
-  function statusBadgeText(s: string): string {
-    if (s === 'working') return 'Remote Agent is Working';
-    if (s === 'input-required') return 'Remote Agent is Waiting for Us';
-    // pass through other statuses
-    if (s === 'submitted') return 'Not started';
-    return s;
-  }
+  function statusBadgeText(s: string): string { return statusLabel(s); }
   return (
     <div className="card">
       <div className="row" style={{ alignItems:'center', gap: 10 }}>
@@ -474,214 +453,4 @@ function PlannerModeSelector() {
   );
 }
 
-function PlannerSetupCard({ urlSetup }: { urlSetup: any | null }) {
-  const pid = useAppStore(s => s.plannerId);
-  const planner: any = resolvePlanner(pid);
-  const applied = useAppStore(s => s.appliedByPlanner[pid]);
-  const ready = useAppStore(s => !!s.readyByPlanner[pid]);
-  const taskId = useAppStore(s => s.taskId);
-  const role = useAppStore(s => s.role);
-  const hud = useAppStore(s => s.hud);
-  const [collapsed, setCollapsed] = React.useState<boolean>(ready);
-
-  React.useEffect(() => {
-    // Auto-collapse once planner becomes ready
-    if (ready) setCollapsed(true);
-  }, [ready]);
-
-  // Generic planner card via config store — always call hooks in stable order
-  const llm = React.useMemo(() => makeChitchatProvider(DEFAULT_CHITCHAT_ENDPOINT), []);
-  const [cfg, setCfg] = React.useState<any>(null);
-  const plannerKey = planner && typeof planner.id === 'string' ? String(planner.id) : 'none';
-  const urlInitial = React.useMemo(() => {
-    const u = urlSetup && urlSetup.planner && urlSetup.planner.id === pid ? (urlSetup.planner.applied || urlSetup.planner.config) : null;
-    // Allow top-level llm override to sneak into initial
-    if (u && urlSetup?.llm?.model && typeof u === 'object') { try { (u as any).model = String(urlSetup.llm.model || ''); } catch {} }
-    return u;
-  }, [urlSetup, pid]);
-
-  const autoApplyRequested = !!(urlSetup && urlSetup.planner && urlSetup.planner.id === pid && urlSetup.planner.ready);
-
-  React.useEffect(() => {
-    if (planner && typeof (planner as any).createConfigStore === 'function') {
-      const initialForCfg = applied || urlInitial || undefined;
-      const s = (planner as any).createConfigStore({ llm, initial: initialForCfg });
-      setCfg(s);
-      return () => { try { s.destroy(); } catch {} };
-    }
-    setCfg(null);
-    return () => {};
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plannerKey, urlInitial]);
-
-  // Subscribe to cfg store to keep snapshot reactive
-  const subscribe = React.useCallback((onStoreChange: () => void) => {
-    if (cfg && typeof cfg.subscribe === 'function') return cfg.subscribe(onStoreChange);
-    return () => {};
-  }, [cfg]);
-  const emptySnapRef = React.useRef<any>({ fields: [], canSave: false, pending: false, dirty: false });
-  const getSnapshot = React.useCallback(() => {
-    return cfg ? cfg.snap : emptySnapRef.current;
-  }, [cfg]);
-  const snap = React.useSyncExternalStore(subscribe, getSnapshot);
-
-  // Hooks below must be unconditional (not inside conditionals)
-  const canBegin = ready && role === 'initiator' && !taskId;
-  const [autoApplied, setAutoApplied] = React.useState(false);
-  const kickoffPref = React.useMemo(() => {
-    const ks = urlSetup && urlSetup.planner && urlSetup.planner.id === pid ? (urlSetup.kickoff || 'never') : 'never';
-    return ks as 'never'|'always'|'if-ready';
-  }, [urlSetup, pid]);
-  const [kicked, setKicked] = React.useState(false);
-
-  const save = React.useCallback(() => {
-    if (!cfg) return;
-    try {
-      const { applied: appliedOut, ready: readyOut } = cfg.exportApplied();
-      try { useAppStore.getState().setPlannerApplied(appliedOut, readyOut); } catch {
-        // Fallback for older stores
-        useAppStore.setState((s: any) => ({
-          appliedByPlanner: { ...s.appliedByPlanner, [pid]: appliedOut },
-          readyByPlanner: { ...s.readyByPlanner, [pid]: readyOut },
-        }));
-      }
-      setCollapsed(true);
-    } catch { /* errors are inline in fields */ }
-  }, [cfg, pid]);
-
-  // If URL requested ready/auto-apply, apply once cfg is ready (canSave && !pending)
-  React.useEffect(() => {
-    if (!cfg || !autoApplyRequested || autoApplied) return;
-    const snapNow = cfg?.snap;
-    if (snapNow && snapNow.canSave && !snapNow.pending) {
-      try { save(); setAutoApplied(true); } catch {}
-    }
-  }, [cfg, autoApplyRequested, autoApplied, save, snap?.canSave, snap?.pending]);
-
-  // Optional kickoff based on URL preference (after ready/apply)
-  React.useEffect(() => {
-    if (kicked) return;
-    if (role !== 'initiator' || taskId) return;
-    const shouldKick = kickoffPref === 'always' || (kickoffPref === 'if-ready' && ready);
-    if (shouldKick) { try { useAppStore.getState().kickoffConversationWithPlanner(); setKicked(true); } catch {} }
-  }, [kickoffPref, ready, role, taskId, kicked]);
-
-  if (cfg) {
-    function handleSubmit(e: React.FormEvent) {
-      e.preventDefault();
-      if (!snap?.canSave || snap?.pending) return;
-      save();
-    }
-    function handleKeyDown(e: React.KeyboardEvent) {
-      if (e.key !== 'Enter') return;
-      const t = e.target as any;
-      const tag = String((t?.tagName || '')).toUpperCase();
-      const type = String(t?.type || '').toLowerCase();
-      const isTextInput = tag === 'INPUT' && type === 'text';
-      const isTextarea = tag === 'TEXTAREA';
-      // Only allow Enter-to-save from single-line text inputs
-      if (!isTextInput || isTextarea) {
-        e.preventDefault();
-      }
-    }
-    return (
-      <form onSubmit={handleSubmit} onKeyDown={handleKeyDown} className="card" style={{ marginTop: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button
-            className="btn ghost"
-            type="button"
-            onClick={() => setCollapsed(v => !v)}
-            aria-label={collapsed ? 'Expand planner setup' : 'Collapse planner setup'}
-            style={{ fontSize: 18, width: 34, height: 34, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-          >
-            {collapsed ? '▸' : '▾'}
-          </button>
-          <strong>Planner — {planner?.name || '—'}</strong>
-          <span className="small muted" style={{ marginLeft: 8 }}>
-            {ready ? 'Ready' : 'Not configured'}
-            {collapsed && ((planner as any)?.summarizeApplied?.(applied) || snap?.summary) ? ` • ${(planner as any)?.summarizeApplied?.(applied) || snap.summary}` : ''}
-          </span>
-          <span style={{ marginLeft: 'auto' }} />
-          {hud && hud.phase !== 'idle' && (
-            <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-              <span className="pill">{hud.phase}{hud.label ? ` — ${hud.label}` : ''}</span>
-              {typeof hud.p === 'number' && (
-                <div style={{ width: 160, height: 6, background: '#eef1f7', borderRadius: 4 }}>
-                  <div style={{ width: `${Math.round(Math.max(0, Math.min(1, hud.p)) * 100)}%`, height: '100%', background: '#5b7cff', borderRadius: 4 }} />
-                </div>
-              )}
-            </div>
-          )}
-          {!collapsed && (
-            <button className="btn" type="submit" disabled={!snap?.canSave || snap?.pending}>Save & Apply</button>
-          )}
-          {canBegin && <button className="btn" onClick={() => useAppStore.getState().kickoffConversationWithPlanner()}>Begin conversation</button>}
-        </div>
-        {!collapsed && (
-          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {snap.fields.filter((f: any) => f.visible !== false).map((f: any) => (
-              <div key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 680 }}>
-                <label className="small" style={{ fontWeight: 600 }}>{f.label}</label>
-                {renderField(f, cfg.setField)}
-                {f.help && <div className="small muted">{f.help}</div>}
-                {f.error && <div className="small" style={{ color: '#c62828' }}>{f.error}</div>}
-                {f.pending && <div className="small muted">Validating…</div>}
-              </div>
-            ))}
-            {snap.preview && <div className="small muted">Preview: {JSON.stringify(snap.preview)}</div>}
-          </div>
-        )}
-      </form>
-    );
-  }
-
-  // No config UI for planners without createConfigStore
-  return null;
-}
-
-function renderField(f: any, setField: (k: string, v: any) => void) {
-  if (f.type === 'text') return <input className="input" value={String(f.value || '')} placeholder={f.placeholder || ''} onChange={e => setField(f.key, e.target.value)} />;
-  if (f.type === 'checkbox') return (
-    <input type="checkbox" checked={!!f.value} onChange={e => setField(f.key, e.target.checked)} />
-  );
-  if (f.type === 'select') return <select className="input" value={String(f.value || '')} onChange={e => setField(f.key, e.target.value)}>
-    {(f.options || []).map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
-  </select>;
-  if (f.type === 'checkbox-group') {
-    const sel = new Set<string>(Array.isArray(f.value) ? f.value : []);
-    const toggle = (v: string) => { const next = new Set(sel); next.has(v) ? next.delete(v) : next.add(v); setField(f.key, Array.from(next)); };
-    return (
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px,1fr))', gap: 8 }}>
-        {(f.options || []).map((o: any) => (
-          <label key={o.value} className="small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <input type="checkbox" checked={sel.has(o.value)} onChange={() => toggle(o.value)} /> {o.label}
-          </label>
-        ))}
-      </div>
-    );
-  }
-  return null;
-}
-
-function DebugPanel() {
-  const facts = useAppStore(s => s.facts);
-  const seq = useAppStore(s => s.seq);
-  const taskId = useAppStore(s => s.taskId);
-  const [copied, setCopied] = useState(false);
-  const payload = JSON.stringify({ taskId, seq, facts }, null, 2);
-  async function copy() {
-    try { await navigator.clipboard.writeText(payload); setCopied(true); setTimeout(()=>setCopied(false), 1200); } catch {}
-  }
-  return (
-    <aside className="debug-panel" aria-label="Debug facts panel">
-      <div className="debug-header">
-        <strong style={{ color:'#e3f0ff' }}>Journal</strong>
-        <span style={{ marginLeft:'auto', fontSize:12, color:'#93c5fd' }}>seq {seq}</span>
-        <button className="debug-btn" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
-      </div>
-      <div className="debug-body">
-        <pre className="debug-pre">{payload}</pre>
-      </div>
-    </aside>
-  );
-}
+// Removed inline PlannerSetupCard/renderField/DebugPanel; using extracted components.

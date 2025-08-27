@@ -110,7 +110,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
     const model = cfg.model || ctx.model;
     let llmText: string;
     try {
-      llmText = await chatWithRetry(ctx.llm, { model, messages: [sys, user], temperature: 0.2, maxTokens: 800, signal: ctx.signal }, 3);
+      llmText = await chatWithRetry(ctx.llm, { model, messages: [sys, user], temperature: 0.5, signal: ctx.signal }, 3);
     } catch (e: any) {
       // Hard failure after retries → propose a gentle draft to the counterpart
       const composeId = ctx.newId('c:');

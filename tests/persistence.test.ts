@@ -15,7 +15,15 @@ describeMaybe("Persistence", () => {
     DB = tmpDbPath();
     S = await startServer({ dbPath: DB });
   });
-afterAll(async () => { await stopServer(S); try { await Bun.file(DB).delete(); } catch {} });
+afterAll(async () => {
+  await stopServer(S);
+  try {
+    const fs = await import('node:fs/promises');
+    await fs.rm(DB).catch(()=>{});
+    await fs.rm(DB + '-wal').catch(()=>{});
+    await fs.rm(DB + '-shm').catch(()=>{});
+  } catch {}
+});
 
   it("persists pair meta and tasks across restart", async () => {
     // Create a pair and start an epoch to create tasks

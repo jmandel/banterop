@@ -6,18 +6,41 @@ import { validateScenarioConfig } from '../../../shared/scenario-validator';
 async function fetchJson(url: string) {
   const res = await fetch(url, { method: 'GET' });
   if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-  // Limit payload size defensively by streaming text then JSON.parse
+  const MAX = 1_500_000; // ~1.5MB cap
+  // Stream text and cap size
+  try {
+    const reader = (res as any).body?.getReader?.();
+    if (reader) {
+      const decoder = new TextDecoder('utf-8');
+      let received = 0; let chunks: string[] = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        received += value.byteLength;
+        if (received > MAX) { try { reader.cancel(); } catch {} throw new Error('Scenario JSON exceeds 1.5 MB limit'); }
+        chunks.push(decoder.decode(value, { stream: true }));
+      }
+      const text = chunks.join('') + decoder.decode();
+      try { return JSON.parse(text); } catch { throw new Error('Invalid JSON'); }
+    }
+  } catch {}
+  // Fallback: whole text, basic length check
   const text = await res.text();
-  try { return JSON.parse(text); }
-  catch { throw new Error('Invalid JSON'); }
+  if (text.length > MAX) throw new Error('Scenario JSON exceeds 1.5 MB limit');
+  try { return JSON.parse(text); } catch { throw new Error('Invalid JSON'); }
 }
 
 async function listModels(llm: any): Promise<string[]> {
+  const curated = ['openai/gpt-oss-120b:nitro', 'qwen/qwen3-235b-a22b-2507:nitro'];
   try {
     const xs = await llm?.listModels?.();
-    if (Array.isArray(xs) && xs.length) return xs.map(String);
+    if (Array.isArray(xs) && xs.length) {
+      const uniq = new Set<string>(xs.map(String));
+      for (const m of curated) uniq.add(m);
+      return Array.from(uniq);
+    }
   } catch {}
-  return ['openai/gpt-oss-120b:nitro'];
+  return curated;
 }
 
 export function createScenarioConfigStore(opts: { llm: any; initial?: any }): PlannerConfigStore {

@@ -101,7 +101,7 @@ export function createPairsService({ db, events }: Deps) {
       const epoch = 1
       db.setPairEpoch(pairId, epoch)
       db.createEpochTasks(pairId, epoch)
-      events.push(pairId, { type:'epoch-begin', epoch })
+      events.push(pairId, { type:'epoch-begin', epoch } as any)
       return { epoch }
     }
     return { epoch: p.epoch }
@@ -111,7 +111,12 @@ export function createPairsService({ db, events }: Deps) {
     return state === 'completed' || state === 'canceled' || (state as any) === 'failed' || (state as any) === 'rejected'
   }
 
-  // When sending without taskId, start a new epoch if current tasks are terminal
+  // NOTE: When sending without a taskId, we unconditionally bump to a new epoch.
+  // This simplifies the demo server (no role/turn disambiguation here), but it will
+  // fragment a single conversation across multiple epochs and can disrupt status/turn-taking.
+  // Clients should preserve and include their taskId on every send to continue within
+  // the current epoch. A production implementation would likely check whether the
+  // current epoch is terminal before incrementing, or derive the correct sender taskId.
   function ensureEpochForSend(pairId: string): { epoch: number } {
     const p = db.getPair(pairId)
     if (!p) throw new Error('pair not found')
@@ -119,12 +124,12 @@ export function createPairsService({ db, events }: Deps) {
     const next = (p.epoch || 0) + 1
     db.setPairEpoch(pairId, next)
     db.createEpochTasks(pairId, next)
-    events.push(pairId, { type:'epoch-begin', epoch: next })
+    events.push(pairId, { type:'epoch-begin', epoch: next } as any)
     return { epoch: next }
   }
 
   async function upsertStates(pairId:string, epoch:number, states:{ init:TaskState; resp:TaskState }, sender:'init'|'resp', msg:any | undefined) {
-    events.push(pairId, { type:'state', epoch, states: { initiator: states.init, responder: states.resp }, status: { message: msg && { ...msg } } })
+    events.push(pairId, { type:'state', epoch, states: { initiator: states.init, responder: states.resp }, status: { message: msg && { ...msg } } } as any)
   }
 
   return {
@@ -159,8 +164,8 @@ export function createPairsService({ db, events }: Deps) {
       const respId = respTaskId(pid, epoch)
       if (!db.getTask(initId)) db.upsertTask({ task_id:initId, pair_id:pid, epoch })
       if (!db.getTask(respId)) db.upsertTask({ task_id:respId, pair_id:pid, epoch })
-      events.push(pairId, { type:'backchannel', action:'unsubscribe' })
-      events.push(pairId, { type:'state', epoch, states:{ initiator:'canceled', responder:'canceled' } })
+      events.push(pairId, { type:'backchannel', action:'unsubscribe' } as any)
+      events.push(pairId, { type:'state', epoch, states:{ initiator:'canceled', responder:'canceled' } } as any)
       return toSnapshot(db.getTask(initId)!)
     },
 
@@ -193,7 +198,7 @@ export function createPairsService({ db, events }: Deps) {
       // mirrored status no longer persisted; snapshot uses events
 
       // Record canonical message event for history (by epoch)
-      events.push(pairId, { type: 'message', epoch, messageId: msg.messageId, message: msg })
+      events.push(pairId, { type: 'message', epoch, messageId: msg.messageId, message: msg } as any)
 
       const snapRow = db.getTask(senderId)!
       const limit = sanitizeHistoryLength(configuration?.historyLength)
@@ -251,11 +256,11 @@ export function createPairsService({ db, events }: Deps) {
       if (!db.getTask(initId)) db.upsertTask({ task_id:initId, pair_id:pairId, epoch })
       if (!db.getTask(respId)) db.upsertTask({ task_id:respId, pair_id:pairId, epoch })
 
-      events.push(pairId, { type:'backchannel', action:'unsubscribe' })
-      events.push(pairId, { type:'state', epoch, states:{ initiator:'canceled', responder:'canceled' } })
+      events.push(pairId, { type:'backchannel', action:'unsubscribe' } as any)
+      events.push(pairId, { type:'state', epoch, states:{ initiator:'canceled', responder:'canceled' } } as any)
 
       if (type === 'hard') {
-        events.push(pairId, { type:'reset-complete', epoch })
+        events.push(pairId, { type:'reset-complete', epoch } as any)
         db.setPairEpoch(pairId, epoch + 1)
         db.createEpochTasks(pairId, epoch + 1)
       }

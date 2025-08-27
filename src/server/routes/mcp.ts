@@ -92,26 +92,31 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
 
     async function collect() {
       const initId = ensured.initiatorTaskId
-      const respId = ensured.responderTaskId
-      const initRow = db.getTask(initId)
-      const respRow = db.getTask(respId)
+      const snap = await pairs.tasksGet(pairId, initId)
       const messages: any[] = []
       try {
-        const m = respRow?.message ? JSON.parse(respRow.message) : null
+        const m = (snap as any)?.status?.message
+        // Projected for initiator view: inbound responder messages have role==='agent'
         if (m && m.role === 'agent') {
-          const text = (m.parts || []).filter((p:any)=>p?.kind==='text').map((p:any)=>String(p.text||'')).join('\n')
+          const parts = Array.isArray(m.parts) ? m.parts : []
+          const text = parts.filter((p:any)=>p?.kind==='text').map((p:any)=>String(p.text||''))?.join('\n') || ''
           const attachments: any[] = []
-          for (const p of (m.parts||[])) if (p?.kind==='file' && p.file && typeof p.file==='object' && typeof p.file.bytes==='string') {
-            attachments.push({ name: String(p.file.name||'file.bin'), contentType: String(p.file.mimeType||'application/octet-stream'), content: fromBase64(String(p.file.bytes||'')), ...(p.metadata?.summary?{summary:String(p.metadata.summary)}:{}) })
+          for (const p of parts) {
+            if (p?.kind==='file' && p.file && typeof p.file==='object' && typeof p.file.bytes==='string') {
+              attachments.push({ name: String(p.file.name||'file.bin'), contentType: String(p.file.mimeType||'application/octet-stream'), content: fromBase64(String(p.file.bytes||'')), ...(p.metadata?.summary?{summary:String(p.metadata.summary)}:{}) })
+            }
           }
-          messages.push({ from:'administrator', at: new Date().toISOString(), text, ...(attachments.length?{attachments}:{}) })
+          messages.push({ from:'administrator', at: new Date().toISOString(), ...(text?{text}:{ }), ...(attachments.length?{attachments}:{}) })
         }
       } catch {}
-      const initState = initRow?.state || 'submitted'
-      const respState = respRow?.state || 'submitted'
-      const completed = ['completed','canceled','failed','rejected'].includes(initState as any) || ['completed','canceled','failed','rejected'].includes(respState as any)
-      const status = completed ? 'completed' : (initState === 'input-required' ? 'input-required' : 'working')
-      const guidance = completed ? 'Conversation ended. No further input is expected.' : (status==='input-required' ? 'It’s your turn to respond as initiator. You can send a message now.' : 'Waiting for the responder to finish or reply. Call check_replies again.')
+      const st: string = String((snap as any)?.status?.state || 'submitted')
+      const completed = ['completed','canceled','failed','rejected'].includes(st)
+      const status = completed ? 'completed' : (st === 'input-required' || st === 'submitted' ? 'input-required' : 'working')
+      const guidance = completed
+        ? 'Conversation ended. No further input is expected.'
+        : (status==='input-required'
+            ? 'It’s your turn to respond as initiator. You can send a message now.'
+            : 'Waiting for the responder to finish or reply. Call check_replies again.')
       return { messages, guidance, status, ended: completed }
     }
 
@@ -178,4 +183,3 @@ function concat(parts: Uint8Array[]): Uint8Array {
 }
 
 function jsonContent(obj:any): any { return obj as any }
-
