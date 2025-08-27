@@ -46,6 +46,9 @@ export type Store = {
   setPlanner(id:'off'|'llm-drafter'|'scenario-v0.3'|'simple-demo'): void;
   setPlannerMode(mode:'approve'|'auto'): void;
   setPlannerApplied(applied: PlannerApplied | any, ready: boolean): void;
+  // rewind + reconfigure
+  rewindJournal(): void; // always rewinds to last public event
+  reconfigurePlanner(opts: { applied: any; ready: boolean; rewind?: boolean }): void;
   // legacy staging functions removed; planners with config stores persist directly
   appendComposeIntent(text: string, attachments?: AttachmentMeta[]): string;
   sendCompose(composeId: string, finality: 'none'|'turn'|'conversation'): Promise<void>;
@@ -133,6 +136,64 @@ export const useAppStore = create<Store>((set, get) => ({
       const hash = encodeSetup(setup);
       if (hash) try { window.location.hash = hash; } catch {}
     } catch {}
+  },
+
+  rewindJournal() {
+    const s = get();
+    const facts = s.facts || [];
+    // Guard: avoid rewinding mid-send
+    if (s.inFlightSends && (s.inFlightSends as Map<string, any>).size) {
+      throw new Error('Cannot rewind while a send is in flight');
+    }
+    if (!facts.length) {
+      set({ facts: [], seq: 0, composing: undefined, composeApproved: new Set(), inFlightSends: new Map(), sendErrorByCompose: new Map(), attachmentsIndex: new Map(), hud: null });
+      return;
+    }
+    // Find last public event (remote_sent or remote_received)
+    let cutIdx = -1;
+    for (let i = facts.length - 1; i >= 0; --i) {
+      const t = facts[i].type;
+      if (t === 'remote_sent' || t === 'remote_received') { cutIdx = i; break; }
+    }
+    if (cutIdx < 0) {
+      set({ facts: [], seq: 0, composing: undefined, composeApproved: new Set(), inFlightSends: new Map(), sendErrorByCompose: new Map(), attachmentsIndex: new Map(), hud: null });
+      return;
+    }
+    const keep = facts.slice(0, cutIdx + 1);
+    // Rebuild attachments index from survivors
+    const idx = new Map<string, { mimeType: string; bytesBase64: string }>();
+    for (const f of keep) {
+      if (f.type === 'attachment_added') {
+        idx.set((f as any).name, { mimeType: (f as any).mimeType, bytesBase64: (f as any).bytes });
+      }
+    }
+    set({
+      facts: keep,
+      seq: keep.length ? keep[keep.length - 1].seq : 0,
+      composing: undefined,
+      composeApproved: new Set(),
+      inFlightSends: new Map(),
+      sendErrorByCompose: new Map(),
+      attachmentsIndex: idx,
+      hud: null,
+    });
+  },
+
+  reconfigurePlanner({ applied, ready, rewind }) {
+    // Default: rewind to last public, unless explicitly disabled
+    try {
+      if (rewind === undefined || rewind === true) {
+        get().rewindJournal();
+      }
+    } catch (e) {
+      // Surface error via console; let caller decide UI handling
+      try { console.warn('[reconfigurePlanner] rewind failed:', (e as any)?.message || e); } catch {}
+      throw e;
+    }
+    // Apply config and deep-link (reuse setPlannerApplied logic)
+    get().setPlannerApplied(applied, ready);
+    // Nudge planner controller; harness will also rebuild on seq change
+    try { get().kickoffConversationWithPlanner(); } catch {}
   },
 
   setTaskId(taskId) {

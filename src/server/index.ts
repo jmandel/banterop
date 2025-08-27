@@ -23,46 +23,54 @@ export type AppBindings = {
   }
 }
 
-const env = loadEnv()
-const app = new Hono<AppBindings>()
+export function createServer(opts?: { port?: number; env?: Partial<Env>; development?: boolean }) {
+  const baseEnv = loadEnv()
+  const env: Env = { ...baseEnv, ...(opts?.env || {}) }
+  const app = new Hono<AppBindings>()
 
-app.use('*', secureHeaders())
-app.use('*', cors())
-app.use('*', logger())
+  app.use('*', secureHeaders())
+  app.use('*', cors())
+  app.use('*', logger())
 
-const db = createPersistence(env)
-const events = createEventStore({ maxPerPair: Number(process.env.FLIPPROXY_EVENTS_MAX || 5000) })
-const pairs = createPairsService({ db, events, baseUrl: env.BASE_URL })
+  const db = createPersistence(env)
+  const eventsMax = Number(((opts?.env as any)?.FLIPPROXY_EVENTS_MAX ?? process.env.FLIPPROXY_EVENTS_MAX ?? 5000))
+  const events = createEventStore({ maxPerPair: eventsMax })
+  const pairs = createPairsService({ db, events, baseUrl: env.BASE_URL })
 
-app.use('*', async (c, next) => { c.set('db', db); c.set('events', events); c.set('pairs', pairs); await next() })
+  app.use('*', async (c, next) => { c.set('db', db); c.set('events', events); c.set('pairs', pairs); await next() })
 
-app.route('/.well-known', wellKnownRoutes())
-app.route('/api', pairsRoutes())
-app.route('/api', a2aRoutes())
-app.route('/api', mcpRoutes())
-app.route('/api', pairsRoutes(true))
+  app.route('/.well-known', wellKnownRoutes())
+  app.route('/api', pairsRoutes())
+  app.route('/api', a2aRoutes())
+  app.route('/api', mcpRoutes())
+  app.route('/api', pairsRoutes(true))
 
-// Bun.serve handles HTML routes and delegates everything else to Hono
-const isDev = (Bun.env.NODE_ENV || process.env.NODE_ENV) !== 'production'
-const port = Number(process.env.PORT ?? env.PORT ?? 3000)
-const IDLE_TIMEOUT = 60
+  const isDev = opts?.development ?? ((Bun.env.NODE_ENV || process.env.NODE_ENV) !== 'production')
+  const port = typeof opts?.port === 'number' ? opts!.port : Number(process.env.PORT ?? env.PORT ?? 3000)
+  const IDLE_TIMEOUT = 60
 
-const server = serve({
-  idleTimeout: IDLE_TIMEOUT,
-  port,
-  development: isDev ? { hmr: true, console: true } : undefined,
-  routes: {
-    '/': controlHtml,
-    '/control/': controlHtml,
-    '/participant/': participantHtml,
-  },
-  async fetch(req, srv) {
-    const url = new URL(req.url)
-    if (!['/','/control/','/participant/'].includes(url.pathname)) {
-      return app.fetch(req, srv)
-    }
-    return new Response('Not Found', { status: 404 })
-  },
-})
+  const server = serve({
+    idleTimeout: IDLE_TIMEOUT,
+    port,
+    development: isDev ? { hmr: true, console: true } : undefined,
+    routes: {
+      '/': controlHtml,
+      '/control/': controlHtml,
+      '/participant/': participantHtml,
+    },
+    async fetch(req, srv) {
+      const url = new URL(req.url)
+      if (!['/','/control/','/participant/'].includes(url.pathname)) {
+        return app.fetch(req, srv)
+      }
+      return new Response('Not Found', { status: 404 })
+    },
+  })
 
-try { console.log(`[flipproxy] ${isDev ? 'Dev' : 'Prod'} server listening on ${server.url}`) } catch {}
+  return server
+}
+
+if (import.meta.main) {
+  const server = createServer()
+  try { console.log(`[flipproxy] ${((Bun.env.NODE_ENV || process.env.NODE_ENV) !== 'production') ? 'Dev' : 'Prod'} server listening on ${server.url}`) } catch {}
+}

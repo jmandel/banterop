@@ -48,6 +48,8 @@ export function PlannerSetupCard({ urlSetup }: { urlSetup: any | null }) {
   const snap = React.useSyncExternalStore(subscribe, getSnapshot);
 
   const canBegin = ready && role === 'initiator' && !taskId;
+  const [rewindOn, setRewindOn] = React.useState<boolean>(true);
+  const [applyErr, setApplyErr] = React.useState<string | null>(null);
   const facts = useAppStore(s => s.facts);
   const hasUnsentDraft = React.useMemo(() => {
     const dismissed = new Set<string>(facts.filter(f=>f.type==='compose_dismissed').map((f:any)=>String(f.composeId||'')));
@@ -77,15 +79,16 @@ export function PlannerSetupCard({ urlSetup }: { urlSetup: any | null }) {
     if (!cfg) return;
     try {
       const { applied: appliedOut, ready: readyOut } = cfg.exportApplied();
-      try { useAppStore.getState().setPlannerApplied(appliedOut, readyOut); } catch {
-        useAppStore.setState((s: any) => ({
-          appliedByPlanner: { ...s.appliedByPlanner, [pid]: appliedOut },
-          readyByPlanner: { ...s.readyByPlanner, [pid]: readyOut },
-        }));
+      setApplyErr(null);
+      try {
+        useAppStore.getState().reconfigurePlanner({ applied: appliedOut, ready: readyOut, rewind: rewindOn });
+      } catch (e:any) {
+        setApplyErr(String(e?.message || 'Apply failed'));
+        return;
       }
       setCollapsed(true);
     } catch {}
-  }, [cfg, pid]);
+  }, [cfg, pid, rewindOn]);
 
   React.useEffect(() => {
     if (!cfg || !autoApplyRequested || autoApplied) return;
@@ -170,7 +173,11 @@ export function PlannerSetupCard({ urlSetup }: { urlSetup: any | null }) {
           </div>
           {canShowBegin && <button className="btn" onClick={() => useAppStore.getState().kickoffConversationWithPlanner()}>Begin conversation</button>}
           {!collapsed && (
-            <button className="btn" type="submit" disabled={!snap?.canSave || snap?.pending}>Save & Apply</button>
+            <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+              <button className="btn" type="submit" disabled={!snap?.canSave || snap?.pending}>Save & Apply</button>
+              <label className="small" title="Rewind to last public event before applying new planner settings"><input type="checkbox" checked={rewindOn} onChange={e=>setRewindOn(e.target.checked)} /> Rewind on apply</label>
+              {applyErr && <span className="small" style={{ color:'#b91c1c' }}>{applyErr}</span>}
+            </div>
           )}
         </div>
         {!collapsed && (
