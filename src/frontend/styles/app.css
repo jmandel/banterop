@@ -1,0 +1,49 @@
+/* Base layout */
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'; margin:0; padding:20px; background:#f6f8fb; }
+.wrap { max-width: 1000px; margin: 0 auto; padding-right: 380px; }
+.card { background: #fff; border: 1px solid #e6e8ee; border-radius: 10px; padding: 12px 12px; margin: 0 0 12px; }
+.row { display:flex; gap:10px; align-items:center; }
+.pill { display:inline-block; padding: 4px 10px; border-radius: 999px; background: #f0f2f7; }
+.btn { background:#316fff; color:#fff; border:1px solid #2b61db; border-radius:8px; padding:6px 10px; cursor: pointer; }
+.btn[disabled] { opacity: 0.6; cursor: not-allowed; background: #c7d2fe; border-color:#c7d2fe; color:#4b5563; }
+.btn.ghost { background: transparent; color: #316fff; border: 1px solid #316fff; }
+.input { border:1px solid #d4d8e2; border-radius:8px; padding:8px 10px; }
+.muted { color:#687083; }
+.small { font-size: 12px; }
+
+/* Transcript + bubbles */
+.transcript { display:flex; flex-direction:column; gap:10px; }
+.bubble { max-width: 88%; padding: 10px 12px; border-radius: 12px; background:#f0f2f7; }
+.me { align-self:flex-start; background:#e8f0ff; }
+.them { align-self:flex-end; background:#f0f2f7; }
+.private { background:#fff; border:1px dashed #dcdfea; border-radius: 6px; padding: 8px 10px; }
+.stripe { border-left: 4px solid #dcdfea; padding-left: 10px; }
+.stripe.draft { border-left-color: #9aa7ff; }
+.stripe.question { border-left-color: #ff9a9a; }
+.stripe.answer { border-left-color: #9affb0; }
+.stripe.whisper { border-left-color: #b09aff; }
+.stripe-head { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color:#6b7280; margin-bottom:4px; }
+.stripe-body { font-size: 14px; }
+
+/* Debug panel pinned to the right */
+.debug-panel { position: fixed; top: 0; right: 0; height: 100vh; width: 360px; background: #0f172a; color: #c7e0ff; border-left: 1px solid #1f2937; z-index: 1000; display:flex; flex-direction:column; }
+.debug-header { padding: 10px 12px; border-bottom: 1px solid #1f2937; display:flex; align-items:center; gap:8px; }
+.debug-body { flex:1; overflow:auto; padding: 8px 10px; }
+.debug-pre { white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; line-height: 1.4; }
+.debug-btn { background: #1f6feb; color: #fff; border: 1px solid #1f6feb; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+
+/* HUD dots */
+.working-dot { width: 10px; height: 10px; border-radius: 50%; background: #5b7cff; display:inline-block; animation: workingPulse 1.4s ease-in-out infinite; box-shadow: 0 0 0 rgba(91,124,255,0.3); }
+@keyframes workingPulse { 0% { transform: scale(0.9); opacity: 0.45; } 50% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(0.9); opacity: 0.45; } }
+.idle-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid #5b7cff; display: inline-block; background: transparent; }
+.hud-json { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; color: #687083; max-width: 40ch; white-space: nowrap; overflow: hidden; display: inline-block; vertical-align: middle; padding-left: 6px; -webkit-mask-image: linear-gradient(to right, black 85%, transparent); mask-image: linear-gradient(to right, black 85%, transparent); }
+
+/* Rooms header bits */
+header { display:flex; gap:10px; align-items:center; margin-bottom: 12px; }
+.chip { display:inline-block; padding:4px 10px; border-radius:999px; background:#f0f2f7; }
+.chip.ok { background:#e8f7ee; color:#0b6b34; }
+.chip.warn { background:#fff1e5; color:#8a4b0f; }
+.banner { background:#fff7e6; border:1px solid #f5d7a1; color:#8a4b0f; padding:10px 12px; border-radius:10px; margin-bottom:12px; }
+
+/* Read-only/observer visuals */
+.faded { opacity: 0.55; }

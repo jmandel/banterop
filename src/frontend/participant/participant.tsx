@@ -4,15 +4,22 @@ import type { AttachmentMeta } from '../../shared/journal-types';
 import type { A2APart } from '../../shared/a2a-types';
 import { useAppStore } from '../state/store';
 import { A2AAdapter } from '../transports/a2a-adapter';
-import { statusLabel } from './status-labels';
+import { statusLabel } from '../components/status-labels';
 import { MCPAdapter } from '../transports/mcp-adapter';
 import { startPlannerController } from '../planner/controller';
 import { resolvePlanner } from '../planner/registry';
 import { makeChitchatProvider, DEFAULT_CHITCHAT_ENDPOINT } from '../../shared/llm-provider';
 import { b64ToUtf8, normalizeB64 } from '../../shared/codec';
-import { decodeSetup } from '../../shared/setup-hash';
+import { useUrlPlannerSetup } from '../hooks/useUrlPlannerSetup';
 import { PlannerSetupCard } from './PlannerSetupCard';
 import { DebugPanel } from './DebugPanel';
+import { TaskRibbon } from '../components/TaskRibbon';
+import { PlannerSelector, PlannerModeSelector } from '../components/PlannerSelectors';
+import { ManualComposer } from '../components/ManualComposer';
+import { Whisper } from '../components/Whisper';
+import { DraftInline } from '../components/DraftInline';
+import { Markdown } from '../components/Markdown';
+import { attachmentHrefFromBase64 } from '../components/attachments';
 
 type Role = 'initiator'|'responder';
 
@@ -26,51 +33,15 @@ function useQuery() {
   return { role, transport, a2aUrl, tasksUrl, mcpUrl };
 }
 
-function attachmentHrefFromBase64(name:string, mimeType:string, b64:string) {
-  try {
-    const bytes = atob(b64);
-    const arr = new Uint8Array(bytes.length);
-    for (let i=0;i<bytes.length;i++) arr[i] = bytes.charCodeAt(i);
-    // Force explicit UTF-8 charset for all attachments (per request),
-    // regardless of the original mimeType, to avoid mojibake in browsers.
-    const baseType = mimeType || 'application/octet-stream';
-    const type = /charset=/i.test(baseType) ? baseType : `${baseType};charset=utf-8`;
-    const blob = new Blob([arr], { type });
-    return URL.createObjectURL(blob);
-  } catch { return null; }
-}
+// attachmentHrefFromBase64 moved to ../components/attachments
 
 function App() {
   const { role, transport, a2aUrl, tasksUrl, mcpUrl } = useQuery();
   const store = useAppStore();
   const [sending, setSending] = useState(false);
 
-  type UrlSetup = {
-    planner?: {
-      id?: 'llm-drafter'|'scenario-v0.3'|'simple-demo'|'off';
-      mode?: 'approve'|'auto';
-      ready?: boolean;
-      applied?: any;
-      config?: any;
-    };
-    llm?: { model?: string };
-    kickoff?: 'if-ready'|'always'|'never';
-  };
-
-function parseSetupFromLocation(): UrlSetup | null {
-  try { return decodeSetup(window.location.hash) as any; } catch { return null; }
-}
-
-  // Hold parsed URL setup for planner bootstrap; do not seed store with partials
-  const [urlSetup, setUrlSetup] = useState<UrlSetup | null>(null);
-  function applySetupFromUrl(setup: UrlSetup) {
-    if (!setup?.planner) return;
-    const pid = (setup.planner.id || 'off') as any;
-    useAppStore.getState().setPlanner(pid);
-    if (setup.planner.mode) useAppStore.getState().setPlannerMode(setup.planner.mode);
-    // Keep as local bootstrap only; config store will use it as opts.initial
-    setUrlSetup(setup);
-  }
+  // Parse and apply #setup to store; provide to PlannerSetupCard
+  const urlSetup = useUrlPlannerSetup() as any;
 
   // init transport & role
   useEffect(() => {
@@ -78,8 +49,6 @@ function parseSetupFromLocation(): UrlSetup | null {
     store.init(role as Role, adapter, undefined);
     // Start planner controller for both roles; harness owns triggers/guards
     startPlannerController();
-    // Apply URL setup (if provided)
-    try { const setup = parseSetupFromLocation(); if (setup) applySetupFromUrl(setup); } catch {}
   }, [role, transport, a2aUrl, mcpUrl]);
 
   // Backchannel (responder, A2A): delegate to store attach/detach
@@ -164,7 +133,7 @@ function parseSetupFromLocation(): UrlSetup | null {
               return (
                 <div key={f.id} className={'bubble ' + (isMe ? 'me' : 'them')}>
                   <div className="small muted">{isMe ? 'Our side' : 'Other side'}</div>
-                  <div className="text">{f.text}</div>
+                  <Markdown text={f.text} />
                   {Array.isArray(f.attachments) && f.attachments.length > 0 && (
                     <div className="attachments small">
                       {f.attachments.map((a:AttachmentMeta) => {
@@ -208,8 +177,8 @@ function parseSetupFromLocation(): UrlSetup | null {
                     {f.type === 'compose_intent' && (isDismissed ? 'Private • Draft (dismissed)' : 'Private • Draft')}
                   </div>
                   <div className="stripe-body">
-                    {f.type === 'user_guidance' && <div className="text">{f.text}</div>}
-                    {f.type === 'user_answer' && <div className="text">{(f as any).text}</div>}
+                    {f.type === 'user_guidance' && <Markdown text={f.text} />}
+                    {f.type === 'user_answer' && <Markdown text={(f as any).text} />}
                     {f.type === 'agent_question' && (()=>{
                       const answered = facts.some(x => x.type === 'user_answer' && (x as any).qid === (f as any).qid && x.seq > f.seq);
                       return <QuestionInline q={f as any} answered={answered} />;
@@ -260,81 +229,9 @@ function HudBar() {
   );
 }
 
-function DraftInline({ composeId, text, attachments }:{ composeId:string; text:string; attachments?: AttachmentMeta[] }) {
-  const [nextState, setNextState] = useState<'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required'>('working');
-  const [sending, setSending] = useState(false);
-  const err = useAppStore(s => s.sendErrorByCompose.get(composeId));
-  const pid = useAppStore(s => s.plannerId);
-  const ready = useAppStore(s => !!s.readyByPlanner[s.plannerId]);
-  const facts = useAppStore(s => s.facts);
-  async function approve() {
-    setSending(true);
-    try { await useAppStore.getState().sendCompose(composeId, nextState); }
-    finally { setSending(false); }
-  }
-  async function retry() { await approve(); }
-  function regenerate() {
-    try { useAppStore.getState().dismissCompose(composeId); } catch {}
-    // Nudge controller by changing appliedByPlanner identity (no-op clone)
-    useAppStore.setState((s: any) => {
-      const curr = s.appliedByPlanner[pid];
-      return { appliedByPlanner: { ...s.appliedByPlanner, [pid]: curr ? { ...curr } : {} } };
-    });
-  }
-  return (
-    <div>
-      <div className="text">{text}</div>
-      {Array.isArray(attachments) && attachments.length > 0 && (
-        <div className="attachments small" style={{ marginTop: 6 }}>
-          {attachments.map((a:AttachmentMeta) => {
-            const added = facts.find(x => x.type === 'attachment_added' && (x as any).name === a.name);
-            const href = added && added.type === 'attachment_added' ? attachmentHrefFromBase64(a.name, added.mimeType, added.bytes) : null;
-            return (
-              <a key={a.name} className="att" href={href || '#'} target="_blank" rel="noreferrer" onClick={e => { if (!href) e.preventDefault(); }}>
-                📎 {a.name} <span className="muted">({a.mimeType || 'application/octet-stream'})</span>
-              </a>
-            );
-          })}
-        </div>
-      )}
-      <div className="row" style={{marginTop:8, gap:8}}>
-        <select value={nextState} onChange={(e)=>setNextState(e.target.value as any)} title="Next state">
-          <option value="working">hand off turn → flip</option>
-          <option value="input-required">keep open (not turn-final)</option>
-          <option value="completed">end conversation</option>
-        </select>
-        <button className="btn" onClick={()=>void approve()} disabled={sending}>{sending ? 'Sending…' : 'Approve & Send'}</button>
-        {ready && (
-          <button className="btn ghost" onClick={regenerate} title="Dismiss current draft and ask the planner to generate a new suggestion">Regenerate suggestion</button>
-        )}
-      </div>
-      {err && (
-        <div className="small" style={{ color:'#b91c1c', marginTop:6 }}>
-          {err} <button className="btn ghost" onClick={()=>void retry()}>Retry</button>
-        </div>
-      )}
-    </div>
-  );
-}
+// DraftInline moved to ../components/DraftInline
 
-function Whisper({ onSend }:{ onSend:(t:string)=>void }) {
-  const [open, setOpen] = useState(false);
-  const [txt, setTxt] = useState('');
-  return (
-    <div style={{width:'100%'}}>
-      <div className="row" style={{justifyContent:'space-between'}}>
-        <div className="small muted">Whisper to our agent (private)</div>
-        <button className="btn ghost" onClick={() => setOpen(v=>!v)}>{open ? 'Hide' : 'Open'}</button>
-      </div>
-      {open && (
-        <div className="row" style={{marginTop:6}}>
-          <input className="input" style={{flex:1}} placeholder="e.g., Emphasize failed PT and work impact" value={txt} onChange={e=>setTxt(e.target.value)} onKeyDown={(e)=>{ if (e.key==='Enter') { onSend(txt); setTxt(''); } }} />
-          <button className="btn" onClick={()=>{ onSend(txt); setTxt(''); }}>Send whisper</button>
-        </div>
-      )}
-    </div>
-  );
-}
+// Whisper component moved to ../components/Whisper
 
 function QuestionInline({ q, answered }:{ q:{ qid:string; prompt:string; placeholder?:string }, answered:boolean }) {
   const [txt, setTxt] = useState('');
@@ -346,7 +243,7 @@ function QuestionInline({ q, answered }:{ q:{ qid:string; prompt:string; placeho
   }
   return (
     <div>
-      <div className="text" style={{marginBottom:6}}>{q.prompt}</div>
+      <div style={{marginBottom:6}}><Markdown text={q.prompt} /></div>
       <div className="row">
         <input className="input" style={{flex:1}} placeholder={q.placeholder || 'Type your answer'} value={txt} onChange={e=>setTxt(e.target.value)} onKeyDown={(e)=>{ if (e.key==='Enter') submit(); }} disabled={answered || submitted} />
         <button className="btn" onClick={submit} disabled={answered || submitted}>{answered ? 'Answered' : (submitted ? 'Sending…' : 'Answer')}</button>
@@ -356,108 +253,13 @@ function QuestionInline({ q, answered }:{ q:{ qid:string; prompt:string; placeho
   );
 }
 
-function ManualComposer({ disabled, hint, placeholder, onSend, sending }:{ disabled:boolean; hint?:string; placeholder?:string; onSend:(t:string, n:'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required')=>Promise<void>|void; sending:boolean }) {
-  const [text, setText] = useState('');
-  const [nextState, setNextState] = useState<'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required'>('working');
-  async function send() {
-    const t = text.trim(); if (!t || disabled) return;
-    setText('');
-    await onSend(t, nextState);
-  }
-  return (
-    <div className="manual-composer">
-      <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-        <input
-          className="input"
-          style={{ flex: 1 }}
-          value={text}
-          placeholder={placeholder || (disabled ? 'Not your turn yet…' : 'Type a message to the other side…')}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (!disabled) void send(); } }}
-          disabled={disabled || sending}
-        />
-        <select
-          value={nextState}
-          onChange={(e) => setNextState(e.target.value as any)}
-          disabled={sending}
-          title="Next state"
-        >
-          <option value="input-required">keep open (not turn-final)</option>
-          <option value="working">hand off turn → flip</option>
-          <option value="completed">end conversation</option>
-        </select>
-        <button className="btn" onClick={() => void send()} disabled={disabled || sending} aria-disabled={disabled || sending} title={disabled ? (hint || 'Not your turn to send') : 'Send message'}>
-          Send
-        </button>
-      </div>
-      {hint && <div className="small muted" style={{ marginTop: 6 }}>{hint}</div>}
-      <style>{`
-        .manual-composer {
-          position: sticky;
-          bottom: 0;
-          background: #fff;
-          border-top: 1px solid #e6e8ee;
-          padding: 10px;
-          border-radius: 0 0 10px 10px;
-        }
-        /* Style inputs/selects uniformly; do not override .btn styles */
-        .manual-composer input, .manual-composer select {
-          font: inherit;
-          padding: 8px 10px;
-          border-radius: 8px;
-          border: 1px solid #d4d8e2;
-          background: #fff;
-        }
-      `}</style>
-    </div>
-  );
-}
+// ManualComposer moved to ../components/ManualComposer
 
 const root = createRoot(document.getElementById('root')!);
 root.render(<App />);
 
-function TaskRibbon() {
-  const taskId = useAppStore(s => s.taskId);
-  const uiStatus = useAppStore(s => s.uiStatus());
-  function statusBadgeText(s: string): string { return statusLabel(s); }
-  return (
-    <div className="card">
-      <div className="row" style={{ alignItems:'center', gap: 10 }}>
-        <strong>Task</strong>
-        <span className="pill">ID: {taskId || '—'}</span>
-        <span className="pill">Status: {statusBadgeText(uiStatus)}</span>
-      </div>
-    </div>
-  );
-}
+// TaskRibbon moved to ../components/TaskRibbon
 
-function PlannerSelector() {
-  const pid = useAppStore(s => s.plannerId);
-  const setPlanner = useAppStore(s => s.setPlanner);
-  return (
-    <div className="row" style={{ gap: 6, alignItems:'center' }}>
-      <span className="small muted">Planner:</span>
-      <select value={pid} onChange={e => setPlanner(e.target.value as any)}>
-        <option value="off">Off</option>
-        <option value="llm-drafter">LLM Drafter</option>
-        <option value="scenario-v0.3">Scenario Planner</option>
-      </select>
-    </div>
-  );
-}
-
-function PlannerModeSelector() {
-  const mode = useAppStore(s => s.plannerMode);
-  const setMode = useAppStore(s => s.setPlannerMode);
-  return (
-    <div className="row" style={{ gap: 6, alignItems:'center' }}>
-      <span className="small muted">Mode:</span>
-      <select value={mode} onChange={e => setMode(e.target.value as any)} title="Planner approval mode">
-        <option value="approve">Approve each turn</option>
-        <option value="auto">Auto-approve</option>
-      </select>
-    </div>
-  );
-}
+// PlannerSelector and PlannerModeSelector moved to ../components/PlannerSelectors
 
 // Removed inline PlannerSetupCard/renderField/DebugPanel; using extracted components.
