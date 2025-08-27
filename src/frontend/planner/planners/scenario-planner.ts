@@ -44,7 +44,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
     const includeWhy = true;
 
     // --- HUD: planning lifecycle
-    ctx.hud('planning', 'Scanning state');
+    try { ctx.hud('planning', 'Thinking…', 0.1); } catch {}
 
     // No legacy whisper-as-answer; rely on first-class user_answer facts from UI
 
@@ -84,289 +84,134 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       return [sleepFact(`No actions: status=${status}`, includeWhy)];
     }
 
-    // 4) Build prompt from scenario + history + tools catalogue
-    ctx.hud('reading', 'Preparing prompt', 0.2);
+    // 4) Multi-step loop with single-batch output
+    try { ctx.hud('reading', 'Preparing prompt', 0.2); } catch {}
     const scenario = cfg.scenario;
     const myId = cfg.myAgentId || scenario?.agents?.[0]?.agentId || 'planner';
     const counterpartId = (scenario?.agents?.find(a => a.agentId !== myId)?.agentId) || (scenario?.agents?.[1]?.agentId) || 'counterpart';
-
-    const filesAtCut = listAttachmentMetasAtCut(facts);
-    const xmlHistory = buildXmlHistory(facts, myId, counterpartId);
-    const availableFilesXml = buildAvailableFilesXml(filesAtCut);
-
     const allowSendToRemote = status === 'input-required';
-    const enabledTools = Array.isArray((ctx.config as any)?.enabledTools) ? (ctx.config as any).enabledTools as string[] : undefined;
-    const coreTools = Array.isArray(cfg.enabledCoreTools) && cfg.enabledCoreTools.length
-      ? cfg.enabledCoreTools
-      : ['sendMessageToRemoteAgent','sendMessageToMyPrincipal','readAttachment','sleep','done'];
-    const toolsCatalog = buildToolsCatalog(scenario, myId, { allowSendToRemote }, enabledTools, coreTools);
-
-    const finalizationReminder = buildFinalizationReminder(facts, scenario, myId) || undefined;
-    const prompt = buildPlannerPrompt(scenario, myId, counterpartId, xmlHistory, availableFilesXml, toolsCatalog, finalizationReminder);
-
-    // 5) Ask LLM for exactly one action
-    ctx.hud('planning', 'Choosing next tool');
-    const sys: LlmMessage = { role: 'system', content: SYSTEM_PREAMBLE };
-    const user: LlmMessage = { role: 'user', content: prompt };
+    const enabledScenarioTools = Array.isArray((ctx.config as any)?.enabledTools) ? (ctx.config as any).enabledTools as string[] : undefined;
+    const coreAllowed = new Set<string>(Array.isArray(cfg.enabledCoreTools) && cfg.enabledCoreTools.length ? cfg.enabledCoreTools : ['sendMessageToRemoteAgent','sendMessageToMyPrincipal','readAttachment','sleep','done']);
     const model = cfg.model || ctx.model;
-    let llmText: string;
-    try {
-      llmText = await chatWithRetry(ctx.llm, { model, messages: [sys, user], temperature: 0.5, signal: ctx.signal }, 3);
-    } catch (e: any) {
-      // Hard failure after retries → propose a gentle draft to the counterpart
-      const composeId = ctx.newId('c:');
-      const text = 'We encountered an error, please reach back soon.';
-      const pf: ProposedFact = ({
-        type: 'compose_intent',
-        composeId,
-        text,
-        ...(includeWhy ? { why: 'Upstream model error after retries.' } : {})
-      }) as ProposedFact;
-      return [pf];
-    }
+    const maxSteps = Math.max(1, Math.min(50, Number(cfg.maxInlineSteps ?? 20)));
 
-    const decision = parseAction(llmText);
-    const reasoning = decision.reasoning || 'Planner step.';
+    const out: ProposedFact[] = [];
+    const workingFacts: any[] = [...facts];
+    const sys: LlmMessage = { role: 'system', content: SYSTEM_PREAMBLE };
 
-    // 6) Map chosen action to ProposedFacts[]
-    switch (decision.tool) {
-      case 'sleep': {
-        return [sleepFact('LLM chose to sleep.', includeWhy, reasoning)];
+    for (let step = 0; step < maxSteps; step++) {
+      const filesAtCut = listAttachmentMetasAtCut(workingFacts as any);
+      const xmlHistory = buildXmlHistory(workingFacts as any, myId, counterpartId);
+      const availableFilesXml = buildAvailableFilesXml(filesAtCut);
+      const toolsCatalog = buildToolsCatalog(scenario, myId, { allowSendToRemote }, enabledScenarioTools, Array.from(coreAllowed));
+      const finalizationReminder = buildFinalizationReminder(workingFacts as any, scenario, myId) || undefined;
+      const prompt = buildPlannerPrompt(scenario, myId, counterpartId, xmlHistory, availableFilesXml, toolsCatalog, finalizationReminder);
+
+      try { ctx.hud('planning', 'Thinking…', 0.5); } catch {}
+      let llmText: string;
+      try {
+        llmText = await chatWithRetry(ctx.llm, { model, messages: [sys, { role: 'user', content: prompt }], temperature: 0.5, signal: ctx.signal }, 3);
+      } catch {
+        out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered an error, please reach back soon.', ...(includeWhy ? { why:'Upstream model error after retries.' } : {}) } as ProposedFact));
+        break;
       }
 
-      case 'sendMessageToMyPrincipal': {
-        if (!(Array.isArray(cfg.enabledCoreTools) ? cfg.enabledCoreTools.includes('sendMessageToMyPrincipal') : true)) {
-          return [sleepFact('Core tool disabled: sendMessageToMyPrincipal', includeWhy)];
-        }
+      const decision = parseAction(llmText);
+      const reasoning = decision.reasoning || 'Planner step.';
+
+      // Dispatch
+      if (decision.tool === 'sleep') {
+        out.push(sleepFact('LLM chose to sleep.', includeWhy, reasoning));
+        break;
+      }
+
+      if (decision.tool === 'sendMessageToMyPrincipal') {
+        if (!coreAllowed.has('sendMessageToMyPrincipal')) { out.push(sleepFact('Core tool disabled: sendMessageToMyPrincipal', includeWhy)); break; }
         const promptText = String(decision.args?.text || '').trim();
-        const qid = ctx.newId('q:');
-        if (!promptText) return [sleepFact('sendMessageToMyPrincipal: empty text → sleep', includeWhy, reasoning)];
-        const q: ProposedFact = ({
-          type: 'agent_question',
-          qid,
-          prompt: promptText,
-          required: false,
-          ...(includeWhy ? { why: reasoning } : {})
-        }) as ProposedFact;
-        return [q];
+        if (!promptText) { out.push(sleepFact('sendMessageToMyPrincipal: empty text → sleep', includeWhy, reasoning)); break; }
+        out.push(({ type:'agent_question', qid: ctx.newId('q:'), prompt: promptText, required:false, ...(includeWhy ? { why: reasoning } : {}) } as ProposedFact));
+        break;
       }
 
-      case 'askUser':
-      case 'ask_user': {
+      if (decision.tool === 'askUser' || decision.tool === 'ask_user') {
         const promptText = String(decision.args?.prompt || '').trim();
-        const qid = ctx.newId('q:');
-        if (!promptText) return [sleepFact('askUser: empty prompt → sleep', includeWhy, reasoning)];
-        const q: ProposedFact = ({
-          type: 'agent_question',
-          qid,
-          prompt: promptText,
-          required: !!decision.args?.required,
-          placeholder: typeof decision.args?.placeholder === 'string' ? decision.args.placeholder : undefined,
-          ...(includeWhy ? { why: reasoning } : {})
-        }) as ProposedFact;
-        return [q];
+        if (!promptText) { out.push(sleepFact('askUser: empty prompt → sleep', includeWhy, reasoning)); break; }
+        out.push(({ type:'agent_question', qid: ctx.newId('q:'), prompt: promptText, required: !!decision.args?.required, placeholder: typeof decision.args?.placeholder === 'string' ? decision.args.placeholder : undefined, ...(includeWhy ? { why: reasoning } : {}) } as ProposedFact));
+        break;
       }
 
-      case 'readAttachment':
-      case 'read_attachment': {
-        if (!(Array.isArray(cfg.enabledCoreTools) ? cfg.enabledCoreTools.includes('readAttachment') : true)) {
-          return [sleepFact('Core tool disabled: readAttachment', includeWhy)];
-        }
+      if (decision.tool === 'readAttachment' || decision.tool === 'read_attachment') {
+        if (!coreAllowed.has('readAttachment')) { out.push(sleepFact('Core tool disabled: readAttachment', includeWhy)); break; }
         const name = String(decision.args?.name || '').trim();
         const callId = ctx.newId('call:read');
-        const out: ProposedFact[] = [({
-          type: 'tool_call',
-          callId,
-          name: 'read_attachment',
-          args: { name },
-          ...(includeWhy ? { why: reasoning } : {})
-        }) as ProposedFact];
-
+        try { ctx.hud('tool', `Tool: read_attachment(name=${name || '?'})`, 0.7); } catch {}
+        out.push(({ type:'tool_call', callId, name:'read_attachment', args:{ name }, ...(includeWhy ? { why: reasoning } : {}) } as ProposedFact));
         if (name) {
           const rec = await ctx.readAttachment(name);
           if (rec) {
-            // Starter: return a tiny excerpt only as tool_result (no synthesized attachment here).
             const textExcerpt = safeDecodeUtf8(rec.bytes, 2000);
-            out.push(({
-              type: 'tool_result',
-              callId,
-              ok: true,
-              result: { name, mimeType: rec.mimeType, size: rec.bytes?.length ?? undefined, excerpt: textExcerpt },
-              ...(includeWhy ? { why: 'Attachment available at cut.' } : {})
-            }) as ProposedFact);
+            out.push(({ type:'tool_result', callId, ok:true, result:{ name, mimeType: rec.mimeType, size: rec.bytes?.length ?? undefined, excerpt: textExcerpt }, ...(includeWhy ? { why:'Attachment available at cut.' } : {}) } as ProposedFact));
+            workingFacts.push({ type:'tool_call', callId, name:'read_attachment', args:{ name } } as any);
+            workingFacts.push({ type:'tool_result', callId, ok:true, result:{ name, mimeType: rec.mimeType } } as any);
           } else {
-            out.push(({
-              type: 'tool_result',
-              callId,
-              ok: false,
-              error: `Attachment '${name}' is not available at this Cut.`,
-              ...(includeWhy ? { why: 'readAttachment failed.' } : {})
-            }) as ProposedFact);
+            out.push(({ type:'tool_result', callId, ok:false, error:`Attachment '${name}' is not available at this Cut.`, ...(includeWhy ? { why:'readAttachment failed.' } : {}) } as ProposedFact));
+            workingFacts.push({ type:'tool_call', callId, name:'read_attachment', args:{ name } } as any);
+            workingFacts.push({ type:'tool_result', callId, ok:false } as any);
           }
         } else {
-          out.push(({
-            type: 'tool_result',
-            callId,
-            ok: false,
-            error: 'Missing name',
-            ...(includeWhy ? { why: 'readAttachment missing name.' } : {})
-          }) as ProposedFact);
+          out.push(({ type:'tool_result', callId, ok:false, error:'Missing name', ...(includeWhy ? { why:'readAttachment missing name.' } : {}) } as ProposedFact));
+          workingFacts.push({ type:'tool_call', callId, name:'read_attachment', args:{ name:'' } } as any);
+          workingFacts.push({ type:'tool_result', callId, ok:false } as any);
         }
-        // Terminal
-        out.push(sleepFact('readAttachment completed.', includeWhy));
-        return out;
+        // continue loop
+        continue;
       }
 
-      case 'done': {
-        if (!(Array.isArray(cfg.enabledCoreTools) ? cfg.enabledCoreTools.includes('done') : true)) {
-          return [sleepFact('Core tool disabled: done', includeWhy)];
-        }
-        return [sleepFact('Planner declared done.', includeWhy, reasoning)];
+      if (decision.tool === 'done') {
+        if (!coreAllowed.has('done')) { out.push(sleepFact('Core tool disabled: done', includeWhy)); } else { out.push(sleepFact('Planner declared done.', includeWhy, reasoning)); }
+        break;
       }
 
-      case 'sendMessageToRemoteAgent': {
-        if (!(Array.isArray(cfg.enabledCoreTools) ? cfg.enabledCoreTools.includes('sendMessageToRemoteAgent') : true)) {
-          return [sleepFact('Core tool disabled: sendMessageToRemoteAgent', includeWhy)];
-        }
-        // Only when status === 'input-required' (toolsCatalog gated this)
-        // Harness now enforces turn-taking; planner remains permissive
-        // Validate attachments exist at Cut
+      if (decision.tool === 'sendMessageToRemoteAgent') {
+        if (!coreAllowed.has('sendMessageToRemoteAgent')) { out.push(sleepFact('Core tool disabled: sendMessageToRemoteAgent', includeWhy)); break; }
         const attList = Array.isArray(decision.args?.attachments) ? decision.args.attachments : [];
-        const known = new Set(filesAtCut.map(a => a.name));
-        const missing = attList.map((a: any) => String(a?.name || '').trim()).filter((n: string) => !!n && !known.has(n));
-        if (missing.length) {
-          return [sleepFact(`Attachments missing: ${missing.join(', ')}.`, includeWhy, reasoning)];
-        }
+        const filesNow = listAttachmentMetasAtCut(workingFacts as any);
+        const known = new Set(filesNow.map(a => a.name));
+        const missing = attList.map((a:any)=>String(a?.name||'').trim()).filter((n:string)=>!!n && !known.has(n));
+        if (missing.length) { out.push(sleepFact(`Attachments missing: ${missing.join(', ')}.`, includeWhy, reasoning)); break; }
         const composeId = ctx.newId('c:');
         const text = String(decision.args?.text || '').trim() || defaultComposeFromScenario(scenario, myId);
-        const metaList: AttachmentMeta[] = attList
-          .map((a: any) => String(a?.name || '').trim())
-          .filter(Boolean)
-          .map((name: string) => {
-            // Try to recover the mimeType from ledger
-            const mimeType = filesAtCut.find(a => a.name === name)?.mimeType || 'application/octet-stream';
-            return { name, mimeType };
-          });
-        const pf: ProposedFact = ({
-          type: 'compose_intent',
-          composeId,
-          text,
-          attachments: metaList.length ? metaList : undefined,
-          ...(includeWhy ? { why: reasoning } : {}),
-          finalityHint: finalizationReminder ? 'conversation' : 'turn'
-        }) as ProposedFact;
-        return [pf];
+        const metaList: AttachmentMeta[] = attList.map((a:any)=>String(a?.name||'')).filter(Boolean).map((name:string)=>({ name, mimeType: filesNow.find(x=>x.name===name)?.mimeType || 'application/octet-stream' }));
+        out.push(({ type:'compose_intent', composeId, text, attachments: metaList.length ? metaList : undefined, ...(includeWhy ? { why: reasoning } : {}), finalityHint: (buildFinalizationReminder(workingFacts as any, scenario, myId) ? 'conversation' : 'turn') } as ProposedFact));
+        try { ctx.hud('drafting', 'Prepared draft', 0.8); } catch {}
+        break;
       }
 
-      default: {
-        // Scenario tool?
-        const toolName = decision.tool;
-        const enabled = Array.isArray((ctx.config as any)?.enabledTools) ? (ctx.config as any).enabledTools as string[] : undefined;
-        if (enabled && !enabled.includes(toolName)) {
-          return [sleepFact(`Tool '${toolName}' disabled`, includeWhy, reasoning)];
-        }
-        const tdef = findScenarioTool(scenario, myId, toolName);
-        if (!tdef) {
-          return [sleepFact(`Unknown tool '${toolName}' → sleep.`, includeWhy, reasoning)];
-        }
-        // Hold tools if somehow not our turn (defensive, though we already gated earlier only on 'working')
-        if (status !== 'input-required') {
-          // We can *calculate* while remote is working, but your requirement says "hold tools during 'working'".
-          // Here status is not 'working'; still, if you want, add more gating. We'll allow tool now.
-        }
+      // Scenario tool name
+      if (enabledScenarioTools && !enabledScenarioTools.includes(decision.tool)) { out.push(sleepFact(`Tool '${decision.tool}' disabled`, includeWhy, reasoning)); break; }
+      const tdef = findScenarioTool(scenario, myId, decision.tool);
+      if (!tdef) { out.push(sleepFact(`Unknown tool '${decision.tool}' → sleep.`, includeWhy, reasoning)); break; }
 
-        // Execute tool via Oracle (LLM-synth), journal call/result and synthesized attachments
-        const callId = ctx.newId(`call:${toolName}:`);
-        const out: ProposedFact[] = [({
-          type: 'tool_call',
-          callId,
-          name: toolName,
-          args: decision.args || {},
-          ...(includeWhy ? { why: reasoning } : {})
-        }) as ProposedFact];
-
-        ctx.hud('tool', `Executing ${toolName}`);
-        const exec = await runToolOracle({
-          tool: tdef,
-          args: decision.args || {},
-          scenario,
-          myAgentId: myId,
-          conversationHistory: xmlHistory,
-          leadingThought: reasoning,
-          llm: ctx.llm,
-          model: model
-        });
-
-        if (!exec.ok) {
-          out.push(({
-            type: 'tool_result',
-            callId,
-            ok: false,
-            error: exec.error || 'Tool failed',
-            ...(includeWhy ? { why: 'Tool execution error.' } : {})
-          }) as ProposedFact);
-          out.push(sleepFact('Tool error → sleeping.', includeWhy));
-          return out;
-        }
-
-        // ok: attach synthesized docs if any
-        out.push(({
-          type: 'tool_result',
-          callId,
-          ok: true,
-          result: exec.result ?? null,
-          ...(includeWhy ? { why: 'Tool execution succeeded.' } : {})
-        }) as ProposedFact);
-
-        const introduced = new Set<string>();
-        for (const doc of exec.attachments) {
-          out.push(({
-            type: 'attachment_added',
-            name: doc.name,
-            mimeType: doc.mimeType,
-            bytes: doc.bytesBase64,
-            origin: 'synthesized',
-            producedBy: { callId, name: tdef.toolName, args: decision.args || {} },
-            ...(includeWhy ? { why: 'Synthesized by scenario tool.' } : {})
-          }) as ProposedFact);
-          introduced.add(doc.name);
-        }
-
-        // If terminal tool, auto‑prep final compose (composer will open; harness can set finality=conversation on send)
-        if (tdef.endsConversation) {
-          const composeId = ctx.newId('c:');
-          const attMeta: AttachmentMeta[] = exec.attachments.map(a => ({ name: a.name, mimeType: a.mimeType }));
-          const text = finalComposeFromTerminal(exec, tdef, scenario, myId);
-          out.push(({
-            type: 'compose_intent',
-            composeId,
-            text,
-            attachments: attMeta.length ? attMeta : undefined,
-            ...(includeWhy ? { why: `Terminal tool '${tdef.toolName}' completed; send final response.` } : {})
-          }) as ProposedFact);
-          return out; // terminal fact already last
-        }
-
-        // Non-terminal tool: either ask user, propose a draft (if allowed), or sleep.
-        // Honor your rule: remote messaging only when input-required.
-        if (status === 'input-required') {
-          const draft = draftComposeFromTool(exec, tdef, scenario, myId);
-          if (draft) {
-            out.push(({
-              type: 'compose_intent',
-              composeId: ctx.newId('c:'),
-              text: draft.text,
-              attachments: draft.attachments?.length ? draft.attachments : undefined,
-              ...(includeWhy ? { why: `Proposed draft after '${tdef.toolName}'.` } : {})
-            }) as ProposedFact);
-            return out;
-          }
-        }
-
-        out.push(sleepFact(`Finished '${tdef.toolName}' — awaiting next event.`, includeWhy));
-        return out;
+      const callId = ctx.newId(`call:${decision.tool}:`);
+      try { ctx.hud('tool', `Tool: ${decision.tool}(${shortArgs(decision.args || {})})`, 0.7); } catch {}
+      out.push(({ type:'tool_call', callId, name: decision.tool, args: decision.args || {}, ...(includeWhy ? { why: reasoning } : {}) } as ProposedFact));
+      const exec = await runToolOracle({ tool: tdef, args: decision.args || {}, scenario, myAgentId: myId, conversationHistory: xmlHistory, leadingThought: reasoning, llm: ctx.llm, model });
+      if (!exec.ok) {
+        out.push(({ type:'tool_result', callId, ok:false, error: exec.error || 'Tool failed', ...(includeWhy ? { why:'Tool execution error.' } : {}) } as ProposedFact));
+        out.push(sleepFact('Tool error → sleeping.', includeWhy));
+        break;
       }
+      out.push(({ type:'tool_result', callId, ok:true, result: exec.result ?? null, ...(includeWhy ? { why:'Tool execution succeeded.' } : {}) } as ProposedFact));
+      for (const doc of exec.attachments) out.push(({ type:'attachment_added', name: doc.name, mimeType: doc.mimeType, bytes: doc.bytesBase64, origin:'synthesized', producedBy:{ callId, name: tdef.toolName, args: decision.args || {} }, ...(includeWhy ? { why:'Synthesized by scenario tool.' } : {}) } as ProposedFact));
+      // Update working facts
+      workingFacts.push({ type:'tool_call', callId, name: decision.tool, args: decision.args || {} } as any);
+      workingFacts.push({ type:'tool_result', callId, ok:true, result: exec.result ?? null } as any);
+      for (const doc of exec.attachments) workingFacts.push({ type:'attachment_added', name: doc.name, mimeType: doc.mimeType, bytes: doc.bytesBase64, origin:'synthesized', producedBy:{ callId, name: tdef.toolName } } as any);
+      // continue loop (if terminal, next iteration will finalize via FINALIZATION_REMINDER)
     }
+
+    if (!out.length) out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We are still preparing the requested information; we will follow up shortly.' } as ProposedFact));
+    return out;
   }
 };
 
@@ -400,6 +245,14 @@ function parseAction(text: string): ParsedDecision {
     return { reasoning: 'parse-error', tool: 'sleep', args: {} };
   };
   return coerce(text || '');
+}
+
+function shortArgs(a: any): string {
+  try {
+    const s = JSON.stringify(a ?? {});
+    if (s.length <= 80) return s;
+    return s.slice(0, 77) + '…';
+  } catch { return ''; }
 }
 
 // LLM chat with simple exponential backoff and jitter

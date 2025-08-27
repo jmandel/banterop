@@ -178,9 +178,12 @@ export const useAppStore = create<Store>((set, get) => ({
   async fetchAndIngest() {
     const { adapter, taskId } = get();
     if (!adapter || !taskId) return;
+    const startedTaskId = taskId;
     set({ fetching: true });
     try {
       const snap = await adapter.snapshot(taskId);
+      // If task switched while we were fetching, discard stale results
+      if (get().taskId !== startedTaskId) return;
       if (!snap) return;
       const proposed = a2aToFacts(snap as any);
       stampAndAppend(set, get, proposed);

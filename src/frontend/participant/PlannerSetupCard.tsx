@@ -13,7 +13,8 @@ export function PlannerSetupCard({ urlSetup }: { urlSetup: any | null }) {
   const hud = useAppStore(s => s.hud);
   const [collapsed, setCollapsed] = React.useState<boolean>(ready);
 
-  React.useEffect(() => { if (ready) setCollapsed(true); }, [ready]);
+  // Only allow collapsing when configured; expand when not ready
+  React.useEffect(() => { setCollapsed(!!ready); }, [ready]);
 
   const llm = React.useMemo(() => makeChitchatProvider(DEFAULT_CHITCHAT_ENDPOINT), []);
   const [cfg, setCfg] = React.useState<any>(null);
@@ -47,6 +48,24 @@ export function PlannerSetupCard({ urlSetup }: { urlSetup: any | null }) {
   const snap = React.useSyncExternalStore(subscribe, getSnapshot);
 
   const canBegin = ready && role === 'initiator' && !taskId;
+  const facts = useAppStore(s => s.facts);
+  const hasUnsentDraft = React.useMemo(() => {
+    const dismissed = new Set<string>(facts.filter(f=>f.type==='compose_dismissed').map((f:any)=>String(f.composeId||'')));
+    for (let i = facts.length - 1; i >= 0; --i) {
+      const f = facts[i];
+      if (f.type === 'compose_intent') {
+        const cid = String((f as any).composeId||'');
+        if (cid && !dismissed.has(cid)) {
+          // if any remote_sent appears after this compose, it's not unsent
+          let sentAfter = false;
+          for (let j = i + 1; j < facts.length; j++) { if (facts[j].type === 'remote_sent') { sentAfter = true; break; } }
+          if (!sentAfter) return true;
+        }
+      }
+    }
+    return false;
+  }, [facts]);
+  const canShowBegin = canBegin && (hud?.phase === 'idle' || !hud) && !hasUnsentDraft;
   const [autoApplied, setAutoApplied] = React.useState(false);
   const kickoffPref = React.useMemo(() => {
     const ks = urlSetup && urlSetup.planner && urlSetup.planner.id === pid ? (urlSetup.kickoff || 'never') : 'never';
@@ -92,29 +111,67 @@ export function PlannerSetupCard({ urlSetup }: { urlSetup: any | null }) {
     return (
       <form onSubmit={handleSubmit} onKeyDown={handleKeyDown} className="card" style={{ marginTop: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button className="btn ghost" type="button" onClick={() => setCollapsed(v => !v)} aria-label={collapsed ? 'Expand planner setup' : 'Collapse planner setup'} style={{ fontSize: 18, width: 34, height: 34, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-            {collapsed ? '▸' : '▾'}
-          </button>
-          <strong>Planner — {planner?.name || '—'}</strong>
-          <span className="small muted" style={{ marginLeft: 8 }}>
-            {ready ? 'Ready' : 'Not configured'}
-            {collapsed && ((planner as any)?.summarizeApplied?.(applied) || snap?.summary) ? ` • ${(planner as any)?.summarizeApplied?.(applied) || snap.summary}` : ''}
-          </span>
-          <span style={{ marginLeft: 'auto' }} />
-          {hud && hud.phase !== 'idle' && (
-            <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-              <span className="pill">{hud.phase}{hud.label ? ` — ${hud.label}` : ''}</span>
-              {typeof hud.p === 'number' && (
-                <div style={{ width: 160, height: 6, background: '#eef1f7', borderRadius: 4 }}>
-                  <div style={{ width: `${Math.round(Math.max(0, Math.min(1, hud.p)) * 100)}%`, height: '100%', background: '#5b7cff', borderRadius: 4 }} />
-                </div>
-              )}
-            </div>
+          {ready && (
+            <button className="btn ghost" type="button" onClick={() => setCollapsed(v => !v)} aria-label={collapsed ? 'Expand planner setup' : 'Collapse planner setup'} style={{ fontSize: 18, width: 34, height: 34, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              {collapsed ? '▸' : '▾'}
+            </button>
           )}
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+            {ready && (
+              (hud && hud.phase && hud.phase !== 'idle')
+                ? <span className="working-dot" aria-label="Working" title="Working" />
+                : <span className="idle-dot" aria-label="Ready" title="Ready" />
+            )}
+            {(() => {
+              const phase = hud?.phase || 'idle';
+              const raw = String(hud?.label || '').trim();
+              const isTool = phase === 'tool';
+              // Normalize label for tool phase
+              let name: string | null = null;
+              let argsText: string | null = null;
+              if (isTool && raw) {
+                // Patterns to support: "Tool: name(argsJSON)", "Executing name", "name(argsJSON)"
+                const m1 = raw.match(/^Tool:\s*([^\(\s]+)\s*\((.*)\)\s*$/);
+                if (m1) { name = m1[1]; argsText = m1[2]; }
+                else {
+                  const m2 = raw.match(/^Executing\s+([^\s]+)\s*$/);
+                  if (m2) { name = m2[1]; }
+                  else {
+                    const m3 = raw.match(/^([^\(\s]+)\s*\((.*)\)\s*$/);
+                    if (m3) { name = m3[1]; argsText = m3[2]; }
+                  }
+                }
+              }
+              const pillText = (() => {
+                if (isTool) return `Tool — ${raw && raw.startsWith('Executing') ? raw : (name ? `Executing ${name}` : 'Executing')}`;
+                if (phase === 'idle') return 'Idle';
+                const cap = phase.slice(0,1).toUpperCase() + phase.slice(1);
+                return raw ? `${cap} — ${raw}` : cap;
+              })();
+              // Build tooltip (full pretty JSON) for tool inputs
+              let tooltip: string | undefined;
+              if (isTool && name) {
+                let parsed: any = undefined;
+                try { if (argsText) parsed = JSON.parse(argsText); } catch {}
+                const fullObj: any = { name, args: parsed ?? (argsText ? String(argsText) : {}) };
+                try { tooltip = JSON.stringify(fullObj, null, 2); } catch {}
+              }
+              return (
+                <>
+                  <span className="pill">{pillText}</span>
+                  {isTool && name && (
+                    <span className="hud-json" title={tooltip || `{\n  \"name\": \"${name}\",\n  \"args\": ${argsText ? argsText : '{}'}\n}`}>
+                      {`{\"name\":\"${name}\", \"args\": ${argsText ? argsText : '{}'}}`}
+                    </span>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+          {canShowBegin && <button className="btn" onClick={() => useAppStore.getState().kickoffConversationWithPlanner()}>Begin conversation</button>}
           {!collapsed && (
             <button className="btn" type="submit" disabled={!snap?.canSave || snap?.pending}>Save & Apply</button>
           )}
-          {canBegin && <button className="btn" onClick={() => useAppStore.getState().kickoffConversationWithPlanner()}>Begin conversation</button>}
         </div>
         {!collapsed && (
           <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -155,4 +212,3 @@ function renderField(f: any, setField: (k: string, v: any) => void) {
   }
   return null;
 }
-

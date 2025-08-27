@@ -137,7 +137,12 @@ function parseSetupFromLocation(): UrlSetup | null {
     <div className="wrap">
       <div className="card">
         <div className="row">
-          <div><strong>Role:</strong> <span className="pill">{role === 'initiator' ? 'Initiator' : 'Responder'}</span></div>
+          {(() => {
+            const transportLabel = transport === 'mcp' ? 'MCP' : 'A2A';
+            const roleLabel = role === 'initiator' ? (transport === 'mcp' ? 'Client' : 'Client') : 'Server';
+            const label = `${transportLabel} ${roleLabel}`;
+            return (<div><strong>Role:</strong> <span className="pill">{label}</span></div>);
+          })()}
           <PlannerSelector />
           <PlannerModeSelector />
           {role==='initiator' && (
