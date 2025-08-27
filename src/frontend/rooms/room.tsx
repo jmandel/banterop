@@ -9,7 +9,8 @@ import { startPlannerController } from '../planner/controller'
 function useRoom() {
   const url = new URL(window.location.href)
   const parts = url.pathname.split('/').filter(Boolean)
-  const roomId = parts[1] || ''
+  const qp = url.searchParams.get('roomId') || ''
+  const roomId = qp || parts[1] || ''
   const base = `${url.origin}`
   const a2a = `${base}/api/bridge/${roomId}/a2a`
   const tasks = `${base}/api/pairs/${roomId}/server-events?mode=backend`

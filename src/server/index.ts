@@ -74,10 +74,7 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
   app.route('/api', mcpRoutes())
   app.route('/api', pairsRoutes(true))
 
-  // Rooms: serve HTML and agent card
-  app.get('/rooms/:roomId', (c) => {
-    return c.html(roomsHtml)
-  })
+  // Rooms: serve agent card (dynamic JSON)
   app.get('/rooms/:roomId/agent-card.json', (c) => {
     const { roomId } = c.req.param()
     const origin = new URL(c.req.url).origin
@@ -92,6 +89,7 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
     }
     return c.json(json)
   })
+  // Note: dynamic HTML for /rooms/:roomId is served via Bun.serve routes below
 
   const isDev = opts?.development ?? ((Bun.env.NODE_ENV || process.env.NODE_ENV) !== 'production')
   const port = typeof opts?.port === 'number' ? opts!.port : Number(process.env.PORT ?? env.PORT ?? 3000)
@@ -106,13 +104,20 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
       '/control/': controlHtml,
       '/participant/': participantHtml,
       '/rooms/': roomsHtml,
+      // Serve dynamic room page directly (same bundled HTML)
+      '/rooms/:roomId': roomsHtml,
     },
     async fetch(req, srv) {
       const url = new URL(req.url)
-      if (!['/','/control/','/participant/','/rooms/'].includes(url.pathname)) {
-        return app.fetch(req, srv)
+      const staticPages: Record<string, string> = {
+        '/': controlHtml,
+        '/control/': controlHtml,
+        '/participant/': participantHtml,
+        '/rooms/': roomsHtml,
       }
-      return new Response('Not Found', { status: 404 })
+      const html = staticPages[url.pathname]
+      if (html) return new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } })
+      return app.fetch(req, srv)
     },
   })
 

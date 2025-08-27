@@ -105,7 +105,15 @@ export function createPairsService({ db, events }: Deps) {
 
   function ensureEpoch(pairId: string): { epoch: number } {
     const p = db.getPair(pairId)
-    if (!p) throw new Error('pair not found')
+    if (!p) {
+      // Auto-create pair/epoch on first access for Rooms semantics
+      try { db.createPair(pairId) } catch {}
+      const epoch = 1
+      db.setPairEpoch(pairId, epoch)
+      db.createEpochTasks(pairId, epoch)
+      events.push(pairId, { type:'epoch-begin', epoch } as any)
+      return { epoch }
+    }
     if (p.epoch === 0) {
       const epoch = 1
       db.setPairEpoch(pairId, epoch)
@@ -128,7 +136,7 @@ export function createPairsService({ db, events }: Deps) {
   // current epoch is terminal before incrementing, or derive the correct sender taskId.
   function ensureEpochForSend(pairId: string): { epoch: number } {
     const p = db.getPair(pairId)
-    if (!p) throw new Error('pair not found')
+    if (!p) return ensureEpoch(pairId)
     if (p.epoch === 0) return ensureEpoch(pairId)
     const next = (p.epoch || 0) + 1
     db.setPairEpoch(pairId, next)

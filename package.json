@@ -7,7 +7,7 @@
     "dev": "bun --watch src/server/index.ts",
     "start": "bun src/server/index.ts",
     "test": "bun test",
-    "test:timeout": "timeout ${TEST_TIMEOUT:-120}s bun test || ec=$?; if [ $ec -eq 124 ]; then echo 'Test run timed out'; exit 1; else exit $ec; fi",
+    "test:timeout": "timeout ${TEST_TIMEOUT:-5}s bun test --bail || ec=$?; if [ $ec -eq 124 ]; then echo 'Test run timed out'; exit 1; else exit $ec; fi",
     "typecheck": "bun x tsc --noEmit"
   },
   "dependencies": {

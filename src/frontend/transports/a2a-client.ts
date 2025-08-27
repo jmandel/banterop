@@ -87,6 +87,10 @@ export class A2AClient {
     const res = await fetch(this.ep(), { method:'POST', headers: { 'content-type':'application/json' }, body: JSON.stringify(body) });
     if (!res.ok) throw new Error('message/send failed: ' + res.status);
     const j = await res.json();
+    if (j && j.error) {
+      const msg = String(j.error?.message || 'JSON-RPC error');
+      throw new Error(`message/send JSON-RPC error: ${msg}`);
+    }
     return j.result as A2ATask;
   }
 }
