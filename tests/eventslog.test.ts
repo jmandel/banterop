@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
-import { startServer, stopServer, Spawned, decodeA2AUrl } from "./utils";
+import { startServer, stopServer, Spawned, decodeA2AUrl, openBackend } from "./utils";
 
 let S: Spawned;
 
@@ -13,6 +13,7 @@ describe("Control-plane event log", () => {
     expect(r.ok).toBeTrue();
     const j = await r.json();
     const pairId = j.pairId as string;
+    await openBackend(S, pairId);
 
     // Backlog replay from since=0 should include pair-created as first event
     {

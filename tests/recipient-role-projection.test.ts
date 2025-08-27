@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
-import { startServer, stopServer, Spawned, decodeA2AUrl, textPart } from "./utils";
+import { startServer, stopServer, Spawned, decodeA2AUrl, textPart, openBackend } from "./utils";
 
 let S: Spawned;
 
@@ -10,7 +10,9 @@ afterAll(async () => { await stopServer(S); });
 async function createPairA2A() {
   const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
   const j = await r.json();
-  return { pairId: j.pairId as string, a2a: decodeA2AUrl(j.links.initiator.joinA2a) };
+  const pairId = j.pairId as string;
+  await openBackend(S, pairId);
+  return { pairId, a2a: decodeA2AUrl(j.links.initiator.joinA2a) };
 }
 
 describe("Recipient role projection", () => {
@@ -37,4 +39,3 @@ describe("Recipient role projection", () => {
     expect(hist.some((m:any)=>m.parts?.some((p:any)=>p.text==='from-init') && m.role==='agent' && m.taskId===respId)).toBeTrue();
   });
 });
-

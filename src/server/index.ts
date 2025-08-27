@@ -14,6 +14,7 @@ import { serve } from 'bun'
 import { extractNextState, computeStatesForNext } from './core/finality'
 import controlHtml from '../frontend/control/index.html'
 import participantHtml from '../frontend/participant/index.html'
+import roomsHtml from '../frontend/rooms/index.html'
 
 export type AppBindings = {
   Bindings: Env
@@ -73,6 +74,25 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
   app.route('/api', mcpRoutes())
   app.route('/api', pairsRoutes(true))
 
+  // Rooms: serve HTML and agent card
+  app.get('/rooms/:roomId', (c) => {
+    return c.html(roomsHtml)
+  })
+  app.get('/rooms/:roomId/agent-card.json', (c) => {
+    const { roomId } = c.req.param()
+    const origin = new URL(c.req.url).origin
+    const json = {
+      name: 'flipproxy-room',
+      version: '1.0',
+      endpoints: {
+        a2a: `/api/bridge/${roomId}/a2a`,
+        mcp: `/api/bridge/${roomId}/mcp`,
+        tasks: `/api/pairs/${roomId}/server-events`
+      }
+    }
+    return c.json(json)
+  })
+
   const isDev = opts?.development ?? ((Bun.env.NODE_ENV || process.env.NODE_ENV) !== 'production')
   const port = typeof opts?.port === 'number' ? opts!.port : Number(process.env.PORT ?? env.PORT ?? 3000)
   const IDLE_TIMEOUT = 60
@@ -85,10 +105,11 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
       '/': controlHtml,
       '/control/': controlHtml,
       '/participant/': participantHtml,
+      '/rooms/': roomsHtml,
     },
     async fetch(req, srv) {
       const url = new URL(req.url)
-      if (!['/','/control/','/participant/'].includes(url.pathname)) {
+      if (!['/','/control/','/participant/','/rooms/'].includes(url.pathname)) {
         return app.fetch(req, srv)
       }
       return new Response('Not Found', { status: 404 })

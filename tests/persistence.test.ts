@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
-import { startServer, stopServer, Spawned, decodeA2AUrl, tmpDbPath } from "./utils";
+import { startServer, stopServer, Spawned, decodeA2AUrl, tmpDbPath, openBackend } from "./utils";
 
 // Persistence tests write a temporary on-disk DB and verify recovery across restart.
 
@@ -31,6 +31,7 @@ afterAll(async () => {
     const j = await r.json();
     const pairId = j.pairId as string;
     const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    await openBackend(S, pairId);
     const initTaskId = `init:${pairId}#1`;
 
     // Create epoch #1 via a no-op stream

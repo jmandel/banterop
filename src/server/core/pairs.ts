@@ -18,6 +18,31 @@ export type PairsService = ReturnType<typeof createPairsService>
 
 export function createPairsService({ db, events }: Deps) {
   const metadata = new Map<string, any>()
+  // Single Active Backend (SAB) lease map
+  const backendByRoom = new Map<string, { leaseId: string; connId: string; lastSeen: number }>()
+
+  function hasActiveBackend(roomId: string): boolean {
+    const l = backendByRoom.get(roomId)
+    if (!l) return false
+    return (Date.now() - l.lastSeen) < 45_000
+  }
+
+  function acquireBackend(roomId: string, connId: string): { granted: boolean; leaseId?: string } {
+    if (hasActiveBackend(roomId)) return { granted: false }
+    const leaseId = crypto.randomUUID()
+    backendByRoom.set(roomId, { leaseId, connId, lastSeen: Date.now() })
+    return { granted: true, leaseId }
+  }
+
+  function renewBackend(roomId: string, connId: string): void {
+    const l = backendByRoom.get(roomId)
+    if (l && l.connId === connId) l.lastSeen = Date.now()
+  }
+
+  function releaseBackend(roomId: string, connId: string): void {
+    const l = backendByRoom.get(roomId)
+    if (l && l.connId === connId) backendByRoom.delete(roomId)
+  }
 
   function sanitizeHistoryLength(v: unknown): number {
     const MAX = 10_000;
@@ -50,11 +75,6 @@ export function createPairsService({ db, events }: Deps) {
     return { id: row.task_id, contextId: row.pair_id, kind:'task', status:{ state, message: statusMessage }, history: hist }
   }
 
-  function buildHistory(pairId: string, epoch: number, excludeMessageId: string | undefined, limit: number): any[] {
-    // Not used anymore; history is pulled from DB in toSnapshot
-    return []
-  }
-
   function projectForViewer(message: any, viewerTaskId: string, viewerRole: 'init'|'resp', authorRoleHint?: 'init'|'resp') {
     try {
       const raw = typeof message === 'string' ? JSON.parse(message) : (message || {})
@@ -71,7 +91,6 @@ export function createPairsService({ db, events }: Deps) {
       return message
     }
   }
-  function latestMessageForEpoch(pairId: string, epoch: number): { messageId: string; message: any } | null { return null }
   function currentStateForEpoch(pairId: string, epoch: number, viewerRole: 'init'|'resp'): TaskState { return currentStateForEpochFromDb(pairId, epoch, viewerRole) }
 
   function currentStateForEpochFromDb(pairId: string, epoch: number, viewerRole: 'init'|'resp'): TaskState {
@@ -186,26 +205,46 @@ export function createPairsService({ db, events }: Deps) {
       const desired = extractNextState(msg) ?? 'input-required'
       const states = computeStatesForNext(senderRole, desired)
 
-      // Persist message first (idempotent by messageId), then emit SSE
+      // Persist caller's attempted message first (idempotent by messageId)
       try {
-        // Strip relative fields (role, taskId, contextId) from persisted JSON
         const { role: _r, taskId: _t, contextId: _c, ...persistBase } = msg as any
         db.insertMessage({ pair_id: pairId, epoch, author: senderRole, json: JSON.stringify(persistBase) })
       } catch (e: any) {
         const em = String(e?.message || '')
-        if (!em.includes('UNIQUE')) throw e // swallow duplicate messageId errors
+        if (!em.includes('UNIQUE')) throw e
       }
 
+      // If no active backend, generate protocol error message and fail the task in-band
+      if (!hasActiveBackend(pairId)) {
+        const otherRole = senderRole === 'init' ? 'resp' : 'init'
+        const errorMsg = {
+          role: otherRole === 'init' ? 'user' : 'agent',
+          parts: [{ kind:'text', text: `Room backend not open. Open /rooms/${pairId} in a browser and keep that tab open. Processing runs in your browser.` }],
+          messageId: `err:${crypto.randomUUID()}`,
+          taskId: senderId, // relative for viewer; persisted JSON will strip these
+          contextId: pairId,
+          kind: 'message',
+          metadata: { server: { category: 'room-error', reason: 'backend-not-open' }, 'https://chitchat.fhir.me/a2a-ext': { nextState: 'failed' } }
+        }
+        // Persist server-authored error message as canonical latest
+        try {
+          const { role: _r2, taskId: _t2, contextId: _c2, ...persistBase2 } = errorMsg as any
+          db.insertMessage({ pair_id: pairId, epoch, author: otherRole, json: JSON.stringify(persistBase2) })
+        } catch {}
+        // Persist FAILED states so snapshot reflects terminal state
+        await upsertStates(pairId, epoch, { init:'failed', resp:'failed' } as any, senderRole, errorMsg)
+        // Emit SSE events in consistent order: state → message(s)
+        events.push(pairId, { type: 'state', epoch, states: { initiator:'failed', responder:'failed' }, status: { message: errorMsg } } as any)
+        events.push(pairId, { type: 'message', epoch, messageId: msg.messageId, message: msg } as any)
+        events.push(pairId, { type: 'message', epoch, messageId: errorMsg.messageId, message: errorMsg } as any)
+        const snapRow = db.getTask(senderId)!
+        const limit = sanitizeHistoryLength(configuration?.historyLength)
+        return toSnapshot(snapRow, limit)
+      }
+
+      // Normal path: emit state then message
       await upsertStates(pairId, epoch, states, senderRole, msg)
-
-      // Mirror message to the other side so their snapshot has status.message
-      const otherRole = senderRole === 'init' ? 'resp' : 'init'
-      const otherId = otherRole === 'init' ? initTaskId(pairId, epoch) : respTaskId(pairId, epoch)
-      // mirrored status no longer persisted; snapshot uses events
-
-      // Record canonical message event for history (by epoch)
       events.push(pairId, { type: 'message', epoch, messageId: msg.messageId, message: msg } as any)
-
       const snapRow = db.getTask(senderId)!
       const limit = sanitizeHistoryLength(configuration?.historyLength)
       return toSnapshot(snapRow, limit)
@@ -279,5 +318,10 @@ export function createPairsService({ db, events }: Deps) {
       const { epoch } = ensureEpoch(pairId)
       return { initiatorTaskId: initTaskId(pairId, epoch), responderTaskId: respTaskId(pairId, epoch), epoch }
     },
+    // SAB helpers
+    hasActiveBackend(roomId: string) { return hasActiveBackend(roomId) },
+    acquireBackend(roomId: string, connId: string) { return acquireBackend(roomId, connId) },
+    renewBackend(roomId: string, connId: string) { return renewBackend(roomId, connId) },
+    releaseBackend(roomId: string, connId: string) { return releaseBackend(roomId, connId) },
   }
 }

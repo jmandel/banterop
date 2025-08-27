@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
-import { startServer, stopServer, Spawned, decodeA2AUrl, tmpDbPath, textPart } from "./utils";
+import { startServer, stopServer, Spawned, decodeA2AUrl, tmpDbPath, textPart, openBackend } from "./utils";
 
 let S: Spawned;
 let DB: string;
@@ -27,6 +27,7 @@ describe("Persistence — messages and state across restart", () => {
     const j = await r.json();
     const pairId = j.pairId as string;
     const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    await openBackend(S, pairId);
     const initTaskId = `init:${pairId}#1`;
     const respTaskId = `resp:${pairId}#1`;
 
@@ -127,6 +128,7 @@ describe("Persistence — messages and state across restart", () => {
     const j = await r.json();
     const pairId = j.pairId as string;
     const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    await openBackend(S, pairId);
 
     const init1 = `init:${pairId}#1`;
     const resp1 = `resp:${pairId}#1`;

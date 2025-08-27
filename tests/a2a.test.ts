@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
-import { startServer, stopServer, Spawned, decodeA2AUrl, textPart } from "./utils";
+import { startServer, stopServer, Spawned, decodeA2AUrl, textPart, openBackend } from "./utils";
 
 let S: Spawned;
 
@@ -10,7 +10,9 @@ afterAll(async () => { await stopServer(S); });
 async function createPairAndA2A() {
   const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
   const j = await r.json();
-  return { pairId: j.pairId as string, a2a: decodeA2AUrl(j.links.initiator.joinA2a) };
+  const pairId = j.pairId as string;
+  await openBackend(S, pairId);
+  return { pairId, a2a: decodeA2AUrl(j.links.initiator.joinA2a) };
 }
 
 describe("A2A JSON-RPC", () => {
@@ -82,7 +84,8 @@ describe("A2A JSON-RPC", () => {
     const r2 = await fetch(a2a, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ jsonrpc:'2.0', id:'g', method:'tasks/get', params:{ id: respId } }) });
     const j2 = await r2.json();
     expect(j2.result.id).toBe(respId);
-    expect(j2.result.status.state).toBe('input-required');
+    // With mandatory backend, first send without backend sets failed
+    expect(j2.result.status.state).toBe('failed');
   });
 
   it("message/send without taskId starts next epoch if tasks already exist", async () => {

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { startServer, stopServer, Spawned, decodeA2AUrl } from "./utils";
+import { startServer, stopServer, Spawned, decodeA2AUrl, openBackend } from "./utils";
 
 let S: Spawned;
 
@@ -12,6 +12,7 @@ describe("nextState metadata placement", () => {
     const j = await r.json();
     const pairId = j.pairId as string;
     const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    await openBackend(S, pairId);
     const initId = `init:${pairId}#1`;
     const respId = `resp:${pairId}#1`;
 
@@ -42,6 +43,7 @@ describe("nextState metadata placement", () => {
     const j = await r.json();
     const pairId = j.pairId as string;
     const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    await openBackend(S, pairId);
     const initId = `init:${pairId}#1`;
     const respId = `resp:${pairId}#1`;
 

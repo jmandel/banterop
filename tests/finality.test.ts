@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { startServer, stopServer, Spawned, decodeA2AUrl, textPart } from "./utils";
+import { startServer, stopServer, Spawned, decodeA2AUrl, textPart, openBackend } from "./utils";
 
 let S: Spawned;
 
@@ -18,6 +18,7 @@ describe('Finality transitions', () => {
     const j = await r.json();
     const pairId = j.pairId as string;
     const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    await openBackend(S, pairId);
     const initId = `init:${pairId}#1`;
     const respId = `resp:${pairId}#1`;
 
@@ -36,6 +37,7 @@ describe('Finality transitions', () => {
     const j = await r.json();
     const pairId = j.pairId as string;
     const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    await openBackend(S, pairId);
     const initId = `init:${pairId}#1`;
     const respId = `resp:${pairId}#1`;
 
@@ -57,6 +59,7 @@ describe('Finality transitions', () => {
     const j = await r.json();
     const pairId = j.pairId as string;
     const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    await openBackend(S, pairId);
     const initId = `init:${pairId}#1`;
     const respId = `resp:${pairId}#1`;
 

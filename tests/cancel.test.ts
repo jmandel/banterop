@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
-import { startServer, stopServer, Spawned, decodeA2AUrl, textPart } from "./utils";
+import { startServer, stopServer, Spawned, decodeA2AUrl, textPart, openBackend } from "./utils";
 
 let S: Spawned;
 
@@ -15,6 +15,7 @@ describe("Cancel semantics", () => {
     const j = await r.json();
     const pairId = j.pairId as string;
     const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    await openBackend(S, pairId);
     const initTaskId = `init:${pairId}#1`;
     const respTaskId = `resp:${pairId}#1`;
 
@@ -79,6 +80,7 @@ describe("Cancel semantics", () => {
     const j = await r.json();
     const pairId = j.pairId as string;
     const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    await openBackend(S, pairId);
     const initTaskId = `init:${pairId}#1`;
     const respTaskId = `resp:${pairId}#1`;
 
@@ -113,6 +115,7 @@ describe("Cancel semantics", () => {
     const j = await r.json();
     const pairId = j.pairId as string;
     const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    await openBackend(S, pairId);
     const initTaskId = `init:${pairId}#1`;
     const respTaskId = `resp:${pairId}#1`;
 

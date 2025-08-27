@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
-import { startServer, stopServer, Spawned } from "./utils";
+import { startServer, stopServer, Spawned, openBackend } from "./utils";
 
 let S: Spawned;
 
@@ -24,6 +24,7 @@ describe('events.log invariants', () => {
 
     // Cause activity (epoch-begin/backchannel/state/message)
     const a2a = `${S.base}/api/bridge/${pairId}/a2a`;
+    await openBackend(S, pairId);
     await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params:{ message:{ role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
 
     // Reconnect since=firstSeq and assert first observed seq > baseline

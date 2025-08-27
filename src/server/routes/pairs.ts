@@ -59,6 +59,7 @@ export function pairsRoutes(includeNonApi = false) {
     // Responder backchannel: emits subscribe after epoch-begin
     r.get('/pairs/:pairId/server-events', async (c) => {
       const { pairId } = c.req.param()
+      const mode = (c.req.query('mode') || 'observer').toLowerCase()
       const headers = { 'content-type':'text/event-stream', 'cache-control':'no-cache, no-transform', 'connection':'keep-alive', 'x-accel-buffering':'no' }
       const body = new ReadableStream({
         async start(controller) {
@@ -66,7 +67,20 @@ export function pairsRoutes(includeNonApi = false) {
           const write = (obj:any) => controller.enqueue(enc.encode(`data: ${JSON.stringify({ result: obj })}\n\n`))
           const events = c.get('events')
           const pairs = c.get('pairs')
-          const ping = setInterval(() => { try { controller.enqueue(enc.encode(`event: ping\ndata: ${Date.now()}\n\n`)) } catch {} }, 15000)
+          const connId = crypto.randomUUID()
+          let granted = false
+          // Attempt backend lease if requested
+          if (mode === 'backend') {
+            try {
+              const acq = (pairs as any).acquireBackend(pairId, connId)
+              if (acq?.granted) { write({ type:'backend-granted', leaseId: acq.leaseId }) ; granted = true }
+              else { write({ type:'backend-denied' }) }
+            } catch {}
+          }
+          const ping = setInterval(() => { try {
+            controller.enqueue(enc.encode(`event: ping\ndata: ${Date.now()}\n\n`))
+            if (granted) { try { (pairs as any).renewBackend(pairId, connId) } catch {} }
+          } catch {} }, 15000)
           try {
             // On connect, emit subscribe for the current epoch only
             try {
@@ -84,7 +98,11 @@ export function pairsRoutes(includeNonApi = false) {
               }
             }
           } catch {}
-          finally { clearInterval(ping); try { controller.close() } catch {} }
+          finally {
+            clearInterval(ping)
+            if (granted) { try { (pairs as any).releaseBackend(pairId, connId) } catch {} }
+            try { controller.close() } catch {}
+          }
         }
       })
       return new Response(body, { status:200, headers })
