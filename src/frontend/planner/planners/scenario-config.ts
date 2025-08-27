@@ -51,7 +51,15 @@ export function createScenarioConfigStore(opts: { llm: any; initial?: any }): Pl
       { key: 'scenarioUrl', type: 'text', label: 'Scenario JSON URL', value: initialScenarioUrl, placeholder: 'URL…', required: true },
       { key: 'model', type: 'select', label: 'Model', value: String(opts.initial?.model || ''), options: [], pending: true },
       { key: 'myAgentId', type: 'select', label: 'My role (agent)', value: String(opts.initial?.myAgentId || ''), options: [], visible: false, pending: true },
-      { key: 'enabledTools', type: 'checkbox-group', label: 'Tools to enable', value: [], options: [], visible: false },
+      { key: 'enabledTools', type: 'checkbox-group', label: 'Scenario tools', value: [], options: [], visible: false },
+      { key: 'enabledCoreTools', type: 'checkbox-group', label: 'Core tools', value: Array.isArray((opts.initial as any)?.enabledCoreTools) ? (opts.initial as any).enabledCoreTools : ['sendMessageToRemoteAgent','sendMessageToMyPrincipal','readAttachment','sleep','done'], options: [
+        { value:'sendMessageToRemoteAgent', label:'Send message to remote agent' },
+        { value:'sendMessageToMyPrincipal', label:'Send message to my principal (user prompt)' },
+        { value:'readAttachment', label:'Read attachment' },
+        { value:'sleep', label:'Sleep' },
+        { value:'done', label:'Done' },
+      ], visible: true },
+      { key: 'maxInlineSteps', type: 'text', label: 'Max inline steps', value: String((opts.initial as any)?.maxInlineSteps ?? 20), placeholder: 'e.g., 20', help: 'How many planner steps to take in one pass (1–50). Default 20.' },
     ];
 
     const snap: ConfigSnapshot = {
@@ -202,6 +210,13 @@ export function createScenarioConfigStore(opts: { llm: any; initial?: any }): Pl
           toolsField.options = tools.map((t:any)=>({ value: String(t?.toolName||''), label: toolLabel(t) }));
           toolsField.value = toolNames;
         }
+      } else if (key === 'maxInlineSteps') {
+        const n = Number(value);
+        if (!Number.isFinite(n) || n < 1 || n > 50) {
+          f.error = 'Enter a number between 1 and 50.';
+        } else {
+          f.error = null;
+        }
       }
       const anyPending = get().snap.fields.some(x => x.pending);
       const anyError = get().snap.fields.some(x => x.error);
@@ -222,6 +237,8 @@ export function createScenarioConfigStore(opts: { llm: any; initial?: any }): Pl
         model: String(val('model') || ''),
         myAgentId: String(val('myAgentId') || ''),
         enabledTools: (val('enabledTools') as string[]) || [],
+        enabledCoreTools: (val('enabledCoreTools') as string[]) || ['sendMessageToRemoteAgent','sendMessageToMyPrincipal','readAttachment','sleep','done'],
+        maxInlineSteps: (()=>{ const n = Number(val('maxInlineSteps')); return Number.isFinite(n) ? n : 20; })(),
       };
       return { applied, ready: true };
     }
@@ -257,6 +274,8 @@ export interface ScenarioPlannerApplied {
   model?: string;
   myAgentId?: string;
   enabledTools?: string[];
+  enabledCoreTools?: string[];
+  maxInlineSteps?: number;
 }
 
 ;(ScenarioPlannerV03 as any).createConfigStore = createScenarioConfigStore;
@@ -265,6 +284,8 @@ export interface ScenarioPlannerApplied {
   model: String(applied?.model || ''),
   myAgentId: String(applied?.myAgentId || ''),
   enabledTools: Array.isArray(applied?.enabledTools) ? applied.enabledTools : undefined,
+  enabledCoreTools: Array.isArray(applied?.enabledCoreTools) ? applied.enabledCoreTools : ['sendMessageToRemoteAgent','sendMessageToMyPrincipal','readAttachment','sleep','done'],
+  maxInlineSteps: (typeof applied?.maxInlineSteps === 'number' ? applied.maxInlineSteps : 20),
 });
 ;(ScenarioPlannerV03 as any).summarizeApplied = (applied: ScenarioPlannerApplied) => {
   const title = applied?.resolvedScenario?.metadata?.title || applied?.resolvedScenario?.metadata?.id || '';

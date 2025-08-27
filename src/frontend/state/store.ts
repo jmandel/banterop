@@ -118,6 +118,10 @@ export const useAppStore = create<Store>((set, get) => ({
           if (myAgentId) slim.myAgentId = myAgentId;
           const tools = (applied as any)?.enabledTools;
           if (Array.isArray(tools) && tools.length) slim.enabledTools = tools;
+          const coreTools = (applied as any)?.enabledCoreTools;
+          if (Array.isArray(coreTools) && coreTools.length) slim.enabledCoreTools = coreTools;
+          const maxSteps = Number((applied as any)?.maxInlineSteps);
+          if (Number.isFinite(maxSteps) && maxSteps > 0) slim.maxInlineSteps = maxSteps;
           appliedForUrl = slim;
         } else if (applied && typeof applied === 'object') {
           // Generic: drop known heavy keys if present

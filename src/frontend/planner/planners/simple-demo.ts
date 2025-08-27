@@ -105,3 +105,6 @@ Clinical notes attached. Requesting MRI knee per guideline after failed conserva
     }];
   }
 };
+
+// Attach harness config mapper for thin registry usage
+;(SimpleDemoPlanner as any).toHarnessCfg = (applied?: any) => ({ mode: (applied?.mode || 'suggest') });

@@ -1,12 +1,6 @@
 // src/frontend/planner/planners/scenario-planner.ts
 //
 // Scenario-aware planner for v0.3 Planner API.
-// Core behaviors ported from the older ScenarioPlanner:
-//  - Hold during 'working' (emit sleep only)
-//  - Only propose remote messaging when status === 'input-required' (or initial kick-off if enabled)
-//  - Exactly one user wrap-up question after 'completed'
-//  - Terminal tools: after endsConversation tool, auto-propose a compose with attachments
-//
 // NOTES
 // - This file is self-contained except for imports of your v0.3 types and the ScenarioConfiguration types.
 // - No adapters; returns ProposedFacts[] directly per v0.3.
@@ -34,6 +28,10 @@ export interface ScenarioPlannerConfig {
   enabledTools?: string[];
   /** Which agent we are playing as (agentId). Defaults to first agent. */
   myAgentId?: string;
+  /** Core tools allow-list (send/read/sleep/done/principal). Omit → all enabled. */
+  enabledCoreTools?: string[];
+  /** Max planner steps within one pass (reserved; defaults handled by planner). */
+  maxInlineSteps?: number;
 }
 
 export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
@@ -98,7 +96,10 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
 
     const allowSendToRemote = status === 'input-required';
     const enabledTools = Array.isArray((ctx.config as any)?.enabledTools) ? (ctx.config as any).enabledTools as string[] : undefined;
-    const toolsCatalog = buildToolsCatalog(scenario, myId, { allowSendToRemote }, enabledTools);
+    const coreTools = Array.isArray(cfg.enabledCoreTools) && cfg.enabledCoreTools.length
+      ? cfg.enabledCoreTools
+      : ['sendMessageToRemoteAgent','sendMessageToMyPrincipal','readAttachment','sleep','done'];
+    const toolsCatalog = buildToolsCatalog(scenario, myId, { allowSendToRemote }, enabledTools, coreTools);
 
     const finalizationReminder = buildFinalizationReminder(facts, scenario, myId) || undefined;
     const prompt = buildPlannerPrompt(scenario, myId, counterpartId, xmlHistory, availableFilesXml, toolsCatalog, finalizationReminder);
@@ -134,6 +135,9 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       }
 
       case 'sendMessageToMyPrincipal': {
+        if (!(Array.isArray(cfg.enabledCoreTools) ? cfg.enabledCoreTools.includes('sendMessageToMyPrincipal') : true)) {
+          return [sleepFact('Core tool disabled: sendMessageToMyPrincipal', includeWhy)];
+        }
         const promptText = String(decision.args?.text || '').trim();
         const qid = ctx.newId('q:');
         if (!promptText) return [sleepFact('sendMessageToMyPrincipal: empty text → sleep', includeWhy, reasoning)];
@@ -165,6 +169,9 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
 
       case 'readAttachment':
       case 'read_attachment': {
+        if (!(Array.isArray(cfg.enabledCoreTools) ? cfg.enabledCoreTools.includes('readAttachment') : true)) {
+          return [sleepFact('Core tool disabled: readAttachment', includeWhy)];
+        }
         const name = String(decision.args?.name || '').trim();
         const callId = ctx.newId('call:read');
         const out: ProposedFact[] = [({
@@ -211,10 +218,16 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       }
 
       case 'done': {
+        if (!(Array.isArray(cfg.enabledCoreTools) ? cfg.enabledCoreTools.includes('done') : true)) {
+          return [sleepFact('Core tool disabled: done', includeWhy)];
+        }
         return [sleepFact('Planner declared done.', includeWhy, reasoning)];
       }
 
       case 'sendMessageToRemoteAgent': {
+        if (!(Array.isArray(cfg.enabledCoreTools) ? cfg.enabledCoreTools.includes('sendMessageToRemoteAgent') : true)) {
+          return [sleepFact('Core tool disabled: sendMessageToRemoteAgent', includeWhy)];
+        }
         // Only when status === 'input-required' (toolsCatalog gated this)
         // Harness now enforces turn-taking; planner remains permissive
         // Validate attachments exist at Cut
@@ -239,7 +252,8 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
           composeId,
           text,
           attachments: metaList.length ? metaList : undefined,
-          ...(includeWhy ? { why: reasoning } : {})
+          ...(includeWhy ? { why: reasoning } : {}),
+          finalityHint: finalizationReminder ? 'conversation' : 'turn'
         }) as ProposedFact;
         return [pf];
       }
@@ -690,18 +704,27 @@ function buildFinalizationReminder(facts: ReadonlyArray<Fact>, scenario: Scenari
 // Tools catalog presented to LLM
 // -----------------------------
 
-function buildToolsCatalog(scenario: ScenarioConfiguration, myAgentId: string, _opts: { allowSendToRemote: boolean }, enabledTools?: string[]) {
+function buildToolsCatalog(
+  scenario: ScenarioConfiguration,
+  myAgentId: string,
+  _opts: { allowSendToRemote: boolean },
+  enabledTools?: string[],
+  enabledCoreTools?: string[]
+) {
   const lines: string[] = [];
   lines.push('<TOOLS>');
   lines.push('Respond with exactly ONE JSON object describing your reasoning and chosen action.');
   lines.push('Schema: { reasoning: string, action: { tool: string, args: object } }');
   lines.push('');
 
-  // Core tools (no gating; harness enforces rules)
-  lines.push("// Send a message to the remote agent. Attachments by 'name'.");
-  lines.push("interface SendMessageToRemoteAgentArgs { text?: string; attachments?: Array<{ name: string }>; finality?: 'none'|'turn'|'conversation'; }");
-  lines.push('Tool: sendMessageToRemoteAgent: SendMessageToRemoteAgentArgs');
-  lines.push('');
+  const coreAllowed = new Set<string>(Array.isArray(enabledCoreTools) && enabledCoreTools.length ? enabledCoreTools : ['sendMessageToRemoteAgent','sendMessageToMyPrincipal','readAttachment','sleep','done']);
+  // Core: sendMessageToRemoteAgent
+  if (coreAllowed.has('sendMessageToRemoteAgent')) {
+    lines.push("// Send a message to the remote agent. Attachments by 'name'.");
+    lines.push("interface SendMessageToRemoteAgentArgs { text?: string; attachments?: Array<{ name: string }>; finality?: 'none'|'turn'|'conversation'; }");
+    lines.push('Tool: sendMessageToRemoteAgent: SendMessageToRemoteAgentArgs');
+    lines.push('');
+  }
 
   // Principal messaging
   try {
@@ -710,30 +733,38 @@ function buildToolsCatalog(scenario: ScenarioConfiguration, myAgentId: string, _
     const pName = String(me?.principal?.name || '').trim();
     const typeLabel = pType ? (pType === 'individual' ? 'individual' : pType === 'organization' ? 'organization' : pType) : '';
     const descSuffix = pName && typeLabel ? ` (${typeLabel}: ${pName})` : (pName ? ` (${pName})` : '');
-    lines.push(`// Send a message to your principal${descSuffix}.`);
+    if (coreAllowed.has('sendMessageToMyPrincipal')) lines.push(`// Send a message to your principal${descSuffix}.`);
   } catch {
-    lines.push('// Send a message to your principal.');
+    if (coreAllowed.has('sendMessageToMyPrincipal')) lines.push('// Send a message to your principal.');
   }
-  lines.push('interface sendMessageToMyPrincipalArgs { text: string; attachments?: Array<{ name: string }>; }');
-  lines.push('Tool: sendMessageToMyPrincipal: sendMessageToMyPrincipalArgs');
-  lines.push('');
+  if (coreAllowed.has('sendMessageToMyPrincipal')) {
+    lines.push('interface sendMessageToMyPrincipalArgs { text: string; attachments?: Array<{ name: string }>; }');
+    lines.push('Tool: sendMessageToMyPrincipal: sendMessageToMyPrincipalArgs');
+    lines.push('');
+  }
 
   // Sleep
-  lines.push('// Sleep until a new event arrives (no arguments).');
-  lines.push('type SleepArgs = {};');
-  lines.push('Tool: sleep: SleepArgs');
-  lines.push('');
+  if (coreAllowed.has('sleep')) {
+    lines.push('// Sleep until a new event arrives (no arguments).');
+    lines.push('type SleepArgs = {};');
+    lines.push('Tool: sleep: SleepArgs');
+    lines.push('');
+  }
 
   // Read attachment
-  lines.push('// Read a previously uploaded attachment by name (from AVAILABLE_FILES).');
-  lines.push('interface ReadAttachmentArgs { name: string }');
-  lines.push('Tool: readAttachment: ReadAttachmentArgs');
-  lines.push('');
+  if (coreAllowed.has('readAttachment')) {
+    lines.push('// Read a previously uploaded attachment by name (from AVAILABLE_FILES).');
+    lines.push('interface ReadAttachmentArgs { name: string }');
+    lines.push('Tool: readAttachment: ReadAttachmentArgs');
+    lines.push('');
+  }
 
   // Done
-  lines.push("// Declare that you're fully done.");
-  lines.push('interface DoneArgs { summary?: string }');
-  lines.push('Tool: done: DoneArgs');
+  if (coreAllowed.has('done')) {
+    lines.push("// Declare that you're fully done.");
+    lines.push('interface DoneArgs { summary?: string }');
+    lines.push('Tool: done: DoneArgs');
+  }
 
   // Scenario tools
   const me = (scenario?.agents || []).find(a => a.agentId === myAgentId) || scenario?.agents?.[0];

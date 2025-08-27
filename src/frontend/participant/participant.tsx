@@ -11,6 +11,8 @@ import { resolvePlanner } from '../planner/registry';
 import { makeChitchatProvider, DEFAULT_CHITCHAT_ENDPOINT } from '../../shared/llm-provider';
 import { b64ToUtf8, normalizeB64 } from '../../shared/codec';
 import { decodeSetup } from '../../shared/setup-hash';
+import { PlannerSetupCard } from './PlannerSetupCard';
+import { DebugPanel } from './DebugPanel';
 
 type Role = 'initiator'|'responder';
 

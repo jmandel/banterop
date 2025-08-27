@@ -1,6 +1,6 @@
 import { PlannerHarness } from './harness';
 import { SimpleDemoPlanner } from './planners/simple-demo';
-import { resolvePlanner, PlannerRegistry } from './registry';
+import { resolvePlanner } from './registry';
 import { useAppStore } from '../state/store';
 import { makeChitchatProvider, DEFAULT_CHITCHAT_ENDPOINT, DEFAULT_CHITCHAT_MODEL } from '../../shared/llm-provider';
 
@@ -40,7 +40,7 @@ export function startPlannerController() {
     const applied = s.appliedByPlanner[plannerId];
     const planner = ready && plannerId !== 'off' ? resolvePlanner(plannerId) : (NopPlanner as any);
     const cfg = ready && plannerId !== 'off'
-      ? ((planner as any)?.toHarnessCfg?.(applied) ?? PlannerRegistry[plannerId]?.toHarnessCfg(applied) ?? {})
+      ? ((planner as any)?.toHarnessCfg?.(applied) ?? {})
       : {};
     const getFacts = () => useAppStore.getState().facts;
     const getHead  = () => useAppStore.getState().head();
