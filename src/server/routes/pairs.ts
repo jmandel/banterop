@@ -69,6 +69,7 @@ export function pairsRoutes(includeNonApi = false) {
           const pairs = c.get('pairs')
           const connId = crypto.randomUUID()
           let granted = false
+          let ping: any = null
           // Attempt backend lease if requested
           if (mode === 'backend') {
             try {
@@ -77,7 +78,7 @@ export function pairsRoutes(includeNonApi = false) {
               else { write({ type:'backend-denied' }) }
             } catch {}
           }
-          const ping = setInterval(() => { try {
+          ping = setInterval(() => { try {
             controller.enqueue(enc.encode(`event: ping\ndata: ${Date.now()}\n\n`))
             if (granted) { try { (pairs as any).renewBackend(pairId, connId) } catch {} }
           } catch {} }, 15000)
@@ -103,6 +104,13 @@ export function pairsRoutes(includeNonApi = false) {
             if (granted) { try { (pairs as any).releaseBackend(pairId, connId) } catch {} }
             try { controller.close() } catch {}
           }
+        },
+        cancel() {
+          try { /* ensure lease release on client disconnect */ } catch {}
+          try {
+            const pairs = c.get('pairs')
+            ;(pairs as any).releaseBackend(pairId, connId)
+          } catch {}
         }
       })
       return new Response(body, { status:200, headers })
