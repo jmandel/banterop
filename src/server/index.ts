@@ -11,6 +11,7 @@ import { pairsRoutes } from './routes/pairs'
 import { a2aRoutes } from './routes/a2a'
 import { mcpRoutes } from './routes/mcp'
 import { serve } from 'bun'
+import { extractNextState, computeStatesForNext } from './core/finality'
 import controlHtml from '../frontend/control/index.html'
 import participantHtml from '../frontend/participant/index.html'
 
@@ -36,6 +37,33 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
   const eventsMax = Number(((opts?.env as any)?.FLIPPROXY_EVENTS_MAX ?? process.env.FLIPPROXY_EVENTS_MAX ?? 5000))
   const events = createEventStore({ maxPerPair: eventsMax })
   const pairs = createPairsService({ db, events, baseUrl: env.BASE_URL })
+
+  // Seed SSE ring from DB for current epochs
+  try {
+    const all = db.listPairs()
+    for (const p of all) {
+      const pairId = p.pair_id
+      const epoch = p.epoch || 0
+      if (epoch <= 0) continue
+      events.push(pairId, { type:'epoch-begin', epoch } as any)
+      // replay messages (bounded by ring max per pair)
+      const rows = db.listMessages(pairId, epoch, { order:'ASC', limit: eventsMax })
+      let last: { author:'init'|'resp'; msg:any } | null = null
+      for (const r of rows) {
+        const msg = (()=>{ try { return JSON.parse(r.json) } catch { return null } })()
+        if (!msg) continue
+        events.push(pairId, { type:'message', epoch, messageId: String(msg.messageId||''), message: msg } as any)
+        last = { author: r.author, msg }
+      }
+      if (last) {
+        const desired = extractNextState(last.msg) ?? 'input-required'
+        const states = computeStatesForNext(last.author, desired)
+        events.push(pairId, { type:'state', epoch, states, status:{ message:last.msg } } as any)
+      } else {
+        events.push(pairId, { type:'state', epoch, states:{ initiator:'submitted', responder:'submitted' } } as any)
+      }
+    }
+  } catch {}
 
   app.use('*', async (c, next) => { c.set('db', db); c.set('events', events); c.set('pairs', pairs); await next() })
 

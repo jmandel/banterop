@@ -3,7 +3,14 @@ export async function* parseSse<T = any>(stream: ReadableStream<Uint8Array>): As
   const decoder = new TextDecoder();
   let buf = '';
   while (true) {
-    const { value, done } = await reader.read();
+    let read;
+    try {
+      read = await reader.read();
+    } catch {
+      // Stream aborted or errored; treat as end-of-stream
+      break;
+    }
+    const { value, done } = read;
     if (done) break;
     buf += decoder.decode(value, { stream: true });
     for (;;) {
@@ -25,4 +32,3 @@ export async function* parseSse<T = any>(stream: ReadableStream<Uint8Array>): As
     }
   }
 }
-

@@ -1,28 +1,28 @@
-export type Finality = 'none'|'turn'|'conversation'
+export type NextState = 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required'
 
-export function extractFinality(msg:any): Finality {
-  const top = msg?.metadata?.['https://chitchat.fhir.me/a2a-ext']
-  if (top?.finality) return top.finality
-  for (const p of msg?.parts ?? []) {
-    const m = p?.metadata?.['https://chitchat.fhir.me/a2a-ext']
-    if (m?.finality) return m.finality
-  }
-  return 'none'
+function isNextState(v:any): v is NextState {
+  return ['working','input-required','completed','canceled','failed','rejected','auth-required'].includes(String(v))
 }
 
-export function computeStates(sender:'init'|'resp', finality:Finality) {
-  let init:'submitted'|'working'|'input-required'|'completed'|'canceled' = 'working'
-  let resp:'submitted'|'working'|'input-required'|'completed'|'canceled' = 'working'
-
-  if (finality === 'conversation') {
-    init = 'completed'; resp = 'completed'
-  } else if (finality === 'turn') {
-    // Hand off turn to the other side: sender working, receiver input-required
-    if (sender === 'init') { init = 'working'; resp = 'input-required' }
-    else { init = 'input-required'; resp = 'working' }
-  } else { // 'none': sender input-required, other working
-    if (sender === 'init') { init = 'input-required'; resp = 'working' }
-    else { init = 'working'; resp = 'input-required' }
+export function extractNextState(msg:any): NextState | null {
+  const top = msg?.metadata?.['https://chitchat.fhir.me/a2a-ext']
+  if (isNextState(top?.nextState)) return top.nextState
+  for (const p of msg?.parts ?? []) {
+    const m = p?.metadata?.['https://chitchat.fhir.me/a2a-ext']
+    if (isNextState(m?.nextState)) return m.nextState
   }
-  return { init, resp }
+  return null
+}
+
+export function computeStatesForNext(sender:'init'|'resp', next:NextState) {
+  if (next === 'working') {
+    return sender === 'init' ? { init:'working', resp:'input-required' } : { init:'input-required', resp:'working' }
+  }
+  if (next === 'input-required') {
+    return sender === 'init' ? { init:'input-required', resp:'working' } : { init:'working', resp:'input-required' }
+  }
+  if (['completed','canceled','failed','rejected','auth-required'].includes(next)) {
+    return { init: next as any, resp: next as any }
+  }
+  return sender === 'init' ? { init:'input-required', resp:'working' } : { init:'working', resp:'input-required' }
 }

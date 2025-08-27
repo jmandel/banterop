@@ -14,7 +14,7 @@ export class A2AAdapter implements TransportAdapter {
   constructor(endpoint: string) { this.client = new A2AClient(endpoint); }
   kind(): 'a2a' { return 'a2a'; }
   async send(parts: A2APart[], opts: SendOptions): Promise<{ taskId: string; snapshot: TransportSnapshot }> {
-    const metadata = opts.finality ? { [A2A_EXT_URL]: { finality: opts.finality } } as any : undefined;
+    const metadata = opts.nextState ? { [A2A_EXT_URL]: { nextState: opts.nextState } } as any : undefined;
     const snap = await this.client.messageSend(parts, { taskId: opts.taskId, messageId: opts.messageId, metadata });
     return { taskId: snap.id, snapshot: toSnap(snap)! };
   }

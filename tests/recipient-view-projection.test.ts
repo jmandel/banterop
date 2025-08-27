@@ -29,7 +29,7 @@ describe("Recipient view projection", () => {
     // Send first message from initiator
     const m1 = crypto.randomUUID();
     {
-      const send = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m1', method:'message/send', params:{ configuration:{ historyLength: 10000 }, message:{ parts:[textPart('hello-1','turn')], taskId: initId, messageId: m1 } } }) });
+      const send = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m1', method:'message/send', params:{ configuration:{ historyLength: 10000 }, message:{ parts:[textPart('hello-1','working')], taskId: initId, messageId: m1 } } }) });
       expect(send.ok).toBeTrue();
     }
 
@@ -47,7 +47,7 @@ describe("Recipient view projection", () => {
 
     // Send second message from initiator; now responder history should include first message, projected to resp taskId
     const m2 = crypto.randomUUID();
-    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m2', method:'message/send', params:{ configuration:{ historyLength: 10000 }, message:{ parts:[textPart('hello-2','turn')], taskId: initId, messageId: m2 } } }) });
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m2', method:'message/send', params:{ configuration:{ historyLength: 10000 }, message:{ parts:[textPart('hello-2','working')], taskId: initId, messageId: m2 } } }) });
 
     {
       const rget2 = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'g2', method:'tasks/get', params:{ id: respId } }) });
@@ -60,4 +60,3 @@ describe("Recipient view projection", () => {
     }
   });
 });
-

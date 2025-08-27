@@ -25,7 +25,7 @@ describe("A2A JSON-RPC", () => {
   it("streams JSON-RPC frames; responder mirrors message", async () => {
     const { pairId, a2a } = await createPairAndA2A();
     const reqId = crypto.randomUUID();
-    const res = await fetch(a2a, { method: 'POST', headers: { 'content-type': 'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id: reqId, method: 'message/stream', params: { message: { role:'user', parts: [textPart('hi', 'turn')], messageId: crypto.randomUUID() } } }) });
+    const res = await fetch(a2a, { method: 'POST', headers: { 'content-type': 'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id: reqId, method: 'message/stream', params: { message: { role:'user', parts: [textPart('hi', 'working')], messageId: crypto.randomUUID() } } }) });
     expect(res.ok).toBeTrue();
     const frames: any[] = [];
     for await (const result of parseSse<any>(res.body!)) {
@@ -70,7 +70,7 @@ describe("A2A JSON-RPC", () => {
     const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
 
     // Send without taskId — should auto-create epoch and use init:<pair>#1
-    const body = { jsonrpc:'2.0', id:'m0', method:'message/send', params:{ message:{ parts:[textPart('auto turn','turn')], messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } };
+    const body = { jsonrpc:'2.0', id:'m0', method:'message/send', params:{ message:{ parts:[textPart('auto turn','working')], messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } };
     const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify(body) });
     expect(res.ok).toBeTrue();
     const jr = await res.json();
@@ -98,7 +98,7 @@ describe("A2A JSON-RPC", () => {
     }
 
     // Now send without taskId — should bump to epoch #2
-    const body = { jsonrpc:'2.0', id:'m1', method:'message/send', params:{ message:{ parts:[textPart('next','turn')], messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } };
+    const body = { jsonrpc:'2.0', id:'m1', method:'message/send', params:{ message:{ parts:[textPart('next','working')], messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } };
     const res2 = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify(body) });
     expect(res2.ok).toBeTrue();
     const jr = await res2.json();
@@ -113,7 +113,7 @@ describe("A2A JSON-RPC", () => {
     for await (const _ of parseSse<any>(res.body!)) break; // snapshot only
 
     // Send a message via message/send (turn)
-    const send = await fetch(a2a, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ jsonrpc:'2.0', id:'m', method:'message/send', params:{ message:{ parts:[textPart('hello','turn')], taskId: `init:${pairId}#1`, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
+    const send = await fetch(a2a, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ jsonrpc:'2.0', id:'m', method:'message/send', params:{ message:{ parts:[textPart('hello','working')], taskId: `init:${pairId}#1`, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
     expect(send.ok).toBeTrue();
 
     // Responder should see mirrored message in status.message

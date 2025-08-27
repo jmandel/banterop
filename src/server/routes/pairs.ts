@@ -37,7 +37,23 @@ export function pairsRoutes(includeNonApi = false) {
     r.get('/pairs/:pairId/events.log', async (c) => {
       const { pairId } = c.req.param()
       const since = Number(c.req.query('since') || '0') || 0
-      return sse(c, c.get('events').stream(pairId, since))
+      const backlogOnly = ['1','true','yes'].includes(String(c.req.query('backlogOnly')||'').toLowerCase())
+      if (!backlogOnly) {
+        return sse(c, c.get('events').stream(pairId, since))
+      }
+      const headers = { 'content-type':'text/event-stream', 'cache-control':'no-cache, no-transform', 'connection':'keep-alive', 'x-accel-buffering':'no' }
+      const body = new ReadableStream({
+        start(controller) {
+          const enc = new TextEncoder()
+          const write = (obj:any) => controller.enqueue(enc.encode(`data: ${JSON.stringify({ result: obj })}\n\n`))
+          try {
+            const arr = c.get('events').listSince(pairId, since)
+            for (const ev of arr) write(ev)
+          } catch {}
+          finally { try { controller.close() } catch {} }
+        }
+      })
+      return new Response(body, { status: 200, headers })
     })
 
     // Responder backchannel: emits subscribe after epoch-begin

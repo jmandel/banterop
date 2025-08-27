@@ -10,7 +10,7 @@ export type TransportSnapshot = {
 export type SendOptions = {
   taskId?: string;
   messageId?: string;
-  finality?: "none" | "turn" | "conversation";
+  nextState?: "working" | "input-required" | "completed" | "canceled" | "failed" | "rejected" | "auth-required";
 };
 
 export interface TransportAdapter {
@@ -20,4 +20,3 @@ export interface TransportAdapter {
   cancel(taskId: string): Promise<void>;
   ticks(taskId: string, signal?: AbortSignal): AsyncGenerator<void>;
 }
-

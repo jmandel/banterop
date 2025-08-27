@@ -182,7 +182,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
         const composeId = ctx.newId('c:');
         const text = String(decision.args?.text || '').trim() || defaultComposeFromScenario(scenario, myId);
         const metaList: AttachmentMeta[] = attList.map((a:any)=>String(a?.name||'')).filter(Boolean).map((name:string)=>({ name, mimeType: filesNow.find(x=>x.name===name)?.mimeType || 'application/octet-stream' }));
-        out.push(({ type:'compose_intent', composeId, text, attachments: metaList.length ? metaList : undefined, ...(includeWhy ? { why: reasoning } : {}), finalityHint: (buildFinalizationReminder(workingFacts as any, scenario, myId) ? 'conversation' : 'turn') } as ProposedFact));
+          out.push(({ type:'compose_intent', composeId, text, attachments: metaList.length ? metaList : undefined, ...(includeWhy ? { why: reasoning } : {}), nextStateHint: (buildFinalizationReminder(workingFacts as any, scenario, myId) ? 'completed' : 'working') } as ProposedFact));
         try { ctx.hud('drafting', 'Prepared draft', 0.8); } catch {}
         break;
       }
@@ -543,7 +543,7 @@ function buildFinalizationReminder(facts: ReadonlyArray<Fact>, scenario: Scenari
   lines.push("Compose ONE final message to the remote agent:");
   lines.push('- Summarize the outcome and key reasons.');
   lines.push("- Attach the terminal tool's output files below.");
-  lines.push("- Set finality to 'conversation'.");
+  lines.push("- Set nextState to 'completed'.");
   if (attachments.length) {
     lines.push('Files to attach:');
     for (const name of attachments) lines.push(`- ${name}`);
@@ -574,7 +574,7 @@ function buildToolsCatalog(
   // Core: sendMessageToRemoteAgent
   if (coreAllowed.has('sendMessageToRemoteAgent')) {
     lines.push("// Send a message to the remote agent. Attachments by 'name'.");
-    lines.push("interface SendMessageToRemoteAgentArgs { text?: string; attachments?: Array<{ name: string }>; finality?: 'none'|'turn'|'conversation'; }");
+    lines.push("interface SendMessageToRemoteAgentArgs { text?: string; attachments?: Array<{ name: string }>; nextState?: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required'; }");
     lines.push('Tool: sendMessageToRemoteAgent: SendMessageToRemoteAgentArgs');
     lines.push('');
   }

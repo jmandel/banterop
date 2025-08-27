@@ -30,14 +30,10 @@ describe("Event ring buffer trims old events", () => {
     }
 
     // Backlog since=0 should be limited by ring max (100) and not include the original pair-created
-    const ac = new AbortController();
-    const es = await fetch(S.base + `/api/pairs/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
+    const es = await fetch(S.base + `/api/pairs/${pairId}/events.log?since=0&backlogOnly=1`, { headers:{ accept:'text/event-stream' } });
     expect(es.ok).toBeTrue();
     const collected: any[] = [];
-    for await (const ev of parseSse<any>(es.body!)) {
-      collected.push(ev);
-      if (collected.length >= 100) { try { ac.abort(); } catch {}; break; }
-    }
+    for await (const ev of parseSse<any>(es.body!)) collected.push(ev);
     // Should have exactly 100 backlog items (trimmed to cap)
     expect(collected.length).toBe(100);
     // Oldest events like pair-created should have been trimmed

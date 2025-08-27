@@ -13,7 +13,7 @@ async function tasksGet(a2a: string, id: string) {
 }
 
 describe('Finality transitions', () => {
-  it("finality=none keeps responder working and initiator input-required", async () => {
+  it("nextState=input-required keeps responder working and initiator input-required", async () => {
     const r = await fetch(S.base + "/api/pairs", { method:'POST' });
     const j = await r.json();
     const pairId = j.pairId as string;
@@ -22,7 +22,7 @@ describe('Finality transitions', () => {
     const respId = `resp:${pairId}#1`;
 
     // message/send with finality=none should create epoch and apply states
-    const send = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/send', params:{ message:{ parts:[textPart('hi','none')], taskId: initId, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
+    const send = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/send', params:{ message:{ parts:[textPart('hi','input-required')], taskId: initId, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
     expect(send.ok).toBeTrue();
 
     const ti = await tasksGet(a2a, initId);
@@ -31,7 +31,7 @@ describe('Finality transitions', () => {
     expect(tr.status.state).toBe('working');
   });
 
-  it("finality=turn flips turn: responder input-required then initiator input-required", async () => {
+  it("nextState=working flips turn: responder input-required then initiator input-required", async () => {
     const r = await fetch(S.base + "/api/pairs", { method:'POST' });
     const j = await r.json();
     const pairId = j.pairId as string;
@@ -40,19 +40,19 @@ describe('Finality transitions', () => {
     const respId = `resp:${pairId}#1`;
 
     // Initiator sends with finality=turn → responder input-required, initiator working
-    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s1', method:'message/send', params:{ message:{ parts:[textPart('one','turn')], taskId: initId, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s1', method:'message/send', params:{ message:{ parts:[textPart('one','working')], taskId: initId, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
     const r1 = await tasksGet(a2a, respId);
     expect(r1.status.state).toBe('input-required');
     const i1 = await tasksGet(a2a, initId);
     expect(i1.status.state).toBe('working');
 
     // Responder replies with finality=turn
-    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s2', method:'message/send', params:{ message:{ parts:[textPart('two','turn')], taskId: respId, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s2', method:'message/send', params:{ message:{ parts:[textPart('two','working')], taskId: respId, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
     const r2 = await tasksGet(a2a, initId);
     expect(r2.status.state).toBe('input-required');
   });
 
-  it("finality=conversation completes both", async () => {
+  it("nextState=completed completes both", async () => {
     const r = await fetch(S.base + "/api/pairs", { method:'POST' });
     const j = await r.json();
     const pairId = j.pairId as string;
@@ -60,7 +60,7 @@ describe('Finality transitions', () => {
     const initId = `init:${pairId}#1`;
     const respId = `resp:${pairId}#1`;
 
-    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s3', method:'message/send', params:{ message:{ parts:[textPart('bye','conversation')], taskId: initId, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s3', method:'message/send', params:{ message:{ parts:[textPart('bye','completed')], taskId: initId, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
     const ti = await tasksGet(a2a, initId);
     const tr = await tasksGet(a2a, respId);
     expect(ti.status.state).toBe('completed');

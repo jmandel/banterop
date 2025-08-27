@@ -101,6 +101,7 @@ Clinical notes attached. Requesting MRI knee per guideline after failed conserva
     ctx.hud('drafting', 'Composing acknowledgement', 0.6);
     return [{
       type:'compose_intent', composeId: ctx.newId('c'), text:'Acknowledged. We are reviewing and will respond shortly.',
+      nextStateHint: 'working',
       why:'Fallback acknowledgement'
     }];
   }

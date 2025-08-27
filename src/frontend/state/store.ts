@@ -51,7 +51,7 @@ export type Store = {
   reconfigurePlanner(opts: { applied: any; ready: boolean; rewind?: boolean }): void;
   // legacy staging functions removed; planners with config stores persist directly
   appendComposeIntent(text: string, attachments?: AttachmentMeta[]): string;
-  sendCompose(composeId: string, finality: 'none'|'turn'|'conversation'): Promise<void>;
+  sendCompose(composeId: string, nextState: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required'): Promise<void>;
   addUserGuidance(text: string): void;
   addUserAnswer(qid: string, text: string): void;
   dismissCompose(composeId: string): void;
@@ -265,7 +265,7 @@ export const useAppStore = create<Store>((set, get) => ({
     return composeId;
   },
 
-  async sendCompose(composeId, finality) {
+  async sendCompose(composeId, nextState) {
     const { adapter, taskId, facts, attachmentsIndex } = get();
     if (!adapter) throw new Error('no adapter');
     const ci = [...facts].reverse().find((f): f is Extract<typeof f, { type:'compose_intent' }> => f.type === 'compose_intent' && f.composeId === composeId);
@@ -287,11 +287,11 @@ export const useAppStore = create<Store>((set, get) => ({
       inFlightSends: new Map<string,{composeId:string}>(s.inFlightSends as Map<string,{composeId:string}>).set(messageId, { composeId }),
       sendErrorByCompose: (()=>{ const m = new Map<string,string>(s.sendErrorByCompose as Map<string,string>); m.delete(composeId); return m; })(),
     }));
-    const fin = (finality || ci.finalityHint || 'turn') as 'none'|'turn'|'conversation';
+    const ns = (nextState || (ci as any).nextStateHint || 'working') as 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required';
     let lastErr: any;
     let result: { taskId: string; snapshot: any } | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
-      try { result = await adapter.send(parts, { taskId, messageId, finality: fin }); lastErr = null; break; }
+      try { result = await adapter.send(parts, { taskId, messageId, nextState: ns }); lastErr = null; break; }
       catch (e) { lastErr = e; await new Promise(r => setTimeout(r, 200 * (2 ** attempt) + Math.random() * 100)); }
     }
     if (lastErr) {
@@ -410,8 +410,8 @@ export const useAppStore = create<Store>((set, get) => ({
       if (mode === 'auto') {
         for (const pf of batch) {
           if (pf && pf.type === 'compose_intent') {
-            const ci = pf as any as { composeId:string; finalityHint?: 'none'|'turn'|'conversation' };
-            queueMicrotask(() => { try { void get().sendCompose(ci.composeId, (ci.finalityHint || 'turn') as any); } catch {} });
+            const ci = pf as any as { composeId:string; nextStateHint?: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required' };
+            queueMicrotask(() => { try { void get().sendCompose(ci.composeId, (ci.nextStateHint || 'working') as any); } catch {} });
           }
         }
       }
@@ -484,16 +484,16 @@ function stampAndAppend(set: any, get: any, proposed: ProposedFact[]) {
 
 // legacy ingest removed; use a2aToFacts + stampAndAppend
 
-function findUnsentComposes(facts: Fact[]): Array<{ composeId: string; finalityHint?: 'none'|'turn'|'conversation' }> {
+function findUnsentComposes(facts: Fact[]): Array<{ composeId: string; nextStateHint?: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required' }> {
   // consider compose 'unsent' only if not dismissed and no remote_sent after it
   const dismissed = new Set<string>(facts.filter(f=>f.type==='compose_dismissed').map((f:any)=>f.composeId));
-  const out: Array<{ composeId: string; finalityHint?: 'none'|'turn'|'conversation' }> = [];
+  const out: Array<{ composeId: string; nextStateHint?: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required' }> = [];
   for (let i = facts.length - 1; i >= 0; --i) {
     const f = facts[i];
     if (f.type === 'remote_sent') break;
     if (f.type === 'compose_intent') {
       const ci = f as any;
-      if (!dismissed.has(ci.composeId)) out.unshift({ composeId: ci.composeId, finalityHint: ci.finalityHint });
+      if (!dismissed.has(ci.composeId)) out.unshift({ composeId: ci.composeId, nextStateHint: ci.nextStateHint });
     }
   }
   return out;

@@ -63,7 +63,7 @@ export type Fact =
      ; composeId:string
      ; text:string
      ; attachments?:AttachmentMeta[]
-     ; finalityHint?: 'none'|'turn'|'conversation'
+     ; nextStateHint?: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required'
      } & PlannerWhy & Stamp)
   | ({ type:'compose_dismissed'
      ; composeId:string

@@ -1,6 +1,5 @@
 import type { Persistence, TaskRow, TaskState } from './persistence'
-import type { Finality } from './finality'
-import { extractFinality, computeStates } from './finality'
+import { extractNextState, computeStatesForNext } from './finality'
 import { validateParts } from './validators'
 import { initTaskId, respTaskId, parseTaskId } from './ids'
 import { createEventStore } from './events'
@@ -29,69 +28,60 @@ export function createPairsService({ db, events }: Deps) {
   }
 
   function toSnapshot(row: TaskRow, historyLength?: number): TaskSnapshot {
-    let currentMsgId: string | undefined = undefined
-    try {
-      const lastMsg = latestMessageForEpoch(row.pair_id, row.epoch)
-      currentMsgId = lastMsg?.message?.messageId
-    } catch {}
+    const last = db.lastMessage(row.pair_id, row.epoch)
+    const currentMsgId = last ? String((() => { try { return JSON.parse(last.json)?.messageId } catch { return '' } })() || '') : undefined
     const limit = typeof historyLength === 'number' ? sanitizeHistoryLength(historyLength) : 10_000
-    // Build canonical history and project into the viewer's perspective
-    const canonical = buildHistory(row.pair_id, row.epoch, currentMsgId, limit)
     const viewerTaskId = row.task_id
     const viewerRole: 'init'|'resp' = viewerTaskId.startsWith('init:') ? 'init' : 'resp'
-    const hist = canonical.map((m:any) => projectForViewer(m, viewerTaskId, viewerRole))
-
-    const state = currentStateForEpoch(row.pair_id, row.epoch, viewerRole)
-    const statusMessage = currentMsgId ? projectForViewer(latestMessageForEpoch(row.pair_id, row.epoch)!.message, viewerTaskId, viewerRole) : undefined
-    return {
-      id: row.task_id,
-      contextId: row.pair_id,
-      kind: 'task',
-      status: { state, message: statusMessage },
-      history: hist,
+    const rows = db.listMessages(row.pair_id, row.epoch, { order:'ASC', limit: Math.max(0, limit)+1 })
+    const canonical = rows.map(r => ({ obj: (():any=>{ try { return JSON.parse(r.json) } catch { return {} } })(), author: r.author }))
+      .filter(({obj}) => !currentMsgId || String(obj?.messageId || '') !== currentMsgId)
+    const hist = canonical.slice(Math.max(0, canonical.length - limit)).map(({obj, author}) => projectForViewer(obj, viewerTaskId, viewerRole, author))
+    // compute state for viewer
+    let state: TaskState = 'submitted'
+    let statusMessage: any = undefined
+    if (last) {
+      const obj = (()=>{ try { return JSON.parse(last.json) } catch { return {} } })()
+      const desired = extractNextState(obj) ?? 'input-required'
+      const both = computeStatesForNext(last.author, desired)
+      state = (viewerRole === 'init' ? (both as any).init : (both as any).resp) as TaskState
+      statusMessage = projectForViewer(obj, viewerTaskId, viewerRole, last.author)
     }
+    return { id: row.task_id, contextId: row.pair_id, kind:'task', status:{ state, message: statusMessage }, history: hist }
   }
 
   function buildHistory(pairId: string, epoch: number, excludeMessageId: string | undefined, limit: number): any[] {
-    const msgs = events.listMessagesForEpoch(pairId, epoch)
-    const out: any[] = []
-    for (const m of msgs) {
-      if (excludeMessageId && m.messageId === excludeMessageId) continue
-      out.push(m.message)
-    }
-    if (limit <= 0) return []
-    if (out.length <= limit) return out
-    return out.slice(out.length - limit)
+    // Not used anymore; history is pulled from DB in toSnapshot
+    return []
   }
 
-  function projectForViewer(message: any, viewerTaskId: string, viewerRole: 'init'|'resp') {
+  function projectForViewer(message: any, viewerTaskId: string, viewerRole: 'init'|'resp', authorRoleHint?: 'init'|'resp') {
     try {
-      const m = typeof message === 'string' ? JSON.parse(message) : message
-      // author role derived from sender taskId
-      const senderTaskId: string = String(m?.taskId || '')
-      const authorRole: 'init'|'resp' = senderTaskId.startsWith('init:') ? 'init' : 'resp'
-      const role = (authorRole === viewerRole) ? 'user' : 'agent'
-      return { ...m, role, taskId: viewerTaskId }
+      const raw = typeof message === 'string' ? JSON.parse(message) : (message || {})
+      // Drop relative fields from stored JSON
+      const { role: _r, taskId: _t, contextId: _c, ...base } = raw
+      const { pairId: viewerPairId } = parseTaskId(viewerTaskId)
+      // Determine author role: prefer DB hint, fallback to parsing embedded sender taskId if present
+      const senderTaskId: string = String(raw?.taskId || '')
+      const parsedRole: 'init'|'resp' | null = senderTaskId.startsWith('init:') ? 'init' : (senderTaskId.startsWith('resp:') ? 'resp' : null)
+      const authorRole: 'init'|'resp' = authorRoleHint ?? (parsedRole ?? viewerRole)
+      const relRole = (authorRole === viewerRole) ? 'user' : 'agent'
+      return { ...base, role: relRole, taskId: viewerTaskId, contextId: viewerPairId }
     } catch {
       return message
     }
   }
-  function latestMessageForEpoch(pairId: string, epoch: number): { messageId: string; message: any } | null {
-    const msgs = events.listMessagesForEpoch(pairId, epoch)
-    if (!msgs.length) return null
-    return msgs[msgs.length - 1]
-  }
-  function currentStateForEpoch(pairId: string, epoch: number, viewerRole: 'init'|'resp'): TaskState {
-    const evs = (events as any).listSince(pairId, 0) as Array<any>
-    let last: any = null
-    for (const e of evs) {
-      if (e.pairId === pairId && e.type === 'state' && typeof e.epoch === 'number' && e.epoch === epoch) last = e
-    }
-    if (last && last.states) {
-      const st = viewerRole === 'init' ? last.states.initiator : last.states.responder
-      return st as TaskState
-    }
-    return 'submitted'
+  function latestMessageForEpoch(pairId: string, epoch: number): { messageId: string; message: any } | null { return null }
+  function currentStateForEpoch(pairId: string, epoch: number, viewerRole: 'init'|'resp'): TaskState { return currentStateForEpochFromDb(pairId, epoch, viewerRole) }
+
+  function currentStateForEpochFromDb(pairId: string, epoch: number, viewerRole: 'init'|'resp'): TaskState {
+    const last = db.lastMessage(pairId, epoch)
+    if (!last) return 'submitted'
+    let obj: any = {}
+    try { obj = JSON.parse(last.json) } catch {}
+    const desired = extractNextState(obj) ?? 'input-required'
+    const both = computeStatesForNext(last.author, desired)
+    return (viewerRole === 'init' ? (both as any).init : (both as any).resp) as TaskState
   }
 
   function ensureEpoch(pairId: string): { epoch: number } {
@@ -159,11 +149,17 @@ export function createPairsService({ db, events }: Deps) {
     },
 
     async tasksCancel(pairId: string, id: string) {
-      const { pairId: pid, epoch } = parseTaskId(id)
+      const { pairId: pid, epoch, role } = parseTaskId(id)
       const initId = initTaskId(pid, epoch)
       const respId = respTaskId(pid, epoch)
       if (!db.getTask(initId)) db.upsertTask({ task_id:initId, pair_id:pid, epoch })
       if (!db.getTask(respId)) db.upsertTask({ task_id:respId, pair_id:pid, epoch })
+      // persist a control message with nextState=canceled so restart is deterministic
+      const control = { messageId: crypto.randomUUID(), parts: [], kind:'message', taskId: id, contextId: pid, metadata: { 'https://chitchat.fhir.me/a2a-ext': { nextState: 'canceled' } } }
+      try {
+        const { taskId: _t, contextId: _c, role: _r, ...persistBase } = control as any
+        db.insertMessage({ pair_id: pid, epoch, author: role, json: JSON.stringify(persistBase) })
+      } catch {}
       events.push(pairId, { type:'backchannel', action:'unsubscribe' } as any)
       events.push(pairId, { type:'state', epoch, states:{ initiator:'canceled', responder:'canceled' } } as any)
       return toSnapshot(db.getTask(initId)!)
@@ -187,8 +183,18 @@ export function createPairsService({ db, events }: Deps) {
 
       validateParts(msg.parts)
 
-      const f: Finality = extractFinality(msg)
-      const states = computeStates(senderRole, f)
+      const desired = extractNextState(msg) ?? 'input-required'
+      const states = computeStatesForNext(senderRole, desired)
+
+      // Persist message first (idempotent by messageId), then emit SSE
+      try {
+        // Strip relative fields (role, taskId, contextId) from persisted JSON
+        const { role: _r, taskId: _t, contextId: _c, ...persistBase } = msg as any
+        db.insertMessage({ pair_id: pairId, epoch, author: senderRole, json: JSON.stringify(persistBase) })
+      } catch (e: any) {
+        const em = String(e?.message || '')
+        if (!em.includes('UNIQUE')) throw e // swallow duplicate messageId errors
+      }
 
       await upsertStates(pairId, epoch, states, senderRole, msg)
 
@@ -220,7 +226,10 @@ export function createPairsService({ db, events }: Deps) {
         const senderId = m.taskId ?? initTaskId(pairId, epoch)
         const result = await self.messageSend(pairId, { ...(m||{}), taskId: senderId }, m?.configuration)
         yield result
-        yield { kind:'status-update', status:{ state: 'working' } }
+        try {
+          const st = (result as any)?.status?.state || 'submitted'
+          yield { kind:'status-update', status:{ state: st } }
+        } catch {}
       })()
     },
 

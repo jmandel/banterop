@@ -6,8 +6,8 @@ let S: Spawned;
 beforeAll(async () => { S = await startServer(); });
 afterAll(async () => { await stopServer(S); });
 
-describe("Finality metadata placement", () => {
-  it("message-level metadata controls finality when present (no per-part metadata)", async () => {
+describe("nextState metadata placement", () => {
+  it("message-level metadata controls nextState when present (no per-part metadata)", async () => {
     const r = await fetch(S.base + "/api/pairs", { method:'POST' });
     const j = await r.json();
     const pairId = j.pairId as string;
@@ -15,14 +15,14 @@ describe("Finality metadata placement", () => {
     const initId = `init:${pairId}#1`;
     const respId = `resp:${pairId}#1`;
 
-    // Send with message-level metadata only: finality=turn
+    // Send with message-level metadata only: nextState=working (handoff)
     const body = {
       jsonrpc: '2.0', id: 'm1', method: 'message/send',
       params: {
         message: {
           taskId: initId,
           messageId: crypto.randomUUID(),
-          metadata: { 'https://chitchat.fhir.me/a2a-ext': { finality: 'turn' } },
+          metadata: { 'https://chitchat.fhir.me/a2a-ext': { nextState: 'working' } },
           parts: [{ kind:'text', text:'hi' }]
         },
         configuration: { historyLength: 0 }
@@ -45,15 +45,15 @@ describe("Finality metadata placement", () => {
     const initId = `init:${pairId}#1`;
     const respId = `resp:${pairId}#1`;
 
-    // message-level finality=none; per-part incorrectly says conversation; message-level should win → no flip/end
+    // message-level nextState=input-required; per-part incorrectly says completed; message-level should win → keep open
     const body = {
       jsonrpc: '2.0', id: 'm2', method: 'message/send',
       params: {
         message: {
           taskId: initId,
           messageId: crypto.randomUUID(),
-          metadata: { 'https://chitchat.fhir.me/a2a-ext': { finality: 'none' } },
-          parts: [{ kind:'text', text:'hi', metadata: { 'https://chitchat.fhir.me/a2a-ext': { finality: 'conversation' } } }]
+          metadata: { 'https://chitchat.fhir.me/a2a-ext': { nextState: 'input-required' } },
+          parts: [{ kind:'text', text:'hi', metadata: { 'https://chitchat.fhir.me/a2a-ext': { nextState: 'completed' } } }]
         },
         configuration: { historyLength: 0 }
       }
@@ -61,7 +61,7 @@ describe("Finality metadata placement", () => {
     const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify(body) });
     expect(res.ok).toBeTrue();
 
-    // With finality none: initiator should be input-required; responder working
+    // With nextState=input-required: initiator should be input-required; responder working
     const gi = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'gi', method:'tasks/get', params:{ id: initId } }) });
     const jgi = await gi.json();
     expect(jgi.result.status.state).toBe('input-required');

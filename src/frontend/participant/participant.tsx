@@ -95,10 +95,10 @@ function parseSetupFromLocation(): UrlSetup | null {
   const uiStatus = useAppStore(s => s.uiStatus());
 
   // Actions
-  async function handleManualSend(text: string, finality: 'none'|'turn'|'conversation') {
+  async function handleManualSend(text: string, nextState: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required') {
     const composeId = useAppStore.getState().appendComposeIntent(text);
     setSending(true);
-    try { await useAppStore.getState().sendCompose(composeId, finality); }
+    try { await useAppStore.getState().sendCompose(composeId, nextState); }
     finally { setSending(false); }
   }
   function sendWhisper(text: string) {
@@ -261,7 +261,7 @@ function HudBar() {
 }
 
 function DraftInline({ composeId, text, attachments }:{ composeId:string; text:string; attachments?: AttachmentMeta[] }) {
-  const [finality, setFinality] = useState<'none'|'turn'|'conversation'>('turn');
+  const [nextState, setNextState] = useState<'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required'>('working');
   const [sending, setSending] = useState(false);
   const err = useAppStore(s => s.sendErrorByCompose.get(composeId));
   const pid = useAppStore(s => s.plannerId);
@@ -269,7 +269,7 @@ function DraftInline({ composeId, text, attachments }:{ composeId:string; text:s
   const facts = useAppStore(s => s.facts);
   async function approve() {
     setSending(true);
-    try { await useAppStore.getState().sendCompose(composeId, finality); }
+    try { await useAppStore.getState().sendCompose(composeId, nextState); }
     finally { setSending(false); }
   }
   async function retry() { await approve(); }
@@ -298,10 +298,10 @@ function DraftInline({ composeId, text, attachments }:{ composeId:string; text:s
         </div>
       )}
       <div className="row" style={{marginTop:8, gap:8}}>
-        <select value={finality} onChange={(e)=>setFinality(e.target.value as any)}>
-          <option value="none">no finality</option>
-          <option value="turn">end turn → flip</option>
-          <option value="conversation">end conversation</option>
+        <select value={nextState} onChange={(e)=>setNextState(e.target.value as any)} title="Next state">
+          <option value="working">hand off turn → flip</option>
+          <option value="input-required">keep open (not turn-final)</option>
+          <option value="completed">end conversation</option>
         </select>
         <button className="btn" onClick={()=>void approve()} disabled={sending}>{sending ? 'Sending…' : 'Approve & Send'}</button>
         {ready && (
@@ -356,13 +356,13 @@ function QuestionInline({ q, answered }:{ q:{ qid:string; prompt:string; placeho
   );
 }
 
-function ManualComposer({ disabled, hint, placeholder, onSend, sending }:{ disabled:boolean; hint?:string; placeholder?:string; onSend:(t:string, f:'none'|'turn'|'conversation')=>Promise<void>|void; sending:boolean }) {
+function ManualComposer({ disabled, hint, placeholder, onSend, sending }:{ disabled:boolean; hint?:string; placeholder?:string; onSend:(t:string, n:'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required')=>Promise<void>|void; sending:boolean }) {
   const [text, setText] = useState('');
-  const [finality, setFinality] = useState<'none'|'turn'|'conversation'>('turn');
+  const [nextState, setNextState] = useState<'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required'>('working');
   async function send() {
     const t = text.trim(); if (!t || disabled) return;
     setText('');
-    await onSend(t, finality);
+    await onSend(t, nextState);
   }
   return (
     <div className="manual-composer">
@@ -377,14 +377,14 @@ function ManualComposer({ disabled, hint, placeholder, onSend, sending }:{ disab
           disabled={disabled || sending}
         />
         <select
-          value={finality}
-          onChange={(e) => setFinality(e.target.value as any)}
+          value={nextState}
+          onChange={(e) => setNextState(e.target.value as any)}
           disabled={sending}
-          title="Finality hint"
+          title="Next state"
         >
-          <option value="none">no finality</option>
-          <option value="turn">end turn → flip</option>
-          <option value="conversation">end conversation</option>
+          <option value="input-required">keep open (not turn-final)</option>
+          <option value="working">hand off turn → flip</option>
+          <option value="completed">end conversation</option>
         </select>
         <button className="btn" onClick={() => void send()} disabled={disabled || sending} aria-disabled={disabled || sending} title={disabled ? (hint || 'Not your turn to send') : 'Send message'}>
           Send

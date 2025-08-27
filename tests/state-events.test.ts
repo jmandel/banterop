@@ -8,7 +8,7 @@ beforeAll(async () => { S = await startServer(); });
 afterAll(async () => { await stopServer(S); });
 
 describe('State events reflect correct turn semantics and include message text', () => {
-  it('state after message/send(turn) shows responder=input-required, initiator=working with message text', async () => {
+  it('state after message/send(working) shows responder=input-required, initiator=working with message text', async () => {
     const r = await fetch(S.base + '/api/pairs', { method:'POST' });
     const j = await r.json();
     const pairId = j.pairId as string;
@@ -18,8 +18,8 @@ describe('State events reflect correct turn semantics and include message text',
     const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params:{ message:{ role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
     for await (const _ of parseSse<any>(res.body!)) break;
 
-    // Send turn message
-    const send = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m', method:'message/send', params:{ message:{ parts:[textPart('hello-turn','turn')], taskId: `init:${pairId}#1`, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
+    // Send handoff message (nextState=working)
+    const send = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m', method:'message/send', params:{ message:{ parts:[textPart('hello-turn','working')], taskId: `init:${pairId}#1`, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
     expect(send.ok).toBeTrue();
 
     // Read the next state from events.log
