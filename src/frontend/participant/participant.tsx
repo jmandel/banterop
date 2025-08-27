@@ -27,7 +27,11 @@ function attachmentHrefFromBase64(name:string, mimeType:string, b64:string) {
     const bytes = atob(b64);
     const arr = new Uint8Array(bytes.length);
     for (let i=0;i<bytes.length;i++) arr[i] = bytes.charCodeAt(i);
-    const blob = new Blob([arr], { type: mimeType || 'application/octet-stream' });
+    // Force explicit UTF-8 charset for all attachments (per request),
+    // regardless of the original mimeType, to avoid mojibake in browsers.
+    const baseType = mimeType || 'application/octet-stream';
+    const type = /charset=/i.test(baseType) ? baseType : `${baseType};charset=utf-8`;
+    const blob = new Blob([arr], { type });
     return URL.createObjectURL(blob);
   } catch { return null; }
 }
@@ -221,7 +225,7 @@ function App() {
                     {f.type === 'compose_intent' && (
                       isDismissed
                         ? <div className="text">{f.text}</div>
-                        : <DraftInline composeId={f.composeId} text={f.text} />
+                        : <DraftInline composeId={f.composeId} text={f.text} attachments={f.attachments} />
                     )}
                   </div>
                 </div>
@@ -264,12 +268,13 @@ function HudBar() {
   );
 }
 
-function DraftInline({ composeId, text }:{ composeId:string; text:string }) {
+function DraftInline({ composeId, text, attachments }:{ composeId:string; text:string; attachments?: AttachmentMeta[] }) {
   const [finality, setFinality] = useState<'none'|'turn'|'conversation'>('turn');
   const [sending, setSending] = useState(false);
   const err = useAppStore(s => s.sendErrorByCompose.get(composeId));
   const pid = useAppStore(s => s.plannerId);
   const ready = useAppStore(s => !!s.readyByPlanner[s.plannerId]);
+  const facts = useAppStore(s => s.facts);
   async function approve() {
     setSending(true);
     try { await useAppStore.getState().sendCompose(composeId, finality); }
@@ -287,6 +292,19 @@ function DraftInline({ composeId, text }:{ composeId:string; text:string }) {
   return (
     <div>
       <div className="text">{text}</div>
+      {Array.isArray(attachments) && attachments.length > 0 && (
+        <div className="attachments small" style={{ marginTop: 6 }}>
+          {attachments.map((a:AttachmentMeta) => {
+            const added = facts.find(x => x.type === 'attachment_added' && (x as any).name === a.name);
+            const href = added && added.type === 'attachment_added' ? attachmentHrefFromBase64(a.name, added.mimeType, added.bytes) : null;
+            return (
+              <a key={a.name} className="att" href={href || '#'} target="_blank" rel="noreferrer" onClick={e => { if (!href) e.preventDefault(); }}>
+                📎 {a.name} <span className="muted">({a.mimeType || 'application/octet-stream'})</span>
+              </a>
+            );
+          })}
+        </div>
+      )}
       <div className="row" style={{marginTop:8, gap:8}}>
         <select value={finality} onChange={(e)=>setFinality(e.target.value as any)}>
           <option value="none">no finality</option>

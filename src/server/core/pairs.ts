@@ -30,15 +30,24 @@ export function createPairsService({ db, events }: Deps) {
 
   function toSnapshot(row: TaskRow, historyLength?: number): TaskSnapshot {
     let currentMsgId: string | undefined = undefined
-    try { currentMsgId = row.message ? (JSON.parse(row.message).messageId) : undefined } catch {}
+    try {
+      const lastMsg = latestMessageForEpoch(row.pair_id, row.epoch)
+      currentMsgId = lastMsg?.message?.messageId
+    } catch {}
     const limit = typeof historyLength === 'number' ? sanitizeHistoryLength(historyLength) : 10_000
-    const hist = buildHistory(row.pair_id, row.epoch, currentMsgId, limit)
+    // Build canonical history and project into the viewer's perspective
+    const canonical = buildHistory(row.pair_id, row.epoch, currentMsgId, limit)
+    const viewerTaskId = row.task_id
+    const viewerRole: 'init'|'resp' = viewerTaskId.startsWith('init:') ? 'init' : 'resp'
+    const hist = canonical.map((m:any) => projectForViewer(m, viewerTaskId, viewerRole))
 
+    const state = currentStateForEpoch(row.pair_id, row.epoch, viewerRole)
+    const statusMessage = currentMsgId ? projectForViewer(latestMessageForEpoch(row.pair_id, row.epoch)!.message, viewerTaskId, viewerRole) : undefined
     return {
       id: row.task_id,
       contextId: row.pair_id,
       kind: 'task',
-      status: { state: row.state as TaskState, message: row.message ? JSON.parse(row.message) : undefined },
+      status: { state, message: statusMessage },
       history: hist,
     }
   }
@@ -53,6 +62,36 @@ export function createPairsService({ db, events }: Deps) {
     if (limit <= 0) return []
     if (out.length <= limit) return out
     return out.slice(out.length - limit)
+  }
+
+  function projectForViewer(message: any, viewerTaskId: string, viewerRole: 'init'|'resp') {
+    try {
+      const m = typeof message === 'string' ? JSON.parse(message) : message
+      // author role derived from sender taskId
+      const senderTaskId: string = String(m?.taskId || '')
+      const authorRole: 'init'|'resp' = senderTaskId.startsWith('init:') ? 'init' : 'resp'
+      const role = (authorRole === viewerRole) ? 'user' : 'agent'
+      return { ...m, role, taskId: viewerTaskId }
+    } catch {
+      return message
+    }
+  }
+  function latestMessageForEpoch(pairId: string, epoch: number): { messageId: string; message: any } | null {
+    const msgs = events.listMessagesForEpoch(pairId, epoch)
+    if (!msgs.length) return null
+    return msgs[msgs.length - 1]
+  }
+  function currentStateForEpoch(pairId: string, epoch: number, viewerRole: 'init'|'resp'): TaskState {
+    const evs = (events as any).listSince(pairId, 0) as Array<any>
+    let last: any = null
+    for (const e of evs) {
+      if (e.pairId === pairId && e.type === 'state' && typeof e.epoch === 'number' && e.epoch === epoch) last = e
+    }
+    if (last && last.states) {
+      const st = viewerRole === 'init' ? last.states.initiator : last.states.responder
+      return st as TaskState
+    }
+    return 'submitted'
   }
 
   function ensureEpoch(pairId: string): { epoch: number } {
@@ -85,33 +124,7 @@ export function createPairsService({ db, events }: Deps) {
   }
 
   async function upsertStates(pairId:string, epoch:number, states:{ init:TaskState; resp:TaskState }, sender:'init'|'resp', msg:any | undefined) {
-    const initId = initTaskId(pairId, epoch)
-    const respId = respTaskId(pairId, epoch)
-
-    const initRow = db.getTask(initId)!
-    const respRow = db.getTask(respId)!
-
-    const set = (row: TaskRow, next: TaskState, maybeMsg?: any) => {
-      db.upsertTask({
-        ...row,
-        state: next,
-        message: maybeMsg ? JSON.stringify(maybeMsg) : (row.message ?? null),
-      })
-    }
-
-    if (sender === 'init') {
-      set(initRow, states.init, msg)
-      set(respRow, states.resp)
-    } else {
-      set(respRow, states.resp, msg)
-      set(initRow, states.init)
-    }
-
-    events.push(pairId, {
-      type:'state',
-      states: { initiator: states.init, responder: states.resp },
-      status: { message: msg && { ...msg } }
-    })
+    events.push(pairId, { type:'state', epoch, states: { initiator: states.init, responder: states.resp }, status: { message: msg && { ...msg } } })
   }
 
   return {
@@ -144,16 +157,10 @@ export function createPairsService({ db, events }: Deps) {
       const { pairId: pid, epoch } = parseTaskId(id)
       const initId = initTaskId(pid, epoch)
       const respId = respTaskId(pid, epoch)
-
-      const initRow = db.getTask(initId) ?? { task_id:initId, pair_id:pid, role:'init' as const, epoch, state:'submitted' as TaskState, message:null }
-      const respRow = db.getTask(respId) ?? { task_id:respId, pair_id:pid, role:'resp' as const, epoch, state:'submitted' as TaskState, message:null }
-
-      db.upsertTask({ ...initRow, state:'canceled' })
-      db.upsertTask({ ...respRow, state:'canceled' })
-
+      if (!db.getTask(initId)) db.upsertTask({ task_id:initId, pair_id:pid, epoch })
+      if (!db.getTask(respId)) db.upsertTask({ task_id:respId, pair_id:pid, epoch })
       events.push(pairId, { type:'backchannel', action:'unsubscribe' })
-      events.push(pairId, { type:'state', states:{ initiator:'canceled', responder:'canceled' } })
-
+      events.push(pairId, { type:'state', epoch, states:{ initiator:'canceled', responder:'canceled' } })
       return toSnapshot(db.getTask(initId)!)
     },
 
@@ -183,19 +190,7 @@ export function createPairsService({ db, events }: Deps) {
       // Mirror message to the other side so their snapshot has status.message
       const otherRole = senderRole === 'init' ? 'resp' : 'init'
       const otherId = otherRole === 'init' ? initTaskId(pairId, epoch) : respTaskId(pairId, epoch)
-      try {
-        const mirrored = {
-          role: 'agent',
-          parts: (msg.parts ?? []).map((p:any) => p && p.kind === 'text' ? { kind:'text', text: p.text } : p),
-          messageId: crypto.randomUUID(),
-          taskId: otherId,
-          contextId: pairId,
-          kind: 'message',
-          metadata: msg.metadata,
-        }
-        const otherRow = db.getTask(otherId)
-        if (otherRow) db.upsertTask({ ...otherRow, message: JSON.stringify(mirrored) })
-      } catch {}
+      // mirrored status no longer persisted; snapshot uses events
 
       // Record canonical message event for history (by epoch)
       events.push(pairId, { type: 'message', epoch, messageId: msg.messageId, message: msg })
@@ -234,7 +229,11 @@ export function createPairsService({ db, events }: Deps) {
           const e = ev.result
           if (e.type === 'state') {
             const now = db.getTask(id)
-            if (now) yield { kind:'status-update', status: { state: now.state } }
+            if (now) {
+              const role: 'init'|'resp' = id.startsWith('init:') ? 'init' : 'resp'
+              const st = currentStateForEpoch(pairId, parseTaskId(id).epoch, role)
+              yield { kind:'status-update', status: { state: st } }
+            }
           }
         }
       })()
@@ -249,13 +248,11 @@ export function createPairsService({ db, events }: Deps) {
       const initId = initTaskId(pairId, epoch)
       const respId = respTaskId(pairId, epoch)
 
-      const initRow = db.getTask(initId) ?? { task_id:initId, pair_id:pairId, role:'init' as const, epoch, state:'submitted' as TaskState, message:null }
-      const respRow = db.getTask(respId) ?? { task_id:respId, pair_id:pairId, role:'resp' as const, epoch, state:'submitted' as TaskState, message:null }
-      db.upsertTask({ ...initRow, state:'canceled' })
-      db.upsertTask({ ...respRow, state:'canceled' })
+      if (!db.getTask(initId)) db.upsertTask({ task_id:initId, pair_id:pairId, epoch })
+      if (!db.getTask(respId)) db.upsertTask({ task_id:respId, pair_id:pairId, epoch })
 
       events.push(pairId, { type:'backchannel', action:'unsubscribe' })
-      events.push(pairId, { type:'state', states:{ initiator:'canceled', responder:'canceled' } })
+      events.push(pairId, { type:'state', epoch, states:{ initiator:'canceled', responder:'canceled' } })
 
       if (type === 'hard') {
         events.push(pairId, { type:'reset-complete', epoch })

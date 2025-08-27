@@ -15,7 +15,7 @@ describeMaybe("Persistence", () => {
     DB = tmpDbPath();
     S = await startServer({ dbPath: DB });
   });
-  afterAll(async () => { await stopServer(S); });
+afterAll(async () => { await stopServer(S); try { await Bun.file(DB).delete(); } catch {} });
 
   it("persists pair meta and tasks across restart", async () => {
     // Create a pair and start an epoch to create tasks

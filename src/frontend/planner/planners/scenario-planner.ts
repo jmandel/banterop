@@ -108,7 +108,21 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
     const sys: LlmMessage = { role: 'system', content: SYSTEM_PREAMBLE };
     const user: LlmMessage = { role: 'user', content: prompt };
     const model = cfg.model || ctx.model;
-    const { text: llmText } = await ctx.llm.chat({ model, messages: [sys, user], temperature: 0.2, maxTokens: 800, signal: ctx.signal });
+    let llmText: string;
+    try {
+      llmText = await chatWithRetry(ctx.llm, { model, messages: [sys, user], temperature: 0.2, maxTokens: 800, signal: ctx.signal }, 3);
+    } catch (e: any) {
+      // Hard failure after retries → propose a gentle draft to the counterpart
+      const composeId = ctx.newId('c:');
+      const text = 'We encountered an error, please reach back soon.';
+      const pf: ProposedFact = ({
+        type: 'compose_intent',
+        composeId,
+        text,
+        ...(includeWhy ? { why: 'Upstream model error after retries.' } : {})
+      }) as ProposedFact;
+      return [pf];
+    }
 
     const decision = parseAction(llmText);
     const reasoning = decision.reasoning || 'Planner step.';
@@ -372,6 +386,26 @@ function parseAction(text: string): ParsedDecision {
     return { reasoning: 'parse-error', tool: 'sleep', args: {} };
   };
   return coerce(text || '');
+}
+
+// LLM chat with simple exponential backoff and jitter
+async function chatWithRetry(llm: PlanContext['llm'], req: { model?: string; messages: LlmMessage[]; temperature?: number; maxTokens?: number; signal?: AbortSignal }, attempts = 3): Promise<string> {
+  let lastErr: any = null;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      const { text } = await llm.chat(req);
+      return String(text ?? '');
+    } catch (e: any) {
+      lastErr = e;
+      if (i < attempts) {
+        const base = 250;
+        const delay = base * Math.pow(2, i - 1) + Math.floor(Math.random() * 50);
+        await new Promise(res => setTimeout(res, delay));
+        continue;
+      }
+    }
+  }
+  throw lastErr ?? new Error('LLM chat failed');
 }
 
 // -----------------------------
