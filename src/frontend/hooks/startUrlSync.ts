@@ -41,16 +41,7 @@ export function startUrlSync() {
         if (planner?.hydrate) {
           try { console.debug('[urlSync] boot: first hydrate(%o)…', id); } catch {}
           const res = await planner.hydrate(seed, {
-            fetchJson: async (url: string) => {
-              const key = `json:${url}`;
-              if (hydrationCache.has(key)) return hydrationCache.get(key);
-              const response = await fetch(url);
-              if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
-              const MAX = 1_500_000;
-              const text = await response.text();
-              if (text.length > MAX) throw new Error('Response exceeds 1.5 MB limit');
-              try { return JSON.parse(text); } catch { throw new Error('Invalid JSON'); }
-            },
+            fetchJson,
             cache: hydrationCache
           });
           // Accept both shapes:
@@ -61,7 +52,14 @@ export function startUrlSync() {
           const fields = (res as any)?.fields;
           if (Array.isArray(fields)) { console.debug('[urlSync] boot: seeding savedFields (count=%o)', fields.length); useAppStore.getState().setPlannerSavedFields(fields); }
           console.debug('[urlSync] boot: hydrate → ready=%o, summary=%o', !!ready, summarizeConfigForLog(id, config));
-          if (config) useAppStore.getState().setPlannerConfig(config, !!ready);
+          if (config) {
+            useAppStore.getState().setPlannerConfig(config, !!ready);
+
+            // CRITICAL: Also set readyByPlanner for the UI to stay collapsed
+            useAppStore.setState(s => ({
+              readyByPlanner: { ...s.readyByPlanner, [id]: !!ready }
+            }));
+          }
 
           // NEW: fast-forward the planner's config store fields from the seed
             const store = useAppStore.getState().configStores[id];
@@ -95,16 +93,7 @@ export function startUrlSync() {
         if (planner?.hydrate) {
           try { console.debug('[urlSync] hashchange: hydrate(%o)…', id); } catch {}
           const res = await planner.hydrate(seed, {
-            fetchJson: async (url: string) => {
-              const key = `json:${url}`;
-              if (hydrationCache.has(key)) return hydrationCache.get(key);
-              const response = await fetch(url);
-              if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
-              const MAX = 1_500_000;
-              const text = await response.text();
-              if (text.length > MAX) throw new Error('Response exceeds 1.5 MB limit');
-              try { return JSON.parse(text); } catch { throw new Error('Invalid JSON'); }
-            },
+            fetchJson,
             cache: hydrationCache
           });
           // Accept both shapes:
@@ -117,7 +106,14 @@ export function startUrlSync() {
             if (Array.isArray(fields)) { console.debug('[urlSync] hashchange: seeding savedFields (count=%o)', fields.length); useAppStore.getState().setPlannerSavedFields(fields); }
           } catch {}
           try { console.debug('[urlSync] hashchange: hydrate → ready=%o, summary=%o', !!ready, summarizeConfigForLog(id, config)); } catch {}
-          if (config) useAppStore.getState().setPlannerConfig(config, !!ready);
+          if (config) {
+            useAppStore.getState().setPlannerConfig(config, !!ready);
+
+            // CRITICAL: Also set readyByPlanner for the UI to stay collapsed
+            useAppStore.setState(s => ({
+              readyByPlanner: { ...s.readyByPlanner, [id]: !!ready }
+            }));
+          }
 
           // NEW: fast-forward the planner's config store fields from the seed
           try {

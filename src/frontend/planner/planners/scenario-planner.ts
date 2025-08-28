@@ -14,6 +14,8 @@ import type {
   Planner, PlanInput, PlanContext, ProposedFact, LlmMessage,
   Fact, AttachmentMeta
 } from '../../../shared/journal-types'; // ← adjust path if needed
+import { chatWithValidationRetry } from '../../../shared/llm-retry';
+import { b64ToUtf8 } from '../../../shared/codec';
 import type { ScenarioConfiguration, Tool as ScenarioTool } from '../../../types/scenario-configuration.types'; // ← adjust
 
 // ---------------------u--------
@@ -114,15 +116,15 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       const prompt = buildPlannerPrompt(scenario, myId, counterpartId, xmlHistory, availableFilesXml, toolsCatalog, finalizationReminder);
 
       try { ctx.hud('planning', 'Thinking…', 0.5); } catch {}
-      let llmText: string;
+      let decision: ParsedDecision;
       try {
-        llmText = await chatWithRetry(ctx.llm, { model, messages: [sys, { role: 'user', content: prompt }], temperature: 0.5, signal: ctx.signal }, 3);
-      } catch {
-        out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered an error, please reach back soon.', ...(includeWhy ? { why:'Upstream model error after retries.' } : {}) } as ProposedFact));
+        decision = await chatForDecisionWithRetry(ctx, { model, sys, prompt });
+      } catch (e:any) {
+        const errMsg = String(e?.message || e || 'planner error');
+        const msg = `We hit a temporary error while drafting (details: ${errMsg}). If you want us to continue, please reply or try again.`;
+        out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text: msg, nextStateHint: 'input-required', ...(includeWhy ? { why:'Planner error after 3 attempts.' } : {}) } as ProposedFact));
         break;
       }
-
-      const decision = parseAction(llmText);
       const reasoning = decision.reasoning || 'Planner step.';
 
       // Dispatch
@@ -155,10 +157,12 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
         if (name) {
           const rec = await ctx.readAttachment(name);
           if (rec) {
-            const textExcerpt = safeDecodeUtf8(rec.bytes, 2000);
-            out.push(({ type:'tool_result', callId, ok:true, result:{ name, mimeType: rec.mimeType, size: rec.bytes?.length ?? undefined, excerpt: textExcerpt }, ...(includeWhy ? { why:'Attachment available at cut.' } : {}) } as ProposedFact));
+            // Do not persist file content to the ledger; only reflect success.
+            // Embed the full file content in the in-memory working facts so the next prompt includes a
+            // consistent <tool_result filename="...">...full text...</tool_result> block.
             workingFacts.push({ type:'tool_call', callId, name:'read_attachment', args:{ name } } as any);
-            workingFacts.push({ type:'tool_result', callId, ok:true, result:{ name, mimeType: rec.mimeType } } as any);
+            const fullText = b64ToUtf8(rec.bytes);
+            workingFacts.push({ type:'tool_result', callId, ok:true, result:{ name, mimeType: rec.mimeType, text: fullText } } as any);
           } else {
             out.push(({ type:'tool_result', callId, ok:false, error:`Attachment '${name}' is not available at this Cut.`, ...(includeWhy ? { why:'readAttachment failed.' } : {}) } as ProposedFact));
             workingFacts.push({ type:'tool_call', callId, name:'read_attachment', args:{ name } } as any);
@@ -230,28 +234,6 @@ You are a turn-based agent planner. Respond with JSON only.
 `;
 
 type ParsedDecision = { reasoning: string; tool: string; args: any };
-function parseAction(text: string): ParsedDecision {
-  const coerce = (s: string) => {
-    let raw = s.trim();
-    const m = raw.match(/```json\s*([\s\S]*?)```/i) || raw.match(/```\s*([\s\S]*?)```/i);
-    if (m?.[1]) raw = m[1].trim();
-    const i = raw.indexOf('{'); const j = raw.lastIndexOf('}');
-    const body = i >= 0 && j > i ? raw.slice(i, j + 1) : raw;
-    try {
-      const obj = JSON.parse(body);
-      // Accept { action: { tool, args }, reasoning }
-      if (obj && typeof obj === 'object') {
-        const action = obj.action || obj.toolCall || {};
-        const tool = String(action.tool || '').trim() || 'sleep';
-        const args = action.args || {};
-        const reasoning = String(obj.reasoning || obj.thought || '').trim();
-        return { reasoning, tool, args };
-      }
-    } catch {}
-    return { reasoning: 'parse-error', tool: 'sleep', args: {} };
-  };
-  return coerce(text || '');
-}
 
 function shortArgs(a: any): string {
   try {
@@ -261,24 +243,35 @@ function shortArgs(a: any): string {
   } catch { return ''; }
 }
 
-// LLM chat with simple exponential backoff and jitter
-async function chatWithRetry(llm: PlanContext['llm'], req: { model?: string; messages: LlmMessage[]; temperature?: number; maxTokens?: number; signal?: AbortSignal }, attempts = 3): Promise<string> {
-  let lastErr: any = null;
-  for (let i = 1; i <= attempts; i++) {
-    try {
-      const { text } = await llm.chat(req);
-      return String(text ?? '');
-    } catch (e: any) {
-      lastErr = e;
-      if (i < attempts) {
-        const base = 250;
-        const delay = base * Math.pow(2, i - 1) + Math.floor(Math.random() * 50);
-        await new Promise(res => setTimeout(res, delay));
-        continue;
-      }
-    }
-  }
-  throw lastErr ?? new Error('LLM chat failed');
+// Centralized wrapper: retry up to 3x until a valid decision JSON is parsed
+async function chatForDecisionWithRetry(ctx: PlanContext<any>, opts: { model?: string; sys: LlmMessage; prompt: string }): Promise<ParsedDecision> {
+  const req: { model?: string; messages: LlmMessage[]; temperature?: number; signal?: AbortSignal } = {
+    model: opts.model,
+    messages: [opts.sys, { role: 'user', content: opts.prompt }],
+    temperature: 0.5,
+    signal: ctx.signal,
+  };
+  const retryMessages: LlmMessage[] = [
+    { role: 'system', content: 'Return exactly one JSON object with keys "reasoning" and "action". No extra text.' }
+  ];
+  return chatWithValidationRetry(ctx.llm, req, (text) => parseActionStrict(text), { attempts: 3, retryMessages });
+}
+
+function parseActionStrict(text: string): ParsedDecision {
+  const raw = String(text || '').trim();
+  const m = raw.match(/```json\s*([\s\S]*?)```/i) || raw.match(/```\s*([\s\S]*?)```/i);
+  const candidate = m?.[1]?.trim() ?? raw;
+  const i = candidate.indexOf('{'); const j = candidate.lastIndexOf('}');
+  const body = i >= 0 && j > i ? candidate.slice(i, j + 1) : candidate;
+  let obj: any;
+  try { obj = JSON.parse(body); } catch { throw new Error('Invalid JSON'); }
+  if (!obj || typeof obj !== 'object') throw new Error('Response not an object');
+  const action = (obj as any).action || (obj as any).toolCall || {};
+  const tool = String((action as any).tool || '').trim();
+  const args = (action as any).args || {};
+  const reasoning = String((obj as any).reasoning || (obj as any).thought || '').trim();
+  if (!tool) throw new Error('Missing action.tool');
+  return { reasoning, tool, args };
 }
 
 // -----------------------------
@@ -464,6 +457,15 @@ function buildPlannerPrompt(
 
   // TOOLS CATALOG
   parts.push(toolsCatalog);
+
+  // TOOLING GUIDANCE (nudge toward scenario tools over free-form)
+  parts.push('<TOOLING_GUIDANCE>');
+  parts.push('- Prefer scenario-specific tools to advance the task.');
+  parts.push('- Use read_attachment only to inspect existing files; to generate new content, invoke scenario tools that synthesize documents or results.');
+  parts.push('- Before sending a free-form message, consider if a tool can produce a clearer, more authoritative outcome.');
+  parts.push("- When a tool is terminal (endsConversation=true), compose one final message, attach its outputs, and set nextState='completed'.");
+  parts.push("- Keep all exchange in this conversation thread; do not refer to portals/emails/fax.");
+  parts.push('</TOOLING_GUIDANCE>');
 
   // FINALIZATION REMINDER (optional)
   if (finalizationReminder && finalizationReminder.trim()) {
@@ -709,29 +711,17 @@ async function runToolOracle(opts: {
   model?: string;
 }): Promise<OracleExec> {
   const prompt = buildOraclePromptAligned(opts);
-
-  // Attempt 1
   try {
-    const { text } = await opts.llm.chat({ model: opts.model, messages: [{ role: 'user', content: prompt }], temperature: 0.7 });
-    const parsed = parseOracleResponseAligned(text);
+    const req = { model: opts.model, messages: [{ role: 'user', content: prompt }], temperature: 0.6 } as const;
+    const retryMessages: LlmMessage[] = [
+      { role: 'system', content: 'Return exactly one JSON code block with keys "reasoning" (string) and "output" (JSON). No extra text.' }
+    ];
+    const parsed = await chatWithValidationRetry(opts.llm, req as any, (text) => parseOracleResponseAligned(text), { attempts: 3, retryMessages });
     const { output } = parsed;
     const attachments = extractAttachmentsFromOutput(output);
     return { ok: true, result: output, attachments };
-  } catch (e: any) {
-    // Retry with strict format hint
-    try {
-      const retryMsgs: LlmMessage[] = [
-        { role: 'user', content: prompt },
-        { role: 'system', content: 'Return exactly one JSON code block with keys "reasoning" (string) and "output" (JSON). No extra text.' }
-      ];
-      const { text } = await opts.llm.chat({ model: opts.model, messages: retryMsgs, temperature: 0.5 });
-      const parsed = parseOracleResponseAligned(text);
-      const { output } = parsed;
-      const attachments = extractAttachmentsFromOutput(output);
-      return { ok: true, result: output, attachments };
-    } catch (e2: any) {
-      return { ok: false, error: String(e2?.message || e2 || 'oracle failed'), attachments: [] };
-    }
+  } catch (e:any) {
+    return { ok: false, error: String(e?.message || 'oracle failed'), attachments: [] };
   }
 }
 
@@ -1098,26 +1088,7 @@ function toBase64(str: string): string {
   return Buffer.from(str, 'utf-8').toString('base64');
 }
 
-function safeDecodeUtf8(b64: string, max = 2000): string {
-  try {
-    // Browser path
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore
-    if (typeof atob === 'function') {
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      const bin = atob(b64);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      const dec = new TextDecoder('utf-8').decode(bytes);
-      return dec.slice(0, max);
-    }
-  } catch {}
-  // Node/Bun
-  // eslint-disable-next-line no-undef
-  const dec = Buffer.from(b64, 'base64').toString('utf-8');
-  return dec.slice(0, max);
-}
+// (Replaced ad-hoc decoders with shared b64ToUtf8 from src/shared/codec)
 
 function findScenarioTool(scenario: ScenarioConfiguration, myId: string, toolName: string): ScenarioTool | undefined {
   const me = scenario.agents.find(a => a.agentId === myId) || scenario.agents[0];

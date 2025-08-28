@@ -72,6 +72,22 @@ export type Store = {
   // HUD
   setHud(phase: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting', label?: string, p?: number): void;
   hud: { phase: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting'; label?: string; p?: number } | null;
+
+  // planning baton
+  planNonce: number;
+  requestReplan(reason?: string): void;
+
+  // setup UI state machine
+  setupUi: {
+    panel: 'open' | 'collapsed';
+    lastPlannerId: string;
+    autoCollapseOnReady: boolean;
+  };
+  openSetup(): void;
+  collapseSetup(): void;
+  onPlannerSelected(newPid: string, readyNow: boolean): void;
+  onPlannerReadyFlip(readyNow: boolean): void;
+  onApplyClicked(): void;
 };
 
 export const useAppStore = create<Store>((set, get) => ({
@@ -87,6 +103,12 @@ export const useAppStore = create<Store>((set, get) => ({
   facts: [],
   seq: 0,
   hud: null,
+  planNonce: 0,
+  setupUi: {
+    panel: 'collapsed' as 'open' | 'collapsed',
+    lastPlannerId: '',
+    autoCollapseOnReady: true,
+  },
   knownMsg: new Set<string>(),
   attachmentsIndex: new Map(),
   composeApproved: new Set<string>(),
@@ -239,6 +261,8 @@ export const useAppStore = create<Store>((set, get) => ({
     get().setPlannerConfig(config, ready);
     // Nudge planner controller; harness will also rebuild on seq change
     try { get().kickoffConversationWithPlanner(); } catch {}
+    // Explicitly request a single replan after apply (exact, non-heuristic)
+    try { get().requestReplan('apply'); } catch {}
   },
 
   setTaskId(taskId) {
@@ -465,6 +489,31 @@ export const useAppStore = create<Store>((set, get) => ({
   },
   head() { return get().seq || 0; },
   setHud(phase, label, p) { set({ hud: { phase, label, p } }); },
+  requestReplan(_reason) { set(s => ({ planNonce: (s.planNonce || 0) + 1 })); },
+
+  // Setup UI state machine
+  openSetup() { set(s => ({ setupUi: { ...s.setupUi, panel: 'open' } })); },
+  collapseSetup() { set(s => ({ setupUi: { ...s.setupUi, panel: 'collapsed' } })); },
+  onPlannerSelected(newPid, readyNow) {
+    set(s => ({
+      setupUi: {
+        ...s.setupUi,
+        lastPlannerId: newPid,
+        panel: readyNow ? 'collapsed' : 'open',
+      }
+    }));
+  },
+  onPlannerReadyFlip(readyNow) {
+    set(s => {
+      if (readyNow && s.setupUi.autoCollapseOnReady) {
+        return { setupUi: { ...s.setupUi, panel: 'collapsed' } };
+      }
+      return s;
+    });
+  },
+  onApplyClicked() {
+    set(s => ({ setupUi: { ...s.setupUi, panel: 'collapsed' } }));
+  },
 }));
 
 // --- helpers ---

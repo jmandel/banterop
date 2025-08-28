@@ -1,4 +1,5 @@
 import type { Planner, PlanInput, PlanContext, ProposedFact, Fact, AttachmentMeta } from "../../../shared/journal-types";
+import { chatWithValidationRetry, cleanModelText } from "../../../shared/llm-retry";
 
 type Cfg = {
   endpoint?: string;
@@ -9,7 +10,6 @@ type Cfg = {
   targetWords?: number;
 };
 
-const DEFAULT_ENDPOINT = "https://chitchat.fhir.me/api/llm/complete";
 const DEFAULT_MODEL = "openai/gpt-oss-120b:nitro";
 const DEFAULT_TEMP = 0.2;
 
@@ -92,36 +92,30 @@ function buildPrompt(input: PlanInput, ctx: PlanContext<Cfg>): { system: string;
   return { system, user };
 }
 
-async function callLLM(prompt: { system: string; user: string }, cfg: Cfg, signal?: AbortSignal): Promise<string | null> {
-  try {
-    const endpoint = cfg.endpoint || DEFAULT_ENDPOINT;
-    const model = cfg.model || DEFAULT_MODEL;
-    const temperature = typeof cfg.temperature === 'number' ? cfg.temperature : DEFAULT_TEMP;
-    const body = JSON.stringify({ messages: [{ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user }], model, temperature });
-    const res = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body, signal });
-    if (!res.ok) return null;
-    const j: any = await res.json();
-    const text =
-      (j && typeof j === 'object' && j.result && typeof j.result.text === 'string' && j.result.text)
-      || (j && typeof j === 'object' && j.result && typeof j.result.content === 'string' && j.result.content)
-      || (j && Array.isArray(j.choices) && j.choices[0]?.message?.content)
-      || (typeof j.text === 'string' ? j.text : null)
-      || (typeof j.content === 'string' ? j.content : null);
-    if (!text) return null;
-    const cleaned = String(text).trim().replace(/^```[a-z]*\n?|```$/g, '').trim();
-    return cleaned || null;
-  } catch {
-    return null;
-  }
-}
-
 export const LLMDrafterPlanner: Planner<Cfg> = {
   id: 'llm-drafter',
   name: 'LLM Drafter',
   async plan(input, ctx) {
     ctx.hud('planning', 'LLM drafting…', 0.4);
     const p = buildPrompt(input, ctx);
-    const text = await callLLM(p, ctx.config || {}, ctx.signal);
+    const model = (ctx.config?.model || ctx.model || DEFAULT_MODEL);
+    const temperature = typeof ctx.config?.temperature === 'number' ? ctx.config!.temperature! : DEFAULT_TEMP;
+    let text: string | null = null;
+    try {
+      const req: { model?: string; messages: import("../../../shared/journal-types").LlmMessage[]; temperature?: number; signal?: AbortSignal } = {
+        model,
+        messages: [{ role: 'system', content: p.system }, { role: 'user', content: p.user }],
+        temperature,
+        signal: ctx.signal,
+      };
+      text = await chatWithValidationRetry<string>(ctx.llm, req, (raw) => {
+        const cleaned = cleanModelText(raw);
+        if (!cleaned) throw new Error('Empty response');
+        return cleaned;
+      }, { attempts: 3 });
+    } catch {
+      text = null;
+    }
     if (!text) {
       ctx.hud('waiting', 'LLM empty/error');
       return [{ type:'sleep', reason:'LLM empty/error' } as ProposedFact];

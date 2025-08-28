@@ -27,6 +27,10 @@ body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, 'Helveti
 .stripe-head { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color:#6b7280; margin-bottom:4px; }
 .stripe-body { font-size: 14px; }
 
+/* Attachments inside message bubbles */
+.attachments { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.attachments .att { display: block; }
+
 /* Debug panel pinned to the right */
 .debug-panel { position: fixed; top: 0; right: 0; height: 100vh; width: 360px; background: #0f172a; color: #c7e0ff; border-left: 1px solid #1f2937; z-index: 1000; display:flex; flex-direction:column; }
 .debug-header { padding: 10px 12px; border-bottom: 1px solid #1f2937; display:flex; align-items:center; gap:8px; }

@@ -1,11 +1,12 @@
-import { PlannerHarness } from './harness';
-import { SimpleDemoPlanner } from './planners/simple-demo';
-import { resolvePlanner } from './registry';
+import { DEFAULT_CHITCHAT_ENDPOINT, DEFAULT_CHITCHAT_MODEL, makeChitchatProvider } from '../../shared/llm-provider';
 import { useAppStore } from '../state/store';
-import { makeChitchatProvider, DEFAULT_CHITCHAT_ENDPOINT, DEFAULT_CHITCHAT_MODEL } from '../../shared/llm-provider';
+import { PlannerHarness } from './harness';
+import { resolvePlanner } from './registry';
 
 let started = false;
 let currentHarness: PlannerHarness<any> | null = null;
+let lastBuildKey = '';      // fingerprint to avoid redundant rebuilds
+let lastSeenPlanNonce = 0;  // to run exactly once per request
 const sharedLlmProvider = makeChitchatProvider(DEFAULT_CHITCHAT_ENDPOINT);
 
 const NopPlanner = { id:'nop', name:'No-op', async plan(){ return []; } } as const;
@@ -46,27 +47,40 @@ export function startPlannerController() {
     const hud      = (phase:any, label?:string, p?:number) => useAppStore.getState().setHud(phase, label, p);
     const model = (config?.model && String(config.model).trim()) || DEFAULT_CHITCHAT_MODEL;
     currentHarness = new PlannerHarness(getFacts, getHead, append, hud, planner as any, cfg as any, { otherAgentId:'counterpart', model }, sharedLlmProvider);
-    // Kick once now
-    try { currentHarness.schedulePlan(); } catch {}
+    // Don't auto-plan on rebuild - let explicit requests handle it
   }
 
   rebuildHarness();
-  // Rebuild harness if planner or readiness or config or task changes
+  // Rebuild harness when it matters (including config changes)
   useAppStore.subscribe((s, prev) => {
-    const pidChanged = s.plannerId !== prev.plannerId;
-    const taskChanged = s.taskId !== prev.taskId;
-    const readyChanged = s.readyByPlanner !== prev.readyByPlanner;
-    const configChanged = s.configByPlanner !== (prev as any).configByPlanner;
-    const newPlannerReady = !!s.readyByPlanner[s.plannerId || 'off'];
-    let rebuilt = false;
-    // If planner id or config changed (and not due to task change), and the new planner is ready,
-    // rebuild first so the next seq change (from dismissal) schedules planning on the NEW harness.
-    if ((pidChanged || configChanged) && newPlannerReady && !taskChanged) {
+    const pid = s.plannerId;
+    const ready = !!s.readyByPlanner[pid];
+
+    // Check if basic state changed (planner, task, ready)
+    const basicKey = [pid, s.taskId || '', ready ? '1' : '0'].join('|');
+    const basicChanged = basicKey !== lastBuildKey;
+
+    // Check if config changed (for applied configs, not transient typing)
+    const configChanged = ready && JSON.stringify(s.configByPlanner[pid]) !== JSON.stringify(prev.configByPlanner[pid]);
+
+    if (basicChanged || configChanged) {
+      lastBuildKey = basicKey;
       rebuildHarness();
-      rebuilt = true;
-      try { dismissLatestUnsentDraft(); } catch {}
     }
-    if (!rebuilt && (pidChanged || taskChanged || readyChanged || configChanged)) rebuildHarness();
+
+    // Setup UI state machine transitions
+    const pidChanged = s.plannerId !== prev.plannerId;
+    if (pidChanged) {
+      try {
+        s.onPlannerSelected(s.plannerId, ready);
+      } catch {}
+    }
+
+    // When planner becomes ready against an existing task, request a single replan
+    const prevReady = !!prev.readyByPlanner[prev.plannerId || pid];
+    if (!prevReady && ready && s.taskId) {
+      try { useAppStore.getState().requestReplan('boot-ready'); } catch {}
+    }
   });
   // Trigger planning when journal head advances
   let prevSeq = useAppStore.getState().seq || 0;
@@ -75,6 +89,15 @@ export function startPlannerController() {
     if (seq !== prevSeq) {
       prevSeq = seq;
       try { currentHarness?.schedulePlan(); } catch {}
+    }
+  });
+
+  // Run exactly once when someone requests a replan (apply / boot-ready)
+  useAppStore.subscribe((s) => {
+    const nonce = (s as any).planNonce || 0;
+    if (nonce !== lastSeenPlanNonce) {
+      lastSeenPlanNonce = nonce;
+      currentHarness?.schedulePlan();
     }
   });
 }

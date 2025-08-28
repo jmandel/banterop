@@ -13,56 +13,9 @@ export function PlannerSetupCard() {
   // Use the new clean config store system
   const configStore = useAppStore(s => s.configStores[pid]);
 
-  // Track planner changes and expansion state
-  const [lastPlannerId, setLastPlannerId] = React.useState<string>('');
-  const [isNewPlanner, setIsNewPlanner] = React.useState<boolean>(false);
-  const [collapsed, setCollapsed] = React.useState<boolean>(true);
-  const [isExpanding, setIsExpanding] = React.useState<boolean>(false);
-  const [wasReadyWhenSwitched, setWasReadyWhenSwitched] = React.useState<boolean>(false);
-
-  // Expand when planner changes OR when newly selected
-  React.useEffect(() => {
-    const plannerChanged = lastPlannerId !== pid;
-    console.log('[PlannerSetupCard] useEffect triggered:', {
-      pid,
-      lastPlannerId,
-      plannerChanged,
-      ready,
-      isNewPlanner,
-      isExpanding,
-      currentCollapsed: collapsed
-    });
-
-    if (plannerChanged) {
-      // Different planner selected - expand to show its config
-      // Track if it was already ready when we switched
-      const alreadyReady = ready;
-      console.log('[PlannerSetupCard] Planner changed from', lastPlannerId, 'to', pid, '- expanding config (was ready:', alreadyReady, ')');
-
-      setLastPlannerId(pid);
-      setIsNewPlanner(true);
-      setWasReadyWhenSwitched(alreadyReady);
-      setIsExpanding(true);
-      setCollapsed(false);
-
-      // Allow collapse after a short delay to let auto-apply finish
-      setTimeout(() => {
-        console.log('[PlannerSetupCard] Expansion phase complete, allowing collapse');
-        setIsExpanding(false);
-      }, 100);
-    } else if (!ready && !isNewPlanner && !isExpanding) {
-      // Same planner but not configured yet - expand
-      console.log('[PlannerSetupCard] Same planner but not ready - expanding config');
-      setIsNewPlanner(true);
-      setCollapsed(false);
-    } else if (isNewPlanner && ready && !plannerChanged && !isExpanding && !wasReadyWhenSwitched) {
-      // Allow collapsing once configured, but NOT during expansion phase
-      // AND NOT if it was already ready when we switched
-      console.log('[PlannerSetupCard] Planner configured - allowing collapse');
-      setIsNewPlanner(false);
-      setCollapsed(true);
-    }
-  }, [pid, ready, isNewPlanner, lastPlannerId, collapsed, isExpanding]);
+  // Use the setup UI state machine from the store
+  const setupUi = useAppStore(s => s.setupUi);
+  const collapsed = setupUi.panel === 'collapsed';
 
   // Get config snapshot from store (reactive) - manual subscription to avoid hook issues
   const [configSnapshot, setConfigSnapshot] = React.useState(
@@ -112,29 +65,6 @@ export function PlannerSetupCard() {
     }
   }, [currentConfig, lastAppliedConfig]);
 
-  console.log('[PlannerSetupCard] Render:', {
-    pid,
-    plannerName: planner?.name || 'none',
-    plannerId: planner?.id || 'none',
-    ready,
-    isNewPlanner,
-    collapsed,
-    lastPlannerId,
-    hasConfigStore: !!configStore,
-    shouldShowFields: !collapsed,
-    shouldShowSaveButton: !collapsed && (hasChanges || !ready)
-  });
-
-  console.log('[PlannerSetupCard] Config state:', {
-    hasConfigStore: !!configStore,
-    fieldsCount: configSnapshot?.fields?.length || 0,
-    fields: configSnapshot?.fields?.map(f => ({ key: f.key, value: f.value, visible: f.visible, type: f.type })) || [],
-    canSave: configSnapshot?.canSave,
-    pending: configSnapshot?.pending,
-    hasChanges,
-    lastAppliedConfig: !!lastAppliedConfig
-  });
-
   const [applyErr, setApplyErr] = React.useState<string | null>(null);
 
   const canBegin = ready && role === 'initiator' && !taskId;
@@ -156,7 +86,7 @@ export function PlannerSetupCard() {
     }
     return false;
   }, [facts]);
-  const canShowBegin = canBegin && (hud?.phase === 'idle' || !hud) && !hasUnsentDraft;
+  const canShowBegin = canBegin && (hud?.phase === 'idle' || !hud) && !hasUnsentDraft && collapsed;
 
   const saveApply = React.useCallback(async () => {
     if (!configStore) return;
@@ -169,7 +99,7 @@ export function PlannerSetupCard() {
       setLastAppliedConfig(config);
 
       useAppStore.getState().reconfigurePlanner({ config, ready: rdy, rewind: true });
-      setCollapsed(true);
+      useAppStore.getState().onApplyClicked();
     } catch (error: any) {
       setApplyErr(String(error?.message || 'Apply failed'));
     }
@@ -212,7 +142,10 @@ export function PlannerSetupCard() {
           <button
             className="btn ghost"
             type="button"
-            onClick={() => setCollapsed(v => !v)}
+            onClick={() => {
+              const { openSetup, collapseSetup } = useAppStore.getState();
+              collapsed ? openSetup() : collapseSetup();
+            }}
             aria-label={collapsed ? 'Expand planner setup' : 'Collapse planner setup'}
             style={{ fontSize: 18, width: 34, height: 34, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
           >
@@ -245,7 +178,7 @@ export function PlannerSetupCard() {
             }
             const pillText = (() => {
               if (isTool) return `Tool — ${raw && raw.startsWith('Executing') ? raw : (name ? `Executing ${name}` : 'Executing')}`;
-              if (phase === 'idle') return 'Idle';
+              if (phase === 'idle') return `Idle ${planner?.name || 'Planner'}`;
               const cap = phase.slice(0,1).toUpperCase() + phase.slice(1);
               return raw ? `${cap} — ${raw}` : cap;
             })();
