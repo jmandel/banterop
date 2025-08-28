@@ -2,13 +2,19 @@
 // Provides tolerant parsing for legacy shapes
 
 export type SetupPayload = {
+  v?: number;
   planner?: {
     id?: 'off'|'llm-drafter'|'scenario-v0.3'|'simple-demo';
     mode?: 'approve'|'auto';
+    // v1 legacy fields
     ready?: boolean;
-    applied?: any; // lightweight applied config for deep-link
-    config?: any;  // legacy fallback
+    applied?: any;
+    config?: any;
+    // v2 fields
+    seed?: any;
+    rev?: number;
   };
+  rev?: number; // tolerant legacy placement
   llm?: { model?: string };
   kickoff?: 'if-ready'|'always'|'never';
 };
@@ -49,4 +55,3 @@ export function decodeSetup(hash: string): SetupPayload | null {
   } catch {}
   return null;
 }
-

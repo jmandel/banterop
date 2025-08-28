@@ -17,6 +17,9 @@ export type A2AStatus =
   | "auth-required"
   | "unknown";
 
+// Allowed nextState values when sending a message
+export type A2ANextState = Exclude<A2AStatus, 'submitted'|'unknown'>;
+
 export type A2AMessage = {
   role: "user" | "agent";
   parts: A2APart[];

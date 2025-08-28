@@ -1,4 +1,5 @@
 import type { Persistence, TaskRow, TaskState } from './persistence'
+import { A2A_EXT_URL } from '../../shared/core'
 import { extractNextState, computeStatesForNext } from './finality'
 import { validateParts } from './validators'
 import { initTaskId, respTaskId, parseTaskId } from './ids'
@@ -156,11 +157,8 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
   }
 
   // NOTE: When sending without a taskId, we unconditionally bump to a new epoch.
-  // This simplifies the demo server (no role/turn disambiguation here), but it will
-  // fragment a single conversation across multiple epochs and can disrupt status/turn-taking.
-  // Clients should preserve and include their taskId on every send to continue within
-  // the current epoch. A production implementation would likely check whether the
-  // current epoch is terminal before incrementing, or derive the correct sender taskId.
+  // This ensures no more than one active task per room/channel/pair. Any time
+  // a new task is created, any existing tasks are ended. This is intentional.
   function ensureEpochForSend(pairId: string): { epoch: number } {
     const p = db.getPair(pairId)
     if (!p) return ensureEpoch(pairId)
@@ -209,7 +207,7 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
       if (!db.getTask(initId)) db.upsertTask({ task_id:initId, pair_id:pid, epoch })
       if (!db.getTask(respId)) db.upsertTask({ task_id:respId, pair_id:pid, epoch })
       // persist a control message with nextState=canceled so restart is deterministic
-      const control = { messageId: crypto.randomUUID(), parts: [], kind:'message', taskId: id, contextId: pid, metadata: { 'https://chitchat.fhir.me/a2a-ext': { nextState: 'canceled' } } }
+      const control = { messageId: crypto.randomUUID(), parts: [], kind:'message', taskId: id, contextId: pid, metadata: { [A2A_EXT_URL]: { nextState: 'canceled' } } }
       try {
         const { taskId: _t, contextId: _c, role: _r, ...persistBase } = control as any
         db.insertMessage({ pair_id: pid, epoch, author: role, json: JSON.stringify(persistBase) })
@@ -260,7 +258,7 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
           taskId: senderId, // relative for viewer; persisted JSON will strip these
           contextId: pairId,
           kind: 'message',
-          metadata: { server: { category: 'room-error', reason: 'backend-not-open' }, 'https://chitchat.fhir.me/a2a-ext': { nextState: 'failed' } }
+          metadata: { server: { category: 'room-error', reason: 'backend-not-open' }, [A2A_EXT_URL]: { nextState: 'failed' } }
         }
         // Persist server-authored error message as canonical latest
         try {

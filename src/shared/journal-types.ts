@@ -63,7 +63,7 @@ export type Fact =
      ; composeId:string
      ; text:string
      ; attachments?:AttachmentMeta[]
-     ; nextStateHint?: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required'
+     ; nextStateHint?: import('./a2a-types').A2ANextState
      } & PlannerWhy & Stamp)
   | ({ type:'compose_dismissed'
      ; composeId:string

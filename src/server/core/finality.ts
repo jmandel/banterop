@@ -1,14 +1,14 @@
-export type NextState = 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required'
+import { A2A_EXT_URL, type NextState } from '../../shared/core'
 
 function isNextState(v:any): v is NextState {
   return ['working','input-required','completed','canceled','failed','rejected','auth-required'].includes(String(v))
 }
 
 export function extractNextState(msg:any): NextState | null {
-  const top = msg?.metadata?.['https://chitchat.fhir.me/a2a-ext']
+  const top = msg?.metadata?.[A2A_EXT_URL]
   if (isNextState(top?.nextState)) return top.nextState
   for (const p of msg?.parts ?? []) {
-    const m = p?.metadata?.['https://chitchat.fhir.me/a2a-ext']
+    const m = p?.metadata?.[A2A_EXT_URL]
     if (isNextState(m?.nextState)) return m.nextState
   }
   return null

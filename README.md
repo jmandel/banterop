@@ -26,26 +26,26 @@ bun run dev
 ```
 
 Use the Control Plane to create a pair; it shows links you can open in new tabs:
-- `participant/?role=initiator&a2a=<encoded A2A URL>` → Initiator
-- `participant/?role=responder&a2a=<encoded A2A URL>&tasks=<encoded backchannel URL>` → Responder (listens to backchannel)
+- `/client/?card=<AgentCard URL>` → Client (initiator). Back-compat: `/client/?a2a=<A2A URL>`.
+- `/rooms/<PAIR_ID>` → Room backend (responder)
 
 Send messages and choose finality (`turn` to pass the token; `conversation` to complete). After a hard reset, the next initiator send starts a new epoch. No popups are used; links are displayed for manual opening.
 
 ## Rooms (optional)
 Rooms provide a stable workspace per `roomId` (alias of `pairId`), with exactly one active backend (a `/rooms/:roomId` tab) at a time.
 
-- Open `/rooms/:roomId` to acquire the backend lease for the room; a second tab becomes an observer (blocked banner).
-- The header shows copy buttons for the room’s A2A endpoint and agent card (`/rooms/:roomId/agent-card.json`).
-- Click “Open client (initiator)” to launch the initiator Participant UI pre-wired to the room.
-- Feature flag `FLIPPROXY_REQUIRE_BACKEND=1` makes ingress enforce in-band protocol errors when the backend isn’t open:
-  - The server persists the caller’s attempted message, appends a server-authored message with a text part explaining the issue, and transitions the task to `failed` (both sides).
-  - The response is a valid snapshot (no HTTP/JSON-RPC error); consumers can render the state and guidance in-band.
+- Open `/rooms/:roomId` to acquire the backend lease for the room; a second tab becomes an observer (banner explains how to take over).
+- Header includes: “Open client” (launches `/client/?a2a=…`), copy Agent Card URL, copy MCP URL.
+- Agent Card: `GET /rooms/:roomId/agent-card.json` (spec-like). The default includes:
+  - `url`: `/api/rooms/:roomId/a2a` (JSONRPC alias of `/api/bridge/:roomId/a2a`).
+  - `preferredTransport`: `JSONRPC` and `additionalInterfaces` repeating the same URL for clarity.
+  - `capabilities.extensions[0]` with `uri: https://chitchat.fhir.me/a2a-ext` and `params: { a2a, mcp, tasks }`.
+  - Provider defaults can be customized (see AGENT_CARD_TEMPLATE below).
+- Feature flag (conceptual): when the backend isn’t open, ingress returns an in-band guidance message and marks the task failed; the message includes a full room URL for easy clicking.
 
-Per-room agent card returns endpoints for the room:
-```
-GET /rooms/:roomId/agent-card.json
-{ "name":"flipproxy-room", "version":"1.0", "endpoints": { "a2a":"/api/bridge/:roomId/a2a", "mcp":"/api/bridge/:roomId/mcp", "tasks":"/api/pairs/:roomId/server-events" } }
-```
+Template-driven card overrides:
+- Env `AGENT_CARD_TEMPLATE` may contain JSON used as a base (deep-merged with defaults, then with `pairs.metadata.agentCard`).
+- Template supports placeholders: `{{roomId}}`, `{{BASE_URL}}`, `{{origin}}`.
 
 ## Control Plane
 - Header: Create Pair, Hard reset, persistent join links when `#pair=<id>` is in the URL.
@@ -63,12 +63,12 @@ GET /rooms/:roomId/agent-card.json
   - Note: This reference implementation does not emit separate `[message]` events. The latest message content is available within the `[state]` event’s embedded task `status.message`.
 - Legend: “?” button opens a sheet describing event types.
 
-## Participant app (A2A Client)
-- URL params: `role=initiator|responder`, `a2a=<JSON-RPC endpoint>`, optional `tasks=<backchannel SSE>` (responder).
+## Client app (A2A)
+- URL params: `a2a=<JSON-RPC endpoint>`, optional `transport=mcp&mcp=<MCP endpoint>`.
 - UX:
   - Enter to send, tab order (input → finality → send), autofocus.
   - Finality: none | turn | conversation.
-  - Send gating: send when `input-required` or (initiator) no task yet; after cancel, initiator sees “Send on new task”.
+  - Send gating: send when `input-required` or no task yet; after cancel, shows “Send on new task”.
   - Cancel task (non-terminal states): calls `tasks/cancel`.
   - Clear task (terminal states): clears local history and taskId to start fresh.
 
@@ -80,13 +80,13 @@ GET /rooms/:roomId/agent-card.json
 
 ## API Summary
 - `POST /api/pairs` (optional `{ metadata?: object }`) →
-  - `{ pairId, endpoints: { a2a, mcp, a2aAgentCard }, links: { initiator: { joinA2a, joinMcp }, responder: { joinA2a } } }`
+  - `{ pairId, endpoints: { a2a, mcp, agentCard }, links: { initiator: { joinClient, joinMcp }, responder: { openRoom } } }`
 - `GET /api/pairs/:pairId/metadata` → `{ metadata }`
 - `POST /pairs/:pairId/reset` (hard only) → `{ ok, epoch }`
 - `GET /pairs/:pairId/server-events` (SSE; responder backchannel)
 - `GET /pairs/:pairId/events.log?since=<seq>` (SSE; concise live events)
 - Also supports `?backlogOnly=1` for a one-shot backlog response (used in tests)
-- `POST /api/bridge/:pairId/a2a` JSON-RPC:
+- `POST /api/bridge/:pairId/a2a` JSON-RPC (alias: `/api/rooms/:pairId/a2a`):
   - `message/stream` (SSE), `message/send`, `tasks/get`, `tasks/resubscribe`, `tasks/cancel`.
 
 ### MCP Bridge (initiator-side)
@@ -140,8 +140,8 @@ src/
   frontend/
     control/index.html      # Control Plane; create pairs + live event log
     control/app.tsx         # Control Plane UI logic
-    participant/index.html  # Participant UI shell; references ../app.tsx
-    app.tsx                 # React entrypoint for Participant (A2A Client)
+    client/index.html       # Client UI shell
+    client/client.tsx       # React entrypoint for Client (A2A)
 ```
 
 ## Notes & Limitations

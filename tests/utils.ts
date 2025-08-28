@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect } from "bun:test";
 
 import { createServer } from "../src/server/index.ts";
 import { parseSse } from "../src/shared/sse";
+import { A2A_EXT_URL } from "../src/shared/core";
 
 export type Spawned = { server: ReturnType<typeof createServer>; port: number; base: string; dbPath?: string };
 const __openBackends: Array<Response> = [];
@@ -44,7 +45,7 @@ export function decodeA2AUrl(str: string): string {
 }
 
 export function textPart(text: string, nextState: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required' = 'input-required') {
-  return { kind: 'text', text, metadata: { 'https://chitchat.fhir.me/a2a-ext': { nextState } } } as any;
+  return { kind: 'text', text, metadata: { [A2A_EXT_URL]: { nextState } } } as any;
 }
 
 export function tmpDbPath(): string {

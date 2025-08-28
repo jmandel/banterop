@@ -16,8 +16,8 @@ describe("Pairs API", () => {
     expect(j.endpoints.a2a).toContain(`/api/bridge/${j.pairId}/a2a`);
     expect(j.endpoints.mcp).toContain(`/api/bridge/${j.pairId}/mcp`);
     expect(j.endpoints.agentCard).toContain(`/rooms/${j.pairId}/agent-card.json`);
-    expect(j.links.initiator.joinClient).toContain('/client/?card=');
-    expect(j.links.initiator.joinMcp).toContain('/client/?mcp=');
+    expect(j.links.initiator.joinClient).toContain('/client/?agentCardUrl=');
+    expect(j.links.initiator.joinMcp).toContain('/client/?mcpUrl=');
     expect(j.links.responder.openRoom).toContain(`/rooms/${j.pairId}`);
 
     // events.log backlog since=0 contains pair-created as first event

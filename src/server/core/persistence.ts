@@ -1,7 +1,8 @@
 import { Database } from 'bun:sqlite'
 import type { Env } from './env'
+import type { A2AStatus } from '../../shared/a2a-types'
 
-export type TaskState = 'submitted'|'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required'|'unknown'
+export type TaskState = A2AStatus
 // Parsimonious task row: identity only; role is derivable from task_id; state/message are computed from events/messages
 export type TaskRow = { task_id:string; pair_id:string; epoch:number }
 export type PairRow = { pair_id:string; epoch:number; metadata:string|null }

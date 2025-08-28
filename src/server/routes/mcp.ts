@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { AppBindings } from '../index'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { A2A_EXT_URL } from '../../shared/core'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 
 export function mcpRoutes() {
@@ -69,7 +70,7 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
     if (conversationId !== ensured.initiatorTaskId) return jsonContent({ ok:false, error:`conversationId does not match current epoch (expected ${ensured.initiatorTaskId})` })
 
     const parts: any[] = []
-    if (message) parts.push({ kind:'text', text: message, metadata: { 'https://chitchat.fhir.me/a2a-ext': { nextState: 'working' } } })
+    if (message) parts.push({ kind:'text', text: message, metadata: { [A2A_EXT_URL]: { nextState: 'working' } } })
     for (const a of attachments) {
       parts.push({ kind:'file', file:{ bytes: toBase64(String(a.content ?? '')), name: String(a.name ?? ''), mimeType: String(a.contentType ?? 'application/octet-stream') }, ...(a.summary ? { metadata:{ summary: String(a.summary) } } : {}) })
     }
