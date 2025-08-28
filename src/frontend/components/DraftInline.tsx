@@ -6,8 +6,8 @@ import { NextStateSelect } from './NextStateSelect';
 import { Markdown } from './Markdown';
 import type { A2ANextState } from '../../shared/a2a-types';
 
-export function DraftInline({ composeId, text, attachments }:{ composeId:string; text:string; attachments?: AttachmentMeta[] }) {
-  const [nextState, setNextState] = useState<A2ANextState>('working');
+export function DraftInline({ composeId, text, attachments, nextStateHint }:{ composeId:string; text:string; attachments?: AttachmentMeta[]; nextStateHint?: A2ANextState }) {
+  const [nextState, setNextState] = useState<A2ANextState>((nextStateHint as any) || 'working');
   const [sending, setSending] = useState(false);
   const err = useAppStore(s => s.sendErrorByCompose.get(composeId));
   const pid = useAppStore(s => s.plannerId);
@@ -20,12 +20,9 @@ export function DraftInline({ composeId, text, attachments }:{ composeId:string;
   }
   async function retry() { await approve(); }
   function regenerate() {
-    try { useAppStore.getState().dismissCompose(composeId); } catch {}
-    // Nudge controller by changing configByPlanner identity (no-op clone)
-    useAppStore.setState((s: any) => {
-      const curr = (s.configByPlanner || {})[pid];
-      return { configByPlanner: { ...(s.configByPlanner || {}), [pid]: curr ? { ...curr } : {} } };
-    });
+    // Rewind to the last public event and request a fresh plan.
+    try { useAppStore.getState().rewindJournal(); } catch {}
+    try { useAppStore.getState().requestReplan('regenerate'); } catch {}
   }
   return (
     <div>

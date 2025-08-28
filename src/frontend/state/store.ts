@@ -11,6 +11,23 @@ import { makeChitchatProvider, DEFAULT_CHITCHAT_ENDPOINT } from '../../shared/ll
 
 type Role = 'initiator'|'responder';
 
+// ---- runaway-guard (tiny inline helper) ----
+const JOURNAL_HARD_CAP: number = (() => {
+  try {
+    const w: any = (typeof window !== 'undefined') ? (window as any).__RUNAWAY_LIMIT : undefined;
+    const fromWin = (typeof w === 'number' && Number.isFinite(w)) ? w
+      : (typeof w === 'string' && w.trim() !== '' && Number.isFinite(Number(w)) ? Number(w) : undefined);
+    if (typeof fromWin === 'number' && fromWin > 0) return Math.floor(fromWin);
+  } catch {}
+  try {
+    const s = (typeof window !== 'undefined') ? (window as any)?.localStorage?.getItem?.('RUNAWAY_LIMIT') : null;
+    const n = (typeof s === 'string' && s.trim() !== '' && Number.isFinite(Number(s))) ? Number(s) : NaN;
+    if (Number.isFinite(n) && n > 0) return Math.floor(n);
+  } catch {}
+  return 200; // default (only positive values allowed)
+})();
+function runawayGuardActive(len: number): boolean { return len >= JOURNAL_HARD_CAP; }
+
 export type Store = {
   // meta
   role: Role;
@@ -477,6 +494,10 @@ export const useAppStore = create<Store>((set, get) => ({
     try {
       const mode = get().plannerMode;
       if (mode === 'auto') {
+        if (runawayGuardActive(get().facts.length)) {
+          try { get().setHud('waiting', `🧊 Runaway guard: auto-send disabled (entries=${get().facts.length} ≥ cap=${JOURNAL_HARD_CAP})`); } catch {}
+          return true;
+        }
         for (const pf of batch) {
           if (pf && pf.type === 'compose_intent') {
             const ci = pf as any as { composeId:string; nextStateHint?: A2ANextState };

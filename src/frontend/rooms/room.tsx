@@ -15,6 +15,8 @@ import { attachmentHrefFromBase64 } from '../components/attachments'
 import { startUrlSync } from '../hooks/startUrlSync'
 import { DraftInline } from '../components/DraftInline'
 import { Markdown } from '../components/Markdown'
+import { resolvePlanner } from '../planner/registry'
+import { encodeSetup } from '../../shared/setup-hash'
 
 // EXPERIMENTAL: WebRTC datachannel keepalive to avoid Chrome Energy Saver freezing
 // See: https://developer.chrome.com/blog/freezing-on-energy-saver
@@ -132,12 +134,29 @@ function App() {
   const uiStatus = useAppStore(s => s.uiStatus())
   const facts = useAppStore(s => s.facts)
   const plannerId = useAppStore(s => s.plannerId)
+  const plannerMode = useAppStore(s => s.plannerMode)
+  const plannerReady = useAppStore(s => !!s.readyByPlanner[s.plannerId])
+  const plannerConfig = useAppStore(s => s.configByPlanner[s.plannerId])
   const approved = useAppStore(s => s.composeApproved)
   const sentComposeIds = React.useMemo(() => {
     const s = new Set<string>();
     for (const f of facts) if (f.type === 'remote_sent' && (f as any).composeId) s.add((f as any).composeId as string);
     return s;
   }, [facts])
+  const hasTranscript = React.useMemo(() => {
+    for (const f of facts) {
+      if (f.type === 'remote_received' || f.type === 'remote_sent') return true;
+      if (f.type === 'agent_question' || f.type === 'user_answer') return true;
+      if (f.type === 'user_guidance') {
+        const t = String((f as any).text || '')
+        if (!/^\s*Answer\s+[^:]+\s*:/.test(t)) return true;
+      }
+      if (f.type === 'compose_intent') {
+        if (!(approved.has(f.composeId) || sentComposeIds.has(f.composeId))) return true;
+      }
+    }
+    return false;
+  }, [facts, approved, sentComposeIds])
   const observing = backendGranted === false
   const [autoScroll, setAutoScroll] = useState(true)
   const transcriptRef = React.useRef<HTMLDivElement|null>(null)
@@ -164,6 +183,18 @@ function App() {
   async function copyMcp() {
     try { await navigator.clipboard.writeText(mcp); setCopiedMcp(true); setTimeout(()=>setCopiedMcp(false), 500); } catch {}
   }
+  const clientHref = React.useMemo(() => {
+    try {
+      const origin = window.location.origin
+      const base = `${origin}/client/?agentCardUrl=${encodeURIComponent(agentCard)}`
+      const planner: any = resolvePlanner(plannerId as any)
+      if (plannerReady && planner && typeof planner.makePeerSetup === 'function') {
+        const peer = planner.makePeerSetup({ fullConfig: plannerConfig, mode: plannerMode as any })
+        if (peer) return `${base}#${encodeSetup(peer)}`
+      }
+      return base
+    } catch { return `${window.location.origin}/client/?agentCardUrl=${encodeURIComponent(agentCard)}` }
+  }, [agentCard, plannerId, plannerReady, plannerConfig, plannerMode])
   // Graceful release on unload only (allow background operation; do not release on hidden)
   useEffect(() => {
     function release() {
@@ -214,7 +245,7 @@ function App() {
             <span className="copied">Copied!</span>
           </span>
         </button>
-        <a className="btn" href={`${window.location.origin}/client/?agentCardUrl=${encodeURIComponent(agentCard)}`} target="_blank" rel="noreferrer">Open client</a>
+        <a className="btn" href={clientHref} target="_blank" rel="noreferrer">Open client</a>
       </header>
 
       {backendGranted===false && (
@@ -238,14 +269,13 @@ function App() {
       <div className="sticky" style={{ top: 48 }}>
         <TaskRibbon />
       </div>
-      {!observing && <PlannerSetupCard />}
 
       {showDebug && <DebugPanel />}
 
-      <div className="card">
-        <div className={`transcript ${observing ? 'faded' : ''}`} aria-live="polite" ref={transcriptRef}>
-          {!facts.length && <div className="small muted">No events yet.</div>}
-          {facts.map((f:any) => {
+      {hasTranscript && (
+        <div className="card">
+          <div className={`transcript ${observing ? 'faded' : ''}`} aria-live="polite" ref={transcriptRef}>
+            {facts.map((f:any) => {
             if (f.type === 'remote_received' || f.type === 'remote_sent') {
               const isMe = f.type === 'remote_sent'
               return (
@@ -295,37 +325,39 @@ function App() {
                     {f.type === 'compose_intent' && (
                       observing || isDismissed
                         ? <Markdown text={f.text} />
-                        : <DraftInline composeId={f.composeId} text={f.text} attachments={(f as any).attachments as AttachmentMeta[] | undefined} />
+                        : <DraftInline composeId={f.composeId} text={f.text} attachments={(f as any).attachments as AttachmentMeta[] | undefined} nextStateHint={(f as any).nextStateHint as any} />
                     )}
                   </div>
                 </div>
               )
             }
             return <div key={f.id} />
-          })}
-        </div>
-        {(observing || plannerId !== 'off') && (
-          <div className="transcript-bar">
-            <label className="small"><input type="checkbox" checked={autoScroll} onChange={(e)=>setAutoScroll(e.target.checked)} /> Auto scroll</label>
+            })}
           </div>
-        )}
+          {(observing || plannerId !== 'off') && (
+            <div className="transcript-bar">
+              <label className="small"><input type="checkbox" checked={autoScroll} onChange={(e)=>setAutoScroll(e.target.checked)} /> Auto scroll</label>
+            </div>
+          )}
+        </div>
+      )}
 
-        {!observing && plannerId === 'off' && (
-          <ManualComposer
-            disabled={uiStatus !== 'input-required'}
-            hint={uiStatus !== 'input-required' ? 'Not your turn' : undefined}
-            placeholder={uiStatus === 'input-required' ? 'Type a message to the other side…' : 'Not your turn yet…'}
-            onSend={handleManualSend}
-            sending={sending}
-          />
-        )}
-      </div>
+      {!observing && plannerId === 'off' && (
+        <ManualComposer
+          disabled={uiStatus !== 'input-required'}
+          hint={uiStatus !== 'input-required' ? 'Not your turn' : undefined}
+          placeholder={uiStatus === 'input-required' ? 'Type a message to the other side…' : 'Not your turn yet…'}
+          onSend={handleManualSend}
+          sending={sending}
+        />
+      )}
 
       {!observing && (
-        <div className="card">
+        <div className="card" style={{ display: 'none' }}>
           <Whisper onSend={sendWhisper} />
         </div>
       )}
+      {!observing && <PlannerSetupCard />}
     </div>
   )
 }

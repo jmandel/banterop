@@ -115,4 +115,7 @@ export type Planner<Cfg = unknown> = {
 
   dehydrate?: (config: Cfg) => Record<string, unknown>;
   hydrate?: (seed: Record<string, unknown>, context: any) => Promise<{ config: Cfg; ready: boolean }>;
+
+  // Optional: provide a peer setup payload for constructing counterpart URLs (planner-agnostic hook)
+  makePeerSetup?: (opts: { fullConfig: Cfg; facts?: ReadonlyArray<Fact>; mode?: 'approve'|'auto' }) => import('./setup-hash').SetupPayload | null;
 };

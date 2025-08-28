@@ -438,3 +438,26 @@ export function createScenarioSetupVM(): PlannerFieldsVM<ScenarioSeedV2, FullCon
   const { full } = await createScenarioSetupVM().hydrate(seed, ctx);
   return { config: full, ready: true };
 };
+
+// Provide peer-setup hook: flip agent to the other participant while keeping scenario/model/steps
+;(ScenarioPlannerV03 as any).makePeerSetup = (opts: { fullConfig: FullConfig; facts?: any[]; mode?: 'approve'|'auto' }) => {
+  try {
+    const full = opts?.fullConfig as FullConfig;
+    if (!full || !full.scenario || !full.scenarioUrl) return null;
+    const agents = Array.isArray((full.scenario as any).agents) ? (full.scenario as any).agents.map((a: any) => String(a?.agentId || '')).filter(Boolean) : [];
+    if (!agents.length) return null;
+    const other = agents.find(id => id && id !== String(full.myAgentId || '')) || agents[0] || '';
+    if (!other || other === String(full.myAgentId || '')) return null;
+    const seed = { v: 2, scenarioUrl: String(full.scenarioUrl || ''), model: String(full.model || ''), myAgentId: other, maxInlineSteps: Number(full.maxInlineSteps ?? 20) } as any;
+    const setup = {
+      v: 2,
+      planner: {
+        id: 'scenario-v0.3',
+        mode: opts?.mode || 'auto',
+        seed,
+        rev: 2,
+      }
+    };
+    return setup;
+  } catch { return null; }
+};

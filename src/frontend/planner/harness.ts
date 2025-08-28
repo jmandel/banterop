@@ -1,6 +1,23 @@
 import type { Fact, ProposedFact, Planner, PlanInput, PlanContext, LlmProvider } from "../../shared/journal-types";
 import { rid } from "../../shared/core";
 
+// ---- runaway-guard (tiny inline helper) ----
+const JOURNAL_HARD_CAP: number = (() => {
+  try {
+    const w: any = (typeof window !== 'undefined') ? (window as any).__RUNAWAY_LIMIT : undefined;
+    const fromWin = (typeof w === 'number' && Number.isFinite(w)) ? w
+      : (typeof w === 'string' && w.trim() !== '' && Number.isFinite(Number(w)) ? Number(w) : undefined);
+    if (typeof fromWin === 'number' && fromWin > 0) return Math.floor(fromWin);
+  } catch {}
+  try {
+    const s = (typeof window !== 'undefined') ? (window as any)?.localStorage?.getItem?.('RUNAWAY_LIMIT') : null;
+    const n = (typeof s === 'string' && s.trim() !== '' && Number.isFinite(Number(s))) ? Number(s) : NaN;
+    if (Number.isFinite(n) && n > 0) return Math.floor(n);
+  } catch {}
+  return 200; // default (only positive values allowed)
+})();
+function runawayGuardActive(len: number): boolean { return len >= JOURNAL_HARD_CAP; }
+
 export class PlannerHarness<Cfg = unknown> {
   constructor(
     private getFacts: () => ReadonlyArray<Fact>,
@@ -51,6 +68,13 @@ export class PlannerHarness<Cfg = unknown> {
 
     const facts = this.getFacts();
     if (!facts.length) return;
+    if (runawayGuardActive(facts.length)) {
+      try {
+        const msg = `🧊 Runaway guard: planner frozen (entries=${facts.length} ≥ cap=${JOURNAL_HARD_CAP})`;
+        this.hud('waiting', msg);
+      } catch {}
+      return;
+    }
     const cut = { seq: headNow };
 
     // --- Trigger detection and guards ---

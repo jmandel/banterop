@@ -127,6 +127,20 @@ function App() {
     for (const f of facts) if (f.type === 'remote_sent' && (f as any).composeId) s.add((f as any).composeId as string);
     return s;
   }, [facts]);
+  const hasTranscript = React.useMemo(() => {
+    for (const f of facts) {
+      if (f.type === 'remote_received' || f.type === 'remote_sent') return true;
+      if (f.type === 'agent_question' || f.type === 'user_answer') return true;
+      if (f.type === 'user_guidance') {
+        const t = String((f as any).text || '');
+        if (!/^\s*Answer\s+[^:]+\s*:/.test(t)) return true;
+      }
+      if (f.type === 'compose_intent') {
+        if (!(approved.has(f.composeId) || sentComposeIds.has(f.composeId))) return true;
+      }
+    }
+    return false;
+  }, [facts, approved, sentComposeIds]);
 
   // Compute composer gating and messaging
   const initiatorCanStart = !taskId;
@@ -166,100 +180,101 @@ function App() {
   <div className="sticky" style={{ top: 48 }}>
     <TaskRibbon />
   </div>
-  <PlannerSetupCard />
 
       {showDebug && <DebugPanel />}
-      <div className="card">
-        <div className="transcript" aria-live="polite" ref={transcriptRef}>
-          {!facts.length && <div className="small muted">No events yet.</div>}
-          {facts.map((f) => {
-            if (f.type === 'remote_received' || f.type === 'remote_sent') {
-              const isMe = f.type === 'remote_sent';
-              return (
-                <div key={f.id} className={'bubble ' + (isMe ? 'me' : 'them')}>
-                  <div className="small muted">{isMe ? 'Our side' : 'Other side'}</div>
-                  <Markdown text={f.text} />
-                  {Array.isArray(f.attachments) && f.attachments.length > 0 && (
-                    <div className="attachments small">
-                      {f.attachments.map((a:AttachmentMeta) => {
-                        const added = facts.find(x => x.type === 'attachment_added' && (x as any).name === a.name);
-                        const href = added && added.type === 'attachment_added' ? attachmentHrefFromBase64(a.name, added.mimeType, added.bytes) : null;
-                        return (
-                          <a key={a.name} className="att" href={href || '#'} target="_blank" rel="noreferrer" onClick={e => { if (!href) e.preventDefault(); }}>
-                            📎 {a.name} <span className="muted">({a.mimeType || 'application/octet-stream'})</span>
-                          </a>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            }
-            if (f.type === 'agent_question' || f.type === 'user_answer' || f.type === 'compose_intent' || f.type === 'user_guidance') {
-              // Hide Q&A whispers like: "Answer <qid>: <text>"
-              if (f.type === 'user_guidance') {
-                const t = String((f as any).text || '');
-                if (/^\s*Answer\s+[^:]+\s*:/.test(t)) return <div key={f.id} style={{display:'none'}} />;
-              }
-              // Hide approved/sent drafts; show dismissed drafts faded (intermediate state)
-              if (f.type === 'compose_intent' && (approved.has(f.composeId) || sentComposeIds.has(f.composeId))) return <div key={f.id} style={{display:'none'}} />;
-              const stripeClass =
-                f.type === 'user_guidance' ? 'stripe whisper' :
-                f.type === 'agent_question' ? 'stripe question' :
-                f.type === 'user_answer' ? 'stripe answer' : 'stripe draft';
-              const isDismissed = (f.type === 'compose_intent') && [...facts].some(x => x.type === 'compose_dismissed' && (x as any).composeId === f.composeId);
-              // If a newer compose_intent exists, hide this dismissed one entirely
-              if (f.type === 'compose_intent' && isDismissed) {
-                const hasNewerDraft = [...facts].some(x => x.type === 'compose_intent' && x.seq > f.seq);
-                if (hasNewerDraft) return <div key={f.id} style={{display:'none'}} />;
-              }
-              return (
-                <div key={f.id} className={'private ' + stripeClass} style={isDismissed ? { opacity: 0.5 } : undefined}>
-                  <div className="stripe-head">
-                    {f.type === 'user_guidance' && 'Private • Whisper'}
-                    {f.type === 'agent_question' && 'Private • Agent Question'}
-                    {f.type === 'user_answer' && 'Private • Answer'}
-                    {f.type === 'compose_intent' && (isDismissed ? 'Private • Draft (dismissed)' : 'Private • Draft')}
-                  </div>
-                  <div className="stripe-body">
-                    {f.type === 'user_guidance' && <Markdown text={f.text} />}
-                    {f.type === 'user_answer' && <Markdown text={(f as any).text} />}
-                    {f.type === 'agent_question' && (()=>{
-                      const answered = facts.some(x => x.type === 'user_answer' && (x as any).qid === (f as any).qid && x.seq > f.seq);
-                      return <QuestionInline q={f as any} answered={answered} />;
-                    })()}
-                    {f.type === 'compose_intent' && (
-                      isDismissed
-                        ? <div className="text">{f.text}</div>
-                        : <DraftInline composeId={f.composeId} text={f.text} attachments={f.attachments} />
+      {hasTranscript && (
+        <div className="card">
+          <div className="transcript" aria-live="polite" ref={transcriptRef}>
+            {facts.map((f) => {
+              if (f.type === 'remote_received' || f.type === 'remote_sent') {
+                const isMe = f.type === 'remote_sent';
+                return (
+                  <div key={f.id} className={'bubble ' + (isMe ? 'me' : 'them')}>
+                    <div className="small muted">{isMe ? 'Our side' : 'Other side'}</div>
+                    <Markdown text={f.text} />
+                    {Array.isArray(f.attachments) && f.attachments.length > 0 && (
+                      <div className="attachments small">
+                        {f.attachments.map((a:AttachmentMeta) => {
+                          const added = facts.find(x => x.type === 'attachment_added' && (x as any).name === a.name);
+                          const href = added && added.type === 'attachment_added' ? attachmentHrefFromBase64(a.name, added.mimeType, added.bytes) : null;
+                          return (
+                            <a key={a.name} className="att" href={href || '#'} target="_blank" rel="noreferrer" onClick={e => { if (!href) e.preventDefault(); }}>
+                              📎 {a.name} <span className="muted">({a.mimeType || 'application/octet-stream'})</span>
+                            </a>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
-                </div>
-              );
-            }
-            return <div key={f.id} />;
-          })}
-        </div>
-        {plannerId !== 'off' && (
-          <div className="transcript-bar">
-            <label className="small"><input type="checkbox" checked={autoScroll} onChange={(e)=>setAutoScroll(e.target.checked)} /> Auto scroll</label>
+                );
+              }
+              if (f.type === 'agent_question' || f.type === 'user_answer' || f.type === 'compose_intent' || f.type === 'user_guidance') {
+                // Hide Q&A whispers like: "Answer <qid>: <text>"
+                if (f.type === 'user_guidance') {
+                  const t = String((f as any).text || '');
+                  if (/^\s*Answer\s+[^:]+\s*:/.test(t)) return <div key={f.id} style={{display:'none'}} />;
+                }
+                // Hide approved/sent drafts; show dismissed drafts faded (intermediate state)
+                if (f.type === 'compose_intent' && (approved.has(f.composeId) || sentComposeIds.has(f.composeId))) return <div key={f.id} style={{display:'none'}} />;
+                const stripeClass =
+                  f.type === 'user_guidance' ? 'stripe whisper' :
+                  f.type === 'agent_question' ? 'stripe question' :
+                  f.type === 'user_answer' ? 'stripe answer' : 'stripe draft';
+                const isDismissed = (f.type === 'compose_intent') && [...facts].some(x => x.type === 'compose_dismissed' && (x as any).composeId === f.composeId);
+                // If a newer compose_intent exists, hide this dismissed one entirely
+                if (f.type === 'compose_intent' && isDismissed) {
+                  const hasNewerDraft = [...facts].some(x => x.type === 'compose_intent' && x.seq > f.seq);
+                  if (hasNewerDraft) return <div key={f.id} style={{display:'none'}} />;
+                }
+                return (
+                  <div key={f.id} className={'private ' + stripeClass} style={isDismissed ? { opacity: 0.5 } : undefined}>
+                    <div className="stripe-head">
+                      {f.type === 'user_guidance' && 'Private • Whisper'}
+                      {f.type === 'agent_question' && 'Private • Agent Question'}
+                      {f.type === 'user_answer' && 'Private • Answer'}
+                      {f.type === 'compose_intent' && (isDismissed ? 'Private • Draft (dismissed)' : 'Private • Draft')}
+                    </div>
+                    <div className="stripe-body">
+                      {f.type === 'user_guidance' && <Markdown text={f.text} />}
+                      {f.type === 'user_answer' && <Markdown text={(f as any).text} />}
+                      {f.type === 'agent_question' && (()=>{
+                        const answered = facts.some(x => x.type === 'user_answer' && (x as any).qid === (f as any).qid && x.seq > f.seq);
+                        return <QuestionInline q={f as any} answered={answered} />;
+                      })()}
+                      {f.type === 'compose_intent' && (
+                        isDismissed
+                          ? <div className="text">{f.text}</div>
+                           : <DraftInline composeId={f.composeId} text={f.text} attachments={f.attachments} nextStateHint={(f as any).nextStateHint as any} />
+                       )}
+                    </div>
+                  </div>
+                );
+              }
+              return <div key={f.id} />;
+            })}
           </div>
-        )}
+          {plannerId !== 'off' && (
+            <div className="transcript-bar">
+              <label className="small"><input type="checkbox" checked={autoScroll} onChange={(e)=>setAutoScroll(e.target.checked)} /> Auto scroll</label>
+            </div>
+          )}
+        </div>
+      )}
 
-        {plannerId === 'off' && (
-          <ManualComposer
-            disabled={!canSendManual}
-            hint={!canSendManual ? (['completed','canceled','failed','rejected'].includes(uiStatus) ? `Task ${uiStatus}.` : (initiatorCanStart ? 'First send will start a conversation' : 'Not your turn')) : undefined}
-            placeholder={composerPlaceholder()}
-            onSend={handleManualSend}
-            sending={sending}
-          />
-        )}
-      </div>
+      {plannerId === 'off' && (
+        <ManualComposer
+          disabled={!canSendManual}
+          hint={!canSendManual ? (['completed','canceled','failed','rejected'].includes(uiStatus) ? `Task ${uiStatus}.` : (initiatorCanStart ? 'First send will start a conversation' : 'Not your turn')) : undefined}
+          placeholder={composerPlaceholder()}
+          onSend={handleManualSend}
+          sending={sending}
+        />
+      )}
 
-      <div className="card">
+      <div className="card" style={{ display: 'none' }}>
         <Whisper onSend={sendWhisper} />
       </div>
+      <PlannerSetupCard />
     </div>
   );
 }

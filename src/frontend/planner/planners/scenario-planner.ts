@@ -115,7 +115,10 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       const finalizationReminder = buildFinalizationReminder(workingFacts as any, scenario, myId) || undefined;
       const prompt = buildPlannerPrompt(scenario, myId, counterpartId, xmlHistory, availableFilesXml, toolsCatalog, finalizationReminder);
 
-      try { ctx.hud('planning', 'Thinking…', 0.5); } catch {}
+    try {
+      const label = buildThinkingHudLabel(workingFacts as any);
+      ctx.hud('planning', label || 'Thinking…', 0.5);
+    } catch {}
       let decision: ParsedDecision;
       try {
         decision = await chatForDecisionWithRetry(ctx, { model, sys, prompt });
@@ -212,11 +215,19 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
         break;
       }
       out.push(({ type:'tool_result', callId, ok:true, result: exec.result ?? null, ...(includeWhy ? { why:'Tool execution succeeded.' } : {}) } as ProposedFact));
-      for (const doc of exec.attachments) out.push(({ type:'attachment_added', name: doc.name, mimeType: doc.mimeType, bytes: doc.bytesBase64, origin:'synthesized', producedBy:{ callId, name: tdef.toolName, args: decision.args || {} }, ...(includeWhy ? { why:'Synthesized by scenario tool.' } : {}) } as ProposedFact));
+      // Filter duplicate attachments by name to keep the journal clean
+      const existingNames = new Set<string>();
+      for (const f of workingFacts as any[]) { if (f?.type === 'attachment_added' && f.name) existingNames.add(String(f.name)); }
+      for (const f of facts as any[]) { if (f?.type === 'attachment_added' && f.name) existingNames.add(String(f.name)); }
+      const newAttachments = exec.attachments.filter(a => a?.name && !existingNames.has(String(a.name)));
+      for (const doc of newAttachments) {
+        out.push(({ type:'attachment_added', name: doc.name, mimeType: doc.mimeType, bytes: doc.bytesBase64, origin:'synthesized', producedBy:{ callId, name: tdef.toolName, args: decision.args || {} }, ...(includeWhy ? { why:'Synthesized by scenario tool.' } : {}) } as ProposedFact));
+        existingNames.add(String(doc.name));
+      }
       // Update working facts
       workingFacts.push({ type:'tool_call', callId, name: decision.tool, args: decision.args || {} } as any);
       workingFacts.push({ type:'tool_result', callId, ok:true, result: exec.result ?? null } as any);
-      for (const doc of exec.attachments) workingFacts.push({ type:'attachment_added', name: doc.name, mimeType: doc.mimeType, bytes: doc.bytesBase64, origin:'synthesized', producedBy:{ callId, name: tdef.toolName } } as any);
+      for (const doc of newAttachments) workingFacts.push({ type:'attachment_added', name: doc.name, mimeType: doc.mimeType, bytes: doc.bytesBase64, origin:'synthesized', producedBy:{ callId, name: tdef.toolName } } as any);
       // continue loop (if terminal, next iteration will finalize via FINALIZATION_REMINDER)
     }
 
@@ -353,8 +364,8 @@ function buildXmlHistory(facts: ReadonlyArray<Fact>, me: string, other: string):
           const name = String(d?.name || d?.docId || 'result');
           const body = typeof d?.content === 'string' ? d.content : (typeof d?.text === 'string' ? d.text : undefined);
           if (name && typeof body === 'string' && body) {
-            const safe = escapeXml(body);
-            lines.push(`<tool_result filename="${escapeXml(name)}">\n${safe}\n</tool_result>`);
+            // Do not XML-escape: tags are used as simple delimiters only
+            lines.push(`<tool_result filename="${name}">\n${body}\n</tool_result>`);
             rendered = true;
           }
         }
@@ -1027,6 +1038,90 @@ function truncateText(s: string, max: number, suffix = '...'): string {
   if (max <= suffix.length) return s.slice(0, max);
   return s.slice(0, max - suffix.length) + suffix;
 }
+
+// -----------------------------
+// HUD helpers for "thinking" label
+// -----------------------------
+
+function buildThinkingHudLabel(facts: ReadonlyArray<Fact>): string | null {
+  const why = lastReasoning(facts);
+  const whyShort = why ? truncateText(oneLine(why), 80) : '';
+  // If we have explicit reasoning, show that alone.
+  if (whyShort) return `Thinking: ${whyShort}`;
+  const tool = describeLastToolContext(facts);
+  if (tool) return `Thinking: ${truncateText(tool, 80)}`;
+  // Fallback to last inbound/outbound line
+  const msg = lastMessageLine(facts);
+  if (msg) return `Thinking about: ${truncateText(msg, 80)}`;
+  return null;
+}
+
+function describeLastToolContext(facts: ReadonlyArray<Fact>): string | null {
+  // Find latest tool_result
+  let idx = -1;
+  for (let i = facts.length - 1; i >= 0; i--) { if (facts[i].type === 'tool_result') { idx = i; break; } }
+  if (idx < 0) return null;
+  const tr = facts[idx] as any;
+  const callId = String(tr.callId || '');
+  const ok = tr.ok !== false;
+  // Find associated tool_call for name
+  let toolName: string | null = null;
+  for (let j = idx - 1; j >= 0; j--) {
+    const f = facts[j] as any;
+    if (f.type === 'tool_call' && String(f.callId || '') === callId) { toolName = String(f.name || 'tool'); break; }
+  }
+  const result = tr.result;
+  if (!ok) {
+    const err = String(tr.error || 'error');
+    return `${toolName || 'tool'} — error: ${err}`;
+  }
+  // Document-like results
+  try {
+    const docs: any[] = Array.isArray(result?.documents) ? result.documents : [];
+    const single = (result && typeof result === 'object' && (result.name || result.docId)) ? [result] : [];
+    const all = (docs.length ? docs : single) as any[];
+    if (all.length) {
+      const names = all.map(d => String(d?.name || d?.docId || 'result')).filter(Boolean);
+      if (names.length === 1) return `${toolName || 'tool'} — ${names[0]}`;
+      if (names.length > 1) return `${toolName || 'tool'} — ${names[0]}, +${names.length - 1}`;
+    }
+    // Text content (e.g., read_attachment inline embedding or single doc with text)
+    const text: string | undefined = (typeof (result as any)?.text === 'string') ? (result as any).text
+      : (typeof (result as any)?.content === 'string') ? (result as any).content
+      : undefined;
+    if (typeof text === 'string' && text.trim()) {
+      const first = firstLine(text);
+      // If read_attachment, try to include filename when present
+      const name = (result as any)?.name;
+      if (name) return `read ${String(name)} — ${first}`;
+      return `${toolName || 'tool'} — ${first}`;
+    }
+  } catch {}
+  return toolName || 'tool';
+}
+
+function lastReasoning(facts: ReadonlyArray<Fact>): string | null {
+  for (let i = facts.length - 1; i >= 0; i--) {
+    const f: any = facts[i];
+    if (typeof f?.why === 'string' && f.why.trim()) return f.why.trim();
+    if (f?.type === 'sleep' && typeof f?.reason === 'string' && f.reason.trim()) return f.reason.trim();
+  }
+  return null;
+}
+
+function lastMessageLine(facts: ReadonlyArray<Fact>): string | null {
+  for (let i = facts.length - 1; i >= 0; i--) {
+    const f = facts[i] as any;
+    if (f.type === 'remote_received' || f.type === 'remote_sent') {
+      const t = String(f.text || '').trim();
+      if (t) return firstLine(t);
+    }
+  }
+  return null;
+}
+
+function firstLine(s: string): string { const i = s.indexOf('\n'); const line = i >= 0 ? s.slice(0, i) : s; return line.trim(); }
+function oneLine(s: string): string { return String(s || '').replace(/\s+/g, ' ').trim(); }
 
 function parseJsonObject(text: string): any {
   let raw = String(text || '').trim();
