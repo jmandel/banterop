@@ -12,13 +12,13 @@ export function pairsRoutes(includeNonApi = false) {
     const base = origin
     const a2a = `${base}/api/bridge/${created.pairId}/a2a`
     const mcp = `${base}/api/bridge/${created.pairId}/mcp`
-    const a2aAgentCard = `${base}/.well-known/agent-card.json`
+    const agentCard = `${base}/rooms/${created.pairId}/agent-card.json`
     const tasks = `${base}/api/pairs/${created.pairId}/server-events`
     return c.json({
       pairId: created.pairId,
-      endpoints: { a2a, mcp, a2aAgentCard },
+      endpoints: { a2a, mcp, agentCard },
       links: {
-        initiator: { joinA2a: `${base}/client/?a2a=${encodeURIComponent(a2a)}`, joinMcp: `${base}/client/?transport=mcp&mcp=${encodeURIComponent(mcp)}` },
+        initiator: { joinClient: `${base}/client/?card=${encodeURIComponent(agentCard)}`, joinMcp: `${base}/client/?mcp=${encodeURIComponent(mcp)}` },
         responder: { openRoom: `${base}/rooms/${created.pairId}` },
       }
     })

@@ -22,29 +22,61 @@ import { attachmentHrefFromBase64 } from '../components/attachments';
 
 function useQuery() {
   const u = new URL(window.location.href);
-  const transport = (u.searchParams.get('transport') === 'mcp') ? 'mcp' : 'a2a';
-  const a2aUrl = u.searchParams.get('a2a') || '';
+  const cardUrl = u.searchParams.get('card') || '';
   const mcpUrl = u.searchParams.get('mcp') || '';
-  return { transport, a2aUrl, mcpUrl };
+  return { cardUrl, mcpUrl };
 }
 
 // attachmentHrefFromBase64 moved to ../components/attachments
 
 function App() {
-  const { transport, a2aUrl, mcpUrl } = useQuery();
+  const { cardUrl, mcpUrl } = useQuery();
   const store = useAppStore();
   const [sending, setSending] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
+  const [resolvedA2A, setResolvedA2A] = useState<string>('');
+  const [resolvedMcp, setResolvedMcp] = useState<string>('');
+  const [cardError, setCardError] = useState<string | null>(null);
 
   // Parse and apply #setup to store; provide to PlannerSetupCard
   const urlSetup = useUrlPlannerSetup() as any;
 
-  // init transport & role
+  // Resolve endpoints from Agent Card (if provided), else use fallback params
   useEffect(() => {
-    const adapter = transport === 'mcp' ? new MCPAdapter(mcpUrl) : new A2AAdapter(a2aUrl);
+    let cancelled = false;
+    async function resolveCard() {
+      setCardError(null);
+      setResolvedA2A('');
+      setResolvedMcp(mcpUrl || '');
+      if (!cardUrl) return;
+      try {
+        const res = await fetch(cardUrl, { method: 'GET' });
+        if (!res.ok) throw new Error(`fetch card failed: ${res.status}`);
+        const card = await res.json();
+        if (cancelled) return;
+        const url = String(card?.url || '');
+        setResolvedA2A(url);
+      } catch (e:any) {
+        setCardError(String(e?.message || 'Failed to load Agent Card'));
+      }
+    }
+    resolveCard();
+    return () => { cancelled = true };
+  }, [cardUrl, mcpUrl]);
+
+  // Determine transport: prefer Agent Card (A2A) if provided, else MCP if mcpUrl present, else fallback to A2A
+  const transport: 'a2a'|'mcp' = cardUrl ? 'a2a' : (mcpUrl || resolvedMcp ? 'mcp' : 'a2a');
+
+  // init adapter once endpoints resolved
+  useEffect(() => {
+    const endpointA2A = resolvedA2A;
+    const endpointMcp = resolvedMcp || mcpUrl;
+    if (transport === 'a2a' && !endpointA2A) return;
+    if (transport === 'mcp' && !endpointMcp) return;
+    const adapter = transport === 'mcp' ? new MCPAdapter(endpointMcp) : new A2AAdapter(endpointA2A);
     store.init('initiator' as any, adapter, undefined);
     startPlannerController();
-  }, [transport, a2aUrl, mcpUrl]);
+  }, [transport, resolvedA2A, resolvedMcp, a2aUrl, mcpUrl]);
 
   // No backchannel: client page is always the initiator
 
@@ -122,6 +154,7 @@ function App() {
           <PlannerSelector />
           <PlannerModeSelector />
           <button className="btn" onClick={clearTask} disabled={!taskId}>Clear task</button>
+          {cardError && <span className="small" style={{ color:'#b91c1c' }}>{cardError}</span>}
           <label className="small" style={{marginLeft:'auto'}}>
             <input type="checkbox" checked={showDebug} onChange={(e)=>setShowDebug(e.target.checked)} /> Show debug
           </label>

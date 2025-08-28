@@ -33,10 +33,9 @@ function ControlApp() {
           if (hPair) {
             setPair(hPair)
             const origin = window.location.origin
-            const a2aUrl = `${origin}/api/bridge/${hPair}/a2a`
-            const tasksUrl = `${origin}/api/pairs/${hPair}/server-events`
+            const cardUrl = `${origin}/rooms/${hPair}/agent-card.json`
             useControlStore.setState({
-              initiatorJoinUrl: `${origin}/client/?a2a=${encodeURIComponent(a2aUrl)}`,
+              initiatorJoinUrl: `${origin}/client/?card=${encodeURIComponent(cardUrl)}`,
               responderJoinUrl: `${origin}/rooms/${hPair}`,
             })
             const s = hSince ? Number(hSince) : 0
