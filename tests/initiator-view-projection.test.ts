@@ -12,7 +12,7 @@ async function createPairA2A() {
   const j = await r.json();
   const pairId = j.pairId as string;
   await openBackend(S, pairId);
-  return { pairId, a2a: decodeA2AUrl(j.links.initiator.joinA2a) };
+  return { pairId, a2a: j.endpoints.a2a };
 }
 
 describe("Initiator view projection", () => {

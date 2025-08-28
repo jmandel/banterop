@@ -15,10 +15,10 @@ describe("Pairs API", () => {
     expect(j.pairId).toBeString();
     expect(j.endpoints.a2a).toContain(`/api/bridge/${j.pairId}/a2a`);
     expect(j.endpoints.mcp).toContain(`/api/bridge/${j.pairId}/mcp`);
-    expect(j.endpoints.a2aAgentCard).toContain(`/.well-known/agent-card.json`);
-    expect(j.links.initiator.joinA2a).toContain('role=initiator');
-    expect(j.links.initiator.joinMcp).toContain('transport=mcp');
-    expect(j.links.responder.joinA2a).toContain('role=responder');
+    expect(j.endpoints.agentCard).toContain(`/rooms/${j.pairId}/agent-card.json`);
+    expect(j.links.initiator.joinClient).toContain('/client/?card=');
+    expect(j.links.initiator.joinMcp).toContain('/client/?mcp=');
+    expect(j.links.responder.openRoom).toContain(`/rooms/${j.pairId}`);
 
     // events.log backlog since=0 contains pair-created as first event
     const ac = new AbortController();

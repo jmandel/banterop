@@ -12,7 +12,7 @@ async function createPairAndA2A() {
   const j = await r.json();
   const pairId = j.pairId as string;
   await openBackend(S, pairId);
-  return { pairId, a2a: decodeA2AUrl(j.links.initiator.joinA2a) };
+  return { pairId, a2a: j.endpoints.a2a };
 }
 
 describe("A2A JSON-RPC", () => {
@@ -69,7 +69,7 @@ describe("A2A JSON-RPC", () => {
     const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
     const j = await r.json();
     const pairId = j.pairId as string;
-    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    const a2a = j.endpoints.a2a;
 
     // Send without taskId — should auto-create epoch and use init:<pair>#1
     const body = { jsonrpc:'2.0', id:'m0', method:'message/send', params:{ message:{ parts:[textPart('auto turn','working')], messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } };
@@ -92,7 +92,7 @@ describe("A2A JSON-RPC", () => {
     const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
     const j = await r.json();
     const pairId = j.pairId as string;
-    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    const a2a = j.endpoints.a2a;
 
     // Create epoch #1 via a no-op stream (no taskId)
     {

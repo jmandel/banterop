@@ -25,8 +25,7 @@ export type Persistence = {
   close(): void
 }
 
-export function createPersistence(env: Env): Persistence {
-  const db = new Database(env.FLIPPROXY_DB || ':memory:')
+export function createPersistenceFromDb(db: Database): Persistence {
   db.exec(`
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS pairs (
@@ -98,4 +97,10 @@ export function createPersistence(env: Env): Persistence {
   function close() { try { db.close() } catch {} }
 
   return { createPair, getPair, setPairEpoch, getTask, upsertTask, createEpochTasks, insertMessage, listMessages, lastMessage, listPairs, close }
+}
+
+export function createPersistence(env: Env): Persistence {
+  const db = new Database(env.FLIPPROXY_DB || ':memory:')
+  db.exec('PRAGMA journal_mode = WAL;')
+  return createPersistenceFromDb(db)
 }

@@ -17,7 +17,7 @@ describe('Finality transitions', () => {
     const r = await fetch(S.base + "/api/pairs", { method:'POST' });
     const j = await r.json();
     const pairId = j.pairId as string;
-    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    const a2a = j.endpoints.a2a;
     await openBackend(S, pairId);
     const initId = `init:${pairId}#1`;
     const respId = `resp:${pairId}#1`;
@@ -36,7 +36,7 @@ describe('Finality transitions', () => {
     const r = await fetch(S.base + "/api/pairs", { method:'POST' });
     const j = await r.json();
     const pairId = j.pairId as string;
-    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    const a2a = j.endpoints.a2a;
     await openBackend(S, pairId);
     const initId = `init:${pairId}#1`;
     const respId = `resp:${pairId}#1`;
@@ -58,7 +58,7 @@ describe('Finality transitions', () => {
     const r = await fetch(S.base + "/api/pairs", { method:'POST' });
     const j = await r.json();
     const pairId = j.pairId as string;
-    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    const a2a = j.endpoints.a2a;
     await openBackend(S, pairId);
     const initId = `init:${pairId}#1`;
     const respId = `resp:${pairId}#1`;

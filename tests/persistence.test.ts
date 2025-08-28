@@ -30,7 +30,7 @@ afterAll(async () => {
     const r = await fetch(S.base + "/api/pairs", { method:'POST' });
     const j = await r.json();
     const pairId = j.pairId as string;
-    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    const a2a = j.endpoints.a2a;
     await openBackend(S, pairId);
     const initTaskId = `init:${pairId}#1`;
 

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
-import { startServer, stopServer, Spawned, decodeA2AUrl, tmpDbPath, textPart, openBackend } from "./utils";
+import { startServer, stopServer, Spawned, decodeA2AUrl, tmpDbPath, textPart, openBackend, leaseHeaders } from "./utils";
 
 let S: Spawned;
 let DB: string;
@@ -26,7 +26,7 @@ describe("Persistence — messages and state across restart", () => {
     expect(r.ok).toBeTrue();
     const j = await r.json();
     const pairId = j.pairId as string;
-    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    const a2a = j.endpoints.a2a;
     await openBackend(S, pairId);
     const initTaskId = `init:${pairId}#1`;
     const respTaskId = `resp:${pairId}#1`;
@@ -34,15 +34,15 @@ describe("Persistence — messages and state across restart", () => {
     // Send two messages in epoch #1: initiator then responder
     const m1 = `m1:${crypto.randomUUID()}`;
     const send1 = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({
-      jsonrpc:'2.0', id:'m1', method:'message/send', params:{ message:{ taskId: initTaskId, parts:[textPart('hi','working')], messageId: m1 } }
+      jsonrpc:'2.0', id:'m1', method:'message/send', params:{ message:{ taskId: initTaskId, parts:[textPart('hi')], metadata:{ 'https://chitchat.fhir.me/a2a-ext': { nextState:'working' } }, messageId: m1 } }
     }) });
     expect(send1.ok).toBeTrue();
     const j1 = await send1.json();
     expect(j1.result.id).toBe(initTaskId);
 
     const m2 = `m2:${crypto.randomUUID()}`;
-    const send2 = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({
-      jsonrpc:'2.0', id:'m2', method:'message/send', params:{ message:{ taskId: respTaskId, parts:[textPart('ok','completed')], messageId: m2 } }
+    const send2 = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json', ...leaseHeaders(pairId) }, body: JSON.stringify({
+      jsonrpc:'2.0', id:'m2', method:'message/send', params:{ message:{ taskId: respTaskId, parts:[textPart('ok')], metadata:{ 'https://chitchat.fhir.me/a2a-ext': { nextState:'completed' } }, messageId: m2 } }
     }) });
     expect(send2.ok).toBeTrue();
 
@@ -127,7 +127,7 @@ describe("Persistence — messages and state across restart", () => {
     expect(r.ok).toBeTrue();
     const j = await r.json();
     const pairId = j.pairId as string;
-    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    const a2a = j.endpoints.a2a;
     await openBackend(S, pairId);
 
     const init1 = `init:${pairId}#1`;
@@ -136,26 +136,26 @@ describe("Persistence — messages and state across restart", () => {
     // Epoch 1: two messages (init then resp)
     const m1 = `e1:m1:${crypto.randomUUID()}`;
     await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({
-      jsonrpc:'2.0', id:'e1m1', method:'message/send', params:{ message:{ taskId: init1, parts:[textPart('e1-hi','working')], messageId: m1 } }
+      jsonrpc:'2.0', id:'e1m1', method:'message/send', params:{ message:{ taskId: init1, parts:[textPart('e1-hi')], metadata:{ 'https://chitchat.fhir.me/a2a-ext': { nextState:'working' } }, messageId: m1 } }
     }) });
 
     const m2 = `e1:m2:${crypto.randomUUID()}`;
-    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({
-      jsonrpc:'2.0', id:'e1m2', method:'message/send', params:{ message:{ taskId: resp1, parts:[textPart('e1-ok','completed')], messageId: m2 } }
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json', ...leaseHeaders(pairId) }, body: JSON.stringify({
+      jsonrpc:'2.0', id:'e1m2', method:'message/send', params:{ message:{ taskId: resp1, parts:[textPart('e1-ok')], metadata:{ 'https://chitchat.fhir.me/a2a-ext': { nextState:'completed' } }, messageId: m2 } }
     }) });
 
     // Epoch 2: bump by sending without taskId (init), then responder replies
     const m3 = `e2:m1:${crypto.randomUUID()}`;
     await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({
-      jsonrpc:'2.0', id:'e2m1', method:'message/send', params:{ message:{ parts:[textPart('e2-hi','working')], messageId: m3 } }
+      jsonrpc:'2.0', id:'e2m1', method:'message/send', params:{ message:{ parts:[textPart('e2-hi')], metadata:{ 'https://chitchat.fhir.me/a2a-ext': { nextState:'working' } }, messageId: m3 } }
     }) });
 
     const init2 = `init:${pairId}#2`;
     const resp2 = `resp:${pairId}#2`;
 
     const m4 = `e2:m2:${crypto.randomUUID()}`;
-    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({
-      jsonrpc:'2.0', id:'e2m2', method:'message/send', params:{ message:{ taskId: resp2, parts:[textPart('e2-ok','completed')], messageId: m4 } }
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json', ...leaseHeaders(pairId) }, body: JSON.stringify({
+      jsonrpc:'2.0', id:'e2m2', method:'message/send', params:{ message:{ taskId: resp2, parts:[textPart('e2-ok')], metadata:{ 'https://chitchat.fhir.me/a2a-ext': { nextState:'completed' } }, messageId: m4 } }
     }) });
 
     // Snapshots before restart

@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, expect } from "bun:test";
 
 import { createServer } from "../src/server/index.ts";
+import { parseSse } from "../src/shared/sse";
 
 export type Spawned = { server: ReturnType<typeof createServer>; port: number; base: string; dbPath?: string };
 const __openBackends: Array<Response> = [];
+const __leaseByPair = new Map<string,string>();
 
 export async function waitUntil(fn: () => Promise<boolean>, timeoutMs = 10000, intervalMs = 100): Promise<boolean> {
   const start = Date.now();
@@ -31,12 +33,14 @@ export async function startServer(opts?: { dbPath?: string; env?: Record<string,
   return { server, port, base, dbPath: opts?.dbPath };
 }
 
-export async function stopServer(s: Spawned) { try { __openBackends.splice(0).forEach(res => { try { (res.body as any)?.cancel?.() } catch {} }); } catch {} try { (s.server as any).stop?.(); } catch {} }
+export async function stopServer(s: Spawned) {
+  try { __openBackends.splice(0); } catch {}
+  try { (s.server as any).stop?.(); } catch {}
+}
 
-export function decodeA2AUrl(joinUrl: string): string {
-  const u = new URL(joinUrl);
-  const a2a = u.searchParams.get("a2a") || "";
-  return decodeURIComponent(a2a);
+export function decodeA2AUrl(str: string): string {
+  if (typeof str === 'string' && /\/api\/bridge\//.test(str)) return str;
+  throw new Error('decodeA2AUrl: expected direct A2A URL');
 }
 
 export function textPart(text: string, nextState: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required' = 'input-required') {
@@ -56,4 +60,20 @@ export async function openBackend(s: Spawned, pairId: string) {
   const res = await fetch(url, { headers:{ accept:'text/event-stream' } });
   if (!res.ok) throw new Error('failed to open backend');
   __openBackends.push(res);
+  // Capture leaseId from first backend-granted event (best-effort)
+  (async () => {
+    try {
+      for await (const ev of parseSse<any>(res.body!)) {
+        if (ev && ev.type === 'backend-granted' && ev.leaseId) {
+          __leaseByPair.set(pairId, String(ev.leaseId));
+          break;
+        }
+      }
+    } catch {}
+  })();
+}
+
+export function leaseHeaders(pairId: string): Record<string,string> {
+  const id = __leaseByPair.get(pairId);
+  return id ? { 'X-FlipProxy-Backend-Lease': id } : {};
 }

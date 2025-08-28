@@ -4,13 +4,17 @@ import { logger } from 'hono/logger'
 import { secureHeaders } from 'hono/secure-headers'
 import { loadEnv, type Env } from './core/env'
 import { createEventStore } from './core/events'
-import { createPersistence, type Persistence } from './core/persistence'
+import { createPersistenceFromDb, type Persistence } from './core/persistence'
 import { createPairsService, type PairsService } from './core/pairs'
 import { wellKnownRoutes } from './routes/wellKnown'
 import { pairsRoutes } from './routes/pairs'
 import { a2aRoutes } from './routes/a2a'
 import { mcpRoutes } from './routes/mcp'
 import { serve } from 'bun'
+import { Database } from 'bun:sqlite'
+import { createScenariosStore } from './core/scenarios-store'
+import { createScenariosRoutes } from './routes/scenarios'
+import { createLLMRoutes } from './routes/llm'
 import { extractNextState, computeStatesForNext } from './core/finality'
 import controlHtml from '../frontend/control/index.html'
 import clientHtml from '../frontend/client/index.html'
@@ -35,7 +39,9 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
   app.use('*', cors())
   app.use('*', logger())
 
-  const db = createPersistence(env)
+  const sqlite = new Database(env.FLIPPROXY_DB || ':memory:')
+  sqlite.exec('PRAGMA journal_mode = WAL;')
+  const db = createPersistenceFromDb(sqlite)
   const eventsMax = Number(((opts?.env as any)?.FLIPPROXY_EVENTS_MAX ?? process.env.FLIPPROXY_EVENTS_MAX ?? 5000))
   const events = createEventStore({ maxPerPair: eventsMax })
   const pairs = createPairsService({ db, events, baseUrl: env.BASE_URL })
@@ -74,6 +80,14 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
   app.route('/api', a2aRoutes())
   app.route('/api', mcpRoutes())
   app.route('/api', pairsRoutes(true))
+  // Mount LLM + Scenarios routes (previously via install script)
+  try {
+    const scenarios = createScenariosStore(sqlite)
+    app.route('/api', createScenariosRoutes(scenarios))
+    app.route('/api', createLLMRoutes())
+  } catch (e) {
+    try { console.warn('[server] failed to mount LLM/Scenarios routes:', (e as any)?.message || e) } catch {}
+  }
 
   // Rooms: serve AgentCard (dynamic JSON) with metadata deep-merge overrides
   app.get('/rooms/:roomId/agent-card.json', async (c) => {

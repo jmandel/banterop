@@ -12,7 +12,7 @@ describe("Rooms SAB and protocol errors", () => {
     const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
     const j = await r.json();
     const pairId = j.pairId as string;
-    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    const a2a = j.endpoints.a2a;
     const url = S.base + `/api/pairs/${pairId}/server-events?mode=backend`;
 
     const backend = await fetch(url, { headers:{ accept:'text/event-stream' } });
@@ -30,7 +30,7 @@ describe("Rooms SAB and protocol errors", () => {
     const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
     const j = await r.json();
     const pairId = j.pairId as string;
-    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    const a2a = j.endpoints.a2a;
 
     // Acquire backend lease by opening server-events in backend mode (keep open)
     const url = S.base + `/api/pairs/${pairId}/server-events?mode=backend`;
@@ -52,7 +52,7 @@ describe("Rooms SAB and protocol errors", () => {
     const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
     const j = await r.json();
     const pairId = j.pairId as string;
-    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    const a2a = j.endpoints.a2a;
 
     // Send without backend
     const send = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({

@@ -33,7 +33,7 @@ describe("Control-plane event log", () => {
     }
 
     // Start epoch by streaming a no-op message
-    const a2a = decodeA2AUrl(j.links.initiator.joinA2a);
+    const a2a = j.endpoints.a2a;
     {
       const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start', method:'message/stream', params:{ message:{ role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
       for await (const _ of parseSse<any>(res.body!)) break;

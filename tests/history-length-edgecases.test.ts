@@ -9,7 +9,7 @@ afterAll(async () => { await stopServer(S); });
 async function createPairA2A() {
   const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
   const j = await r.json();
-  return { pairId: j.pairId as string, a2a: decodeA2AUrl(j.links.initiator.joinA2a) };
+  return { pairId: j.pairId as string, a2a: j.endpoints.a2a };
 }
 
 describe("historyLength edge cases", () => {
@@ -33,4 +33,3 @@ describe("historyLength edge cases", () => {
     expect(r.ok).toBeTrue();
   });
 });
-

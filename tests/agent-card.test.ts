@@ -13,10 +13,14 @@ describe('Per-room agent card', () => {
     const res = await fetch(S.base + `/rooms/${roomId}/agent-card.json`);
     expect(res.ok).toBeTrue();
     const card = await res.json();
-    expect(card?.name).toBe('flipproxy-room');
-    expect(card?.endpoints?.a2a).toBe(`/api/bridge/${roomId}/a2a`);
-    expect(card?.endpoints?.mcp).toBe(`/api/bridge/${roomId}/mcp`);
-    expect(card?.endpoints?.tasks).toBe(`/api/pairs/${roomId}/server-events`);
+    expect(String(card?.name || '')).toContain(`Conversational Interop Room`);
+    // Main URL points to alias under /api/rooms/:roomId/a2a
+    expect(String(card?.url || '')).toContain(`/api/rooms/${roomId}/a2a`);
+    const exts = Array.isArray(card?.capabilities?.extensions) ? card.capabilities.extensions : [];
+    const fp = exts.find((e:any)=>String(e?.uri||'')==='https://chitchat.fhir.me/a2a-ext');
+    expect(!!fp).toBeTrue();
+    expect(String(fp?.params?.a2a || '')).toContain(`/api/rooms/${roomId}/a2a`);
+    expect(String(fp?.params?.mcp || '')).toContain(`/api/bridge/${roomId}/mcp`);
+    expect(String(fp?.params?.tasks || '')).toContain(`/api/pairs/${roomId}/server-events`);
   });
 });
-
