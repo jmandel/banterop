@@ -39,6 +39,7 @@ function App() {
   const { role, transport, a2aUrl, tasksUrl, mcpUrl } = useQuery();
   const store = useAppStore();
   const [sending, setSending] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
 
   // Parse and apply #setup to store; provide to PlannerSetupCard
   const urlSetup = useUrlPlannerSetup() as any;
@@ -62,6 +63,25 @@ function App() {
   const facts = useAppStore(s => s.facts);
   const taskId = useAppStore(s => s.taskId);
   const uiStatus = useAppStore(s => s.uiStatus());
+  const [autoScroll, setAutoScroll] = useState(true);
+  const transcriptRef = React.useRef<HTMLDivElement|null>(null);
+  // Faster auto-scroll to bottom when new messages arrive
+  React.useLayoutEffect(() => {
+    if (!autoScroll) return;
+    try { window.scrollTo(0, document.documentElement.scrollHeight); } catch {}
+  }, [facts, autoScroll]);
+  // Toggle autoScroll off if user scrolls up; re-enable when back at bottom
+  useEffect(() => {
+    function onScroll() {
+      const doc = document.documentElement;
+      const atBottom = (window.innerHeight + window.scrollY) >= (doc.scrollHeight - 8);
+      if (atBottom) { if (!autoScroll) setAutoScroll(true); }
+      else { if (autoScroll) setAutoScroll(false); }
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => { window.removeEventListener('scroll', onScroll); };
+  }, [autoScroll]);
+  const plannerId = useAppStore(s => s.plannerId);
 
   // Actions
   async function handleManualSend(text: string, nextState: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required') {
@@ -103,9 +123,9 @@ function App() {
   }
 
   return (
-    <div className="wrap">
-      <div className="card">
-        <div className="row">
+    <div className={`wrap ${showDebug ? 'with-debug' : ''}`}>
+      <div className="card compact sticky" style={{ top: 0 }}>
+        <div className="row compact">
           {(() => {
             const transportLabel = transport === 'mcp' ? 'MCP' : 'A2A';
             const roleLabel = role === 'initiator' ? (transport === 'mcp' ? 'Client' : 'Client') : 'Server';
@@ -117,15 +137,20 @@ function App() {
           {role==='initiator' && (
             <button className="btn" onClick={clearTask} disabled={!taskId}>Clear task</button>
           )}
+          <label className="small" style={{marginLeft:'auto'}}>
+            <input type="checkbox" checked={showDebug} onChange={(e)=>setShowDebug(e.target.checked)} /> Show debug
+          </label>
         </div>
       </div>
 
-  <TaskRibbon />
+  <div className="sticky" style={{ top: 48 }}>
+    <TaskRibbon />
+  </div>
   <PlannerSetupCard urlSetup={urlSetup} />
 
-      <DebugPanel />
+      {showDebug && <DebugPanel />}
       <div className="card">
-        <div className="transcript" aria-live="polite">
+        <div className="transcript" aria-live="polite" ref={transcriptRef}>
           {!facts.length && <div className="small muted">No events yet.</div>}
           {facts.map((f) => {
             if (f.type === 'remote_received' || f.type === 'remote_sent') {
@@ -195,14 +220,21 @@ function App() {
             return <div key={f.id} />;
           })}
         </div>
+        {plannerId !== 'off' && (
+          <div className="transcript-bar">
+            <label className="small"><input type="checkbox" checked={autoScroll} onChange={(e)=>setAutoScroll(e.target.checked)} /> Auto scroll</label>
+          </div>
+        )}
 
-        <ManualComposer
-          disabled={!canSendManual}
-          hint={!canSendManual ? (['completed','canceled','failed','rejected'].includes(uiStatus) ? `Task ${uiStatus}.` : (initiatorCanStart ? 'First send will start a conversation' : 'Not your turn')) : undefined}
-          placeholder={composerPlaceholder()}
-          onSend={handleManualSend}
-          sending={sending}
-        />
+        {plannerId === 'off' && (
+          <ManualComposer
+            disabled={!canSendManual}
+            hint={!canSendManual ? (['completed','canceled','failed','rejected'].includes(uiStatus) ? `Task ${uiStatus}.` : (initiatorCanStart ? 'First send will start a conversation' : 'Not your turn')) : undefined}
+            placeholder={composerPlaceholder()}
+            onSend={handleManualSend}
+            sending={sending}
+          />
+        )}
       </div>
 
       <div className="card">

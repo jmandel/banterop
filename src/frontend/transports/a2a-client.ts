@@ -7,14 +7,16 @@ export type FrameResult =
   | { kind:'message'; role:'user'|'agent'; parts:A2APart[]; messageId?: string };
 
 export class A2AClient {
-  constructor(private endpoint: string) {}
+  constructor(private endpoint: string, private getHeaders?: () => Record<string,string> | undefined) {}
   private ep() { return this.endpoint }
 
   async *messageStreamParts(parts: A2APart[], opts:{ taskId?:string; messageId?:string; metadata?: any; signal?:AbortSignal }={}) {
     const msg: any = { messageId: opts.messageId || crypto.randomUUID(), ...(opts.taskId ? { taskId: opts.taskId } : {}), parts };
     if (opts.metadata) msg.metadata = opts.metadata;
     const body = { jsonrpc: '2.0', id: crypto.randomUUID(), method: 'message/stream', params: { message: msg } };
-    const res = await fetch(this.ep(), { method: 'POST', headers: { 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify(body), signal: opts.signal });
+    const baseHeaders: Record<string,string> = { 'content-type':'application/json', 'accept':'text/event-stream' };
+    const extra = this.getHeaders ? (this.getHeaders() || {}) : {};
+    const res = await fetch(this.ep(), { method: 'POST', headers: { ...baseHeaders, ...extra }, body: JSON.stringify(body), signal: opts.signal });
     if (!res.ok || !res.body) throw new Error('message/stream failed: ' + res.status);
     for await (const obj of parseSse<FrameResult>(res.body)) yield obj;
   }
@@ -72,19 +74,25 @@ export class A2AClient {
   }
   async tasksGet(taskId: string): Promise<A2ATask | null> {
     const body = { jsonrpc:'2.0', id: crypto.randomUUID(), method: 'tasks/get', params: { id: taskId } };
-    const res = await fetch(this.ep(), { method:'POST', headers: { 'content-type':'application/json' }, body: JSON.stringify(body) });
+    const baseHeaders: Record<string,string> = { 'content-type':'application/json' };
+    const extra = this.getHeaders ? (this.getHeaders() || {}) : {};
+    const res = await fetch(this.ep(), { method:'POST', headers: { ...baseHeaders, ...extra }, body: JSON.stringify(body) });
     const j = await res.json();
     return j.result || null;
   }
   async cancel(taskId: string) {
     const body = { jsonrpc:'2.0', id: crypto.randomUUID(), method: 'tasks/cancel', params: { id: taskId } };
-    await fetch(this.ep(), { method:'POST', headers: { 'content-type':'application/json' }, body: JSON.stringify(body) });
+    const baseHeaders: Record<string,string> = { 'content-type':'application/json' };
+    const extra = this.getHeaders ? (this.getHeaders() || {}) : {};
+    await fetch(this.ep(), { method:'POST', headers: { ...baseHeaders, ...extra }, body: JSON.stringify(body) });
   }
   async messageSend(parts: A2APart[], opts:{ taskId?:string; messageId?:string; metadata?: any }): Promise<A2ATask> {
     const msg: any = { taskId: opts.taskId, messageId: opts.messageId || crypto.randomUUID(), parts };
     if (opts.metadata) msg.metadata = opts.metadata;
     const body = { jsonrpc:'2.0', id: crypto.randomUUID(), method: 'message/send', params: { message: msg } };
-    const res = await fetch(this.ep(), { method:'POST', headers: { 'content-type':'application/json' }, body: JSON.stringify(body) });
+    const baseHeaders: Record<string,string> = { 'content-type':'application/json' };
+    const extra = this.getHeaders ? (this.getHeaders() || {}) : {};
+    const res = await fetch(this.ep(), { method:'POST', headers: { ...baseHeaders, ...extra }, body: JSON.stringify(body) });
     if (!res.ok) throw new Error('message/send failed: ' + res.status);
     const j = await res.json();
     if (j && j.error) {

@@ -11,7 +11,13 @@ function toSnap(t: A2ATask | null): TransportSnapshot | null {
 // Planner-compatible name
 export class A2AAdapter implements TransportAdapter {
   private client: A2AClient;
-  constructor(endpoint: string) { this.client = new A2AClient(endpoint); }
+  private leaseId: string | null = null;
+  constructor(endpoint: string) {
+    this.client = new A2AClient(endpoint, () => {
+      return this.leaseId ? { 'X-FlipProxy-Backend-Lease': this.leaseId } : undefined;
+    });
+  }
+  setBackendLease(leaseId: string | null) { this.leaseId = leaseId; }
   kind(): 'a2a' { return 'a2a'; }
   async send(parts: A2APart[], opts: SendOptions): Promise<{ taskId: string; snapshot: TransportSnapshot }> {
     const metadata = opts.nextState ? { [A2A_EXT_URL]: { nextState: opts.nextState } } as any : undefined;

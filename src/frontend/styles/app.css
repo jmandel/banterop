@@ -1,8 +1,10 @@
 /* Base layout */
 body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'; margin:0; padding:20px; background:#f6f8fb; }
-.wrap { max-width: 1000px; margin: 0 auto; padding-right: 380px; }
+.wrap { max-width: 1200px; margin: 0 auto; padding-right: 0; }
+.wrap.with-debug { padding-right: 380px; }
 .card { background: #fff; border: 1px solid #e6e8ee; border-radius: 10px; padding: 12px 12px; margin: 0 0 12px; }
 .row { display:flex; gap:10px; align-items:center; }
+.row.compact { gap:6px; }
 .pill { display:inline-block; padding: 4px 10px; border-radius: 999px; background: #f0f2f7; }
 .btn { background:#316fff; color:#fff; border:1px solid #2b61db; border-radius:8px; padding:6px 10px; cursor: pointer; }
 .btn[disabled] { opacity: 0.6; cursor: not-allowed; background: #c7d2fe; border-color:#c7d2fe; color:#4b5563; }
@@ -31,6 +33,9 @@ body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, 'Helveti
 .debug-body { flex:1; overflow:auto; padding: 8px 10px; }
 .debug-pre { white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; line-height: 1.4; }
 .debug-btn { background: #1f6feb; color: #fff; border: 1px solid #1f6feb; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+/* Compact cards and sticky helpers */
+.card.compact { padding: 8px 10px; margin-bottom: 8px; }
+.sticky { position: sticky; z-index: 200; background: #fff; }
 
 /* HUD dots */
 .working-dot { width: 10px; height: 10px; border-radius: 50%; background: #5b7cff; display:inline-block; animation: workingPulse 1.4s ease-in-out infinite; box-shadow: 0 0 0 rgba(91,124,255,0.3); }
@@ -47,3 +52,17 @@ header { display:flex; gap:10px; align-items:center; margin-bottom: 12px; }
 
 /* Read-only/observer visuals */
 .faded { opacity: 0.55; }
+
+/* Small success check icon for copy buttons */
+.icon-check { opacity: 0; transition: opacity 0.2s ease; margin-left: 6px; color: #16a34a; font-weight: 600; }
+.icon-check.show { opacity: 1; }
+
+/* Overlay labels (prevents width jump when showing Copied!) */
+.label-stack { display: grid; align-items: center; }
+.label-stack > span { grid-area: 1 / 1; transition: opacity 0.15s ease-in-out; }
+.label-stack .default { opacity: 1; }
+.label-stack .copied { opacity: 0; }
+.label-stack.show-copied .default { opacity: 0; }
+.label-stack.show-copied .copied { opacity: 1; }
+/* Bottom strip in transcript for small controls (e.g., auto scroll) */
+.transcript-bar { position: sticky; bottom: 0; background: #fff; border-top: 1px solid #e6e8ee; padding: 6px 10px; display:flex; justify-content:flex-end; align-items:center; border-radius: 0 0 10px 10px; }

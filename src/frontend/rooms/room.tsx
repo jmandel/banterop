@@ -21,18 +21,22 @@ function useRoom() {
   const qp = url.searchParams.get('roomId') || ''
   const roomId = qp || parts[1] || ''
   const base = `${url.origin}`
-  const a2a = `${base}/api/bridge/${roomId}/a2a`
+  const a2a = `${base}/api/rooms/${roomId}/a2a`
+  const mcp = `${base}/api/bridge/${roomId}/mcp`
   const tasks = `${base}/api/pairs/${roomId}/server-events?mode=backend`
   const agentCard = `${base}/rooms/${roomId}/agent-card.json`
-  return { roomId, a2a, tasks, agentCard }
+  return { roomId, a2a, mcp, tasks, agentCard }
 }
 
 function App() {
-  const { roomId, a2a, tasks, agentCard } = useRoom()
+  const { roomId, a2a, mcp, tasks, agentCard } = useRoom()
   const store = useAppStore()
   const [backendGranted, setGranted] = useState<boolean | null>(null)
+  const [leaseId, setLeaseId] = useState<string | null>(null)
+  const [esUrl, setEsUrl] = useState<string>(tasks)
   const [sending, setSending] = useState(false)
   const urlSetup = useUrlPlannerSetup() as any
+  const [showDebug, setShowDebug] = useState(false)
 
   useEffect(() => { document.title = `Room: ${roomId}` }, [roomId])
 
@@ -40,17 +44,28 @@ function App() {
   useEffect(() => {
     const adapter = new A2AAdapter(a2a)
     store.init('responder' as any, adapter, undefined)
+    // Store adapter on window for debug and lease updates
+    ;(window as any).__a2aAdapter = adapter
   }, [a2a])
 
   // Backend SSE: acquire lease, handle subscribe, set taskId
   useEffect(() => {
-    const es = new EventSource(tasks)
+    const es = new EventSource(esUrl)
     es.onmessage = (ev) => {
       try {
         const payload = JSON.parse(ev.data)
         const msg = payload.result
-        if (msg?.type === 'backend-granted') setGranted(true)
+        if (msg?.type === 'backend-granted') {
+          setGranted(true)
+          if (msg.leaseId) setLeaseId(String(msg.leaseId))
+          try { ((window as any).__a2aAdapter as A2AAdapter | undefined)?.setBackendLease(String(msg.leaseId||'')) } catch {}
+        }
         if (msg?.type === 'backend-denied') setGranted(false)
+        if (msg?.type === 'backend-revoked') {
+          setGranted(false)
+          setLeaseId(null)
+          try { ((window as any).__a2aAdapter as A2AAdapter | undefined)?.setBackendLease(null) } catch {}
+        }
         if (msg?.type === 'subscribe' && msg.taskId) {
           useAppStore.getState().setTaskId(String(msg.taskId))
         }
@@ -58,7 +73,7 @@ function App() {
     }
     es.onerror = () => {}
     return () => { try { es.close() } catch {} }
-  }, [tasks])
+  }, [esUrl])
 
   // Start planner controller only when lease granted
   useEffect(() => {
@@ -71,6 +86,7 @@ function App() {
   const taskId = useAppStore(s => s.taskId)
   const uiStatus = useAppStore(s => s.uiStatus())
   const facts = useAppStore(s => s.facts)
+  const plannerId = useAppStore(s => s.plannerId)
   const approved = useAppStore(s => s.composeApproved)
   const sentComposeIds = React.useMemo(() => {
     const s = new Set<string>();
@@ -78,8 +94,51 @@ function App() {
     return s;
   }, [facts])
   const observing = backendGranted === false
+  const [autoScroll, setAutoScroll] = useState(true)
+  const transcriptRef = React.useRef<HTMLDivElement|null>(null)
+  React.useLayoutEffect(() => {
+    if (!autoScroll) return;
+    try { window.scrollTo(0, document.documentElement.scrollHeight) } catch {}
+  }, [facts, autoScroll])
+  useEffect(() => {
+    function onScroll() {
+      const doc = document.documentElement
+      const atBottom = (window.innerHeight + window.scrollY) >= (doc.scrollHeight - 8)
+      if (atBottom) { if (!autoScroll) setAutoScroll(true) }
+      else { if (autoScroll) setAutoScroll(false) }
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => { window.removeEventListener('scroll', onScroll) }
+  }, [autoScroll])
 
-  function copy(s: string) { try { navigator.clipboard.writeText(s) } catch {} }
+  const [copiedCard, setCopiedCard] = useState(false)
+  const [copiedMcp, setCopiedMcp] = useState(false)
+  async function copyCard() {
+    try { await navigator.clipboard.writeText(agentCard); setCopiedCard(true); setTimeout(()=>setCopiedCard(false), 500); } catch {}
+  }
+  async function copyMcp() {
+    try { await navigator.clipboard.writeText(mcp); setCopiedMcp(true); setTimeout(()=>setCopiedMcp(false), 500); } catch {}
+  }
+  // Graceful release on unload only (allow background operation; do not release on hidden)
+  useEffect(() => {
+    function release() {
+      if (!leaseId) return;
+      try {
+        const u = new URL(window.location.origin)
+        const rel = `${u.origin}/api/pairs/${encodeURIComponent(roomId)}/backend/release`
+        const fd = new FormData(); fd.set('leaseId', leaseId)
+        navigator.sendBeacon(rel, fd)
+      } catch {}
+    }
+    window.addEventListener('beforeunload', release)
+    return () => { window.removeEventListener('beforeunload', release) }
+  }, [leaseId, roomId])
+
+  function forceTakeover() {
+    try { ((window as any).__a2aAdapter as A2AAdapter | undefined)?.setBackendLease(null) } catch {}
+    setLeaseId(null)
+    setEsUrl(`${tasks}${tasks.includes('?') ? '&' : '?'}mode=backend&takeover=1`)
+  }
 
   // Actions
   async function handleManualSend(text: string, nextState: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required') {
@@ -94,38 +153,52 @@ function App() {
   }
 
   return (
-    <div className="wrap">
+    <div className={`wrap ${showDebug ? 'with-debug' : ''}`}>
       <header>
         <strong>{roomTitle}</strong>
-        <span className={`chip ${backendGranted ? 'ok' : 'warn'}`}>{backendGranted ? 'Backend: Active' : (backendGranted===false ? 'Backend: Observer' : 'Backend: …')}</span>
-        <button onClick={()=>copy(a2a)}>Copy A2A</button>
-        <button onClick={()=>copy(agentCard)}>Copy Agent Card</button>
+        <span className={`chip ${backendGranted ? 'ok' : 'warn'}`}>{backendGranted ? 'This tab is controlling the server' : (backendGranted===false ? 'Observing the room' : 'Connecting…')}</span>
+        <button className="btn ghost" onClick={copyCard}>
+          <span className={`label-stack ${copiedCard ? 'show-copied' : ''}`}>
+            <span className="default">Copy Agent Card URL</span>
+            <span className="copied">Copied!</span>
+          </span>
+        </button>
+        <button className="btn ghost" onClick={copyMcp}>
+          <span className={`label-stack ${copiedMcp ? 'show-copied' : ''}`}>
+            <span className="default">Copy MCP URL</span>
+            <span className="copied">Copied!</span>
+          </span>
+        </button>
         <a className="btn" href={`${window.location.origin}/participant/?role=initiator&a2a=${encodeURIComponent(a2a)}`} target="_blank" rel="noreferrer">Open client (initiator)</a>
       </header>
 
       {backendGranted===false && (
         <div className="banner">
           Another tab already owns this room’s backend. Use Ctrl‑Shift‑A and search for “{roomTitle}” to locate it.
+          <button className="btn" style={{ marginLeft: 10 }} onClick={forceTakeover}>Force take over</button>
         </div>
       )}
 
-      {!observing && (
-        <div className="card">
-          <div className="row">
-            <div><strong>Role:</strong> <span className="pill">A2A Server</span></div>
-            <PlannerSelector />
-            <PlannerModeSelector />
-          </div>
+      <div className="card compact sticky" style={{ top: 0 }}>
+        <div className="row compact">
+          <div><strong>Role:</strong> <span className="pill">A2A Server</span></div>
+          {!observing && <PlannerSelector />}
+          {!observing && <PlannerModeSelector />}
+          <label className="small" style={{marginLeft:'auto'}}>
+            <input type="checkbox" checked={showDebug} onChange={(e)=>setShowDebug(e.target.checked)} /> Show debug
+          </label>
         </div>
-      )}
+      </div>
 
-      <TaskRibbon />
+      <div className="sticky" style={{ top: 48 }}>
+        <TaskRibbon />
+      </div>
       {!observing && <PlannerSetupCard urlSetup={urlSetup} />}
 
-      <DebugPanel />
+      {showDebug && <DebugPanel />}
 
       <div className="card">
-        <div className={`transcript ${observing ? 'faded' : ''}`} aria-live="polite">
+        <div className={`transcript ${observing ? 'faded' : ''}`} aria-live="polite" ref={transcriptRef}>
           {!facts.length && <div className="small muted">No events yet.</div>}
           {facts.map((f:any) => {
             if (f.type === 'remote_received' || f.type === 'remote_sent') {
@@ -186,8 +259,13 @@ function App() {
             return <div key={f.id} />
           })}
         </div>
+        {(observing || plannerId !== 'off') && (
+          <div className="transcript-bar">
+            <label className="small"><input type="checkbox" checked={autoScroll} onChange={(e)=>setAutoScroll(e.target.checked)} /> Auto scroll</label>
+          </div>
+        )}
 
-        {!observing && (
+        {!observing && plannerId === 'off' && (
           <ManualComposer
             disabled={uiStatus !== 'input-required'}
             hint={uiStatus !== 'input-required' ? 'Not your turn' : undefined}

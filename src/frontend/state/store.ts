@@ -96,8 +96,25 @@ export const useAppStore = create<Store>((set, get) => ({
 
   setPlanner(id) {
     set({ plannerId: id });
+    // Reflect planner change in URL hash so reloads preserve it, especially when turning off
+    try {
+      if (id === 'off') {
+        const mode = get().plannerMode;
+        const hash = encodeSetup({ planner: { id: 'off', mode, ready: false } } as any);
+        if (hash) try { window.location.hash = hash; } catch {}
+      }
+    } catch {}
   },
-  setPlannerMode(mode) { set({ plannerMode: mode }); },
+  setPlannerMode(mode) {
+    set({ plannerMode: mode });
+    // If planner is off, keep hash in sync with current mode
+    try {
+      if (get().plannerId === 'off') {
+        const hash = encodeSetup({ planner: { id: 'off', mode, ready: false } } as any);
+        if (hash) try { window.location.hash = hash; } catch {}
+      }
+    } catch {}
+  },
 
   setPlannerApplied(applied, ready) {
     const pid = get().plannerId;
@@ -459,6 +476,22 @@ function stampAndAppend(set: any, get: any, proposed: ProposedFact[]) {
     }
     filtered.push(p);
   }
+  // When we send a new outgoing message, dismiss any prior suggested drafts
+  try {
+    if (filtered.some(p => p && p.type === 'remote_sent')) {
+      const facts: Fact[] = get().facts || [];
+      const dismissed = new Set<string>(facts.filter(f=>f.type==='compose_dismissed').map((f:any)=>String((f as any).composeId||'')));
+      for (const f of facts) {
+        if (f.type === 'compose_intent') {
+          const cid = String((f as any).composeId || '');
+          if (cid && !dismissed.has(cid)) {
+            filtered.push({ type:'compose_dismissed', composeId: cid } as any as ProposedFact);
+            dismissed.add(cid);
+          }
+        }
+      }
+    }
+  } catch {}
   if (!filtered.length) return;
   const seq0 = get().seq || 0;
   const ts = nowIso();

@@ -1,7 +1,8 @@
 import React from 'react';
 import { marked } from 'marked';
 
-marked.setOptions({ gfm: true, breaks: true, headerIds: false, mangle: false });
+// Keep options minimal for broad version compatibility
+try { marked.setOptions({ gfm: true, breaks: true } as any); } catch {}
 
 export function Markdown({ text, className }:{ text?: string; className?: string }) {
   const html = React.useMemo(() => {
@@ -9,4 +10,3 @@ export function Markdown({ text, className }:{ text?: string; className?: string
   }, [text]);
   return <div className={className || 'text'} dangerouslySetInnerHTML={{ __html: html }} />;
 }
-

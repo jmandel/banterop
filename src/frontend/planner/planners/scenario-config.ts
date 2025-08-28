@@ -246,9 +246,18 @@ export function createScenarioConfigStore(opts: { llm: any; initial?: any }): Pl
     function destroy() { (get() as any)._mounted = false; try { if ((get() as any)._timer) clearTimeout((get() as any)._timer); } catch {} }
 
     if (opts.initial?.resolvedScenario) {
-      (get() as any)._scenario = opts.initial.resolvedScenario;
-      deriveFromScenario(opts.initial.resolvedScenario);
-      set({ _appliedInitial: true } as any);
+      // Defer applying initial scenario until after store is initialized
+      queueMicrotask(() => {
+        try {
+          (get() as any)._scenario = (opts.initial as any).resolvedScenario;
+          deriveFromScenario((opts.initial as any).resolvedScenario);
+          set({ _appliedInitial: true } as any);
+          // Recompute derived flags for canSave/pending
+          const anyPending = get().snap.fields.some(x => x.pending);
+          const anyError = get().snap.fields.some(x => x.error);
+          set(s => ({ snap: { ...s.snap, fields: [...s.snap.fields], pending: anyPending, dirty: true, canSave: !!(get() as any)._scenario && !anyPending && !anyError } }));
+        } catch {}
+      });
     } else if (initialScenarioUrl) {
       // If only a URL is provided, automatically fetch and validate it
       queueMicrotask(() => { void validateUrl(initialScenarioUrl); });

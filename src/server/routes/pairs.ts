@@ -60,27 +60,40 @@ export function pairsRoutes(includeNonApi = false) {
     r.get('/pairs/:pairId/server-events', async (c) => {
       const { pairId } = c.req.param()
       const mode = (c.req.query('mode') || 'observer').toLowerCase()
+      const takeover = ['1','true','yes'].includes(String(c.req.query('takeover')||'').toLowerCase())
       const headers = { 'content-type':'text/event-stream', 'cache-control':'no-cache, no-transform', 'connection':'keep-alive', 'x-accel-buffering':'no' }
+      const connId = crypto.randomUUID()
       const body = new ReadableStream({
         async start(controller) {
           const enc = new TextEncoder()
           const write = (obj:any) => controller.enqueue(enc.encode(`data: ${JSON.stringify({ result: obj })}\n\n`))
           const events = c.get('events')
           const pairs = c.get('pairs')
-          const connId = crypto.randomUUID()
           let granted = false
+          let leaseId: string | undefined
           let ping: any = null
           // Attempt backend lease if requested
           if (mode === 'backend') {
             try {
-              const acq = (pairs as any).acquireBackend(pairId, connId)
-              if (acq?.granted) { write({ type:'backend-granted', leaseId: acq.leaseId }) ; granted = true }
+              const acq = (pairs as any).acquireBackend(pairId, connId, takeover)
+              if (acq?.granted) { leaseId = acq.leaseId; write({ type:'backend-granted', leaseId: acq.leaseId, leaseGen: acq.leaseGen }) ; granted = true }
               else { write({ type:'backend-denied' }) }
             } catch {}
           }
           ping = setInterval(() => { try {
             controller.enqueue(enc.encode(`event: ping\ndata: ${Date.now()}\n\n`))
-            if (granted) { try { (pairs as any).renewBackend(pairId, connId) } catch {} }
+            if (granted) {
+              try { (pairs as any).renewBackend(pairId, connId) } catch {}
+              // Detect takeover/revocation: if current lease conn differs, revoke this stream
+              try {
+                const l = (pairs as any).getLease(pairId)
+                if (!l || l.connId !== connId) {
+                  write({ type:'backend-revoked', reason: l ? 'takeover' : 'stale' })
+                  clearInterval(ping)
+                  try { controller.close() } catch {}
+                }
+              } catch {}
+            }
           } catch {} }, 15000)
           try {
             // On connect, emit subscribe for the current epoch only
@@ -114,6 +127,21 @@ export function pairsRoutes(includeNonApi = false) {
         }
       })
       return new Response(body, { status:200, headers })
+    })
+
+    // Backend lease release endpoint (sendBeacon-friendly)
+    r.post('/pairs/:pairId/backend/release', async (c) => {
+      const { pairId } = c.req.param()
+      const form = await c.req.formData().catch(()=>null)
+      const leaseId = form ? String(form.get('leaseId') || '') : ''
+      const pairs = c.get('pairs')
+      try {
+        const l = (pairs as any).getLease(pairId)
+        if (l && l.leaseId && leaseId && l.leaseId === leaseId) {
+          ;(pairs as any).releaseBackend(pairId, l.connId)
+        }
+      } catch {}
+      return c.json({ ok: true })
     })
 
     r.post('/pairs/:pairId/reset', async (c) => {

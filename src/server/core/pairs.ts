@@ -16,10 +16,10 @@ export type TaskSnapshot = {
 
 export type PairsService = ReturnType<typeof createPairsService>
 
-export function createPairsService({ db, events }: Deps) {
+export function createPairsService({ db, events, baseUrl }: Deps) {
   const metadata = new Map<string, any>()
   // Single Active Backend (SAB) lease map
-  const backendByRoom = new Map<string, { leaseId: string; connId: string; lastSeen: number }>()
+  const backendByRoom = new Map<string, { leaseId: string; connId: string; lastSeen: number; leaseGen: number }>()
 
   function hasActiveBackend(roomId: string): boolean {
     const l = backendByRoom.get(roomId)
@@ -27,11 +27,23 @@ export function createPairsService({ db, events }: Deps) {
     return (Date.now() - l.lastSeen) < 45_000
   }
 
-  function acquireBackend(roomId: string, connId: string): { granted: boolean; leaseId?: string } {
-    if (hasActiveBackend(roomId)) return { granted: false }
+  function getLease(roomId: string): { leaseId: string; connId: string; leaseGen: number } | null {
+    const l = backendByRoom.get(roomId)
+    if (!l) return null
+    return { leaseId: l.leaseId, connId: l.connId, leaseGen: l.leaseGen }
+  }
+
+  function acquireBackend(roomId: string, connId: string, takeover?: boolean): { granted: boolean; leaseId?: string; leaseGen?: number; takeover?: boolean } {
+    const existing = backendByRoom.get(roomId)
+    if (hasActiveBackend(roomId) && !takeover) return { granted: false }
+    // If takeover, clear any existing lease first
+    if (existing && takeover) {
+      backendByRoom.delete(roomId)
+    }
     const leaseId = crypto.randomUUID()
-    backendByRoom.set(roomId, { leaseId, connId, lastSeen: Date.now() })
-    return { granted: true, leaseId }
+    const leaseGen = (existing?.leaseGen ?? 0) + 1
+    backendByRoom.set(roomId, { leaseId, connId, lastSeen: Date.now(), leaseGen })
+    return { granted: true, leaseId, leaseGen, takeover: !!existing }
   }
 
   function renewBackend(roomId: string, connId: string): void {
@@ -52,7 +64,7 @@ export function createPairsService({ db, events }: Deps) {
     return Math.min(Math.floor(n), MAX);
   }
 
-  function toSnapshot(row: TaskRow, historyLength?: number): TaskSnapshot {
+  function toSnapshot(row: TaskRow, historyLength?: number, viewerLeaseId?: string | null): TaskSnapshot {
     const last = db.lastMessage(row.pair_id, row.epoch)
     const currentMsgId = last ? String((() => { try { return JSON.parse(last.json)?.messageId } catch { return '' } })() || '') : undefined
     const limit = typeof historyLength === 'number' ? sanitizeHistoryLength(historyLength) : 10_000
@@ -61,7 +73,10 @@ export function createPairsService({ db, events }: Deps) {
     const rows = db.listMessages(row.pair_id, row.epoch, { order:'ASC', limit: Math.max(0, limit)+1 })
     const canonical = rows.map(r => ({ obj: (():any=>{ try { return JSON.parse(r.json) } catch { return {} } })(), author: r.author }))
       .filter(({obj}) => !currentMsgId || String(obj?.messageId || '') !== currentMsgId)
-    const hist = canonical.slice(Math.max(0, canonical.length - limit)).map(({obj, author}) => projectForViewer(obj, viewerTaskId, viewerRole, author))
+    const hist = canonical
+      .slice(Math.max(0, canonical.length - limit))
+      .map(({obj, author}) => projectForViewer(obj, viewerTaskId, viewerRole, author, viewerLeaseId))
+      .filter(Boolean) as any[]
     // compute state for viewer
     let state: TaskState = 'submitted'
     let statusMessage: any = undefined
@@ -75,11 +90,23 @@ export function createPairsService({ db, events }: Deps) {
     return { id: row.task_id, contextId: row.pair_id, kind:'task', status:{ state, message: statusMessage }, history: hist }
   }
 
-  function projectForViewer(message: any, viewerTaskId: string, viewerRole: 'init'|'resp', authorRoleHint?: 'init'|'resp') {
+  function projectForViewer(message: any, viewerTaskId: string, viewerRole: 'init'|'resp', authorRoleHint?: 'init'|'resp', viewerLeaseId?: string | null) {
     try {
       const raw = typeof message === 'string' ? JSON.parse(message) : (message || {})
       // Drop relative fields from stored JSON
       const { role: _r, taskId: _t, contextId: _c, ...base } = raw
+      // Audience scoping: filter out diagnostics when viewer is not intended audience
+      try {
+        const audience = String((raw as any)?.metadata?.server?.audience || '')
+        if (audience && audience.startsWith('lease:')) {
+          const want = audience.slice('lease:'.length)
+          if (!viewerLeaseId || viewerLeaseId !== want) return null
+        }
+        if (audience && audience.startsWith('role:')) {
+          const wantRole = audience.slice('role:'.length)
+          if ((wantRole === 'init' && viewerRole !== 'init') || (wantRole === 'resp' && viewerRole !== 'resp')) return null
+        }
+      } catch {}
       const { pairId: viewerPairId } = parseTaskId(viewerTaskId)
       // Determine author role: prefer DB hint, fallback to parsing embedded sender taskId if present
       const senderTaskId: string = String(raw?.taskId || '')
@@ -192,7 +219,7 @@ export function createPairsService({ db, events }: Deps) {
       return toSnapshot(db.getTask(initId)!)
     },
 
-    async messageSend(pairId: string, m: any, configuration?: { historyLength?: number }) {
+    async messageSend(pairId: string, m: any, configuration?: { historyLength?: number }, viewerLeaseId?: string | null) {
       const hasTaskId = !!m?.taskId
       const { epoch } = hasTaskId ? ensureEpoch(pairId) : ensureEpochForSend(pairId)
 
@@ -225,9 +252,10 @@ export function createPairsService({ db, events }: Deps) {
       // If no active backend, generate protocol error message and fail the task in-band
       if (!hasActiveBackend(pairId)) {
         const otherRole = senderRole === 'init' ? 'resp' : 'init'
+        const absRoomsUrl = `${String(baseUrl || '').replace(/\/+$/, '')}/rooms/${pairId}`
         const errorMsg = {
           role: otherRole === 'init' ? 'user' : 'agent',
-          parts: [{ kind:'text', text: `Room backend not open. Open /rooms/${pairId} in a browser and keep that tab open. Processing runs in your browser.` }],
+          parts: [{ kind:'text', text: `Room backend not open. Open ${absRoomsUrl} in a browser and keep that tab open. Processing runs in your browser.` }],
           messageId: `err:${crypto.randomUUID()}`,
           taskId: senderId, // relative for viewer; persisted JSON will strip these
           contextId: pairId,
@@ -245,9 +273,32 @@ export function createPairsService({ db, events }: Deps) {
         events.push(pairId, { type: 'state', epoch, states: { initiator:'failed', responder:'failed' }, status: { message: errorMsg } } as any)
         events.push(pairId, { type: 'message', epoch, messageId: msg.messageId, message: msg } as any)
         events.push(pairId, { type: 'message', epoch, messageId: errorMsg.messageId, message: errorMsg } as any)
-        const snapRow = db.getTask(senderId)!
-        const limit = sanitizeHistoryLength(configuration?.historyLength)
-        return toSnapshot(snapRow, limit)
+      const snapRow = db.getTask(senderId)!
+      const limit = sanitizeHistoryLength(configuration?.historyLength)
+      return toSnapshot(snapRow, limit)
+      }
+
+      // Lease-bound authorization for responder writes
+      if (senderRole === 'resp') {
+        const lease = getLease(pairId)
+        const ok = !!(viewerLeaseId && lease && lease.leaseId === viewerLeaseId)
+        if (!ok) {
+          // Persist diagnostic scoped to offending lease (or none)
+          const otherRole = 'init'
+          const diag = {
+            role: otherRole === 'init' ? 'user' : 'agent',
+            parts: [{ kind:'text', text: 'Stale or missing backend lease. Your tab is no longer authorized to send. Refresh the room or take over.' }],
+            messageId: `err:${crypto.randomUUID()}`,
+            taskId: senderId,
+            contextId: pairId,
+            kind: 'message',
+            metadata: { server: { category: 'room-error', reason: 'stale-backend-lease', audience: `lease:${viewerLeaseId || ''}` } }
+          }
+          try { const { role: _r3, taskId: _t3, contextId: _c3, ...pb3 } = diag as any; db.insertMessage({ pair_id: pairId, epoch, author: otherRole, json: JSON.stringify(pb3) }) } catch {}
+          const snapRow = db.getTask(senderId)!
+          const limit = sanitizeHistoryLength(configuration?.historyLength)
+          return toSnapshot(snapRow, limit, viewerLeaseId)
+        }
       }
 
       // Normal path: emit state then message
@@ -328,8 +379,9 @@ export function createPairsService({ db, events }: Deps) {
     },
     // SAB helpers
     hasActiveBackend(roomId: string) { return hasActiveBackend(roomId) },
-    acquireBackend(roomId: string, connId: string) { return acquireBackend(roomId, connId) },
+    acquireBackend(roomId: string, connId: string, takeover?: boolean) { return acquireBackend(roomId, connId, takeover) },
     renewBackend(roomId: string, connId: string) { return renewBackend(roomId, connId) },
     releaseBackend(roomId: string, connId: string) { return releaseBackend(roomId, connId) },
+    getLease(roomId: string) { return getLease(roomId) },
   }
 }
