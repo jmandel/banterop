@@ -36,8 +36,8 @@ function ControlApp() {
             const a2aUrl = `${origin}/api/bridge/${hPair}/a2a`
             const tasksUrl = `${origin}/api/pairs/${hPair}/server-events`
             useControlStore.setState({
-              initiatorJoinUrl: `${origin}/participant/?role=initiator&a2a=${encodeURIComponent(a2aUrl)}`,
-              responderJoinUrl: `${origin}/participant/?role=responder&a2a=${encodeURIComponent(a2aUrl)}&tasks=${encodeURIComponent(tasksUrl)}`,
+              initiatorJoinUrl: `${origin}/client/?a2a=${encodeURIComponent(a2aUrl)}`,
+              responderJoinUrl: `${origin}/rooms/${hPair}`,
             })
             const s = hSince ? Number(hSince) : 0
             setSince(Number.isFinite(s) ? s : 0)

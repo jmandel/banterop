@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { useAppStore } from '../state/store'
 import { A2AAdapter } from '../transports/a2a-adapter'
-import { PlannerSetupCard } from '../participant/PlannerSetupCard'
-import { DebugPanel } from '../participant/DebugPanel'
+import { PlannerSetupCard } from '../client/PlannerSetupCard'
+import { DebugPanel } from '../client/DebugPanel'
 import { startPlannerController } from '../planner/controller'
 import type { AttachmentMeta } from '../../shared/journal-types'
 import { TaskRibbon } from '../components/TaskRibbon'
@@ -169,7 +169,7 @@ function App() {
             <span className="copied">Copied!</span>
           </span>
         </button>
-        <a className="btn" href={`${window.location.origin}/participant/?role=initiator&a2a=${encodeURIComponent(a2a)}`} target="_blank" rel="noreferrer">Open client (initiator)</a>
+        <a className="btn" href={`${window.location.origin}/client/?card=${encodeURIComponent(agentCard)}`} target="_blank" rel="noreferrer">Open client</a>
       </header>
 
       {backendGranted===false && (

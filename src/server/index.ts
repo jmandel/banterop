@@ -13,7 +13,7 @@ import { mcpRoutes } from './routes/mcp'
 import { serve } from 'bun'
 import { extractNextState, computeStatesForNext } from './core/finality'
 import controlHtml from '../frontend/control/index.html'
-import participantHtml from '../frontend/participant/index.html'
+import clientHtml from '../frontend/client/index.html'
 import roomsHtml from '../frontend/rooms/index.html'
 import { A2A_EXT_URL } from '../shared/core'
 
@@ -166,7 +166,7 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
     routes: {
       '/': controlHtml,
       '/control/': controlHtml,
-      '/participant/': participantHtml,
+      '/client/': clientHtml,
       '/rooms/': roomsHtml,
       // Serve dynamic room page directly (same bundled HTML)
       '/rooms/:roomId': roomsHtml,
@@ -176,7 +176,7 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
       const staticPages: Record<string, string> = {
         '/': controlHtml,
         '/control/': controlHtml,
-        '/participant/': participantHtml,
+        '/client/': clientHtml,
         '/rooms/': roomsHtml,
       }
       const html = staticPages[url.pathname]

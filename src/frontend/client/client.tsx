@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { AttachmentMeta } from '../../shared/journal-types';
-import type { A2APart } from '../../shared/a2a-types';
 import { useAppStore } from '../state/store';
 import { A2AAdapter } from '../transports/a2a-adapter';
 import { statusLabel } from '../components/status-labels';
@@ -21,22 +20,18 @@ import { DraftInline } from '../components/DraftInline';
 import { Markdown } from '../components/Markdown';
 import { attachmentHrefFromBase64 } from '../components/attachments';
 
-type Role = 'initiator'|'responder';
-
 function useQuery() {
   const u = new URL(window.location.href);
-  const role = (u.searchParams.get('role') === 'responder') ? 'responder' : 'initiator';
   const transport = (u.searchParams.get('transport') === 'mcp') ? 'mcp' : 'a2a';
   const a2aUrl = u.searchParams.get('a2a') || '';
-  const tasksUrl = u.searchParams.get('tasks') || '';
   const mcpUrl = u.searchParams.get('mcp') || '';
-  return { role, transport, a2aUrl, tasksUrl, mcpUrl };
+  return { transport, a2aUrl, mcpUrl };
 }
 
 // attachmentHrefFromBase64 moved to ../components/attachments
 
 function App() {
-  const { role, transport, a2aUrl, tasksUrl, mcpUrl } = useQuery();
+  const { transport, a2aUrl, mcpUrl } = useQuery();
   const store = useAppStore();
   const [sending, setSending] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
@@ -47,18 +42,11 @@ function App() {
   // init transport & role
   useEffect(() => {
     const adapter = transport === 'mcp' ? new MCPAdapter(mcpUrl) : new A2AAdapter(a2aUrl);
-    store.init(role as Role, adapter, undefined);
-    // Start planner controller for both roles; harness owns triggers/guards
+    store.init('initiator' as any, adapter, undefined);
     startPlannerController();
-  }, [role, transport, a2aUrl, mcpUrl]);
+  }, [transport, a2aUrl, mcpUrl]);
 
-  // Backchannel (responder, A2A): delegate to store attach/detach
-  useEffect(() => {
-    if (transport === 'a2a' && role === 'responder' && tasksUrl) {
-      useAppStore.getState().attachBackchannel(tasksUrl);
-      return () => { try { useAppStore.getState().detachBackchannel(); } catch {} };
-    }
-  }, [role, tasksUrl, transport]);
+  // No backchannel: client page is always the initiator
 
   const facts = useAppStore(s => s.facts);
   const taskId = useAppStore(s => s.taskId);
@@ -107,7 +95,7 @@ function App() {
   }, [facts]);
 
   // Compute composer gating and messaging
-  const initiatorCanStart = role === 'initiator' && !taskId;
+  const initiatorCanStart = !taskId;
   const canSendManual = initiatorCanStart || uiStatus === 'input-required';
   function composerPlaceholder() {
     if (canSendManual) return 'Type a message to the other side…';
@@ -128,15 +116,12 @@ function App() {
         <div className="row compact">
           {(() => {
             const transportLabel = transport === 'mcp' ? 'MCP' : 'A2A';
-            const roleLabel = role === 'initiator' ? (transport === 'mcp' ? 'Client' : 'Client') : 'Server';
-            const label = `${transportLabel} ${roleLabel}`;
+            const label = `${transportLabel} Client`;
             return (<div><strong>Role:</strong> <span className="pill">{label}</span></div>);
           })()}
           <PlannerSelector />
           <PlannerModeSelector />
-          {role==='initiator' && (
-            <button className="btn" onClick={clearTask} disabled={!taskId}>Clear task</button>
-          )}
+          <button className="btn" onClick={clearTask} disabled={!taskId}>Clear task</button>
           <label className="small" style={{marginLeft:'auto'}}>
             <input type="checkbox" checked={showDebug} onChange={(e)=>setShowDebug(e.target.checked)} /> Show debug
           </label>

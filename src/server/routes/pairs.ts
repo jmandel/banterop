@@ -18,8 +18,8 @@ export function pairsRoutes(includeNonApi = false) {
       pairId: created.pairId,
       endpoints: { a2a, mcp, a2aAgentCard },
       links: {
-        initiator: { joinA2a: `${base}/participant/?role=initiator&a2a=${encodeURIComponent(a2a)}`, joinMcp: `${base}/participant/?role=initiator&transport=mcp&mcp=${encodeURIComponent(mcp)}` },
-        responder: { joinA2a: `${base}/participant/?role=responder&a2a=${encodeURIComponent(a2a)}&tasks=${encodeURIComponent(tasks)}` },
+        initiator: { joinA2a: `${base}/client/?a2a=${encodeURIComponent(a2a)}`, joinMcp: `${base}/client/?transport=mcp&mcp=${encodeURIComponent(mcp)}` },
+        responder: { openRoom: `${base}/rooms/${created.pairId}` },
       }
     })
   })

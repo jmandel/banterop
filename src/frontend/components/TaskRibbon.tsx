@@ -7,8 +7,8 @@ export function TaskRibbon() {
   const uiStatus = useAppStore(s => s.uiStatus());
   function statusBadgeText(s: string): string { return statusLabel(s); }
   return (
-    <div className="card">
-      <div className="row" style={{ alignItems:'center', gap: 10 }}>
+    <div className="card compact">
+      <div className="row compact" style={{ alignItems:'center' }}>
         <strong>Task</strong>
         <span className="pill">ID: {taskId || '—'}</span>
         <span className="pill">Status: {statusBadgeText(uiStatus)}</span>
