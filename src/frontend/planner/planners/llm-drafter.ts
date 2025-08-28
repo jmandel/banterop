@@ -129,4 +129,26 @@ export const LLMDrafterPlanner: Planner<Cfg> = {
     ctx.hud('drafting', `Draft ${text.length} chars`);
     return [{ type:'compose_intent', composeId: ctx.newId('c'), text } as ProposedFact];
   },
+
+  // Config management methods
+  createConfigStore: (opts) => {
+    // Import the config store dynamically to avoid circular dependencies
+    const { createLLMDrafterConfigStore } = require('./llm-drafter-config');
+    return createLLMDrafterConfigStore(opts);
+  },
+
+  dehydrate: (config) => ({
+    model: config.model,
+    systemAppend: config.systemAppend,
+    targetWords: config.targetWords,
+  }),
+
+  hydrate: async (seed) => ({
+    config: {
+      model: String(seed.model || DEFAULT_MODEL),
+      systemAppend: String(seed.systemAppend || ''),
+      targetWords: Number(seed.targetWords) || 0,
+    },
+    ready: true,
+  }),
 };

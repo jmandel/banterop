@@ -1,4 +1,4 @@
-// Shared config UI types for planner setup
+// New simplified config types for the cleaner architecture
 export type FieldType = 'text' | 'select' | 'checkbox' | 'checkbox-group';
 
 export type FieldOption = { value: string; label: string };
@@ -18,6 +18,9 @@ export type FieldState = {
   pending?: boolean;
 };
 
+// Serialized, portable representation for persistence/deep-linking
+export type SavedField = { key: string; value: unknown };
+
 export type ConfigSnapshot = {
   fields: FieldState[];
   canSave: boolean;   // OK to Save
@@ -27,3 +30,42 @@ export type ConfigSnapshot = {
   preview?: unknown;  // planner-defined preview blob
 };
 
+// Generic config store interface
+export type PlannerConfigStore = {
+  // state
+  snap: ConfigSnapshot;
+
+  // actions
+  setField: (key: string, value: unknown) => void;
+  exportConfig: () => { config: any; ready: boolean };
+  initialize?: (values: Record<string, unknown>) => Promise<void>;
+  destroy: () => void;
+  // subscribe for React reactivity
+  subscribe: (listener: () => void) => () => void;
+};
+
+// Helper function to create initial field state
+export function createFieldState(definition: any): FieldState {
+  return {
+    key: definition.key,
+    type: definition.type,
+    label: definition.label,
+    value: definition.defaultValue || '',
+    placeholder: definition.placeholder,
+    help: definition.help,
+    required: definition.required,
+    visible: definition.visible !== false,
+    options: definition.options || [],
+    error: null,
+    pending: false,
+  };
+}
+
+// Helper function to update field in array
+export function updateField(fields: FieldState[], key: string, value: unknown, error?: string | null): FieldState[] {
+  return fields.map(f =>
+    f.key === key
+      ? { ...f, value, error: error !== undefined ? error : f.error, pending: false }
+      : f
+  );
+}

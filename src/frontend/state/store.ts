@@ -1,15 +1,13 @@
 import { create } from 'zustand';
-import type { A2APart, A2AStatus } from '../../shared/a2a-types';
+import type { SavedField, PlannerConfigStore } from '../planner/config/types';
+import type { A2APart, A2AStatus, A2ANextState } from '../../shared/a2a-types';
 import type { Fact, ProposedFact, AttachmentMeta } from '../../shared/journal-types';
-import type { PlannerApplied } from '../planner/types';
 import type { TransportAdapter } from '../transports/types';
 import { a2aToFacts } from '../../shared/a2a-translator';
 import { validateParts } from '../../shared/parts-validator';
 import { nowIso, rid } from '../../shared/core';
-import { encodeSetup } from '../../shared/setup-hash';
-// import { uniqueName } from '../../shared/a2a-helpers';
-// Planner registry for defaults
-// PlannerRegistry no longer used for staging; config handled by planner stores
+import { resolvePlanner } from '../planner/registry';
+import { makeChitchatProvider, DEFAULT_CHITCHAT_ENDPOINT } from '../../shared/llm-provider';
 
 type Role = 'initiator'|'responder';
 
@@ -24,8 +22,13 @@ export type Store = {
   plannerId: 'off'|'llm-drafter'|'scenario-v0.3'|'simple-demo';
   plannerMode: 'approve'|'auto';
   // planner setup
-  appliedByPlanner: Record<string, any>;
+  configByPlanner: Record<string, any>;
   readyByPlanner: Record<string, boolean>;
+  savedFieldsByPlanner: Record<string, SavedField[] | undefined>;
+  // new config system
+  configStores: Record<string, PlannerConfigStore>;
+  urlHash: string;
+  urlParams: URLSearchParams;
   // journal
   facts: Fact[];
   seq: number;
@@ -45,13 +48,19 @@ export type Store = {
   fetchAndIngest(): Promise<void>;
   setPlanner(id:'off'|'llm-drafter'|'scenario-v0.3'|'simple-demo'): void;
   setPlannerMode(mode:'approve'|'auto'): void;
-  setPlannerApplied(applied: PlannerApplied | any, ready: boolean): void;
+  setPlannerConfig(config: any, ready: boolean): void;
+  setPlannerSavedFields(saved: SavedField[]): void;
+  // new config system actions
+  initFromUrl(): void;
+  loadPlannerFromUrl(plannerId: string): void;
+  onConfigChange(plannerId: string, config: any): void;
+  syncUrlFromConfig(): void;
   // rewind + reconfigure
   rewindJournal(): void; // always rewinds to last public event
-  reconfigurePlanner(opts: { applied: any; ready: boolean; rewind?: boolean }): void;
+  reconfigurePlanner(opts: { config: any; ready: boolean; rewind?: boolean }): void;
   // legacy staging functions removed; planners with config stores persist directly
   appendComposeIntent(text: string, attachments?: AttachmentMeta[]): string;
-  sendCompose(composeId: string, nextState: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required'): Promise<void>;
+  sendCompose(composeId: string, nextState: A2ANextState): Promise<void>;
   addUserGuidance(text: string): void;
   addUserAnswer(qid: string, text: string): void;
   dismissCompose(composeId: string): void;
@@ -76,8 +85,12 @@ export const useAppStore = create<Store>((set, get) => ({
   needsRefresh: false,
   plannerId: 'off',
   plannerMode: 'approve',
-  appliedByPlanner: {},
+  configByPlanner: {},
   readyByPlanner: {},
+  savedFieldsByPlanner: {},
+  configStores: {},
+  urlHash: '',
+  urlParams: new URLSearchParams(),
   facts: [],
   seq: 0,
   hud: null,
@@ -95,64 +108,117 @@ export const useAppStore = create<Store>((set, get) => ({
   },
 
   setPlanner(id) {
+    const prevId = get().plannerId;
+    console.log('[AppStore] setPlanner:', { from: prevId, to: id });
+
     set({ plannerId: id });
-    // Reflect planner change in URL hash so reloads preserve it, especially when turning off
-    try {
-      if (id === 'off') {
-        const mode = get().plannerMode;
-        const hash = encodeSetup({ planner: { id: 'off', mode, ready: false } } as any);
-        if (hash) try { window.location.hash = hash; } catch {}
+
+    // If switching to a planner that supports config, create the config store
+    if (id !== 'off' && id !== prevId) {
+      const planner = resolvePlanner(id);
+      console.log('[AppStore] setPlanner: resolved planner:', {
+        id,
+        planner: !!planner,
+        hasCreateConfigStore: !!(planner && planner.createConfigStore)
+      });
+
+      if (planner.createConfigStore) {
+        const llm = makeChitchatProvider(DEFAULT_CHITCHAT_ENDPOINT);
+        console.log('[AppStore] setPlanner: creating config store for', id);
+
+        const configStore = planner.createConfigStore({
+          llm,
+          onConfigChange: (config) => {
+            console.log('[AppStore] onConfigChange called:', { id, config });
+            get().onConfigChange(id, config);
+          }
+        });
+
+        console.log('[AppStore] setPlanner: config store created:', !!configStore);
+
+        set(s => ({
+          configStores: { ...s.configStores, [id]: configStore }
+        }));
+
+        console.log('[AppStore] setPlanner: config store stored in state');
+
+        // Initialize the config store (this will trigger model loading)
+        console.log('[AppStore] setPlanner: initializing config store');
+        // The config store facade doesn't expose getState, so we need to initialize it differently
+        // For now, we'll initialize it when it's first accessed by the UI
+        console.log('[AppStore] setPlanner: config store ready for initialization');
       }
-    } catch {}
+    }
   },
   setPlannerMode(mode) {
     set({ plannerMode: mode });
-    // If planner is off, keep hash in sync with current mode
-    try {
-      if (get().plannerId === 'off') {
-        const hash = encodeSetup({ planner: { id: 'off', mode, ready: false } } as any);
-        if (hash) try { window.location.hash = hash; } catch {}
-      }
-    } catch {}
   },
 
-  setPlannerApplied(applied, ready) {
+  setPlannerConfig(config, ready) {
     const pid = get().plannerId;
     set((s:any) => ({
-      appliedByPlanner: { ...s.appliedByPlanner, [pid]: applied },
-      readyByPlanner: { ...s.readyByPlanner, [pid]: ready },
+      configByPlanner: { ...s.configByPlanner, [pid]: config },
+      readyByPlanner: { ...s.readyByPlanner, [pid]: !!ready },
     }));
-    // Reflect setup in URL hash for deep links (UI-agnostic)
-    try {
-      const mode = get().plannerMode;
-      // Sanitize large blobs like resolvedScenario
-      let appliedForUrl: any = applied;
-      try {
-        if (pid === 'scenario-v0.3') {
-          const slim: any = {};
-          const scenUrl = String((applied as any)?.scenarioUrl || '');
-          if (scenUrl) slim.scenarioUrl = scenUrl;
-          const model = String((applied as any)?.model || '');
-          if (model) slim.model = model;
-          const myAgentId = String((applied as any)?.myAgentId || '');
-          if (myAgentId) slim.myAgentId = myAgentId;
-          const tools = (applied as any)?.enabledTools;
-          if (Array.isArray(tools) && tools.length) slim.enabledTools = tools;
-          const coreTools = (applied as any)?.enabledCoreTools;
-          if (Array.isArray(coreTools) && coreTools.length) slim.enabledCoreTools = coreTools;
-          const maxSteps = Number((applied as any)?.maxInlineSteps);
-          if (Number.isFinite(maxSteps) && maxSteps > 0) slim.maxInlineSteps = maxSteps;
-          appliedForUrl = slim;
-        } else if (applied && typeof applied === 'object') {
-          // Generic: drop known heavy keys if present
-          const { resolvedScenario, ...rest } = applied as any;
-          appliedForUrl = rest;
-        }
-      } catch {}
-      const setup = { planner: { id: pid, mode, ready: true, applied: appliedForUrl } };
-      const hash = encodeSetup(setup);
-      if (hash) try { window.location.hash = hash; } catch {}
-    } catch {}
+  },
+
+  setPlannerSavedFields(saved) {
+    const pid = get().plannerId;
+    set((s:any) => ({ savedFieldsByPlanner: { ...s.savedFieldsByPlanner, [pid]: saved } }));
+  },
+
+  // New config system actions
+  initFromUrl() {
+    const hash = window.location.hash.slice(1);
+    set({ urlHash: hash, urlParams: new URLSearchParams(hash) });
+
+    const plannerId = get().urlParams.get('planner');
+    if (plannerId) {
+      get().loadPlannerFromUrl(plannerId);
+    }
+  },
+
+  loadPlannerFromUrl: (plannerId: string) => {
+    // Just set the planner ID - the UI will handle VM creation and initialization
+    set({ plannerId: plannerId as any });
+  },
+
+  onConfigChange(plannerId, config) {
+    set(s => ({
+      configByPlanner: { ...s.configByPlanner, [plannerId]: config },
+      readyByPlanner: { ...s.readyByPlanner, [plannerId]: true }
+    }));
+
+    // Update URL to reflect new config
+    get().syncUrlFromConfig();
+  },
+
+  syncUrlFromConfig() {
+    const { plannerId, configByPlanner } = get();
+    const config = configByPlanner[plannerId];
+
+    if (!config) return;
+
+    const planner = resolvePlanner(plannerId);
+    if (!planner.dehydrate) return;
+
+    const seed = planner.dehydrate(config);
+
+    const params = new URLSearchParams();
+    params.set('planner', plannerId);
+
+    // Add seed values
+    Object.entries(seed).forEach(([key, value]) => {
+      if (value != null) {
+        params.set(key, String(value));
+      }
+    });
+
+    const newHash = params.toString();
+    if (get().urlHash !== newHash) {
+      set({ urlHash: newHash, urlParams: params });
+      window.history.replaceState(null, '', `#${newHash}`);
+    }
   },
 
   rewindJournal() {
@@ -196,7 +262,7 @@ export const useAppStore = create<Store>((set, get) => ({
     });
   },
 
-  reconfigurePlanner({ applied, ready, rewind }) {
+  reconfigurePlanner({ config, ready, rewind }) {
     // Default: rewind to last public, unless explicitly disabled
     try {
       if (rewind === undefined || rewind === true) {
@@ -207,8 +273,8 @@ export const useAppStore = create<Store>((set, get) => ({
       try { console.warn('[reconfigurePlanner] rewind failed:', (e as any)?.message || e); } catch {}
       throw e;
     }
-    // Apply config and deep-link (reuse setPlannerApplied logic)
-    get().setPlannerApplied(applied, ready);
+    // Apply FullConfig
+    get().setPlannerConfig(config, ready);
     // Nudge planner controller; harness will also rebuild on seq change
     try { get().kickoffConversationWithPlanner(); } catch {}
   },
@@ -304,7 +370,7 @@ export const useAppStore = create<Store>((set, get) => ({
       inFlightSends: new Map<string,{composeId:string}>(s.inFlightSends as Map<string,{composeId:string}>).set(messageId, { composeId }),
       sendErrorByCompose: (()=>{ const m = new Map<string,string>(s.sendErrorByCompose as Map<string,string>); m.delete(composeId); return m; })(),
     }));
-    const ns = (nextState || (ci as any).nextStateHint || 'working') as 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required';
+    const ns = (nextState || (ci as any).nextStateHint || 'working') as A2ANextState;
     let lastErr: any;
     let result: { taskId: string; snapshot: any } | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -427,8 +493,8 @@ export const useAppStore = create<Store>((set, get) => ({
       if (mode === 'auto') {
         for (const pf of batch) {
           if (pf && pf.type === 'compose_intent') {
-            const ci = pf as any as { composeId:string; nextStateHint?: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required' };
-            queueMicrotask(() => { try { void get().sendCompose(ci.composeId, (ci.nextStateHint || 'working') as any); } catch {} });
+            const ci = pf as any as { composeId:string; nextStateHint?: A2ANextState };
+            queueMicrotask(() => { try { void get().sendCompose(ci.composeId, (ci.nextStateHint || 'working') as A2ANextState); } catch {} });
           }
         }
       }
@@ -515,12 +581,21 @@ function stampAndAppend(set: any, get: any, proposed: ProposedFact[]) {
   set((s:any)=>({ facts: [...s.facts, ...stamped], seq: seq0 + stamped.length, attachmentsIndex, knownMsg: known, inFlightSends: inflight, composeApproved: approved }));
 }
 
-// legacy ingest removed; use a2aToFacts + stampAndAppend
+// Helper functions
+function extractSeedFromUrl(params: URLSearchParams): Record<string, unknown> {
+  const seed: Record<string, unknown> = {};
+  for (const [key, value] of params.entries()) {
+    if (key !== 'planner') {
+      seed[key] = value;
+    }
+  }
+  return seed;
+}
 
-function findUnsentComposes(facts: Fact[]): Array<{ composeId: string; nextStateHint?: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required' }> {
+function findUnsentComposes(facts: Fact[]): Array<{ composeId: string; nextStateHint?: A2ANextState }> {
   // consider compose 'unsent' only if not dismissed and no remote_sent after it
   const dismissed = new Set<string>(facts.filter(f=>f.type==='compose_dismissed').map((f:any)=>f.composeId));
-  const out: Array<{ composeId: string; nextStateHint?: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required' }> = [];
+  const out: Array<{ composeId: string; nextStateHint?: A2ANextState }> = [];
   for (let i = facts.length - 1; i >= 0; --i) {
     const f = facts[i];
     if (f.type === 'remote_sent') break;

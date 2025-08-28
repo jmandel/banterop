@@ -1,4 +1,4 @@
-import type { A2APart, A2AMessage, A2AStatus } from "../../shared/a2a-types";
+import type { A2APart, A2AMessage, A2AStatus, A2ANextState } from "../../shared/a2a-types";
 
 export type TransportSnapshot = {
   kind: "task";
@@ -10,7 +10,7 @@ export type TransportSnapshot = {
 export type SendOptions = {
   taskId?: string;
   messageId?: string;
-  nextState?: "working" | "input-required" | "completed" | "canceled" | "failed" | "rejected" | "auth-required";
+  nextState?: A2ANextState;
 };
 
 export interface TransportAdapter {

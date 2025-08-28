@@ -64,34 +64,38 @@ The harness plans only once per logical trigger instance:
 
 ## Config Stores (Setup UI)
 
-- Each planner can optionally expose a config companion on the exported planner object:
-  - `createConfigStore({ llm, initial }) => PlannerConfigStore`
-  - `toHarnessCfg(applied) => PlannerCfg`
-  - `summarizeApplied?(applied) => string`
+- Each planner exposes a config companion on the exported planner object:
+  - `createConfigStore({ llm, initial?: FullConfig }) => PlannerConfigStore`
+  - `summarizeApplied?(config) => string` (optional, label remains for now)
+  - `dehydrate(config: FullConfig) => Seed` (pure; no network)
+  - `hydrate(seed: Seed, ctx?) => Promise<{ config: FullConfig; ready: boolean }>` (may fetch)
 - The Setup card renders generically using `FieldState[]` from the store snapshot and calls `setField()` as the user types.
-- `exportApplied()` returns `{ applied, ready }` for persistence in `appliedByPlanner` and readiness in `readyByPlanner`.
+- `exportFullConfig()` returns `{ config, ready }` for persistence in `configByPlanner[plannerId]` and readiness in `readyByPlanner[plannerId]`.
 - Current planners wired with config stores:
   - LLM Drafter
   - Scenario Planner v0.3
 
-## Applied Config Lifecycle (Generic UI + Store)
+## Config Lifecycle (Generic UI + Store)
 
-- Save & Apply: The Setup card calls `setPlannerApplied(applied, ready)` on the app store.
-  - Store updates `appliedByPlanner[plannerId]` and `readyByPlanner[plannerId]`.
-  - Store also writes a compact deep-link payload to `window.location.hash` as `#setup=...`.
-    - Payload is planner-agnostic: `{ planner: { id, mode, ready: true, applied } }`.
-    - Sanitization: large fields like `resolvedScenario` are dropped from the hash; planner-specific essentials are retained (see Scenario below).
+- Save & Apply: The Setup card calls `reconfigurePlanner({ config, ready, rewind:true })` on the app store.
+  - Store updates `configByPlanner[plannerId]` and `readyByPlanner[plannerId]`.
+  - The centralized URL sync dehydrates FullConfig and writes `#setup=…` with a monotonic `rev`.
 
-- Deep-link bootstrap: On page load, the Participant UI parses `#setup=...` and seeds the store (planner id/mode/applied/ready). This ensures a copied URL can reconstruct the setup.
+- Deep-link bootstrap: On page load, a centralized `startUrlSync()` reads `#setup=…`, sets planner id/mode, hydrates the seed via the planner’s `hydrate()`, then commits `{ config, ready }` to the store.
 
-- Harness wiring: The planner controller watches store changes and rebuilds the harness when planner id/applied/ready change, translating `applied` via the planner’s `toHarnessCfg`.
+- Harness wiring: The planner controller watches store changes and rebuilds the harness when `plannerId`, `readyByPlanner`, or `configByPlanner` change, passing the FullConfig directly to the harness.
+
+## Deep-Linking Contract
+
+- Planners should implement both hooks:
+  - `dehydrate(config)` returns a small, URL‑safe seed; exclude large fields (e.g., fetched documents) and include only what’s needed to reconstruct intent.
+  - `hydrate(seed, ctx)` returns `{ config, ready }` usable by the harness; may fetch and should preserve user choices when still valid.
+- The generic store/UI do not read/write the URL directly — a centralized service coordinates both directions.
 
 ## `opts.initial` Convention (Planner Config Stores)
 
-- Definition: `opts.initial` is the previously applied config (from the store or `#setup=`) passed into `createConfigStore({ llm, initial })`.
-- Use: Each planner’s config store uses it to prefill fields and drive initialization behaviors.
-  - The generic UI does not interpret planner-specific shapes; it simply passes `appliedByPlanner[plannerId]` as `initial`.
-  - Config stores define how to interpret `initial` and what to expose in `exportApplied()`.
+- Definition: `opts.initial` is the previously applied FullConfig (from the store or hydrated seed) passed into `createConfigStore({ llm, initial })`.
+- Use: Each planner’s config store uses it to prefill fields and drive initialization behaviors. Stores define how to interpret `initial` and what to expose in `exportFullConfig()`.
 
 ## Scenario Planner v0.3 — Setup Behaviors
 
@@ -100,17 +104,17 @@ The harness plans only once per logical trigger instance:
   - `myAgentId`: If provided in `initial` and valid for the loaded scenario, it’s kept; otherwise the first agent is selected.
   - `enabledTools`: If provided in `initial`, it is filtered to valid tools and used; otherwise defaults to “all tools” for the selected agent.
 - One-time application: An internal `_appliedInitial` flag ensures initial selections apply once and are not overwritten on subsequent derives.
-- Deep-link sanitization: When serializing `#setup=...`, only lightweight scenario fields are persisted: `{ scenarioUrl, model, myAgentId?, enabledTools? }`.
+- Deep-link de/rehydration: The planner serializes only lightweight fields in `dehydrate(config)` (e.g., `{ scenarioUrl, model, myAgentId?, enabledTools?, enabledCoreTools?, maxInlineSteps? }`) and reconstructs FullConfig via `hydrate(seed)`.
 
 ## Responsibilities Recap
 
 - Generic UI/Store:
-  - Renders setup using generic fields; saves via `setPlannerApplied()`.
-  - Owns deep-link serialization (`#setup=`) and bootstrap.
+  - Renders setup using generic fields; saves via `reconfigurePlanner({ config, ready })`.
+  - A centralized URL sync dehydrates/hydrates using planner hooks.
   - Orchestrates harness lifecycle; no planner-specific logic.
 - Planner Config Stores:
   - Define fields, validation, and dynamic options (e.g., load scenario, derive agents/tools).
   - Interpret `opts.initial`; return `{ applied, ready }`.
 - Planner Implementations:
   - Implement `plan(input, ctx)` to produce journal facts.
-  - Provide `toHarnessCfg(applied)` to map setup to runtime config.
+  - Consume FullConfig directly via `ctx.config`.

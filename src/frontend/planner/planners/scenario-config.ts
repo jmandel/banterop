@@ -1,304 +1,286 @@
 import { create } from 'zustand';
-import type { PlannerConfigStore } from '../../planner/config/store';
-import type { ConfigSnapshot, FieldState } from '../../planner/config/types';
-import { validateScenarioConfig } from '../../../shared/scenario-validator';
+import type { PlannerConfigStore, FieldState, ConfigSnapshot } from '../config/types';
+import { createFieldState, updateField } from '../config/types';
 
-async function fetchJson(url: string) {
-  const res = await fetch(url, { method: 'GET' });
-  if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-  const MAX = 1_500_000; // ~1.5MB cap
-  // Stream text and cap size
-  try {
-    const reader = (res as any).body?.getReader?.();
-    if (reader) {
-      const decoder = new TextDecoder('utf-8');
-      let received = 0; let chunks: string[] = [];
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        received += value.byteLength;
-        if (received > MAX) { try { reader.cancel(); } catch {} throw new Error('Scenario JSON exceeds 1.5 MB limit'); }
-        chunks.push(decoder.decode(value, { stream: true }));
+// Scenario-specific field definitions
+function createScenarioFields(): FieldState[] {
+  return [
+    createFieldState({
+      key: 'scenarioUrl',
+      type: 'text',
+      label: 'Scenario JSON URL',
+      placeholder: 'https://...',
+      required: true,
+    }),
+    createFieldState({
+      key: 'model',
+      type: 'select',
+      label: 'Model',
+      options: [],
+      visible: false,
+    }),
+    createFieldState({
+      key: 'myAgentId',
+      type: 'select',
+      label: 'My role (agent)',
+      options: [],
+      visible: false,
+    }),
+    createFieldState({
+      key: 'enabledTools',
+      type: 'checkbox-group',
+      label: 'Scenario tools',
+      options: [],
+      visible: false,
+    }),
+    createFieldState({
+      key: 'maxInlineSteps',
+      type: 'text',
+      label: 'Max inline steps',
+      defaultValue: '20',
+      placeholder: '1–50',
+    }),
+  ];
+}
+
+// Scenario config store state
+type ScenarioConfigState = {
+  fields: FieldState[];
+  scenario: any;
+  loading: Set<string>;
+  initialized: boolean;
+};
+
+// Scenario config store actions
+type ScenarioConfigActions = {
+  initialize: (values: Record<string, unknown>) => Promise<void>;
+  setScenarioUrl: (url: string) => Promise<void>;
+  setMyAgentId: (agentId: string) => Promise<void>;
+  setModel: (model: string) => Promise<void>;
+  setEnabledTools: (tools: string[]) => Promise<void>;
+  setMaxInlineSteps: (steps: number) => Promise<void>;
+  updateDependentFields: () => Promise<void>;
+  updateToolOptions: () => Promise<void>;
+  setField: (key: string, value: unknown) => Promise<void>;
+  exportConfig: () => { config: any; ready: boolean };
+};
+
+export function createScenarioConfigStore(opts: {
+  llm: any;
+  initialValues?: Record<string, unknown>;
+  onConfigChange?: (config: any) => void;
+}): PlannerConfigStore {
+  const store = create<ScenarioConfigState & ScenarioConfigActions>((set, get) => ({
+    // Initial state
+    fields: createScenarioFields(),
+    scenario: null,
+    loading: new Set(),
+    initialized: false,
+
+    // Initialize from saved values or URL
+    initialize: async (values) => {
+      // Step 1: Set scenario URL and fetch scenario
+      if (values.scenarioUrl) {
+        await get().setScenarioUrl(String(values.scenarioUrl));
       }
-      const text = chunks.join('') + decoder.decode();
-      try { return JSON.parse(text); } catch { throw new Error('Invalid JSON'); }
-    }
-  } catch {}
-  // Fallback: whole text, basic length check
-  const text = await res.text();
-  if (text.length > MAX) throw new Error('Scenario JSON exceeds 1.5 MB limit');
-  try { return JSON.parse(text); } catch { throw new Error('Invalid JSON'); }
-}
 
-async function listModels(llm: any): Promise<string[]> {
-  const curated = ['openai/gpt-oss-120b:nitro', 'qwen/qwen3-235b-a22b-2507:nitro'];
-  try {
-    const xs = await llm?.listModels?.();
-    if (Array.isArray(xs) && xs.length) {
-      const uniq = new Set<string>(xs.map(String));
-      for (const m of curated) uniq.add(m);
-      return Array.from(uniq);
-    }
-  } catch {}
-  return curated;
-}
+      // Step 2: Set agent selection (triggers tool loading)
+      if (values.myAgentId) {
+        await get().setMyAgentId(String(values.myAgentId));
+      }
 
-export function createScenarioConfigStore(opts: { llm: any; initial?: any }): PlannerConfigStore {
-  type S = PlannerConfigStore & { _timer?: any; _lastUrl?: string; _scenario?: any; _mounted: boolean; _appliedInitial?: boolean };
-  const store = create<S>((set, get) => {
-    const initialScenarioUrl = String((opts.initial as any)?.scenarioUrl || (opts.initial as any)?.resolvedScenario?.__sourceUrl || '');
-    const fields: FieldState[] = [
-      { key: 'scenarioUrl', type: 'text', label: 'Scenario JSON URL', value: initialScenarioUrl, placeholder: 'URL…', required: true },
-      { key: 'model', type: 'select', label: 'Model', value: String(opts.initial?.model || ''), options: [], pending: true },
-      { key: 'myAgentId', type: 'select', label: 'My role (agent)', value: String(opts.initial?.myAgentId || ''), options: [], visible: false, pending: true },
-      { key: 'enabledTools', type: 'checkbox-group', label: 'Scenario tools', value: [], options: [], visible: false },
-      { key: 'enabledCoreTools', type: 'checkbox-group', label: 'Core tools', value: Array.isArray((opts.initial as any)?.enabledCoreTools) ? (opts.initial as any).enabledCoreTools : ['sendMessageToRemoteAgent','sendMessageToMyPrincipal','readAttachment','sleep','done'], options: [
-        { value:'sendMessageToRemoteAgent', label:'Send message to remote agent' },
-        { value:'sendMessageToMyPrincipal', label:'Send message to my principal (user prompt)' },
-        { value:'readAttachment', label:'Read attachment' },
-        { value:'sleep', label:'Sleep' },
-        { value:'done', label:'Done' },
-      ], visible: true },
-      { key: 'maxInlineSteps', type: 'text', label: 'Max inline steps', value: String((opts.initial as any)?.maxInlineSteps ?? 20), placeholder: 'e.g., 20', help: 'How many planner steps to take in one pass (1–50). Default 20.' },
-    ];
+      // Step 3: Set other independent fields
+      if (values.model) await get().setModel(String(values.model));
+      if (values.enabledTools) await get().setEnabledTools(values.enabledTools as string[]);
+      if (values.maxInlineSteps) await get().setMaxInlineSteps(Number(values.maxInlineSteps));
 
-    const snap: ConfigSnapshot = {
-      fields,
-      canSave: !!opts.initial?.resolvedScenario,
-      pending: true,
-      dirty: false,
-      summary: '',
-      preview: undefined,
-    };
+      set({ initialized: true });
+    },
 
-    // Prime model list
-    (async () => {
-      const models = await listModels(opts.llm);
-      if (!(get() as any)._mounted) return;
-      const f = get().snap.fields.find(x => x.key === 'model')!;
-      f.options = models.map(m => ({ value: m, label: m }));
-      if (!f.value) f.value = models[0];
-      f.pending = false;
-      const anyPending = get().snap.fields.some(x => x.pending);
-      const anyError = get().snap.fields.some(x => x.error);
-      set(s => ({ snap: { ...s.snap, fields: [...s.snap.fields], pending: anyPending, dirty: true, canSave: !!(get() as any)._scenario && !anyPending && !anyError } }));
-    })();
-
-    function deriveFromScenario(scen: any) {
-      const agents: any[] = Array.isArray(scen?.agents) ? scen.agents : [];
-      const agentField = get().snap.fields.find(x => x.key === 'myAgentId')!;
-      agentField.visible = agents.length > 0;
-      agentField.options = agents.map((a: any) => ({
-        value: String(a?.agentId || ''),
-        label: [String(a?.agentId || ''), a?.principal?.name ? `— ${a.principal.name}` : ''].filter(Boolean).join(' ')
+    // Field-specific setters with planner logic
+    setScenarioUrl: async (url) => {
+      set(s => ({
+        fields: updateField(s.fields, 'scenarioUrl', url),
+        loading: new Set([...s.loading, 'scenarioUrl'])
       }));
-      if (!agentField.value || !agentField.options.some(o => o.value === agentField.value)) {
-        agentField.value = agentField.options[0]?.value || '';
-      }
-      agentField.pending = false;
-
-      // Tools for the selected agent
-      function toolLabel(t: any): string {
-        const name = String(t?.toolName || '');
-        const desc = String(t?.description || '').trim();
-        const short = desc.length > 60 ? (desc.slice(0, 57) + '…') : desc;
-        const badge = t?.endsConversation ? ' • 🏁 ends' : '';
-        return [name, short ? `— ${short}` : '', badge].filter(Boolean).join(' ');
-      }
-      const selectedAgentId = String(agentField.value || '');
-      const selectedAgent = agents.find(a => a?.agentId === selectedAgentId) || agents[0];
-      const tools = Array.isArray(selectedAgent?.tools) ? selectedAgent.tools : [];
-      const toolNames = tools.map((t:any)=>String(t?.toolName||'')).filter(Boolean);
-      const toolsField = get().snap.fields.find(x => x.key === 'enabledTools')!;
-      toolsField.visible = tools.length > 0;
-      toolsField.options = tools.map((t:any) => ({ value: String(t?.toolName || ''), label: toolLabel(t) }));
-      // If initial enabledTools were provided, prefer them once; else default to all for convenience
-      const initialEnabled = (opts.initial && Array.isArray((opts.initial as any).enabledTools)) ? (opts.initial as any).enabledTools as string[] : null;
-      if (!get()._appliedInitial && initialEnabled && initialEnabled.length) {
-        const filtered = initialEnabled.filter(x => toolNames.includes(String(x)));
-        toolsField.value = filtered.length ? filtered : toolNames;
-      } else {
-        toolsField.value = toolNames;
-      }
-
-      const title = String(scen?.metadata?.title || scen?.metadata?.id || '');
-      const agentsSummary = (scen?.agents ?? []).map((a: any) => a?.agentId).filter(Boolean).join(' ↔ ');
-      set(s => ({ snap: { ...s.snap, preview: { title, agents: agentsSummary, toolCount: toolNames.length } } }));
-    }
-
-    async function validateUrl(url: string) {
-      const me = (get()._lastUrl = url);
-      const urlField = get().snap.fields.find(x => x.key === 'scenarioUrl')!;
-      urlField.pending = true; urlField.error = null;
-      set(s => ({ snap: { ...s.snap, fields: [...s.snap.fields], pending: true } }));
 
       try {
-        const data = await fetchJson(url);
-        if (get()._lastUrl !== me) return; // race
-        // Try top-level first
-        let chosen: any = null;
-        let valTop = validateScenarioConfig(data);
-        if (valTop.ok) {
-          chosen = valTop.value;
-        } else if (data && typeof data === 'object' && (data as any).config) {
-          const valNested = validateScenarioConfig((data as any).config);
-          if (valNested.ok) {
-            chosen = valNested.value;
-          } else {
-            // keep top-level error messages
-            urlField.error = valTop.errors.join('\n').slice(0, 1000);
-            (get() as any)._scenario = null as any;
-          }
-        } else {
-          urlField.error = valTop.errors.join('\n').slice(0, 1000);
-          (get() as any)._scenario = null as any;
-        }
-        if (chosen) {
-          (chosen as any).__sourceUrl = url;
-          (get() as any)._scenario = chosen;
-          deriveFromScenario(chosen);
-          urlField.error = null;
-          // Mark that we've applied initial selections once
-          set({ _appliedInitial: true } as any);
-        }
-      } catch (e: any) {
-        if (get()._lastUrl !== me) return;
-        urlField.error = String(e?.message || 'Fetch failed');
-        (get() as any)._scenario = null as any;
-      } finally {
-        if (!(get() as any)._mounted) return;
-        urlField.pending = false;
-        const anyPending = get().snap.fields.some(x => x.pending);
-        const scenOk = !!(get() as any)._scenario;
-        const anyError = get().snap.fields.some(x => x.error);
-        set(s => ({ snap: { ...s.snap, fields: [...s.snap.fields], pending: anyPending, dirty: true, canSave: scenOk && !anyPending && !anyError } }));
+        const scenario = await fetchScenarioJson(url);
+        set({
+          scenario,
+          loading: new Set([...get().loading].filter(k => k !== 'scenarioUrl'))
+        });
+
+        // Trigger dependent updates
+        await get().updateDependentFields();
+
+        // Notify parent of config change
+        opts.onConfigChange?.(get().exportConfig().config);
+      } catch (error) {
+        set(s => ({
+          loading: new Set([...s.loading].filter(k => k !== 'scenarioUrl')),
+          fields: updateField(s.fields, 'scenarioUrl', url, 'Failed to fetch scenario')
+        }));
       }
-    }
+    },
 
-    function setField(key: string, value: unknown) {
-      const f = get().snap.fields.find(x => x.key === key)!;
-      f.value = value;
-      if (key === 'scenarioUrl') {
-        const url = String(value || '').trim();
-        const err = !url ? 'Enter a URL' : null;
-        f.error = err; (get() as any)._scenario = null as any;
-        const tools = get().snap.fields.find(x => x.key === 'enabledTools')!;
-        tools.visible = false; tools.options = []; tools.value = [];
-        const agentField = get().snap.fields.find(x => x.key === 'myAgentId')!;
-        agentField.visible = false; agentField.options = []; agentField.value = '';
-        agentField.pending = true;
-        if ((get() as any)._timer) clearTimeout((get() as any)._timer);
-        if (!err && url) (get() as any)._timer = setTimeout(() => validateUrl(url), 350);
-      } else if (key === 'myAgentId') {
-        // Re-derive tool list for selected agent
-        const scen = (get() as any)._scenario;
-        if (scen) {
-          const agents: any[] = Array.isArray(scen?.agents) ? scen.agents : [];
-          const selectedAgentId = String(value || '');
-          const selectedAgent = agents.find(a => a?.agentId === selectedAgentId) || agents[0];
-          const tools = Array.isArray(selectedAgent?.tools) ? selectedAgent.tools : [];
-          const toolsField = get().snap.fields.find(x => x.key === 'enabledTools')!;
-          const toolNames = tools.map((t:any)=>String(t?.toolName||'')).filter(Boolean);
-          const toolLabel = (t:any) => {
-            const name = String(t?.toolName || '');
-            const desc = String(t?.description || '').trim();
-            const short = desc.length > 60 ? (desc.slice(0,57)+'…') : desc;
-            const badge = t?.endsConversation ? ' • 🏁 ends' : '';
-            return [name, short ? `— ${short}` : '', badge].filter(Boolean).join(' ');
-          };
-          toolsField.visible = tools.length > 0;
-          toolsField.options = tools.map((t:any)=>({ value: String(t?.toolName||''), label: toolLabel(t) }));
-          toolsField.value = toolNames;
-        }
-      } else if (key === 'maxInlineSteps') {
-        const n = Number(value);
-        if (!Number.isFinite(n) || n < 1 || n > 50) {
-          f.error = 'Enter a number between 1 and 50.';
-        } else {
-          f.error = null;
-        }
+    setMyAgentId: async (agentId) => {
+      set(s => ({ fields: updateField(s.fields, 'myAgentId', agentId) }));
+      await get().updateToolOptions();
+      opts.onConfigChange?.(get().exportConfig().config);
+    },
+
+    setModel: async (model) => {
+      set(s => ({ fields: updateField(s.fields, 'model', model) }));
+      opts.onConfigChange?.(get().exportConfig().config);
+    },
+
+    setEnabledTools: async (tools) => {
+      set(s => ({ fields: updateField(s.fields, 'enabledTools', tools) }));
+      opts.onConfigChange?.(get().exportConfig().config);
+    },
+
+    setMaxInlineSteps: async (steps) => {
+      const num = Math.max(1, Math.min(50, Number(steps) || 20));
+      set(s => ({ fields: updateField(s.fields, 'maxInlineSteps', num) }));
+      opts.onConfigChange?.(get().exportConfig().config);
+    },
+
+    // Generic field setter for UI
+    setField: async (key, value) => {
+      switch (key) {
+        case 'scenarioUrl': return get().setScenarioUrl(String(value));
+        case 'myAgentId': return get().setMyAgentId(String(value));
+        case 'model': return get().setModel(String(value));
+        case 'enabledTools': return get().setEnabledTools(value as string[]);
+        case 'maxInlineSteps': return get().setMaxInlineSteps(Number(value));
       }
-      const anyPending = get().snap.fields.some(x => x.pending);
-      const anyError = get().snap.fields.some(x => x.error);
-      const scenOk = !!(get() as any)._scenario;
-      set(s => ({ snap: { ...s.snap, fields: [...s.snap.fields], pending: anyPending, dirty: true, canSave: scenOk && !anyPending && !anyError } }));
-    }
+    },
 
-    function exportApplied() {
-      const urlField = get().snap.fields.find(x => x.key === 'scenarioUrl')!;
-      if (urlField.pending) throw new Error('Validation in progress');
-      if (urlField.error) throw new Error(urlField.error);
-      if (!(get() as any)._scenario) throw new Error('Scenario not loaded/valid');
+    // Update dependent fields after scenario changes
+    updateDependentFields: async () => {
+      const { scenario } = get();
+      if (!scenario) return;
 
-      const val = (k: string) => get().snap.fields.find(x => x.key === k)!.value;
-      const applied = {
-        resolvedScenario: (get() as any)._scenario,
-        scenarioUrl: String(val('scenarioUrl') || ''),
-        model: String(val('model') || ''),
-        myAgentId: String(val('myAgentId') || ''),
-        enabledTools: (val('enabledTools') as string[]) || [],
-        enabledCoreTools: (val('enabledCoreTools') as string[]) || ['sendMessageToRemoteAgent','sendMessageToMyPrincipal','readAttachment','sleep','done'],
-        maxInlineSteps: (()=>{ const n = Number(val('maxInlineSteps')); return Number.isFinite(n) ? n : 20; })(),
+      // Update model options
+      const models = await getAvailableModels(opts.llm);
+      set(s => ({
+        fields: s.fields.map(f =>
+          f.key === 'model'
+            ? { ...f, options: models.map(m => ({ value: m, label: m })), visible: true }
+            : f
+        )
+      }));
+
+      // Update agent options
+      const agents = scenario.agents || [];
+      const agentOptions = agents.map((a: any) => ({
+        value: a.agentId,
+        label: `${a.agentId} — ${a.principal?.name || ''}`
+      }));
+      set(s => ({
+        fields: s.fields.map(f =>
+          f.key === 'myAgentId'
+            ? { ...f, options: agentOptions, visible: agents.length > 0 }
+            : f
+        )
+      }));
+    },
+
+    // Update tool options based on selected agent
+    updateToolOptions: async () => {
+      const { scenario, fields } = get();
+      const selectedAgentId = fields.find(f => f.key === 'myAgentId')?.value;
+
+      if (!scenario || !selectedAgentId) return;
+
+      const agent = scenario.agents.find((a: any) => a.agentId === selectedAgentId);
+      const tools = agent?.tools || [];
+
+      const toolOptions = tools.map((t: any) => ({
+        value: t.toolName,
+        label: `${t.toolName} — ${t.description || ''}`
+      }));
+
+      set(s => ({
+        fields: s.fields.map(f =>
+          f.key === 'enabledTools'
+            ? { ...f, options: toolOptions, visible: tools.length > 0 }
+            : f
+        )
+      }));
+    },
+
+    // Export current config
+    exportConfig: () => {
+      const { fields, scenario } = get();
+      const values = Object.fromEntries(
+        fields.map(f => [f.key, f.value])
+      );
+
+      return {
+        config: {
+          scenario,
+          model: values.model,
+          myAgentId: values.myAgentId,
+          enabledTools: values.enabledTools || [],
+          maxInlineSteps: Number(values.maxInlineSteps) || 20
+        },
+        ready: !!(scenario && values.model && values.myAgentId)
       };
-      return { applied, ready: true };
     }
+  }));
 
-    function destroy() { (get() as any)._mounted = false; try { if ((get() as any)._timer) clearTimeout((get() as any)._timer); } catch {} }
+  // Auto-initialize if we have initial values
+  if (opts.initialValues) {
+    store.getState().initialize(opts.initialValues);
+  }
 
-    if (opts.initial?.resolvedScenario) {
-      // Defer applying initial scenario until after store is initialized
-      queueMicrotask(() => {
-        try {
-          (get() as any)._scenario = (opts.initial as any).resolvedScenario;
-          deriveFromScenario((opts.initial as any).resolvedScenario);
-          set({ _appliedInitial: true } as any);
-          // Recompute derived flags for canSave/pending
-          const anyPending = get().snap.fields.some(x => x.pending);
-          const anyError = get().snap.fields.some(x => x.error);
-          set(s => ({ snap: { ...s.snap, fields: [...s.snap.fields], pending: anyPending, dirty: true, canSave: !!(get() as any)._scenario && !anyPending && !anyError } }));
-        } catch {}
-      });
-    } else if (initialScenarioUrl) {
-      // If only a URL is provided, automatically fetch and validate it
-      queueMicrotask(() => { void validateUrl(initialScenarioUrl); });
-    }
-
-    return { snap, setField, exportApplied, destroy, _mounted: true } as any as S;
-  });
-
-  // Facade
+  // Return the store facade expected by the UI
   return {
-    get snap() { return store.getState().snap; },
-    setField: (k, v) => store.getState().setField(k, v),
-    exportApplied: () => store.getState().exportApplied(),
-    destroy: () => { try { store.getState().destroy(); } catch {} try { (store as any).destroy?.(); } catch {} },
-    subscribe: (listener: () => void) => (store as any).subscribe(listener),
+    get snap() {
+      const { fields, scenario, loading } = store.getState();
+      const anyPending = fields.some(f => f.pending) || loading.size > 0;
+      const anyError = fields.some(f => f.error);
+      const { config, ready } = store.getState().exportConfig();
+
+      return {
+        fields,
+        canSave: ready && !anyPending && !anyError,
+        pending: anyPending,
+        dirty: true, // For now, assume dirty if not saved
+        summary: scenario ? `${scenario.metadata?.title || 'Scenario'} • ${config.myAgentId}` : '',
+        preview: scenario ? {
+          title: scenario.metadata?.title || '',
+          agents: scenario.agents?.length || 0,
+          tools: config.enabledTools?.length || 0
+        } : undefined
+      };
+    },
+
+    setField: (key, value) => store.getState().setField(key, value),
+    exportConfig: () => store.getState().exportConfig(),
+    destroy: () => {
+      // Zustand stores don't need explicit destruction
+      // but we can clean up subscriptions if needed
+    },
+
+    subscribe: (listener) => store.subscribe(listener)
   };
 }
 
-// Attach companions onto the existing planner object
-import { ScenarioPlannerV03 } from './scenario-planner';
-export interface ScenarioPlannerApplied {
-  resolvedScenario: any;
-  model?: string;
-  myAgentId?: string;
-  enabledTools?: string[];
-  enabledCoreTools?: string[];
-  maxInlineSteps?: number;
+// Helper functions
+async function fetchScenarioJson(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('Failed to fetch scenario');
+  return await response.json();
 }
 
-;(ScenarioPlannerV03 as any).createConfigStore = createScenarioConfigStore;
-;(ScenarioPlannerV03 as any).toHarnessCfg = (applied: ScenarioPlannerApplied) => ({
-  scenario: applied?.resolvedScenario,
-  model: String(applied?.model || ''),
-  myAgentId: String(applied?.myAgentId || ''),
-  enabledTools: Array.isArray(applied?.enabledTools) ? applied.enabledTools : undefined,
-  enabledCoreTools: Array.isArray(applied?.enabledCoreTools) ? applied.enabledCoreTools : ['sendMessageToRemoteAgent','sendMessageToMyPrincipal','readAttachment','sleep','done'],
-  maxInlineSteps: (typeof applied?.maxInlineSteps === 'number' ? applied.maxInlineSteps : 20),
-});
-;(ScenarioPlannerV03 as any).summarizeApplied = (applied: ScenarioPlannerApplied) => {
-  const title = applied?.resolvedScenario?.metadata?.title || applied?.resolvedScenario?.metadata?.id || '';
-  const model = applied?.model ? `Model: ${applied.model}` : '';
-  const role = applied?.myAgentId ? `Role: ${applied.myAgentId}` : '';
-  return [title, role, model].filter(Boolean).join(' • ');
-};
+async function getAvailableModels(llm: any): Promise<string[]> {
+  try {
+    const models = await llm?.listModels?.();
+    return Array.isArray(models) ? models : ['openai/gpt-4', 'openai/gpt-3.5-turbo'];
+  } catch {
+    return ['openai/gpt-4', 'openai/gpt-3.5-turbo'];
+  }
+}

@@ -38,6 +38,35 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
   id: 'scenario-v0.3',
   name: 'Scenario Planner (v0.3)',
 
+  // Config management methods
+  createConfigStore: (opts) => {
+    // Import the config store dynamically to avoid circular dependencies
+    const { createScenarioConfigStore } = require('./scenario-config');
+    return createScenarioConfigStore(opts);
+  },
+
+  dehydrate: (config) => ({
+    scenarioUrl: config.scenario?.__sourceUrl,
+    model: config.model,
+    myAgentId: config.myAgentId,
+    maxInlineSteps: config.maxInlineSteps !== 20 ? config.maxInlineSteps : undefined,
+    enabledTools: config.enabledTools,
+    enabledCoreTools: config.enabledCoreTools,
+  }),
+
+  hydrate: async (seed, context) => {
+    const scenario = await context.fetchJson(String(seed.scenarioUrl));
+    const config: ScenarioPlannerConfig = {
+      scenario: { ...scenario, __sourceUrl: String(seed.scenarioUrl) } as any,
+      model: String(seed.model || (scenario as any).defaultModel || ''),
+      myAgentId: String(seed.myAgentId || scenario.agents?.[0]?.agentId || ''),
+      maxInlineSteps: Number(seed.maxInlineSteps) || 20,
+      enabledTools: Array.isArray(seed.enabledTools) ? seed.enabledTools as string[] : undefined,
+      enabledCoreTools: Array.isArray(seed.enabledCoreTools) ? seed.enabledCoreTools as string[] : undefined,
+    };
+    return { config, ready: true };
+  },
+
   async plan(input: PlanInput, ctx: PlanContext<ScenarioPlannerConfig>): Promise<ProposedFact[]> {
     const { facts } = input;
     const cfg = ctx.config || ({} as ScenarioPlannerConfig);

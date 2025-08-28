@@ -37,38 +37,36 @@ export function startPlannerController() {
     const s = useAppStore.getState();
     const plannerId = s.plannerId || 'off';
     const ready = !!s.readyByPlanner[plannerId];
-    const applied = s.appliedByPlanner[plannerId];
+    const config = s.configByPlanner?.[plannerId];
     const planner = ready && plannerId !== 'off' ? resolvePlanner(plannerId) : (NopPlanner as any);
-    const cfg = ready && plannerId !== 'off'
-      ? ((planner as any)?.toHarnessCfg?.(applied) ?? {})
-      : {};
+    const cfg = ready && plannerId !== 'off' ? (config ?? {}) : {};
     const getFacts = () => useAppStore.getState().facts;
     const getHead  = () => useAppStore.getState().head();
     const append   = (batch:any, opts?:{casBaseSeq?:number}) => useAppStore.getState().append(batch, opts);
     const hud      = (phase:any, label?:string, p?:number) => useAppStore.getState().setHud(phase, label, p);
-    const model = (applied?.model && String(applied.model).trim()) || DEFAULT_CHITCHAT_MODEL;
+    const model = (config?.model && String(config.model).trim()) || DEFAULT_CHITCHAT_MODEL;
     currentHarness = new PlannerHarness(getFacts, getHead, append, hud, planner as any, cfg as any, { otherAgentId:'counterpart', model }, sharedLlmProvider);
     // Kick once now
     try { currentHarness.schedulePlan(); } catch {}
   }
 
   rebuildHarness();
-  // Rebuild harness if planner or readiness or applied config or task changes
+  // Rebuild harness if planner or readiness or config or task changes
   useAppStore.subscribe((s, prev) => {
     const pidChanged = s.plannerId !== prev.plannerId;
     const taskChanged = s.taskId !== prev.taskId;
     const readyChanged = s.readyByPlanner !== prev.readyByPlanner;
-    const appliedChanged = s.appliedByPlanner !== prev.appliedByPlanner;
+    const configChanged = s.configByPlanner !== (prev as any).configByPlanner;
     const newPlannerReady = !!s.readyByPlanner[s.plannerId || 'off'];
     let rebuilt = false;
-    // If planner id or applied config changed (and not due to task change), and the new planner is ready,
+    // If planner id or config changed (and not due to task change), and the new planner is ready,
     // rebuild first so the next seq change (from dismissal) schedules planning on the NEW harness.
-    if ((pidChanged || appliedChanged) && newPlannerReady && !taskChanged) {
+    if ((pidChanged || configChanged) && newPlannerReady && !taskChanged) {
       rebuildHarness();
       rebuilt = true;
       try { dismissLatestUnsentDraft(); } catch {}
     }
-    if (!rebuilt && (pidChanged || taskChanged || readyChanged || appliedChanged)) rebuildHarness();
+    if (!rebuilt && (pidChanged || taskChanged || readyChanged || configChanged)) rebuildHarness();
   });
   // Trigger planning when journal head advances
   let prevSeq = useAppStore.getState().seq || 0;

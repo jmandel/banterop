@@ -1,100 +1,256 @@
 import { create } from 'zustand';
-import type { PlannerConfigStore } from '../../planner/config/store';
-import type { ConfigSnapshot, FieldState } from '../../planner/config/types';
+import type { PlannerConfigStore, FieldState, FieldOption } from '../config/types';
 
-async function listModels(llm: any): Promise<string[]> {
-  const curated = ['openai/gpt-oss-120b:nitro', 'qwen/qwen3-235b-a22b-2507:nitro'];
-  try {
-    const xs = await llm?.listModels?.();
-    if (Array.isArray(xs) && xs.length) {
-      const uniq = new Set<string>(xs.map(String));
-      for (const m of curated) uniq.add(m);
-      return Array.from(uniq);
-    }
-  } catch {}
-  return curated;
-}
-
-export function createLLMDrafterConfigStore(opts: { llm: any; initial?: any }): PlannerConfigStore {
-  const store = create<PlannerConfigStore & { _initial?: any; _mounted: boolean }>((set, get) => {
-    const fields: FieldState[] = [
-      { key: 'model', type: 'select', label: 'Model', value: String(opts.initial?.model || ''), options: [], pending: true },
-      { key: 'systemAppend', type: 'text', label: 'System prompt (append)', value: String(opts.initial?.systemAppend || ''), placeholder: 'Optional: appended to built-in system prompt' },
-      { key: 'targetWords', type: 'text', label: 'Target word count', value: String(opts.initial?.targetWords ?? 0), placeholder: '0 (no target)', help: 'Aim near this length; set 0 to disable.' },
-    ];
-    const snap: ConfigSnapshot = { fields, canSave: false, pending: true, dirty: false };
-
-    (async () => {
-      const models = await listModels(opts.llm);
-      if (!(get() as any)._mounted) return;
-      const f = get().snap.fields.find(x => x.key === 'model')!;
-      f.options = models.map(m => ({ value: m, label: m }));
-      if (!f.value) f.value = models[0];
-      f.pending = false;
-      const anyPending = get().snap.fields.some(x => x.pending);
-      const anyError = get().snap.fields.some(x => x.error);
-      set(s => ({ snap: { ...s.snap, fields: [...s.snap.fields], pending: anyPending, dirty: true, canSave: !anyPending && !anyError } }));
-    })();
-
-    function setField(key: string, value: unknown) {
-      const f = get().snap.fields.find(x => x.key === key)!;
-      f.value = value;
-      if (key === 'targetWords') {
-        const n = Number(value);
-        if (!Number.isFinite(n) || n < 0) {
-          f.error = 'Enter 0 to disable, or a positive number.';
-        } else if (n !== 0 && (n < 10 || n > 1000)) {
-          f.error = 'Enter a number between 10 and 1000, or 0 to disable.';
-        } else {
-          f.error = null;
-        }
-      }
-      const anyPending = get().snap.fields.some(x => x.pending);
-      const anyError = get().snap.fields.some(x => x.error);
-      set(s => ({ snap: { ...s.snap, fields: [...s.snap.fields], pending: anyPending, dirty: true, canSave: !anyPending && !anyError } }));
-    }
-
-    function exportApplied() {
-      const val = (k: string) => get().snap.fields.find(x => x.key === k)!.value;
-      const tw = Number(val('targetWords') || 0);
-      const model = String(val('model') || '');
-      const applied = {
-        model,
-        systemAppend: String(val('systemAppend') || ''),
-        targetWords: Number.isFinite(tw) ? tw : 0,
-      };
-      return { applied, ready: true };
-    }
-
-    function destroy() { (get() as any)._mounted = false; }
-
-    return { snap, setField, exportApplied, destroy, _mounted: true } as any;
-  });
-
+// Helper function to create initial field state
+function createFieldState(definition: any): FieldState {
   return {
-    get snap() { return store.getState().snap; },
-    setField: (k, v) => store.getState().setField(k, v),
-    exportApplied: () => store.getState().exportApplied(),
-    destroy: () => { try { store.getState().destroy(); } catch {} try { (store as any).destroy?.(); } catch {} },
-    subscribe: (listener: () => void) => (store as any).subscribe(listener),
+    key: definition.key,
+    type: definition.type,
+    label: definition.label,
+    value: definition.defaultValue || '',
+    placeholder: definition.placeholder,
+    help: definition.help,
+    required: definition.required,
+    visible: definition.visible !== false,
+    options: definition.options || [],
+    error: null,
+    pending: false,
   };
 }
 
-// Attach companions onto the existing planner object
-import { LLMDrafterPlanner } from './llm-drafter';
-;(LLMDrafterPlanner as any).createConfigStore = createLLMDrafterConfigStore;
-;(LLMDrafterPlanner as any).toHarnessCfg = (applied: any) => ({
-  endpoint: applied?.endpoint,
-  model: String(applied?.model || ''),
-  temperature: typeof applied?.temperature === 'number' ? applied.temperature : 0.2,
-  systemAppend: String(applied?.systemAppend || ''),
-  targetWords: Number(applied?.targetWords || 0),
-});
-;(LLMDrafterPlanner as any).summarizeApplied = (cfg?: any) => {
-  const n = Number(cfg?.targetWords || 0);
-  const hasAppend = !!String(cfg?.systemAppend || '').trim();
-  const parts: string[] = [];
-  parts.push(n > 0 ? `Target Word Count: ~${n}` : 'Target Word Count: none');
-  parts.push(`System prompt: ${hasAppend ? 'customized' : 'default'}`);
-  return parts.join(' • ');
+// Helper function to update field in array
+function updateField(fields: FieldState[], key: string, value: unknown, error?: string | null): FieldState[] {
+  return fields.map(f =>
+    f.key === key
+      ? { ...f, value, error: error !== undefined ? error : f.error, pending: false }
+      : f
+  );
+}
+
+// LLM Drafter-specific field definitions
+function createLLMDrafterFields(): FieldState[] {
+  return [
+    createFieldState({
+      key: 'model',
+      type: 'select',
+      label: 'Model',
+      options: [],
+      required: true,
+    }),
+    createFieldState({
+      key: 'systemAppend',
+      type: 'text',
+      label: 'System prompt (append)',
+      placeholder: 'Optional: appended to built-in system prompt',
+    }),
+    createFieldState({
+      key: 'targetWords',
+      type: 'text',
+      label: 'Target word count',
+      defaultValue: '0',
+      placeholder: '0 to disable, or positive number',
+      help: 'Aim near this length; set 0 to disable.',
+    }),
+  ];
+}
+
+// LLM Drafter config store state
+type LLMDrafterConfigState = {
+  fields: FieldState[];
+  models: string[];
+  initialized: boolean;
 };
+
+// LLM Drafter config store actions
+type LLMDrafterConfigActions = {
+  initialize: (values: Record<string, unknown>) => Promise<void>;
+  loadModels: () => Promise<void>;
+  setModel: (model: string) => Promise<void>;
+  setSystemAppend: (text: string) => Promise<void>;
+  setTargetWords: (count: number) => Promise<void>;
+  setField: (key: string, value: unknown) => Promise<void>;
+  exportConfig: () => { config: any; ready: boolean };
+};
+
+export function createLLMDrafterConfigStore(opts: {
+  llm: any;
+  initialValues?: Record<string, unknown>;
+  onConfigChange?: (config: any) => void;
+}): PlannerConfigStore {
+  const store = create<LLMDrafterConfigState & LLMDrafterConfigActions>((set, get) => ({
+    // Initial state
+    fields: createLLMDrafterFields(),
+    models: [],
+    initialized: false,
+
+    // Initialize from saved values or URL
+    initialize: async (values) => {
+      console.log('[LLM Drafter] initialize: Starting with values:', values);
+
+      // Load models first
+      await get().loadModels();
+
+      // Set saved values directly (without triggering callbacks during init)
+      set(s => {
+        let updatedFields = s.fields;
+
+        if (values.model) {
+          updatedFields = updateField(updatedFields, 'model', String(values.model));
+          console.log('[LLM Drafter] initialize: Set model to:', values.model);
+        }
+
+        if (values.systemAppend) {
+          updatedFields = updateField(updatedFields, 'systemAppend', String(values.systemAppend));
+          console.log('[LLM Drafter] initialize: Set systemAppend to:', values.systemAppend);
+        }
+
+        if (values.targetWords !== undefined) {
+          const num = Number(values.targetWords);
+          const error = num < 0 || (num !== 0 && (num < 10 || num > 1000))
+            ? 'Enter 0 to disable, or a number between 10 and 1000'
+            : null;
+          updatedFields = updateField(updatedFields, 'targetWords', num, error);
+          console.log('[LLM Drafter] initialize: Set targetWords to:', num);
+        }
+
+        console.log('[LLM Drafter] initialize: Final fields:', updatedFields);
+        return { fields: updatedFields, initialized: true };
+      });
+    },
+
+    // Load available models
+    loadModels: async () => {
+      console.log('[LLM Drafter] loadModels: Starting to load models');
+      set(s => ({
+        fields: s.fields.map(f =>
+          f.key === 'model' ? { ...f, pending: true } : f
+        )
+      }));
+
+      try {
+        const models = await getAvailableModels(opts.llm);
+        console.log('[LLM Drafter] loadModels: Got models from provider:', models);
+
+        set(s => {
+          const updatedFields = s.fields.map(f =>
+            f.key === 'model'
+              ? {
+                  ...f,
+                  options: models.map(m => ({ value: m, label: m })),
+                  value: f.value || models[0] || '',
+                  pending: false
+                }
+              : f
+          );
+          console.log('[LLM Drafter] loadModels: Updated model field:', updatedFields.find(f => f.key === 'model'));
+          return {
+            models,
+            fields: updatedFields
+          };
+        });
+
+        console.log('[LLM Drafter] loadModels: Successfully loaded models');
+      } catch (error) {
+        console.error('[LLM Drafter] loadModels: Error loading models:', error);
+        set(s => ({
+          fields: s.fields.map(f =>
+            f.key === 'model'
+              ? { ...f, pending: false, error: 'Failed to load models' }
+              : f
+          )
+        }));
+      }
+    },
+
+    // Field setters
+    setModel: async (model) => {
+      set(s => ({ fields: updateField(s.fields, 'model', model) }));
+      opts.onConfigChange?.(get().exportConfig().config);
+    },
+
+    setSystemAppend: async (text) => {
+      set(s => ({ fields: updateField(s.fields, 'systemAppend', text) }));
+      opts.onConfigChange?.(get().exportConfig().config);
+    },
+
+    setTargetWords: async (count) => {
+      const num = Number(count);
+      const error = num < 0 || (num !== 0 && (num < 10 || num > 1000))
+        ? 'Enter 0 to disable, or a number between 10 and 1000'
+        : null;
+
+      set(s => ({ fields: updateField(s.fields, 'targetWords', num, error) }));
+      opts.onConfigChange?.(get().exportConfig().config);
+    },
+
+    // Generic field setter for UI
+    setField: async (key, value) => {
+      switch (key) {
+        case 'model': return get().setModel(String(value));
+        case 'systemAppend': return get().setSystemAppend(String(value));
+        case 'targetWords': return get().setTargetWords(Number(value));
+      }
+    },
+
+    // Export current config
+    exportConfig: () => {
+      const { fields } = get();
+      const values = Object.fromEntries(
+        fields.map(f => [f.key, f.value])
+      );
+
+      return {
+        config: {
+          model: values.model,
+          systemAppend: values.systemAppend || '',
+          targetWords: Number(values.targetWords) || 0
+        },
+        ready: !!(values.model)
+      };
+    }
+  }));
+
+  // Don't auto-initialize - let the UI handle initialization
+  // This prevents conflicts between constructor init and UI init
+
+  // Return the store facade expected by the UI
+  return {
+    get snap() {
+      const { fields } = store.getState();
+      const anyPending = fields.some(f => f.pending);
+      const anyError = fields.some(f => f.error);
+      const { config, ready } = store.getState().exportConfig();
+
+      return {
+        fields,
+        canSave: ready && !anyPending && !anyError,
+        pending: anyPending,
+        dirty: true, // For now, assume dirty if not saved
+        summary: config.model ? `Model: ${config.model}` : '',
+        preview: {
+          hasSystemAppend: !!(config.systemAppend && String(config.systemAppend).trim()),
+          targetWords: config.targetWords
+        }
+      };
+    },
+
+    setField: (key, value) => store.getState().setField(key, value),
+    exportConfig: () => store.getState().exportConfig(),
+    initialize: (values) => store.getState().initialize(values),
+    destroy: () => {
+      // Zustand stores don't need explicit destruction
+    },
+
+    subscribe: (listener) => store.subscribe(listener)
+  };
+}
+
+// Helper functions
+async function getAvailableModels(llm: any): Promise<string[]> {
+  try {
+    const models = await llm?.listModels?.();
+    return Array.isArray(models) && models.length > 0 ? models : ['openai/gpt-oss-120b:nitro'];
+  } catch {
+    return ['openai/gpt-oss-120b:nitro'];
+  }
+}

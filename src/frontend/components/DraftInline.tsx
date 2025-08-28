@@ -2,10 +2,12 @@ import React, { useState } from 'react';
 import type { AttachmentMeta } from '../../shared/journal-types';
 import { useAppStore } from '../state/store';
 import { attachmentHrefFromBase64 } from './attachments';
+import { NextStateSelect } from './NextStateSelect';
 import { Markdown } from './Markdown';
+import type { A2ANextState } from '../../shared/a2a-types';
 
 export function DraftInline({ composeId, text, attachments }:{ composeId:string; text:string; attachments?: AttachmentMeta[] }) {
-  const [nextState, setNextState] = useState<'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required'>('working');
+  const [nextState, setNextState] = useState<A2ANextState>('working');
   const [sending, setSending] = useState(false);
   const err = useAppStore(s => s.sendErrorByCompose.get(composeId));
   const pid = useAppStore(s => s.plannerId);
@@ -19,10 +21,10 @@ export function DraftInline({ composeId, text, attachments }:{ composeId:string;
   async function retry() { await approve(); }
   function regenerate() {
     try { useAppStore.getState().dismissCompose(composeId); } catch {}
-    // Nudge controller by changing appliedByPlanner identity (no-op clone)
+    // Nudge controller by changing configByPlanner identity (no-op clone)
     useAppStore.setState((s: any) => {
-      const curr = s.appliedByPlanner[pid];
-      return { appliedByPlanner: { ...s.appliedByPlanner, [pid]: curr ? { ...curr } : {} } };
+      const curr = (s.configByPlanner || {})[pid];
+      return { configByPlanner: { ...(s.configByPlanner || {}), [pid]: curr ? { ...curr } : {} } };
     });
   }
   return (
@@ -42,11 +44,7 @@ export function DraftInline({ composeId, text, attachments }:{ composeId:string;
         </div>
       )}
       <div className="row" style={{marginTop:8, gap:8}}>
-        <select value={nextState} onChange={(e)=>setNextState(e.target.value as any)} title="Next state">
-          <option value="working">hand off turn → flip</option>
-          <option value="input-required">keep open (not turn-final)</option>
-          <option value="completed">end conversation</option>
-        </select>
+        <NextStateSelect value={nextState as any} onChange={(v)=>setNextState(v as any)} order={['working','input-required','completed']} />
         <button className="btn" onClick={()=>void approve()} disabled={sending}>{sending ? 'Sending…' : 'Approve & Send'}</button>
         {ready && (
           <button className="btn ghost" onClick={regenerate} title="Dismiss current draft and ask the planner to generate a new suggestion">Regenerate suggestion</button>

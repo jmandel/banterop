@@ -1,4 +1,4 @@
-import type { ConfigSnapshot } from './types';
+import type { ConfigSnapshot, SavedField } from './types';
 
 export type PlannerConfigStore = {
   // state
@@ -6,7 +6,7 @@ export type PlannerConfigStore = {
 
   // actions
   setField: (key: string, value: unknown) => void;
-  exportApplied: () => { applied: any; ready: boolean };
+  exportFullConfig: () => { config: any; ready: boolean; savedFields: SavedField[] };
   destroy: () => void;
   // subscribe for React reactivity
   subscribe: (listener: () => void) => () => void;

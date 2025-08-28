@@ -5,6 +5,12 @@ export const DEFAULT_CHITCHAT_MODEL = 'openai/gpt-oss-120b:nitro';
 
 export function makeChitchatProvider(endpoint?: string): LlmProvider {
   const ep = (endpoint || DEFAULT_CHITCHAT_ENDPOINT).trim();
+
+  // Available models (simplified for now)
+  const AVAILABLE_MODELS = [
+    'openai/gpt-oss-120b:nitro'
+  ];
+
   return {
     async chat(req: { model?: string; messages: LlmMessage[]; temperature?: number; maxTokens?: number; signal?: AbortSignal }): Promise<LlmResponse> {
       const body = JSON.stringify({
@@ -29,7 +35,12 @@ export function makeChitchatProvider(endpoint?: string): LlmProvider {
       } catch {
         return { text: '' };
       }
+    },
+
+    async listModels(): Promise<string[]> {
+      // Return the common models available in the system
+      // In a real implementation, this might query the endpoint for available models
+      return AVAILABLE_MODELS;
     }
   };
 }
-

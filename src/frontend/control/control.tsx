@@ -35,7 +35,7 @@ function ControlApp() {
             const origin = window.location.origin
             const cardUrl = `${origin}/rooms/${hPair}/agent-card.json`
             useControlStore.setState({
-              initiatorJoinUrl: `${origin}/client/?card=${encodeURIComponent(cardUrl)}`,
+              initiatorJoinUrl: `${origin}/client/?agentCardUrl=${encodeURIComponent(cardUrl)}`,
               responderJoinUrl: `${origin}/rooms/${hPair}`,
             })
             const s = hSince ? Number(hSince) : 0

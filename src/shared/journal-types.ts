@@ -84,6 +84,7 @@ export type LlmMessage =
 export interface LlmResponse { text:string }
 export interface LlmProvider {
   chat(req:{ model?:string; messages:LlmMessage[]; temperature?:number; maxTokens?:number; signal?:AbortSignal }): Promise<LlmResponse>
+  listModels?(): Promise<string[]>
 }
 
 // --- Planner API (lightweight v0.3/v0.4 compat) ---
@@ -104,4 +105,14 @@ export type Planner<Cfg = unknown> = {
   id: string;
   name: string;
   plan(input: PlanInput, ctx: PlanContext<Cfg>): Promise<ProposedFact[]> | ProposedFact[];
+
+  // Config management (optional - for planners with configuration)
+  createConfigStore?: (opts: {
+    llm: any;
+    initialValues?: Record<string, unknown>;
+    onConfigChange?: (config: any) => void;
+  }) => import('../frontend/planner/config/types').PlannerConfigStore;
+
+  dehydrate?: (config: Cfg) => Record<string, unknown>;
+  hydrate?: (seed: Record<string, unknown>, context: any) => Promise<{ config: Cfg; ready: boolean }>;
 };

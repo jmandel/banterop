@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
+import { NextStateSelect } from './NextStateSelect';
+import type { A2ANextState } from '../../shared/a2a-types';
 
-export function ManualComposer({ disabled, hint, placeholder, onSend, sending }:{ disabled:boolean; hint?:string; placeholder?:string; onSend:(t:string, n:'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required')=>Promise<void>|void; sending:boolean }) {
+export function ManualComposer({ disabled, hint, placeholder, onSend, sending }:{ disabled:boolean; hint?:string; placeholder?:string; onSend:(t:string, n:A2ANextState)=>Promise<void>|void; sending:boolean }) {
   const [text, setText] = useState('');
-  const [nextState, setNextState] = useState<'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required'>('working');
+  const [nextState, setNextState] = useState<A2ANextState>('working');
   async function send() {
     const t = text.trim(); if (!t || disabled) return;
     setText('');
@@ -20,16 +22,7 @@ export function ManualComposer({ disabled, hint, placeholder, onSend, sending }:
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (!disabled) void send(); } }}
           disabled={disabled || sending}
         />
-        <select
-          value={nextState}
-          onChange={(e) => setNextState(e.target.value as any)}
-          disabled={sending}
-          title="Next state"
-        >
-          <option value="input-required">keep open (not turn-final)</option>
-          <option value="working">hand off turn → flip</option>
-          <option value="completed">end conversation</option>
-        </select>
+        <NextStateSelect value={nextState as any} onChange={(v)=>setNextState(v as any)} disabled={sending} order={['input-required','working','completed']} />
         <button className="btn" onClick={() => void send()} disabled={disabled || sending} aria-disabled={disabled || sending} title={disabled ? (hint || 'Not your turn to send') : 'Send message'}>
           Send
         </button>
@@ -56,4 +49,3 @@ export function ManualComposer({ disabled, hint, placeholder, onSend, sending }:
     </div>
   );
 }
-

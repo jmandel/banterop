@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { AttachmentMeta } from '../../shared/journal-types';
+import type { A2ANextState } from '../../shared/a2a-types';
 import { useAppStore } from '../state/store';
 import { A2AAdapter } from '../transports/a2a-adapter';
 import { statusLabel } from '../components/status-labels';
@@ -9,7 +10,7 @@ import { startPlannerController } from '../planner/controller';
 import { resolvePlanner } from '../planner/registry';
 import { makeChitchatProvider, DEFAULT_CHITCHAT_ENDPOINT } from '../../shared/llm-provider';
 import { b64ToUtf8, normalizeB64 } from '../../shared/codec';
-import { useUrlPlannerSetup } from '../hooks/useUrlPlannerSetup';
+import { startUrlSync } from '../hooks/startUrlSync';
 import { PlannerSetupCard } from './PlannerSetupCard';
 import { DebugPanel } from './DebugPanel';
 import { TaskRibbon } from '../components/TaskRibbon';
@@ -22,8 +23,9 @@ import { attachmentHrefFromBase64 } from '../components/attachments';
 
 function useQuery() {
   const u = new URL(window.location.href);
-  const cardUrl = u.searchParams.get('card') || '';
-  const mcpUrl = u.searchParams.get('mcp') || '';
+  // Prefer new names; fall back to legacy for backward-compat
+  const cardUrl = u.searchParams.get('agentCardUrl') || u.searchParams.get('card') || '';
+  const mcpUrl = u.searchParams.get('mcpUrl') || u.searchParams.get('mcp') || '';
   return { cardUrl, mcpUrl };
 }
 
@@ -38,8 +40,8 @@ function App() {
   const [resolvedMcp, setResolvedMcp] = useState<string>('');
   const [cardError, setCardError] = useState<string | null>(null);
 
-  // Parse and apply #setup to store; provide to PlannerSetupCard
-  const urlSetup = useUrlPlannerSetup() as any;
+  // Start centralized URL sync
+  useEffect(() => { startUrlSync(); }, []);
 
   // Resolve endpoints from Agent Card (if provided), else use fallback params
   useEffect(() => {
@@ -76,7 +78,7 @@ function App() {
     const adapter = transport === 'mcp' ? new MCPAdapter(endpointMcp) : new A2AAdapter(endpointA2A);
     store.init('initiator' as any, adapter, undefined);
     startPlannerController();
-  }, [transport, resolvedA2A, resolvedMcp, a2aUrl, mcpUrl]);
+  }, [transport, resolvedA2A, resolvedMcp, mcpUrl]);
 
   // No backchannel: client page is always the initiator
 
@@ -104,7 +106,7 @@ function App() {
   const plannerId = useAppStore(s => s.plannerId);
 
   // Actions
-  async function handleManualSend(text: string, nextState: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required') {
+  async function handleManualSend(text: string, nextState: A2ANextState) {
     const composeId = useAppStore.getState().appendComposeIntent(text);
     setSending(true);
     try { await useAppStore.getState().sendCompose(composeId, nextState); }
@@ -164,7 +166,7 @@ function App() {
   <div className="sticky" style={{ top: 48 }}>
     <TaskRibbon />
   </div>
-  <PlannerSetupCard urlSetup={urlSetup} />
+  <PlannerSetupCard />
 
       {showDebug && <DebugPanel />}
       <div className="card">

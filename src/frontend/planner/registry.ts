@@ -1,11 +1,12 @@
 import { LLMDrafterPlanner } from './planners/llm-drafter';
-// Attach config companions (side-effect imports)
-import './planners/llm-drafter-config';
-import { SimpleDemoPlanner } from './planners/simple-demo';
-import { ScenarioPlannerV03 } from './planners/scenario-planner';
-import './planners/scenario-config';
+import './planners/llm-drafter-setup-vm'; // NEW: attaches createSetupVM + de/hydrate to LLMDrafterPlanner
+import './planners/llm-drafter-config'; // keep (for now)
 
-// Thin registry: resolve by id; planners themselves expose names and cfg mappers
+import { SimpleDemoPlanner } from './planners/simple-demo';
+
+import { ScenarioPlannerV03 } from './planners/scenario-planner';
+import './planners/scenario-setup-vm'; // NEW: attaches createSetupVM + de/hydrate to ScenarioPlannerV03
+
 export function resolvePlanner(id: string) {
   if (id === 'llm-drafter') return LLMDrafterPlanner;
   if (id === 'scenario-v0.3') return ScenarioPlannerV03;

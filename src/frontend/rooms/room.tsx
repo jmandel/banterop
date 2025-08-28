@@ -6,14 +6,55 @@ import { PlannerSetupCard } from '../client/PlannerSetupCard'
 import { DebugPanel } from '../client/DebugPanel'
 import { startPlannerController } from '../planner/controller'
 import type { AttachmentMeta } from '../../shared/journal-types'
+import type { A2ANextState } from '../../shared/a2a-types'
 import { TaskRibbon } from '../components/TaskRibbon'
 import { PlannerSelector, PlannerModeSelector } from '../components/PlannerSelectors'
 import { ManualComposer } from '../components/ManualComposer'
 import { Whisper } from '../components/Whisper'
 import { attachmentHrefFromBase64 } from '../components/attachments'
-import { useUrlPlannerSetup } from '../hooks/useUrlPlannerSetup'
+import { startUrlSync } from '../hooks/startUrlSync'
 import { DraftInline } from '../components/DraftInline'
 import { Markdown } from '../components/Markdown'
+
+// EXPERIMENTAL: WebRTC datachannel keepalive to avoid Chrome Energy Saver freezing
+// See: https://developer.chrome.com/blog/freezing-on-energy-saver
+async function startExperimentalRtcKeepAlive(): Promise<() => void> {
+  const url = new URL(window.location.href)
+  const qp = (k:string) => String(url.searchParams.get(k) || '')
+  // Enable by default; allow opt-out via ?expRtcKeepAlive=0|false
+  const enabled = (() => { const v = qp('expRtcKeepAlive'); return !v || !['0','false','off','no'].includes(v.toLowerCase()) })()
+  if (!enabled) return () => {}
+  try { console.debug('[rooms] EXP: starting RTC keepalive (experimental)') } catch {}
+  let ping: any = null
+  const a = new RTCPeerConnection()
+  const b = new RTCPeerConnection()
+  const cleanup = () => { try { clearInterval(ping) } catch {}; try { a.close() } catch {}; try { b.close() } catch {} }
+  try {
+    const dc = a.createDataChannel('keepalive')
+    b.ondatachannel = (e) => { const rx = e.channel; rx.onmessage = () => {} }
+    const offer = await a.createOffer()
+    await a.setLocalDescription(offer)
+    await b.setRemoteDescription(offer)
+    const answer = await b.createAnswer()
+    await b.setLocalDescription(answer)
+    await a.setRemoteDescription(answer)
+    dc.onopen = () => {
+      try { console.debug('[rooms] EXP: RTC datachannel open; sending ping every 10s') } catch {}
+      ping = setInterval(() => { try { if (dc.readyState === 'open') dc.send('ping') } catch {} }, 10_000)
+    }
+    dc.onclose = () => { try { console.debug('[rooms] EXP: RTC datachannel closed') } catch {} }
+    // Page Lifecycle logging for visibility
+    const onFreeze = () => { try { console.debug('[rooms] EXP: Page freeze event') } catch {} }
+    const onResume = () => { try { console.debug('[rooms] EXP: Page resume event') } catch {} }
+    try { (document as any).addEventListener?.('freeze', onFreeze) } catch {}
+    try { (document as any).addEventListener?.('resume', onResume) } catch {}
+    return () => { try { (document as any).removeEventListener?.('freeze', onFreeze) } catch {}; try { (document as any).removeEventListener?.('resume', onResume) } catch {}; cleanup() }
+  } catch (e) {
+    try { console.warn('[rooms] EXP: RTC keepalive failed:', (e as any)?.message || e) } catch {}
+    cleanup();
+    return () => {}
+  }
+}
 
 function useRoom() {
   const url = new URL(window.location.href)
@@ -35,10 +76,14 @@ function App() {
   const [leaseId, setLeaseId] = useState<string | null>(null)
   const [esUrl, setEsUrl] = useState<string>(tasks)
   const [sending, setSending] = useState(false)
-  const urlSetup = useUrlPlannerSetup() as any
   const [showDebug, setShowDebug] = useState(false)
 
   useEffect(() => { document.title = `Room: ${roomId}` }, [roomId])
+  // Start URL sync so deep-links hydrate configs and maintain hash
+  useEffect(() => { try { startUrlSync() } catch {} }, [])
+
+  // Experimental: start RTC-based keepalive on mount (opt-out via ?expRtcKeepAlive=0)
+  useEffect(() => { let stop: (()=>void)|null = null; (async()=>{ try { stop = await startExperimentalRtcKeepAlive() } catch {} })(); return () => { try { stop && stop() } catch {} } }, [])
 
   // Initialize responder adapter
   useEffect(() => {
@@ -141,7 +186,7 @@ function App() {
   }
 
   // Actions
-  async function handleManualSend(text: string, nextState: 'working'|'input-required'|'completed'|'canceled'|'failed'|'rejected'|'auth-required') {
+  async function handleManualSend(text: string, nextState: A2ANextState) {
     const composeId = useAppStore.getState().appendComposeIntent(text)
     setSending(true)
     try { await useAppStore.getState().sendCompose(composeId, nextState) }
@@ -169,7 +214,7 @@ function App() {
             <span className="copied">Copied!</span>
           </span>
         </button>
-        <a className="btn" href={`${window.location.origin}/client/?card=${encodeURIComponent(agentCard)}`} target="_blank" rel="noreferrer">Open client</a>
+        <a className="btn" href={`${window.location.origin}/client/?agentCardUrl=${encodeURIComponent(agentCard)}`} target="_blank" rel="noreferrer">Open client</a>
       </header>
 
       {backendGranted===false && (
@@ -193,7 +238,7 @@ function App() {
       <div className="sticky" style={{ top: 48 }}>
         <TaskRibbon />
       </div>
-      {!observing && <PlannerSetupCard urlSetup={urlSetup} />}
+      {!observing && <PlannerSetupCard />}
 
       {showDebug && <DebugPanel />}
 

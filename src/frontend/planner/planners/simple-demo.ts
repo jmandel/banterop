@@ -108,4 +108,6 @@ Clinical notes attached. Requesting MRI knee per guideline after failed conserva
 };
 
 // Attach harness config mapper for thin registry usage
-;(SimpleDemoPlanner as any).toHarnessCfg = (applied?: any) => ({ mode: (applied?.mode || 'suggest') });
+// Optional deep-link hooks for symmetry (no config UI)
+;(SimpleDemoPlanner as any).dehydrate = (cfg?: any) => ({ mode: String((cfg?.mode || 'suggest') as string) });
+;(SimpleDemoPlanner as any).hydrate = async (seed: any) => ({ config: { mode: String(seed?.mode || 'suggest') }, ready: true });
