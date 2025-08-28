@@ -5,7 +5,7 @@ export function validateScenarioConfig(obj: unknown): { ok: true; value: Scenari
   function err(s: string) { if (errors.length < 10) errors.push(s); }
   const isStr = (v: any) => typeof v === 'string' && v.trim().length > 0;
 
-  const root = obj as any;
+  const root = (obj as any)?.config ?? obj;
   if (!root || typeof root !== 'object') return { ok: false, errors: ['Root must be an object'] };
   const md = root.metadata;
   if (!md || typeof md !== 'object') err('metadata missing or not an object');

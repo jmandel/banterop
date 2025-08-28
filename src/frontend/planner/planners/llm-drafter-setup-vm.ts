@@ -159,8 +159,9 @@ const vm = createLLMDrafterSetupVM();
 // Ensure the VM is properly attached
 console.log('[llm-drafter-setup-vm] Attached VM to planner:', LLMDrafterPlanner.id);
 
-// Remove the old config store method to force VM usage
-if ((LLMDrafterPlanner as any).createConfigStore) {
-  delete (LLMDrafterPlanner as any).createConfigStore;
-  console.log('[llm-drafter-setup-vm] Removed old createConfigStore method');
-}
+// Attach the VM-based config store
+;(LLMDrafterPlanner as any).createConfigStore = (opts: any) => {
+  const { makeConfigStore } = require('../../setup-vm/makeConfigStore');
+  return makeConfigStore(vm, opts);
+};
+console.log('[llm-drafter-setup-vm] Attached VM-based createConfigStore method');

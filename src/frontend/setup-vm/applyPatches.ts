@@ -45,6 +45,9 @@ export function applyPatches(current: Field[], patches: Patch[]): Field[] {
       case 'setFieldVisible':
         f.visible = p.visible;
         break;
+      case 'setFieldPending':
+        f.pending = p.pending;
+        break;
       case 'setFieldMeta':
         f.meta = p.meta;
         break;

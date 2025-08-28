@@ -20,6 +20,7 @@ export type ScenarioSeedV2 = {
 
 export type FullConfig = {
   scenario: ScenarioConfiguration;
+  scenarioUrl: string;  // URL stored separately (no monkeypatch)
   model: string;
   myAgentId: string;
   enabledTools: string[];
@@ -102,10 +103,7 @@ export function createScenarioSetupVM(): PlannerFieldsVM<ScenarioSeedV2, FullCon
               effects: [{
                 token,
                 run: async (ctx) => {
-                  const key = `scen:${url}`;
-                  if (ctx.cache.has(key)) return ctx.cache.get(key);
                   const raw = await fetchJsonCapped(url);
-                  ctx.cache.set(key, raw);
                   return raw;
                 }
               }]
@@ -162,21 +160,32 @@ export function createScenarioSetupVM(): PlannerFieldsVM<ScenarioSeedV2, FullCon
           return { patches };
         }
 
-        (chosen as any).__sourceUrl = urlNow;
+        // URL is now stored separately in the config, no monkeypatch needed
 
         // Set up agents
         const agents = Array.isArray(chosen.agents) ? chosen.agents : [];
-        const agentOpts = agents.map(a => ({
-          value: String(a.agentId || ''),
-          label: [a.agentId, a?.principal?.name ? ` — ${a.principal.name}` : ''].filter(Boolean).join('')
-        }));
+        const agentOpts = agents.map((a: { agentId?: string; principal?: { name?: string } }) => {
+          const agentId = String(a.agentId || '');
+          const principalName = a?.principal?.name ? ` — ${a.principal.name}` : '';
+          return {
+            value: agentId,
+            label: [agentId, principalName].filter(Boolean).join('')
+          };
+        });
         const prevAgent = String((findField(current, 'myAgentId') as any)?.value || '');
         const myAgentId = agentOpts.some(o => o.value === prevAgent) ? prevAgent : (agentOpts[0]?.value || '');
 
         // Set up tools of selected agent
         const me = agents.find(a => a.agentId === myAgentId) || agents[0];
-        const tools = (me?.tools || []);
-        const toolOpts = tools.map((t: any) => ({ value: String(t.toolName || ''), label: toolLabel(t) }));
+      const tools = (me?.tools || []);
+      const toolOpts = tools.map((t: { toolName?: string; description?: string; endsConversation?: boolean }) => {
+        const toolName = String(t.toolName || '');
+        const label = toolLabel(t);
+        return {
+          value: toolName,
+          label
+        };
+      });
         const allToolNames = toolOpts.map(o => o.value);
 
         const prevTools = (findField(current, 'enabledTools') as any)?.value || [];
@@ -245,7 +254,7 @@ export function createScenarioSetupVM(): PlannerFieldsVM<ScenarioSeedV2, FullCon
           throw new Error(`Invalid scenario: ${err}`);
         }
 
-        scen = { ...chosen, __sourceUrl: sUrl };
+        scen = chosen; // Pure scenario object, URL stored separately
         ctx.cache.set(key, scen);
         console.log('[scenario/fastForward] Scenario loaded and validated successfully');
       } else {
@@ -262,7 +271,7 @@ export function createScenarioSetupVM(): PlannerFieldsVM<ScenarioSeedV2, FullCon
       // Apply user's saved selections from seed
       const model = String(seed?.model || CURATED_MODELS[0]);
       const savedAgentId = String(seed?.myAgentId || '');
-      const myAgentId = agentOpts.some(o => o.value === savedAgentId) ? savedAgentId : (agentOpts[0]?.value || '');
+      const myAgentId = agentOpts.some((o: any) => o.value === savedAgentId) ? savedAgentId : (agentOpts[0]?.value || '');
 
       // Get tools for selected agent
       const me = agents.find((a: any) => a.agentId === myAgentId) || agents[0];
@@ -306,6 +315,7 @@ export function createScenarioSetupVM(): PlannerFieldsVM<ScenarioSeedV2, FullCon
 
       const full: FullConfig = {
         scenario: scen,
+        scenarioUrl: sUrl,  // URL stored separately
         model,
         myAgentId,
         enabledTools,
@@ -343,6 +353,7 @@ export function createScenarioSetupVM(): PlannerFieldsVM<ScenarioSeedV2, FullCon
 
       const full: FullConfig = {
         scenario: scen,
+        scenarioUrl: String((by('scenarioUrl') as any)?.value || ''),  // URL stored separately
         model,
         myAgentId,
         enabledTools: selTools,
@@ -354,19 +365,20 @@ export function createScenarioSetupVM(): PlannerFieldsVM<ScenarioSeedV2, FullCon
 
     // Convert FullConfig to compact seed
     dehydrate(full) {
-      const scenarioUrl = (full as any)?.scenario?.__sourceUrl || '';
+      // Use scenario URL from the FullConfig (stored separately, no monkeypatch)
+      const scenarioUrl = full.scenarioUrl || '';
       const myAgentId = String(full?.myAgentId || '');
       const toolsUniverse: string[] =
-        ((full as any)?.scenario?.agents || []).find((a: any) => a.agentId === myAgentId)?.tools?.map((t: any) => String(t.toolName || '')) || [];
+        (full?.scenario?.agents || []).find((a: any) => a.agentId === myAgentId)?.tools?.map((t: any) => String(t.toolName || '')) || [];
       const disabledScenarioTools = toolsUniverse.filter(t => !(full.enabledTools || []).includes(t));
-      const disabledCoreTools = CORE_TOOLS.filter(t => !(full.enabledCoreTools || CORE_TOOLS).includes(t));
+      const disabledCoreTools = ['sendMessageToRemoteAgent','sendMessageToMyPrincipal','readAttachment','sleep','done'].filter(t => !(full.enabledCoreTools || []).includes(t));
 
-      const seed: ScenarioSeedV2 = { v: 2, scenarioUrl };
-      if (full.model) (seed as any).model = String(full.model);
-      if (myAgentId) (seed as any).myAgentId = myAgentId;
-      if (Number.isFinite(full.maxInlineSteps)) (seed as any).maxInlineSteps = Number(full.maxInlineSteps);
-      if (disabledScenarioTools.length) (seed as any).disabledScenarioTools = disabledScenarioTools;
-      if (disabledCoreTools.length) (seed as any).disabledCoreTools = disabledCoreTools;
+      const seed: any = { v: 2, scenarioUrl };
+      if (full.model) seed.model = String(full.model);
+      if (myAgentId) seed.myAgentId = myAgentId;
+      if (Number.isFinite(full.maxInlineSteps)) seed.maxInlineSteps = Number(full.maxInlineSteps);
+      if (disabledScenarioTools.length) seed.disabledScenarioTools = disabledScenarioTools;
+      if (disabledCoreTools.length) seed.disabledCoreTools = disabledCoreTools;
       return seed;
     },
 
@@ -381,7 +393,7 @@ export function createScenarioSetupVM(): PlannerFieldsVM<ScenarioSeedV2, FullCon
         const raw = await ctx.fetchJson(sUrl);
         const val = validateScenarioConfig(raw);
         if (!val.ok) throw new Error(val.errors.join('\n').slice(0, 1000));
-        scen = { ...val.value, __sourceUrl: sUrl };
+        scen = val.value; // Pure scenario object, URL stored separately
         ctx.cache.set(key, scen);
       }
 
@@ -390,10 +402,13 @@ export function createScenarioSetupVM(): PlannerFieldsVM<ScenarioSeedV2, FullCon
       const myAgentId = agentIds.includes(String(seed?.myAgentId || '')) ? String(seed!.myAgentId) : (agentIds[0] || '');
 
       const me = (scen?.agents || []).find((a: any) => a.agentId === myAgentId) || scen?.agents?.[0];
-          const tools = (me?.tools || []).map((t: { toolName?: string }) => String(t.toolName || '')).filter(Boolean);
+      const tools = (me?.tools || []).map((t: { toolName?: string }) => {
+        const toolName = String(t.toolName || '');
+        return toolName;
+      }).filter(Boolean);
 
       const disabledScenario = new Set<string>(Array.isArray(seed?.disabledScenarioTools) ? seed!.disabledScenarioTools.map(String) : []);
-      const enabledTools = tools.filter(t => !disabledScenario.has(t));
+      const enabledTools = tools.filter((t: string) => !disabledScenario.has(t));
       const disabledCore = new Set<string>(Array.isArray(seed?.disabledCoreTools) ? seed!.disabledCoreTools.map(String) : []);
       const enabledCoreTools = CORE_TOOLS.filter(t => !disabledCore.has(t));
 
@@ -402,7 +417,15 @@ export function createScenarioSetupVM(): PlannerFieldsVM<ScenarioSeedV2, FullCon
         return Number.isFinite(n) ? Math.max(1, Math.min(50, Math.floor(n))) : 20;
       })();
 
-      const full: FullConfig = { scenario: scen, model, myAgentId, enabledTools, enabledCoreTools, maxInlineSteps };
+      const full: FullConfig = {
+        scenario: scen,
+        scenarioUrl: sUrl,  // URL stored separately
+        model,
+        myAgentId,
+        enabledTools,
+        enabledCoreTools,
+        maxInlineSteps
+      };
       return { full };
     }
   };
@@ -411,4 +434,7 @@ export function createScenarioSetupVM(): PlannerFieldsVM<ScenarioSeedV2, FullCon
 // Attach to ScenarioPlanner for registry use
 ;(ScenarioPlannerV03 as any).createSetupVM = createScenarioSetupVM;
 ;(ScenarioPlannerV03 as any).dehydrate = (full: FullConfig) => createScenarioSetupVM().dehydrate(full);
-;(ScenarioPlannerV03 as any).hydrate = async (seed: ScenarioSeedV2, ctx: any) => createScenarioSetupVM().hydrate(seed, ctx);
+;(ScenarioPlannerV03 as any).hydrate = async (seed: ScenarioSeedV2, ctx: any) => {
+  const { full } = await createScenarioSetupVM().hydrate(seed, ctx);
+  return { config: full, ready: true };
+};

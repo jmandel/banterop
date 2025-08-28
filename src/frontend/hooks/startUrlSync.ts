@@ -4,6 +4,18 @@ import { resolvePlanner } from '../planner/registry';
 
 const hydrationCache = new Map<string, any>();
 
+// Shared fetchJson utility to avoid duplication
+const fetchJson = async (url: string) => {
+  const key = `json:${url}`;
+  if (hydrationCache.has(key)) return hydrationCache.get(key);
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
+  const MAX = 1_500_000;
+  const text = await response.text();
+  if (text.length > MAX) throw new Error('Response exceeds 1.5 MB limit');
+  try { return JSON.parse(text); } catch { throw new Error('Invalid JSON'); }
+};
+
 export function startUrlSync() {
   let localRev = 0;
   let suppress = false;
@@ -25,20 +37,39 @@ export function startUrlSync() {
     if (mode) { try { console.debug('[urlSync] boot: setPlannerMode(%o)', mode); } catch {}; useAppStore.getState().setPlannerMode(mode); }
 
     if (id && seed) {
-      try {
         const planner: any = resolvePlanner(id);
         if (planner?.hydrate) {
-          try { console.debug('[urlSync] boot: hydrate(%o)…', id); } catch {}
-          const res = await planner.hydrate(seed, { cache: hydrationCache });
-          const { config, ready } = res || {};
-          try {
-            const fields = (res as any)?.fields;
-            if (Array.isArray(fields)) { console.debug('[urlSync] boot: seeding savedFields (count=%o)', fields.length); useAppStore.getState().setPlannerSavedFields(fields); }
-          } catch {}
-          try { console.debug('[urlSync] boot: hydrate → ready=%o, summary=%o', !!ready, summarizeConfigForLog(id, config)); } catch {}
+          try { console.debug('[urlSync] boot: first hydrate(%o)…', id); } catch {}
+          const res = await planner.hydrate(seed, {
+            fetchJson: async (url: string) => {
+              const key = `json:${url}`;
+              if (hydrationCache.has(key)) return hydrationCache.get(key);
+              const response = await fetch(url);
+              if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
+              const MAX = 1_500_000;
+              const text = await response.text();
+              if (text.length > MAX) throw new Error('Response exceeds 1.5 MB limit');
+              try { return JSON.parse(text); } catch { throw new Error('Invalid JSON'); }
+            },
+            cache: hydrationCache
+          });
+          // Accept both shapes:
+          //  - VM hydrators: { full, fields? }
+          //  - Planner hydrators: { config, ready, fields? }
+          const config = (res as any)?.config ?? (res as any)?.full;
+          const ready  = (res as any)?.ready ?? !!config;
+          const fields = (res as any)?.fields;
+          if (Array.isArray(fields)) { console.debug('[urlSync] boot: seeding savedFields (count=%o)', fields.length); useAppStore.getState().setPlannerSavedFields(fields); }
+          console.debug('[urlSync] boot: hydrate → ready=%o, summary=%o', !!ready, summarizeConfigForLog(id, config));
           if (config) useAppStore.getState().setPlannerConfig(config, !!ready);
+
+          // NEW: fast-forward the planner's config store fields from the seed
+            const store = useAppStore.getState().configStores[id];
+            console.debug('[urlSync] boot: found config store?', !!store, "initializeFromSeed?", store && typeof (store as any).initializeFromSeed === 'function');
+            if (store && typeof (store as any).initializeFromSeed === 'function') {
+              await (store as any).initializeFromSeed(seed);
+            }
         }
-      } catch {}
     }
     if (Number.isFinite(rev)) localRev = Math.max(localRev, Number(rev));
   })();
@@ -60,17 +91,41 @@ export function startUrlSync() {
     const seed = (plannerSetup?.seed ?? plannerSetup?.applied ?? plannerSetup?.config) as any;
     if (id && seed) {
       try {
-        const planner: any = resolvePlanner(id);
+        const planner = resolvePlanner(id);
         if (planner?.hydrate) {
           try { console.debug('[urlSync] hashchange: hydrate(%o)…', id); } catch {}
-          const res = await planner.hydrate(seed, { cache: hydrationCache });
-          const { config, ready } = res || {};
+          const res = await planner.hydrate(seed, {
+            fetchJson: async (url: string) => {
+              const key = `json:${url}`;
+              if (hydrationCache.has(key)) return hydrationCache.get(key);
+              const response = await fetch(url);
+              if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
+              const MAX = 1_500_000;
+              const text = await response.text();
+              if (text.length > MAX) throw new Error('Response exceeds 1.5 MB limit');
+              try { return JSON.parse(text); } catch { throw new Error('Invalid JSON'); }
+            },
+            cache: hydrationCache
+          });
+          // Accept both shapes:
+          //  - VM hydrators: { full, fields? }
+          //  - Planner hydrators: { config, ready, fields? }
+          const config = (res as any)?.config ?? (res as any)?.full;
+          const ready  = (res as any)?.ready ?? !!config;
           try {
             const fields = (res as any)?.fields;
             if (Array.isArray(fields)) { console.debug('[urlSync] hashchange: seeding savedFields (count=%o)', fields.length); useAppStore.getState().setPlannerSavedFields(fields); }
           } catch {}
           try { console.debug('[urlSync] hashchange: hydrate → ready=%o, summary=%o', !!ready, summarizeConfigForLog(id, config)); } catch {}
           if (config) useAppStore.getState().setPlannerConfig(config, !!ready);
+
+          // NEW: fast-forward the planner's config store fields from the seed
+          try {
+            const store = useAppStore.getState().configStores[id];
+            if (store && typeof (store as any).initializeFromSeed === 'function') {
+              await (store as any).initializeFromSeed(seed);
+            }
+          } catch {}
         }
       } catch {}
     }
@@ -107,7 +162,8 @@ function summarizeConfigForLog(pid: string | undefined, cfg: any): any {
   try {
     if (pid === 'scenario-v0.3' || (cfg && (cfg as any).scenario)) {
       const scen = (cfg as any).scenario || {};
-      const url = (scen as any).__sourceUrl || (cfg as any).scenarioUrl || '';
+      // Use clean scenarioUrl field instead of monkeypatched __sourceUrl
+      const url = (cfg as any).scenarioUrl || '';
       const agents = Array.isArray((scen as any).agents) ? (scen as any).agents.length : 0;
       const model = String((cfg as any).model || '');
       const myAgentId = String((cfg as any).myAgentId || '');
@@ -119,5 +175,3 @@ function summarizeConfigForLog(pid: string | undefined, cfg: any): any {
   } catch {}
   return cfg;
 }
-
-// Removed quick seed-to-fields pre-seeding to ensure the UI only mounts after full fields are hydrated.

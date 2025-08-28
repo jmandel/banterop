@@ -22,7 +22,12 @@ export function ManualComposer({ disabled, hint, placeholder, onSend, sending }:
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (!disabled) void send(); } }}
           disabled={disabled || sending}
         />
-        <NextStateSelect value={nextState as any} onChange={(v)=>setNextState(v as any)} disabled={sending} order={['input-required','working','completed']} />
+        <NextStateSelect
+          value={nextState as any}
+          onChange={(v)=>setNextState(v as any)}
+          disabled={sending}
+          order={['working','input-required','completed']}
+        />
         <button className="btn" onClick={() => void send()} disabled={disabled || sending} aria-disabled={disabled || sending} title={disabled ? (hint || 'Not your turn to send') : 'Send message'}>
           Send
         </button>

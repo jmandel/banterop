@@ -16,12 +16,13 @@ import type {
 } from '../../../shared/journal-types'; // ← adjust path if needed
 import type { ScenarioConfiguration, Tool as ScenarioTool } from '../../../types/scenario-configuration.types'; // ← adjust
 
-// -----------------------------
+// ---------------------u--------
 // Public export
 // -----------------------------
 
 export interface ScenarioPlannerConfig {
-  scenario: ScenarioConfiguration;
+  scenario: ScenarioConfiguration;  // Pure scenario object
+  scenarioUrl: string;              // URL stored separately (no monkeypatch)
   /** Optional model override; otherwise ctx.model is used. */
   model?: string;
   /** Optional list of tool names to enforce; if omitted, all tools enabled. */
@@ -38,33 +39,11 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
   id: 'scenario-v0.3',
   name: 'Scenario Planner (v0.3)',
 
-  // Config management methods
+  // Config management - use the clean VM adapter
   createConfigStore: (opts) => {
-    // Import the config store dynamically to avoid circular dependencies
-    const { createScenarioConfigStore } = require('./scenario-config');
-    return createScenarioConfigStore(opts);
-  },
-
-  dehydrate: (config) => ({
-    scenarioUrl: config.scenario?.__sourceUrl,
-    model: config.model,
-    myAgentId: config.myAgentId,
-    maxInlineSteps: config.maxInlineSteps !== 20 ? config.maxInlineSteps : undefined,
-    enabledTools: config.enabledTools,
-    enabledCoreTools: config.enabledCoreTools,
-  }),
-
-  hydrate: async (seed, context) => {
-    const scenario = await context.fetchJson(String(seed.scenarioUrl));
-    const config: ScenarioPlannerConfig = {
-      scenario: { ...scenario, __sourceUrl: String(seed.scenarioUrl) } as any,
-      model: String(seed.model || (scenario as any).defaultModel || ''),
-      myAgentId: String(seed.myAgentId || scenario.agents?.[0]?.agentId || ''),
-      maxInlineSteps: Number(seed.maxInlineSteps) || 20,
-      enabledTools: Array.isArray(seed.enabledTools) ? seed.enabledTools as string[] : undefined,
-      enabledCoreTools: Array.isArray(seed.enabledCoreTools) ? seed.enabledCoreTools as string[] : undefined,
-    };
-    return { config, ready: true };
+    const { makeConfigStore } = require('../../setup-vm/makeConfigStore');
+    const { createScenarioSetupVM } = require('./scenario-setup-vm');
+    return makeConfigStore(createScenarioSetupVM(), opts);
   },
 
   async plan(input: PlanInput, ctx: PlanContext<ScenarioPlannerConfig>): Promise<ProposedFact[]> {
@@ -74,8 +53,6 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
 
     // --- HUD: planning lifecycle
     try { ctx.hud('planning', 'Thinking…', 0.1); } catch {}
-
-    // No legacy whisper-as-answer; rely on first-class user_answer facts from UI
 
     // 0) Gate on unanswered agent_question (harness likely gates too, but be safe)
     const openQ = findOpenQuestion(facts);

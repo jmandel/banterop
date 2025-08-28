@@ -1,54 +1,65 @@
-export type FieldType = 'text' | 'select' | 'checkbox' | 'checkbox-group';
-
-export type FieldBase = {
+export type Field = {
   key: string;
+  type: 'text'|'select'|'checkbox'|'checkbox-group';
   label: string;
-  visible?: boolean;
-  disabled?: boolean;
-  error?: string | null;
+  value: unknown;
   placeholder?: string;
-  // Planner-private metadata (not rendered)
+  help?: string;
+  required?: boolean;
+  disabled?: boolean;
+  visible?: boolean;
+  options?: Array<{ value: string; label: string }>;
+  error?: string | null;
+  pending?: boolean;
   meta?: any;
 };
 
-export type Field =
-  | (FieldBase & { type: 'text'; value: string })
-  | (FieldBase & { type: 'select'; value: string; options: Array<{ value: string; label: string }> })
-  | (FieldBase & { type: 'checkbox'; value: boolean })
-  | (FieldBase & { type: 'checkbox-group'; value: string[]; options: Array<{ value: string; label: string }> });
-
 export type Patch =
-  | { op: 'setFieldValue'; key: string; value: any }
-  | { op: 'setFieldOptions'; key: string; options: Array<{ value: string; label: string }> }
-  | { op: 'setFieldError'; key: string; error: string | null }
-  | { op: 'setFieldDisabled'; key: string; disabled: boolean }
-  | { op: 'setFieldVisible'; key: string; visible: boolean }
-  | { op: 'setFieldMeta'; key: string; meta: any }
+  | { op: 'replaceAllFields'; fields: Field[] }
   | { op: 'batch'; ops: Patch[] }
-  | { op: 'replaceAllFields'; fields: Field[] };
+  | { op: 'setFieldValue'; key: string; value: unknown }
+  | { op: 'setFieldOptions'; key: string; options: Array<{ value: string; label: string }> }
+  | { op: 'setFieldVisible'; key: string; visible: boolean }
+  | { op: 'setFieldDisabled'; key: string; disabled: boolean }
+  | { op: 'setFieldError'; key: string; error: string | null }
+  | { op: 'setFieldPending'; key: string; pending: boolean }
+  | { op: 'setFieldMeta'; key: string; meta: any };
 
-export type Event =
-  | { type: 'BOOT' }
-  | { type: 'FIELD_CHANGE'; key: string; value: any }
-  | { type: 'ASYNC_RESULT'; token: string; data: any }
-  | { type: 'ASYNC_ERROR'; token: string; error: string };
+export type EffectToken = string;
 
-export type EffectCtx = {
-  fetchJson: (url: string) => Promise<any>;
-  cache: Map<string, any>;
+export type Effect = {
+  token: EffectToken;
+  run: (ctx: { cache: Map<string, any>, fetchJson: (url: string) => Promise<any> }) => Promise<any>;
 };
+
+export type ReduceEvent =
+  | { type: 'BOOT' }
+  | { type: 'FIELD_CHANGE'; key: string; value: unknown }
+  | { type: 'ASYNC_RESULT'; token: EffectToken; data: any }
+  | { type: 'ASYNC_ERROR'; token: EffectToken; error: string };
 
 export type ReduceResult = {
-  patches: Patch[];
-  effects?: Array<{ token: string; run: (ctx: EffectCtx) => Promise<any> }>;
+  patches?: Patch[];      // synchronous updates
+  effects?: Effect[];     // fire-and-callback async jobs
 };
 
-export interface PlannerFieldsVM<Seed = unknown, Full = unknown> {
+// Aliases for backward compatibility with existing code
+export type Event = ReduceEvent;
+export type EffectCtx = { cache: Map<string, any>, fetchJson: (url: string) => Promise<any> };
+
+export type PlannerFieldsVM<Seed, Full> = {
   id: string;
-  baseFields(): Field[];
-  reduce(current: Field[], ev: Event): ReduceResult;
-  fastForward(seed: Seed, ctx: EffectCtx): Promise<{ fields: Field[]; full?: Full }>;
-  validateToFull(fields: Field[]): { ok: true; full: Full } | { ok: false; errors: Array<{ key: string; msg: string }> };
-  dehydrate(full: Full): Seed;
-  hydrate(seed: Seed, ctx: { fetchJson: (u: string) => Promise<any>, cache: Map<string, any> }): Promise<{ full: Full }>;
-}
+  baseFields(): Field[];  // initial fields
+  reduce(current: Field[], ev: ReduceEvent): ReduceResult;
+
+  // deep-link
+  dehydrate(full: Full): Seed;                      // pure
+  hydrate(seed: Seed, ctx: { cache: Map<string, any>, fetchJson: (url: string) => Promise<any> }):
+    Promise<{ full: Full; fields?: Field[] }>;      // may fetch
+  fastForward?(seed: Seed, ctx: { cache: Map<string, any>, fetchJson: (url: string) => Promise<any> }):
+    Promise<{ full: Full; fields: Field[] }>;       // optional: build fields quickly
+
+  validateToFull(fields: Field[]):
+    | { ok: true; full: Full }
+    | { ok: false; errors: Array<{ key: string; msg: string }> };
+};

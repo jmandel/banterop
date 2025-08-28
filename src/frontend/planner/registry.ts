@@ -1,6 +1,5 @@
 import { LLMDrafterPlanner } from './planners/llm-drafter';
-import './planners/llm-drafter-setup-vm'; // NEW: attaches createSetupVM + de/hydrate to LLMDrafterPlanner
-import './planners/llm-drafter-config'; // keep (for now)
+import './planners/llm-drafter-setup-vm'; // attaches createSetupVM + de/hydrate + createConfigStore to LLMDrafterPlanner
 
 import { SimpleDemoPlanner } from './planners/simple-demo';
 

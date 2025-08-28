@@ -1,8 +1,6 @@
 import React from 'react';
 import { useAppStore } from '../state/store';
 import { resolvePlanner } from '../planner/registry';
-import { useSetupVM } from '../setup-vm/useSetupVM';
-import type { PlannerFieldsVM } from '../setup-vm/types';
 
 export function PlannerSetupCard() {
   const pid = useAppStore(s => s.plannerId);
@@ -11,6 +9,9 @@ export function PlannerSetupCard() {
   const taskId = useAppStore(s => s.taskId);
   const role = useAppStore(s => s.role);
   const hud = useAppStore(s => s.hud);
+
+  // Use the new clean config store system
+  const configStore = useAppStore(s => s.configStores[pid]);
 
   // Track planner changes and expansion state
   const [lastPlannerId, setLastPlannerId] = React.useState<string>('');
@@ -63,62 +64,53 @@ export function PlannerSetupCard() {
     }
   }, [pid, ready, isNewPlanner, lastPlannerId, collapsed, isExpanding]);
 
-  // Extract seed from URL hash
-  const seed = React.useMemo(() => {
-    try {
-      const hash = window.location.hash.slice(1);
-      const urlParams = new URLSearchParams(hash);
-      const setupParam = urlParams.get('setup');
+  // Get config snapshot from store (reactive) - manual subscription to avoid hook issues
+  const [configSnapshot, setConfigSnapshot] = React.useState(
+    configStore?.snap || { fields: [], canSave: false, pending: false, dirty: false }
+  );
 
-      if (setupParam) {
-        const setupData = JSON.parse(setupParam);
-        console.log('[PlannerSetupCard] Parsed setup data:', setupData);
-        return setupData.planner?.seed || setupData.seed;
-      }
-
-      // Fallback to individual parameters
-      const seed: Record<string, unknown> = {};
-      for (const [key, value] of urlParams.entries()) {
-        if (key !== 'planner') {
-          seed[key] = value;
-        }
-      }
-      return Object.keys(seed).length > 0 ? seed : undefined;
-    } catch (error) {
-      console.error('[PlannerSetupCard] Failed to parse URL seed:', error);
-      return undefined;
+  // Subscribe to config store changes
+  React.useEffect(() => {
+    if (!configStore) {
+      setConfigSnapshot({ fields: [], canSave: false, pending: false, dirty: false });
+      return;
     }
-  }, []);
 
-  // Prefer new VM contract, fallback to legacy store
-  const vm: PlannerFieldsVM<any, any> | null = React.useMemo(() => {
-    if (planner && typeof (planner as any).createSetupVM === 'function') {
-      const vmInstance = (planner as any).createSetupVM();
-      console.log('[PlannerSetupCard] Created VM:', vmInstance.id, 'with base fields:', vmInstance.baseFields());
-      return vmInstance;
-    }
-    return null;
-  }, [planner]);
+    // Update immediately
+    setConfigSnapshot(configStore.snap);
 
-  const { fields, dispatch, pending, loadedFromSeed } = useSetupVM(vm, seed);
+    // Subscribe to future changes
+    const unsubscribe = configStore.subscribe(() => {
+      setConfigSnapshot(configStore.snap);
+    });
+
+    return unsubscribe;
+  }, [configStore]);
 
   // Track last applied config to detect changes
   const [lastAppliedConfig, setLastAppliedConfig] = React.useState<any>(null);
 
+  // Get current config for comparison
+  const currentConfig = React.useMemo(() => {
+    if (!configStore) return null;
+    try {
+      return configStore.exportConfig().config;
+    } catch {
+      return null;
+    }
+  }, [configStore]);
+
   // Check if current config differs from last applied
   const hasChanges = React.useMemo(() => {
-    if (!vm || !ready || !lastAppliedConfig) return false;
+    if (!currentConfig) return false;
+    if (!lastAppliedConfig) return true; // No previous config means this is new/changed
 
     try {
-      const currentValidation = vm.validateToFull(fields);
-      if (!currentValidation.ok) return false; // Don't show save if invalid
-
-      const currentConfig = currentValidation.full;
       return JSON.stringify(currentConfig) !== JSON.stringify(lastAppliedConfig);
     } catch {
       return false;
     }
-  }, [vm, fields, ready, lastAppliedConfig]);
+  }, [currentConfig, lastAppliedConfig]);
 
   console.log('[PlannerSetupCard] Render:', {
     pid,
@@ -128,30 +120,21 @@ export function PlannerSetupCard() {
     isNewPlanner,
     collapsed,
     lastPlannerId,
-    hasCreateSetupVM: !!(planner && typeof (planner as any).createSetupVM === 'function'),
-    hasCreateConfigStore: !!(planner && typeof (planner as any).createConfigStore === 'function'),
+    hasConfigStore: !!configStore,
     shouldShowFields: !collapsed,
     shouldShowSaveButton: !collapsed && (hasChanges || !ready)
   });
 
-  console.log('[PlannerSetupCard] VM state:', {
-    hasVM: !!vm,
-    fieldsCount: fields.length,
-    fields: fields.map(f => ({ key: f.key, value: f.value, visible: f.visible, type: f.type })),
-    seed,
-    pending,
-    loadedFromSeed,
+  console.log('[PlannerSetupCard] Config state:', {
+    hasConfigStore: !!configStore,
+    fieldsCount: configSnapshot?.fields?.length || 0,
+    fields: configSnapshot?.fields?.map(f => ({ key: f.key, value: f.value, visible: f.visible, type: f.type })) || [],
+    canSave: configSnapshot?.canSave,
+    pending: configSnapshot?.pending,
     hasChanges,
     lastAppliedConfig: !!lastAppliedConfig
   });
 
-  // Auto-apply config when loaded from URL seed
-  React.useEffect(() => {
-    if (loadedFromSeed && vm && fields.length > 0 && !ready) {
-      console.log('[PlannerSetupCard] Auto-applying config from URL seed');
-      saveApply();
-    }
-  }, [loadedFromSeed, vm, fields.length, ready]);
   const [applyErr, setApplyErr] = React.useState<string | null>(null);
 
   const canBegin = ready && role === 'initiator' && !taskId;
@@ -176,54 +159,24 @@ export function PlannerSetupCard() {
   const canShowBegin = canBegin && (hud?.phase === 'idle' || !hud) && !hasUnsentDraft;
 
   const saveApply = React.useCallback(async () => {
+    if (!configStore) return;
+
     setApplyErr(null);
     try {
-      if (vm) {
-        // Use new VM validation
-        const v = vm.validateToFull(fields);
-        if (!v.ok) {
-          const errs = v.errors || [];
-          setApplyErr(errs.map(e => e.msg).join(' · '));
-          return;
-        }
+      const { config, ready: rdy } = configStore.exportConfig();
 
-        // Track the applied config for change detection
-        setLastAppliedConfig(v.full);
+      // Track the applied config for change detection
+      setLastAppliedConfig(config);
 
-        useAppStore.getState().reconfigurePlanner({ config: v.full, ready: true, rewind: true });
-        setCollapsed(true);
-        return;
-      }
-
-      // Fallback to legacy store for planners not yet migrated
-      if (typeof (planner as any).createConfigStore === 'function') {
-        const saved = useAppStore.getState().savedFieldsByPlanner?.[pid];
-        const initial = useAppStore.getState().configByPlanner?.[pid];
-        const store = (planner as any).createConfigStore({
-          llm: {}, // TODO: get actual LLM provider
-          savedFields: saved,
-          initial
-        });
-        const { config, ready: rdy } = store.exportFullConfig();
-
-        // Track the applied config for change detection
-        setLastAppliedConfig(config);
-
-        useAppStore.getState().reconfigurePlanner({ config, ready: rdy, rewind: true });
-        if (saved) useAppStore.getState().setPlannerSavedFields(saved);
-        store.destroy?.();
-        setCollapsed(true);
-        return;
-      }
-
-      setApplyErr('Planner has no setup VM nor legacy config store.');
+      useAppStore.getState().reconfigurePlanner({ config, ready: rdy, rewind: true });
+      setCollapsed(true);
     } catch (error: any) {
       setApplyErr(String(error?.message || 'Apply failed'));
     }
-  }, [vm, fields, pid, planner]);
+  }, [configStore]);
 
-  // Don't render if no VM and no legacy store
-  if (!vm && typeof (planner as any).createConfigStore !== 'function') {
+  // Don't render if no config store
+  if (!configStore) {
     return (
       <div className="card" style={{ marginTop: 10 }}>
         <div className="small muted">This planner doesn't support configuration.</div>
@@ -231,18 +184,9 @@ export function PlannerSetupCard() {
     );
   }
 
-  // Show legacy fallback message for non-migrated planners
-  if (!vm && typeof (planner as any).createConfigStore === 'function') {
-    return (
-      <div className="card" style={{ marginTop: 10 }}>
-        <div className="small muted">This planner uses the legacy config store. (Scenario Planner uses the new Setup VM.)</div>
-      </div>
-    );
-  }
-
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (pending) return;
+    if (configSnapshot?.pending) return;
     saveApply();
   }
 
@@ -264,7 +208,7 @@ export function PlannerSetupCard() {
   return (
     <form onSubmit={handleSubmit} onKeyDown={handleKeyDown} className="card" style={{ marginTop: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        {ready && (
+        {configStore && (
           <button
             className="btn ghost"
             type="button"
@@ -325,10 +269,10 @@ export function PlannerSetupCard() {
           })()}
         </div>
         {canShowBegin && <button className="btn" type="button" onClick={() => useAppStore.getState().kickoffConversationWithPlanner()}>Begin conversation</button>}
-        {!collapsed && (hasChanges || !ready) && (
+        {!collapsed && (!ready || hasChanges) && (
           <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-            <button className="btn" type="submit" disabled={pending}>
-              {ready ? 'Save & Apply' : 'Save & Apply'}
+            <button className="btn" type="submit" disabled={configSnapshot?.pending}>
+              {ready ? 'Save Changes' : 'Save & Apply'}
             </button>
             {applyErr && <span className="small" style={{ color:'#b91c1c' }}>{applyErr}</span>}
           </div>
@@ -336,10 +280,10 @@ export function PlannerSetupCard() {
       </div>
       {!collapsed && (
         <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {fields.filter(f => f.visible !== false).map(f => (
+          {configSnapshot?.fields?.filter(f => f.visible !== false).map(f => (
             <div key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 680 }}>
               <label className="small" style={{ fontWeight: 600 }}>{f.label}</label>
-              {renderField(f, (k, v) => dispatch({ type: 'FIELD_CHANGE', key: k, value: v }))}
+              {renderField(f, (k, v) => configStore.setField(k, v))}
               {f.error && <div className="small" style={{ color: '#c62828' }}>{f.error}</div>}
             </div>
           ))}
@@ -355,7 +299,12 @@ function renderField(f: any, setField: (k: string, v: any) => void) {
     setField(key, value);
   };
 
-  if (f.type === 'text') return <input className="input" value={String(f.value || '')} placeholder={f.placeholder || ''} onChange={e => handleFieldChange(f.key, e.target.value)} />;
+  if (f.type === 'text') return <input
+    className="input"
+    value={String(f.value || '')}
+    placeholder={f.placeholder || ''}
+    onChange={e => handleFieldChange(f.key, e.target.value)}
+  />;
   if (f.type === 'checkbox') return (<input type="checkbox" checked={!!f.value} onChange={e => handleFieldChange(f.key, e.target.checked)} />);
   if (f.type === 'select') return <select className="input" value={String(f.value || '')} onChange={e => handleFieldChange(f.key, e.target.value)}>{(f.options || []).map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>;
   if (f.type === 'checkbox-group') {

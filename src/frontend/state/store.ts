@@ -27,8 +27,6 @@ export type Store = {
   savedFieldsByPlanner: Record<string, SavedField[] | undefined>;
   // new config system
   configStores: Record<string, PlannerConfigStore>;
-  urlHash: string;
-  urlParams: URLSearchParams;
   // journal
   facts: Fact[];
   seq: number;
@@ -51,10 +49,7 @@ export type Store = {
   setPlannerConfig(config: any, ready: boolean): void;
   setPlannerSavedFields(saved: SavedField[]): void;
   // new config system actions
-  initFromUrl(): void;
-  loadPlannerFromUrl(plannerId: string): void;
   onConfigChange(plannerId: string, config: any): void;
-  syncUrlFromConfig(): void;
   // rewind + reconfigure
   rewindJournal(): void; // always rewinds to last public event
   reconfigurePlanner(opts: { config: any; ready: boolean; rewind?: boolean }): void;
@@ -89,8 +84,6 @@ export const useAppStore = create<Store>((set, get) => ({
   readyByPlanner: {},
   savedFieldsByPlanner: {},
   configStores: {},
-  urlHash: '',
-  urlParams: new URLSearchParams(),
   facts: [],
   seq: 0,
   hud: null,
@@ -111,7 +104,21 @@ export const useAppStore = create<Store>((set, get) => ({
     const prevId = get().plannerId;
     console.log('[AppStore] setPlanner:', { from: prevId, to: id });
 
+    // Switch planner id
     set({ plannerId: id });
+
+    // Clean up the previous planner's config store to avoid leaks
+    if (prevId && prevId !== id) {
+      const prevStore = get().configStores[prevId];
+      if (prevStore && typeof prevStore.destroy === 'function') {
+        try { prevStore.destroy(); } catch {}
+      }
+      set(s => {
+        const next = { ...s.configStores };
+        delete next[prevId];
+        return { configStores: next };
+      });
+    }
 
     // If switching to a planner that supports config, create the config store
     if (id !== 'off' && id !== prevId) {
@@ -168,57 +175,12 @@ export const useAppStore = create<Store>((set, get) => ({
   },
 
   // New config system actions
-  initFromUrl() {
-    const hash = window.location.hash.slice(1);
-    set({ urlHash: hash, urlParams: new URLSearchParams(hash) });
-
-    const plannerId = get().urlParams.get('planner');
-    if (plannerId) {
-      get().loadPlannerFromUrl(plannerId);
-    }
-  },
-
-  loadPlannerFromUrl: (plannerId: string) => {
-    // Just set the planner ID - the UI will handle VM creation and initialization
-    set({ plannerId: plannerId as any });
-  },
-
   onConfigChange(plannerId, config) {
+    // Mirror working config live for URL sync / previews,
+    // but do NOT flip readiness here — Save & Apply handles that.
     set(s => ({
-      configByPlanner: { ...s.configByPlanner, [plannerId]: config },
-      readyByPlanner: { ...s.readyByPlanner, [plannerId]: true }
+      configByPlanner: { ...s.configByPlanner, [plannerId]: config }
     }));
-
-    // Update URL to reflect new config
-    get().syncUrlFromConfig();
-  },
-
-  syncUrlFromConfig() {
-    const { plannerId, configByPlanner } = get();
-    const config = configByPlanner[plannerId];
-
-    if (!config) return;
-
-    const planner = resolvePlanner(plannerId);
-    if (!planner.dehydrate) return;
-
-    const seed = planner.dehydrate(config);
-
-    const params = new URLSearchParams();
-    params.set('planner', plannerId);
-
-    // Add seed values
-    Object.entries(seed).forEach(([key, value]) => {
-      if (value != null) {
-        params.set(key, String(value));
-      }
-    });
-
-    const newHash = params.toString();
-    if (get().urlHash !== newHash) {
-      set({ urlHash: newHash, urlParams: params });
-      window.history.replaceState(null, '', `#${newHash}`);
-    }
   },
 
   rewindJournal() {
@@ -582,16 +544,6 @@ function stampAndAppend(set: any, get: any, proposed: ProposedFact[]) {
 }
 
 // Helper functions
-function extractSeedFromUrl(params: URLSearchParams): Record<string, unknown> {
-  const seed: Record<string, unknown> = {};
-  for (const [key, value] of params.entries()) {
-    if (key !== 'planner') {
-      seed[key] = value;
-    }
-  }
-  return seed;
-}
-
 function findUnsentComposes(facts: Fact[]): Array<{ composeId: string; nextStateHint?: A2ANextState }> {
   // consider compose 'unsent' only if not dismissed and no remote_sent after it
   const dismissed = new Set<string>(facts.filter(f=>f.type==='compose_dismissed').map((f:any)=>f.composeId));
