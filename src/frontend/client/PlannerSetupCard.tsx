@@ -11,22 +11,57 @@ export function PlannerSetupCard() {
   const taskId = useAppStore(s => s.taskId);
   const role = useAppStore(s => s.role);
   const hud = useAppStore(s => s.hud);
-  const [collapsed, setCollapsed] = React.useState<boolean>(ready);
 
-  console.log('[PlannerSetupCard] Render:', {
-    pid,
-    plannerName: planner?.name || 'none',
-    plannerId: planner?.id || 'none',
-    ready,
-    hasCreateSetupVM: !!(planner && typeof (planner as any).createSetupVM === 'function'),
-    hasCreateConfigStore: !!(planner && typeof (planner as any).createConfigStore === 'function')
-  });
+  // Track planner changes and expansion state
+  const [lastPlannerId, setLastPlannerId] = React.useState<string>('');
+  const [isNewPlanner, setIsNewPlanner] = React.useState<boolean>(false);
+  const [collapsed, setCollapsed] = React.useState<boolean>(true);
+  const [isExpanding, setIsExpanding] = React.useState<boolean>(false);
+  const [wasReadyWhenSwitched, setWasReadyWhenSwitched] = React.useState<boolean>(false);
 
-  // Only allow collapsing when configured; expand when not ready
+  // Expand when planner changes OR when newly selected
   React.useEffect(() => {
-    console.log('[PlannerSetupCard] Ready state changed:', ready, 'setting collapsed to:', !!ready);
-    setCollapsed(!!ready);
-  }, [ready]);
+    const plannerChanged = lastPlannerId !== pid;
+    console.log('[PlannerSetupCard] useEffect triggered:', {
+      pid,
+      lastPlannerId,
+      plannerChanged,
+      ready,
+      isNewPlanner,
+      isExpanding,
+      currentCollapsed: collapsed
+    });
+
+    if (plannerChanged) {
+      // Different planner selected - expand to show its config
+      // Track if it was already ready when we switched
+      const alreadyReady = ready;
+      console.log('[PlannerSetupCard] Planner changed from', lastPlannerId, 'to', pid, '- expanding config (was ready:', alreadyReady, ')');
+
+      setLastPlannerId(pid);
+      setIsNewPlanner(true);
+      setWasReadyWhenSwitched(alreadyReady);
+      setIsExpanding(true);
+      setCollapsed(false);
+
+      // Allow collapse after a short delay to let auto-apply finish
+      setTimeout(() => {
+        console.log('[PlannerSetupCard] Expansion phase complete, allowing collapse');
+        setIsExpanding(false);
+      }, 100);
+    } else if (!ready && !isNewPlanner && !isExpanding) {
+      // Same planner but not configured yet - expand
+      console.log('[PlannerSetupCard] Same planner but not ready - expanding config');
+      setIsNewPlanner(true);
+      setCollapsed(false);
+    } else if (isNewPlanner && ready && !plannerChanged && !isExpanding && !wasReadyWhenSwitched) {
+      // Allow collapsing once configured, but NOT during expansion phase
+      // AND NOT if it was already ready when we switched
+      console.log('[PlannerSetupCard] Planner configured - allowing collapse');
+      setIsNewPlanner(false);
+      setCollapsed(true);
+    }
+  }, [pid, ready, isNewPlanner, lastPlannerId, collapsed, isExpanding]);
 
   // Extract seed from URL hash
   const seed = React.useMemo(() => {
@@ -67,13 +102,47 @@ export function PlannerSetupCard() {
 
   const { fields, dispatch, pending, loadedFromSeed } = useSetupVM(vm, seed);
 
+  // Track last applied config to detect changes
+  const [lastAppliedConfig, setLastAppliedConfig] = React.useState<any>(null);
+
+  // Check if current config differs from last applied
+  const hasChanges = React.useMemo(() => {
+    if (!vm || !ready || !lastAppliedConfig) return false;
+
+    try {
+      const currentValidation = vm.validateToFull(fields);
+      if (!currentValidation.ok) return false; // Don't show save if invalid
+
+      const currentConfig = currentValidation.full;
+      return JSON.stringify(currentConfig) !== JSON.stringify(lastAppliedConfig);
+    } catch {
+      return false;
+    }
+  }, [vm, fields, ready, lastAppliedConfig]);
+
+  console.log('[PlannerSetupCard] Render:', {
+    pid,
+    plannerName: planner?.name || 'none',
+    plannerId: planner?.id || 'none',
+    ready,
+    isNewPlanner,
+    collapsed,
+    lastPlannerId,
+    hasCreateSetupVM: !!(planner && typeof (planner as any).createSetupVM === 'function'),
+    hasCreateConfigStore: !!(planner && typeof (planner as any).createConfigStore === 'function'),
+    shouldShowFields: !collapsed,
+    shouldShowSaveButton: !collapsed && (hasChanges || !ready)
+  });
+
   console.log('[PlannerSetupCard] VM state:', {
     hasVM: !!vm,
     fieldsCount: fields.length,
     fields: fields.map(f => ({ key: f.key, value: f.value, visible: f.visible, type: f.type })),
     seed,
     pending,
-    loadedFromSeed
+    loadedFromSeed,
+    hasChanges,
+    lastAppliedConfig: !!lastAppliedConfig
   });
 
   // Auto-apply config when loaded from URL seed
@@ -117,6 +186,10 @@ export function PlannerSetupCard() {
           setApplyErr(errs.map(e => e.msg).join(' · '));
           return;
         }
+
+        // Track the applied config for change detection
+        setLastAppliedConfig(v.full);
+
         useAppStore.getState().reconfigurePlanner({ config: v.full, ready: true, rewind: true });
         setCollapsed(true);
         return;
@@ -132,6 +205,10 @@ export function PlannerSetupCard() {
           initial
         });
         const { config, ready: rdy } = store.exportFullConfig();
+
+        // Track the applied config for change detection
+        setLastAppliedConfig(config);
+
         useAppStore.getState().reconfigurePlanner({ config, ready: rdy, rewind: true });
         if (saved) useAppStore.getState().setPlannerSavedFields(saved);
         store.destroy?.();
@@ -248,9 +325,11 @@ export function PlannerSetupCard() {
           })()}
         </div>
         {canShowBegin && <button className="btn" type="button" onClick={() => useAppStore.getState().kickoffConversationWithPlanner()}>Begin conversation</button>}
-        {!collapsed && (
+        {!collapsed && (hasChanges || !ready) && (
           <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-            <button className="btn" type="submit" disabled={pending}>Save & Apply</button>
+            <button className="btn" type="submit" disabled={pending}>
+              {ready ? 'Save & Apply' : 'Save & Apply'}
+            </button>
             {applyErr && <span className="small" style={{ color:'#b91c1c' }}>{applyErr}</span>}
           </div>
         )}

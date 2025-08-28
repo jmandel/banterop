@@ -156,5 +156,11 @@ const vm = createLLMDrafterSetupVM();
 ;(LLMDrafterPlanner as any).dehydrate = (config: FullConfig) => vm.dehydrate(config);
 ;(LLMDrafterPlanner as any).hydrate = async (seed: LLMDrafterSeedV1, ctx: any) => vm.hydrate(seed, ctx);
 
+// Ensure the VM is properly attached
+console.log('[llm-drafter-setup-vm] Attached VM to planner:', LLMDrafterPlanner.id);
+
 // Remove the old config store method to force VM usage
-delete (LLMDrafterPlanner as any).createConfigStore;
+if ((LLMDrafterPlanner as any).createConfigStore) {
+  delete (LLMDrafterPlanner as any).createConfigStore;
+  console.log('[llm-drafter-setup-vm] Removed old createConfigStore method');
+}
