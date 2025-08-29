@@ -12,6 +12,13 @@ describe("MCPAdapter", () => {
     try {
       globalThis.fetch = (async (_url: any, init?: any) => {
         const body = init?.body ? JSON.parse(init.body) : {};
+        const method = body?.method;
+        if (method === 'initialize') {
+          return new Response(JSON.stringify({ jsonrpc:'2.0', id: body?.id ?? '1', result: { protocolVersion: '2025-03-26', capabilities: {}, serverInfo: { name: 'test', version: '0.0.0' } } }), { status:200, headers:{ 'content-type':'application/json' } });
+        }
+        if (method === 'notifications/initialized') {
+          return new Response('', { status: 202 });
+        }
         const name = body?.params?.name;
         calls.push(name);
         if (name === 'begin_chat_thread') return makeRpcResult({ conversationId: 'conv-123' });
@@ -45,4 +52,3 @@ describe("MCPAdapter", () => {
     }
   });
 });
-

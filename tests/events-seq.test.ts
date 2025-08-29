@@ -23,7 +23,7 @@ describe('events.log invariants', () => {
     }
 
     // Cause activity (epoch-begin/backchannel/state/message)
-    const a2a = `${S.base}/api/bridge/${pairId}/a2a`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
     await openBackend(S, pairId);
     await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params:{ message:{ role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
 

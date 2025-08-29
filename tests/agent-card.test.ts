@@ -20,7 +20,7 @@ describe('Per-room agent card', () => {
     const fp = exts.find((e:any)=>String(e?.uri||'')==='https://chitchat.fhir.me/a2a-ext');
     expect(!!fp).toBeTrue();
     expect(String(fp?.params?.a2a || '')).toContain(`/api/rooms/${roomId}/a2a`);
-    expect(String(fp?.params?.mcp || '')).toContain(`/api/bridge/${roomId}/mcp`);
+    expect(String(fp?.params?.mcp || '')).toContain(`/api/rooms/${roomId}/mcp`);
     expect(String(fp?.params?.tasks || '')).toContain(`/api/pairs/${roomId}/server-events`);
   });
 });

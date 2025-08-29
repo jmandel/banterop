@@ -2,12 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, CardHeader, Button, ModelSelect } from '../../ui';
 import { api } from '../utils/api';
-import { buildBridgeEndpoint } from '../utils/bridgeUrls';
 import { encodeSetup } from '../../../shared/setup-hash';
 
 type Protocol = 'a2a' | 'mcp';
 
-function encodeBase64Url(obj: unknown): string {
+// removed encodeBase64Url
+function encodeBase64Url(obj: unknown): string { /* removed */ return ''; }
   const json = JSON.stringify(obj);
   const base64 = btoa(json).replace(/=+$/, '');
   return base64.replace(/\+/g, '-').replace(/\//g, '_');
@@ -21,10 +21,8 @@ export function RunWizardPage() {
   const [error, setError] = useState<string | null>(null);
   const [scenario, setScenario] = useState<any | null>(null);
 
-  // Step 1: Choose your role or internal simulation
+  // Step 1: Choose your role
   const [role, setRole] = useState<string>('');
-  const [internalSim, setInternalSim] = useState<boolean>(false);
-
   // Step 2: Choose connection pattern
   const [hasClient, setHasClient] = useState<boolean>(true);
   const [protocol, setProtocol] = useState<Protocol>('a2a');
@@ -35,8 +33,7 @@ export function RunWizardPage() {
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [instructions, setInstructions] = useState<string>('');
   const [agentInstructions, setAgentInstructions] = useState<Record<string, string>>({});
-  const [startFirst, setStartFirst] = useState<string>('');
-  const [generatedConfig64, setGeneratedConfig64] = useState<string>('');
+  
 
   useEffect(() => {
     (async () => {
@@ -49,7 +46,6 @@ export function RunWizardPage() {
         const cfg = s.config || s;
         const firstId = (cfg?.agents?.[0]?.agentId) || '';
         setRole(firstId);
-        setStartFirst(firstId);
         try {
           const initInstr: Record<string, string> = {};
           for (const a of (cfg?.agents || [])) initInstr[a.agentId] = '';
@@ -111,7 +107,8 @@ export function RunWizardPage() {
   }, [agentIds, role]);
 
   // Helper function to build metadata for simulation
-  const buildMeta = () => {
+  // removed buildMeta
+const buildMeta = () => { /* removed */ return {}; }
     const cfg = scenario?.config || scenario;
     const sid = cfg?.metadata?.id || scenarioId;
     const agents = (cfg?.agents || []).map((a: any) => {
@@ -130,8 +127,6 @@ export function RunWizardPage() {
   };
 
   const onLaunch = () => {
-    // Only used for non-simulation modes now
-    if (internalSim) return;
     const cfg = scenario?.config || scenario;
     const sid = cfg?.metadata?.id || scenarioId || '';
     const base = api.getBaseUrl();
@@ -203,7 +198,7 @@ export function RunWizardPage() {
               return (
                 <label key={id} className={`p-3 rounded-lg border-2 cursor-pointer ${role === id ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}>
                   <div className="flex items-center gap-2">
-                    <input type="radio" name="role" checked={!internalSim && role === id} onChange={() => { setInternalSim(false); setRole(id); }} />
+                    <input type="radio" name="role" checked={role === id} onChange={() => { setRole(id); }} />
                     <div className="font-medium">{id}</div>
                   </div>
                   {principalLine && (
@@ -221,40 +216,37 @@ export function RunWizardPage() {
               );
             })}
           </div>
-          <label className="flex items-center gap-2 text-xs text-slate-700 mt-2">
-            <input type="checkbox" checked={internalSim} onChange={(e) => { setInternalSim(e.target.checked); if (e.target.checked) setRole(''); }} />
-            I won’t provide an agent; I just want to run a simulation.
-          </label>
+          
         </Card>
 
         {/* Step 2: Connection */}
-        <Card className={`space-y-3 ${internalSim ? 'opacity-50' : ''}`}>
+        <Card className={`space-y-3`}>
           <CardHeader title="Step 2: Choose Your Connection Pattern" />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4" role="radiogroup" aria-label="Connection pattern">
             <div
-              className={`rounded-lg p-4 border-2 ${!internalSim && hasClient ? 'border-blue-600 bg-blue-50' : 'border-gray-200'} ${internalSim ? 'cursor-default' : 'cursor-pointer'}`}
+              className={`rounded-lg p-4 border-2 ${hasClient ? 'border-blue-600 bg-blue-50' : 'border-gray-200'} cursor-pointer`}
               role="radio"
-              aria-checked={!internalSim && hasClient}
-              tabIndex={internalSim ? -1 : 0}
-              onClick={() => { if (!internalSim) setHasClient(true); }}
-              onKeyDown={(e) => { if (!internalSim && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setHasClient(true); } }}
+              aria-checked={hasClient}
+              tabIndex={0}
+              onClick={() => { setHasClient(true); }}
+              onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setHasClient(true); } }}
             >
               <label className="font-bold flex items-center gap-2">
-                <input type="radio" name="pattern" checked={!internalSim && hasClient} onChange={() => setHasClient(true)} disabled={internalSim} />
+                <input type="radio" name="pattern" checked={hasClient} onChange={() => setHasClient(true)} />
                 I have a Client
               </label>
               <p className="text-sm text-slate-600 mt-1">Platform provides a server endpoint for your client.</p>
             </div>
             <div
-              className={`rounded-lg p-4 border-2 ${!internalSim && !hasClient ? 'border-blue-600 bg-blue-50' : 'border-gray-200'} ${internalSim ? 'cursor-default' : 'cursor-pointer'}`}
+              className={`rounded-lg p-4 border-2 ${!hasClient ? 'border-blue-600 bg-blue-50' : 'border-gray-200'} cursor-pointer`}
               role="radio"
-              aria-checked={!internalSim && !hasClient}
-              tabIndex={internalSim ? -1 : 0}
-              onClick={() => { if (!internalSim) setHasClient(false); }}
-              onKeyDown={(e) => { if (!internalSim && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setHasClient(false); } }}
+              aria-checked={!hasClient}
+              tabIndex={0}
+              onClick={() => { setHasClient(false); }}
+              onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setHasClient(false); } }}
             >
               <label className="font-bold flex items-center gap-2">
-                <input type="radio" name="pattern" checked={!internalSim && !hasClient} onChange={() => setHasClient(false)} disabled={internalSim} />
+                <input type="radio" name="pattern" checked={!hasClient} onChange={() => setHasClient(false)} />
                 I have a Server
               </label>
               <p className="text-sm text-slate-600 mt-1">Platform launches a client to connect to you.</p>
@@ -282,7 +274,7 @@ export function RunWizardPage() {
             </label>
           </div>
           {/* If the participant has a server, ask for its URL */}
-          {!internalSim && !hasClient && (
+          {!hasClient && (
             <div className="space-y-2 mt-2">
               <label className="text-sm text-slate-700 font-medium">
                 {protocol === 'mcp'
@@ -306,8 +298,8 @@ export function RunWizardPage() {
 
         {/* Step 4: Simulated agent config */}
         <Card className="space-y-3">
-          <CardHeader title={internalSim ? "Step 4: Configure Simulated Agents" : "Step 4: Configure the Simulated Agent"} />
-          {!internalSim && (
+          <CardHeader title="Step 4: Configure the Simulated Agent" />
+          {
             <div className="text-sm text-slate-600">Platform will simulate: <span className="font-mono">{simulatedAgentId || '(choose role first)'}</span></div>
           )}
           <div className="space-y-3">
@@ -321,8 +313,7 @@ export function RunWizardPage() {
                 className="w-full border rounded px-2 py-1 bg-white"
               />
             </div>
-            {!internalSim ? (
-              <div className="space-y-1">
+            <div className="space-y-1">
                 <label htmlFor="run-additional-instructions" className="text-sm text-slate-600">Additional Instructions</label>
                 <textarea
                   id="run-additional-instructions"
@@ -333,8 +324,7 @@ export function RunWizardPage() {
                   onChange={(e) => setInstructions(e.target.value)}
                 />
               </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3" style={{ display: 'none' }}>
                 {agentIds.map((id) => (
                   <div key={id} className="space-y-1">
                     <div className="text-sm text-slate-700 font-medium">{id} Instructions</div>
@@ -359,14 +349,13 @@ export function RunWizardPage() {
                   </div>
                 </div>
               </div>
-            )}
           </div>
         </Card>
 
         {/* Action Buttons */}
         <Card className="p-4 bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
           {(() => {
-            if (internalSim) {
+            if (false) {
               // Simulation mode - direct client launch
               const config64ForSim = encodeBase64Url(buildMeta());
               const base = api.getBaseUrl();

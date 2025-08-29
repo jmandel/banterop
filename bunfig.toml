@@ -1,3 +1,2 @@
-[install]
-# speeds up install by skipping optional deps
-optional = true
+[serve.static]
+plugins = ["bun-plugin-tailwind"]

@@ -16,6 +16,7 @@
     "@types/marked": "^6.0.0",
     "bun-storage": "^1.1.1",
     "bun-types": "^1.2.20",
+    "fast-json-patch": "^3.1.1",
     "hono": "^4.9.4",
     "marked": "^16.2.1",
     "openai": "^5.16.0",
@@ -25,6 +26,9 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
-    "@types/react-dom": "^18"
+    "@types/react-dom": "^18",
+    "bun-plugin-tailwind": "^0.0.15",
+    "react-router-dom": "^7.8.2",
+    "tailwindcss": "^4.1.12"
   }
 }

@@ -78,7 +78,7 @@ describe("Persistence — messages and state across restart", () => {
     await stopServer(S);
     S = await startServer({ dbPath: DB });
 
-    const a2a2 = `${S.base}/api/bridge/${pairId}/a2a`;
+    const a2a2 = `${S.base}/api/rooms/${pairId}/a2a`;
 
     // After restart: snapshots reconstructed from DB should match
     async function getSnap2(id:string) {
@@ -185,7 +185,7 @@ describe("Persistence — messages and state across restart", () => {
     // Restart server
     await stopServer(S);
     S = await startServer({ dbPath: DB });
-    const a2a2 = `${S.base}/api/bridge/${pairId}/a2a`;
+    const a2a2 = `${S.base}/api/rooms/${pairId}/a2a`;
 
     async function getSnap2(id:string) {
       const r = await fetch(a2a2, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ jsonrpc:'2.0', id:'g', method:'tasks/get', params:{ id } }) });

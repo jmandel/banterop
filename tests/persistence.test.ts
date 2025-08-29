@@ -45,7 +45,7 @@ afterAll(async () => {
     S = await startServer({ dbPath: DB });
 
     // tasks/get should still return snapshot for epoch #1 initiator
-    const a2a2 = `${S.base}/api/bridge/${pairId}/a2a`;
+    const a2a2 = `${S.base}/api/rooms/${pairId}/a2a`;
     const rget = await fetch(a2a2, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ jsonrpc:'2.0', id:'g', method:'tasks/get', params:{ id: initTaskId } }) });
     const jg = await rget.json();
     expect(jg.result.id).toBe(initTaskId);
