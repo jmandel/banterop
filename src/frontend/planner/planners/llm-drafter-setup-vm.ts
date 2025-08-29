@@ -14,7 +14,7 @@ export type FullConfig = {
   targetWords: number;
 };
 
-// Constants
+// Constants / fallbacks
 const CURATED_MODELS = ['openai/gpt-oss-120b:nitro', 'qwen/qwen3-235b-a22b-2507:nitro'];
 
 // Helper functions
@@ -44,7 +44,7 @@ export function createLLMDrafterSetupVM(): PlannerFieldsVM<LLMDrafterSeedV1, Ful
 
     baseFields(): Field[] {
       return [
-        { key: 'model', type: 'select', label: 'Model', value: CURATED_MODELS[0], options: options(CURATED_MODELS) },
+        { key: 'model', type: 'select', label: 'Model', value: CURATED_MODELS[0], options: [], pending: true },
         { key: 'systemAppend', type: 'text', label: 'System prompt (append)', value: '', placeholder: 'Optional: appended to built-in system prompt' },
         { key: 'targetWords', type: 'text', label: 'Target word count', value: '0', placeholder: '0 to disable, or positive number' },
       ];
@@ -54,7 +54,12 @@ export function createLLMDrafterSetupVM(): PlannerFieldsVM<LLMDrafterSeedV1, Ful
       const patches: Patch[] = [];
 
       if (ev.type === 'BOOT') {
-        return { patches };
+        // Fetch available models from backend providers
+        const token = 'llm:providers';
+        return {
+          patches,
+          effects: [{ token, run: async (ctx) => ctx.fetchJson('/api/llm/providers') }]
+        };
       }
 
       if (ev.type === 'FIELD_CHANGE') {
@@ -71,7 +76,23 @@ export function createLLMDrafterSetupVM(): PlannerFieldsVM<LLMDrafterSeedV1, Ful
       }
 
       if (ev.type === 'ASYNC_RESULT') {
-        // LLM Drafter doesn't have async operations in this simple version
+        if (ev.token === 'llm:providers') {
+          const arr = Array.isArray(ev.data) ? ev.data : [];
+          const providers = arr.filter((p:any)=>p && p.available!==false && Array.isArray(p.models) && p.models.length>0);
+          if (providers.length > 1) {
+            const groups = providers.map((p:any)=>({ label: p.name, options: options(p.models) }));
+            patches.push({ op:'setFieldGroups', key:'model', groups });
+            const first = providers[0].models[0];
+            patches.push({ op:'setFieldValue', key:'model', value: first });
+          } else {
+            const models = Array.from(new Set(arr.filter((p:any)=>p && p.available!==false).flatMap((p:any)=>Array.isArray(p.models)?p.models:[]))).filter(Boolean) as string[];
+            const list = (models.length ? models : CURATED_MODELS);
+            patches.push({ op:'setFieldOptions', key:'model', options: options(list) });
+            patches.push({ op:'setFieldValue', key:'model', value: list[0] });
+          }
+          patches.push({ op:'setFieldPending', key:'model', pending: false });
+          return { patches };
+        }
         return { patches };
       }
 
@@ -91,8 +112,25 @@ export function createLLMDrafterSetupVM(): PlannerFieldsVM<LLMDrafterSeedV1, Ful
       const targetWords = Math.max(0, Math.min(1000, Number(targetWordsRaw) || 0));
       const targetWordsError = validateTargetWords(targetWords);
 
+      // Also fetch providers here to populate options quickly
+      let modelOptions = CURATED_MODELS;
+      let modelGroups: Array<{label:string; options:Array<{value:string; label:string}>}> | null = null;
+      try {
+        const prov = await ctx.fetchJson('/api/llm/providers');
+        const arr = Array.isArray(prov) ? prov : [];
+        const providers = arr.filter((p:any)=>p && p.available!==false && Array.isArray(p.models) && p.models.length>0);
+        if (providers.length > 1) {
+          modelGroups = providers.map((p:any)=>({ label: p.name, options: options(p.models) }));
+        } else {
+          const models = Array.from(new Set(arr.filter((p:any)=>p && p.available!==false).flatMap((p:any)=>Array.isArray(p.models)?p.models:[]))).filter(Boolean) as string[];
+          if (models.length) modelOptions = models;
+        }
+      } catch {}
+
       const fields: Field[] = [
-        { key: 'model', type: 'select', label: 'Model', value: model, options: options(CURATED_MODELS) },
+        modelGroups
+          ? { key: 'model', type: 'select', label: 'Model', value: model, options: undefined as any, groups: modelGroups, pending: false }
+          : { key: 'model', type: 'select', label: 'Model', value: model, options: options(modelOptions), pending: false },
         { key: 'systemAppend', type: 'text', label: 'System prompt (append)', value: systemAppend, placeholder: 'Optional: appended to built-in system prompt' },
         { key: 'targetWords', type: 'text', label: 'Target word count', value: String(targetWords), placeholder: '0 to disable, or positive number', error: targetWordsError },
       ];

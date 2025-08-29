@@ -60,7 +60,7 @@ export function createScenarioSetupVM(): PlannerFieldsVM<ScenarioSeedV2, FullCon
     baseFields(): Field[] {
       return [
         { key: 'scenarioUrl', type: 'text', label: 'Scenario JSON URL', value: '', placeholder: 'URL…' },
-        { key: 'model', type: 'select', label: 'Model', value: CURATED_MODELS[0], options: options(CURATED_MODELS) },
+        { key: 'model', type: 'select', label: 'Model', value: CURATED_MODELS[0], options: [], pending: true },
         { key: 'myAgentId', type: 'select', label: 'My role (agent)', value: '', options: [], visible: false, disabled: true },
         { key: 'enabledTools', type: 'checkbox-group', label: 'Scenario tools', value: [], options: [], visible: false },
         { key: 'enabledCoreTools', type: 'checkbox-group', label: 'Core tools', value: [...CORE_TOOLS], options: CORE_TOOLS.map(v => ({ value: v, label: v })) },
@@ -75,7 +75,9 @@ export function createScenarioSetupVM(): PlannerFieldsVM<ScenarioSeedV2, FullCon
       const tokenFor = (url: string) => `load:scenario@${url}`;
 
       if (ev.type === 'BOOT') {
-        return { patches };
+        // Fetch available models from backend providers
+        const token = 'llm:providers';
+        return { patches, effects: [{ token, run: async (ctx) => ctx.fetchJson('/api/llm/providers') }] };
       }
 
       if (ev.type === 'FIELD_CHANGE') {
@@ -136,6 +138,25 @@ export function createScenarioSetupVM(): PlannerFieldsVM<ScenarioSeedV2, FullCon
       }
 
       if (ev.type === 'ASYNC_RESULT') {
+        if (ev.token === 'llm:providers') {
+          const arr = Array.isArray(ev.data) ? ev.data : [];
+          const providers = arr.filter((p:any)=>p && p.available!==false && Array.isArray(p.models) && p.models.length>0);
+          if (providers.length > 1) {
+            const groups = providers.map((p:any)=>({ label: p.name, options: options(p.models) }));
+            patches.push({ op:'setFieldGroups', key:'model', groups });
+            // Ensure current selection is valid
+            const first = providers[0].models[0];
+            patches.push({ op:'setFieldValue', key:'model', value: first });
+          } else {
+            const models = Array.from(new Set(arr.filter((p:any)=>p && p.available!==false).flatMap((p:any)=>Array.isArray(p.models)?p.models:[]))).filter(Boolean) as string[];
+            const list = (models.length ? models : CURATED_MODELS);
+            patches.push({ op:'setFieldOptions', key:'model', options: options(list) });
+            const currentVal = String((findField(current,'model') as any)?.value || '');
+            if (!list.includes(currentVal)) patches.push({ op:'setFieldValue', key:'model', value: list[0] });
+          }
+          patches.push({ op:'setFieldPending', key:'model', pending: false });
+          return { patches };
+        }
         const urlNow = readUrl();
         if (!ev.token.endsWith(urlNow)) {
           return { patches }; // Stale result
@@ -304,9 +325,26 @@ export function createScenarioSetupVM(): PlannerFieldsVM<ScenarioSeedV2, FullCon
         maxInlineSteps
       });
 
+      // Fetch providers to populate model options fast
+      let modelOptions = CURATED_MODELS;
+      let modelGroups: Array<{label:string; options:Array<{value:string; label:string}>}> | null = null;
+      try {
+        const prov = await ctx.fetchJson('/api/llm/providers');
+        const arr = Array.isArray(prov) ? prov : [];
+        const providers = arr.filter((p:any)=>p && p.available!==false && Array.isArray(p.models) && p.models.length>0);
+        if (providers.length > 1) {
+          modelGroups = providers.map((p:any)=>({ label: p.name, options: options(p.models) }));
+        } else {
+          const models = Array.from(new Set(arr.filter((p:any)=>p && p.available!==false).flatMap((p:any)=>Array.isArray(p.models)?p.models:[]))).filter(Boolean) as string[];
+          if (models.length) modelOptions = models;
+        }
+      } catch {}
+
       const fields: Field[] = [
         { key: 'scenarioUrl', type: 'text', label: 'Scenario JSON URL', value: sUrl, placeholder: 'URL…', meta: { scenario: scen } },
-        { key: 'model', type: 'select', label: 'Model', value: model, options: options(CURATED_MODELS) },
+        modelGroups
+          ? { key: 'model', type: 'select', label: 'Model', value: model, options: undefined as any, groups: modelGroups, pending: false }
+          : { key: 'model', type: 'select', label: 'Model', value: model, options: options(modelOptions), pending: false },
         { key: 'myAgentId', type: 'select', label: 'My role (agent)', value: myAgentId, options: agentOpts, visible: agents.length > 0, disabled: false },
         { key: 'enabledTools', type: 'checkbox-group', label: 'Scenario tools', value: enabledTools, options: toolOpts, visible: tools.length > 0 },
         { key: 'enabledCoreTools', type: 'checkbox-group', label: 'Core tools', value: enabledCoreTools, options: CORE_TOOLS.map(v => ({ value: v, label: v })) },

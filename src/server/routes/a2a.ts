@@ -49,7 +49,6 @@ async function a2aHandler(c: Context<AppBindings>) {
 
 export function a2aRoutes() {
   const r = new Hono<AppBindings>()
-  r.post('/bridge/:pairId/a2a', a2aHandler)
   r.post('/rooms/:pairId/a2a', a2aHandler) // alias route to same handler
   return r
 }

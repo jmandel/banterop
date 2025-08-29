@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Card, CardHeader, Button, ModelSelect } from '../../ui';
 import { api } from '../utils/api';
 import { buildBridgeEndpoint } from '../utils/bridgeUrls';
+import { encodeSetup } from '../../../shared/setup-hash';
 
 type Protocol = 'a2a' | 'mcp';
 
@@ -27,6 +28,7 @@ export function RunWizardPage() {
   // Step 2: Choose connection pattern
   const [hasClient, setHasClient] = useState<boolean>(true);
   const [protocol, setProtocol] = useState<Protocol>('a2a');
+  const [serverUrl, setServerUrl] = useState<string>('');
 
   // Step 3/4: Configure simulated agent(s)
   const [providers, setProviders] = useState<Array<{ name: string; models: string[] }>>([]);
@@ -131,50 +133,44 @@ export function RunWizardPage() {
     // Only used for non-simulation modes now
     if (internalSim) return;
     const cfg = scenario?.config || scenario;
-    const title = cfg?.metadata?.title || scenario?.name || '';
-    const sid = cfg?.metadata?.id || scenarioId;
-    const agents = (cfg?.agents || []).map((a: any) => {
-      const isExternal = hasClient ? a.agentId === role : a.agentId === simulatedAgentId;
-      const conf: Record<string, unknown> = {};
-      if (!isExternal) {
-        if (selectedModel) conf.model = selectedModel;
-        if (instructions.trim()) conf.systemPromptExtra = instructions.trim();
-      }
-      return Object.keys(conf).length ? { id: a.agentId, config: conf } : { id: a.agentId };
-    });
+    const sid = cfg?.metadata?.id || scenarioId || '';
+    const base = api.getBaseUrl();
+    const scenarioUrl = `${base}/api/scenarios/${encodeURIComponent(String(sid))}`;
+    const defaultSteps = 20;
 
-    const meta = {
-      title: `Run: ${title}`,
-      scenarioId: sid,
-      agents,
-      startingAgentId: role,
-    };
+    // Choose who the platform will control vs. who the participant provides
+    const myAgentForServer = simulatedAgentId || '';
+    const myAgentForClient = role || '';
 
     if (hasClient) {
-      // Outcome A: participant has a CLIENT → open pre-launch monitoring page in a new tab
-      const config64 = encodeBase64Url(meta);
-      const url = protocol === 'a2a'
-        ? `/#/scenarios/${encodeURIComponent(sid!)}/external-a2a-client/${config64}`
-        : `/#/scenarios/${encodeURIComponent(sid!)}/external-mcp-client/${config64}`;
-      try { window.open(url, '_blank'); } catch { navigate(url); }
-    } else {
-      // Outcome B: participant has a SERVER → open client prefilled
-      const base = api.getBaseUrl();
-      const scenarioUrl = `${base}/api/scenarios/${encodeURIComponent(String(sid))}`;
-      const params = new URLSearchParams({
+      // Participant has a CLIENT → open /rooms/:roomId with scenario planner in auto mode
+      const seed = {
+        v: 2,
         scenarioUrl,
-        plannerAgentId: simulatedAgentId || '',
-        counterpartAgentId: role || '',
-      });
-      // Add the selected model if one is chosen
-      if (selectedModel) {
-        params.set('defaultModel', selectedModel);
-      }
-      // Pass additional planner instructions if provided
-      if (instructions && instructions.trim()) {
-        params.set('instructions', instructions.trim());
-      }
-      window.open(`/client/#/?${params.toString()}`, '_blank');
+        model: selectedModel || '',
+        myAgentId: myAgentForServer,
+        maxInlineSteps: defaultSteps,
+      };
+      const setup = { v: 2, planner: { id: 'scenario-v0.3', mode: 'auto' as const, seed, rev: 2 } };
+      const roomId = String(sid || 'room');
+      const href = `/rooms/${encodeURIComponent(roomId)}#${encodeSetup(setup as any)}`;
+      try { window.open(href, '_blank'); } catch { navigate(href); }
+    } else {
+      // Participant has a SERVER → open /client prefilled with server URL (MCP or Agent Card) + scenario planner in approve mode
+      const seed = {
+        v: 2,
+        scenarioUrl,
+        model: selectedModel || '',
+        myAgentId: myAgentForClient,
+        maxInlineSteps: defaultSteps,
+      };
+      const setup = { v: 2, planner: { id: 'scenario-v0.3', mode: 'approve' as const, seed, rev: 2 } };
+      const params = new URLSearchParams();
+      const trimmed = serverUrl.trim();
+      if (protocol === 'mcp') params.set('mcpUrl', trimmed);
+      else params.set('agentCardUrl', trimmed);
+      const href = `/client/?${params.toString()}#${encodeSetup(setup as any)}`;
+      try { window.open(href, '_blank'); } catch { navigate(href); }
     }
   };
 
@@ -285,8 +281,27 @@ export function RunWizardPage() {
               <div className="text-sm text-slate-600 mt-1">Model Context Protocol with tool-based interactions.</div>
             </label>
           </div>
-
-          {/* Removed Simulation Server Endpoint preview from Step 3 */}
+          {/* If the participant has a server, ask for its URL */}
+          {!internalSim && !hasClient && (
+            <div className="space-y-2 mt-2">
+              <label className="text-sm text-slate-700 font-medium">
+                {protocol === 'mcp'
+                  ? 'Your MCP Server URL (must support Streamable HTTP Transport + 3 Language-First Interop Tools — begin_chat_thread, send_message_to_chat_thread, check_replies)'
+                  : 'Your Agent Card URL'}
+              </label>
+              <input
+                className="w-full border rounded px-2 py-2 text-sm bg-white"
+                placeholder={protocol === 'mcp' ? 'e.g., https://your-host.example.com/mcp' : 'e.g., https://your-host.example.com/.well-known/agent-card.json'}
+                value={serverUrl}
+                onChange={(e) => setServerUrl(e.target.value)}
+              />
+              <div className="text-xs text-slate-600">
+                {protocol === 'mcp'
+                  ? 'The scenarios client will connect to this MCP endpoint.'
+                  : 'The scenarios client will resolve the JSON-RPC endpoint from this Agent Card.'}
+              </div>
+            </div>
+          )}
         </Card>
 
         {/* Step 4: Simulated agent config */}
@@ -414,24 +429,25 @@ export function RunWizardPage() {
                   </p>
                 </div>
               );
-            } else {
-              // Server mode - open client
-              return (
-                <div className="space-y-3">
-                  <h3 className="text-lg font-semibold text-slate-800">Ready to Connect</h3>
-                  <Button 
-                    variant="primary"
-                    className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold py-4 px-6 rounded-lg shadow-lg transition-colors text-lg"
-                    onClick={onLaunch}
-                  >
-                    💬 Open Client & Connect
-                  </Button>
-                  <p className="text-xs text-slate-600 text-center">
-                    Opens client in new tab to connect to your server
-                  </p>
-                </div>
-              );
-            }
+      } else {
+        // Server mode - open client
+        return (
+          <div className="space-y-3">
+            <h3 className="text-lg font-semibold text-slate-800">Ready to Connect</h3>
+            <Button 
+              variant="primary"
+              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold py-4 px-6 rounded-lg shadow-lg transition-colors text-lg"
+              onClick={onLaunch}
+              disabled={!serverUrl.trim()}
+            >
+              💬 Open Client & Connect
+            </Button>
+            <p className="text-xs text-slate-600 text-center">
+              Opens client in new tab to connect to your server
+            </p>
+          </div>
+        );
+      }
           })()}
         </Card>
       </div>

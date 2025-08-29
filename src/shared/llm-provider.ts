@@ -1,15 +1,14 @@
 import type { LlmMessage, LlmProvider, LlmResponse } from './journal-types';
 
-export const DEFAULT_CHITCHAT_ENDPOINT = 'https://chitchat.fhir.me/api/llm/complete';
+// Use same-origin backend by default
+export const DEFAULT_CHITCHAT_ENDPOINT = '/api/llm/complete';
 export const DEFAULT_CHITCHAT_MODEL = 'openai/gpt-oss-120b:nitro';
 
 export function makeChitchatProvider(endpoint?: string): LlmProvider {
   const ep = (endpoint || DEFAULT_CHITCHAT_ENDPOINT).trim();
 
-  // Available models (simplified for now)
-  const AVAILABLE_MODELS = [
-    'openai/gpt-oss-120b:nitro'
-  ];
+  // Available models (dynamic from backend; fallback to curated)
+  let AVAILABLE_MODELS = ['openai/gpt-oss-120b:nitro'];
 
   return {
     async chat(req: { model?: string; messages: LlmMessage[]; temperature?: number; maxTokens?: number; signal?: AbortSignal }): Promise<LlmResponse> {
@@ -47,9 +46,18 @@ export function makeChitchatProvider(endpoint?: string): LlmProvider {
     },
 
     async listModels(): Promise<string[]> {
-      // Return the common models available in the system
-      // In a real implementation, this might query the endpoint for available models
-      return AVAILABLE_MODELS;
+      try {
+        const base = (() => {
+          try { const u = new URL(ep, window.location.origin); return u.origin; } catch { return ''; }
+        })();
+        const res = await fetch(base + '/api/llm/providers', { method: 'GET' });
+        if (!res.ok) throw new Error(String(res.status));
+        const arr: any[] = await res.json();
+        const models = Array.from(new Set((arr || []).filter(p => p && p.available !== false).flatMap((p:any) => Array.isArray(p.models) ? p.models : []))).filter(Boolean) as string[];
+        return models.length ? models : AVAILABLE_MODELS;
+      } catch {
+        return AVAILABLE_MODELS;
+      }
     }
   };
 }

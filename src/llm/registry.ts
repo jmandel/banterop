@@ -50,18 +50,29 @@ export function resolveProviderByModel(model: string, env: Env): ProviderDescrip
 }
 
 export function createProvider(env: Env, opts?: { provider?: SupportedProvider; model?: string; config?: Partial<LLMProviderConfig> }): LLMProvider {
-  const providerName = opts?.provider || env.DEFAULT_LLM_PROVIDER || 'mock';
-  const byName = REGISTRY.get(providerName as string);
-  if (byName) return byName.create(env, { ...(opts?.config||{}), model: opts?.model });
+  const requestedProvider = opts?.provider as string | undefined;
+  const requestedModel = opts?.model;
 
-  if (opts?.model) {
-    const byModel = resolveProviderByModel(opts.model, env);
-    if (byModel) return byModel.create(env, { ...(opts?.config||{}), model: opts.model });
+  // 1) If an explicit provider was requested and is registered, honor it
+  if (requestedProvider) {
+    const byName = REGISTRY.get(requestedProvider);
+    if (byName) return byName.create(env, { ...(opts?.config || {}), model: requestedModel });
   }
+
+  // 2) If a model was requested, attempt to resolve a provider that serves it
+  if (requestedModel) {
+    const byModel = resolveProviderByModel(requestedModel, env);
+    if (byModel) return byModel.create(env, { ...(opts?.config || {}), model: requestedModel });
+  }
+
+  // 3) Fall back to DEFAULT_LLM_PROVIDER if configured, else mock
+  const defaultName = (env.DEFAULT_LLM_PROVIDER as string | undefined) || 'mock';
+  const byDefault = REGISTRY.get(defaultName);
+  if (byDefault) return byDefault.create(env, { ...(opts?.config || {}), model: requestedModel });
 
   const fallback = REGISTRY.get('mock');
   if (!fallback) throw new Error('No providers registered');
-  return fallback.create(env, { ...(opts?.config||{}), model: opts?.model });
+  return fallback.create(env, { ...(opts?.config || {}), model: requestedModel });
 }
 
 export function envFromProcess(): Env { return process.env as any; }

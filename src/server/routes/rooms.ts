@@ -23,8 +23,8 @@ export function createRoomsRoutes() {
     }
 
     const a2aAlias = `${origin}/api/rooms/${roomId}/a2a`
-    const a2a = `${origin}/api/bridge/${roomId}/a2a`
-    const mcp = `${origin}/api/bridge/${roomId}/mcp`
+    const a2a = `${origin}/api/rooms/${roomId}/a2a`
+    const mcp = `${origin}/api/rooms/${roomId}/mcp`
     const tasks = `${origin}/api/pairs/${roomId}/server-events`
     const defaultCard: any = {
       protocolVersion: '0.3.0',

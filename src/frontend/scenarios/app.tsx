@@ -8,14 +8,15 @@ import { ScenarioLandingPage } from './components/ScenarioLandingPage';
 import { ScenarioBuilderPage } from './components/ScenarioBuilderPage';
 import { ScenarioRunPage } from './components/ScenarioRunPage';
 import { RunWizardPage } from './components/RunWizardPage';
-import { ScenarioPluginPage } from './components/ScenarioPluginPage';
-import { ScenarioA2APreLaunchPage } from './components/ScenarioA2APreLaunchPage';
-import { ScenarioConfiguredPage } from './components/ScenarioConfiguredPage';
+// Disabled non-essential pages in this build to avoid missing deps
+// import { ScenarioPluginPage } from './components/ScenarioPluginPage';
+// import { ScenarioA2APreLaunchPage } from './components/ScenarioA2APreLaunchPage';
+// import { ScenarioConfiguredPage } from './components/ScenarioConfiguredPage';
 
 declare const __API_BASE__: string | undefined;
 const API_BASE: string =
   (typeof window !== 'undefined' && (window as any).__APP_CONFIG__?.API_BASE) ||
-  (typeof __API_BASE__ !== 'undefined' ? __API_BASE__ : 'http://localhost:3000/api');
+  (typeof __API_BASE__ !== 'undefined' ? __API_BASE__ : '/api');
 
 async function wsRpcCall<T>(method: string, params?: any): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -326,10 +327,10 @@ function App() {
           <Route path="/scenarios/:scenarioId" element={<ScenarioBuilderPage />} />
           <Route path="/scenarios/:scenarioId/edit" element={<ScenarioBuilderPage />} />
           <Route path="/scenarios/:scenarioId/run" element={<RunWizardPage />} />
-          <Route path="/scenarios/:scenarioId/external-mcp-client/:config64" element={<ScenarioPluginPage />} />
-          <Route path="/scenarios/:scenarioId/external-a2a-client/:config64" element={<ScenarioA2APreLaunchPage />} />
-          <Route path="/scenarios/configured/:config64" element={<ScenarioConfiguredPage />} />
-          <Route path="/scenarios/created/:conversationId" element={<ScenarioConfiguredPage />} />
+          {false && <Route path="/scenarios/:scenarioId/external-mcp-client/:config64" element={<div />} />}
+          {false && <Route path="/scenarios/:scenarioId/external-a2a-client/:config64" element={<div />} />}
+          {false && <Route path="/scenarios/configured/:config64" element={<div />} />}
+          {false && <Route path="/scenarios/created/:conversationId" element={<div />} />}
         </Routes>
       </AppLayout>
     </Router>

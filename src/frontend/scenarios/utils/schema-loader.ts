@@ -4,7 +4,7 @@
 // Bun supports: import text from 'path' with { type: 'text' }
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - Bun runtime supports the following import assertion
-import schemaFileContent from '$src/types/scenario-configuration.types.ts' with { type: 'text' };
+import schemaFileContent from '../../../types/scenario-configuration.types.ts' with { type: 'text' };
 
 // Optionally split curated schema from embedded examples if a marker exists
 const lines = (schemaFileContent as string).split('\n');

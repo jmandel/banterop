@@ -5,6 +5,9 @@ function cloneField(f: Field): Field {
   if ('options' in base && Array.isArray(base.options)) {
     base.options = base.options.map((o: any) => ({ ...o }));
   }
+  if ('groups' in base && Array.isArray(base.groups)) {
+    base.groups = base.groups.map((g: any) => ({ label: g.label, options: Array.isArray(g.options) ? g.options.map((o:any)=>({ ...o })) : [] }));
+  }
   return base;
 }
 
@@ -35,6 +38,13 @@ export function applyPatches(current: Field[], patches: Patch[]): Field[] {
         break;
       case 'setFieldOptions':
         (f as any).options = p.options;
+        // Clear groups if switching to flat options
+        (f as any).groups = undefined;
+        break;
+      case 'setFieldGroups':
+        (f as any).groups = p.groups;
+        // Clear flat options when using groups
+        (f as any).options = undefined;
         break;
       case 'setFieldError':
         f.error = p.error;

@@ -262,13 +262,25 @@ function App() {
       )}
 
       {plannerId === 'off' && (
-        <ManualComposer
-          disabled={!canSendManual}
-          hint={!canSendManual ? (['completed','canceled','failed','rejected'].includes(uiStatus) ? `Task ${uiStatus}.` : (initiatorCanStart ? 'First send will start a conversation' : 'Not your turn')) : undefined}
-          placeholder={composerPlaceholder()}
-          onSend={handleManualSend}
-          sending={sending}
-        />
+        ['completed','canceled','failed','rejected'].includes(uiStatus)
+          ? (
+              <button
+                className="btn"
+                style={{ width: '100%', padding: '16px', marginTop: 12 }}
+                onClick={clearTask}
+              >
+                Task completed: Click here to begin again
+              </button>
+            )
+          : (
+              <ManualComposer
+                disabled={!canSendManual}
+                hint={!canSendManual ? (['completed','canceled','failed','rejected'].includes(uiStatus) ? `Task ${uiStatus}.` : (initiatorCanStart ? 'First send will start a conversation' : 'Not your turn')) : undefined}
+                placeholder={composerPlaceholder()}
+                onSend={handleManualSend}
+                sending={sending}
+              />
+            )
       )}
 
       <div className="card" style={{ display: 'none' }}>

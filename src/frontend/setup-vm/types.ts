@@ -9,6 +9,8 @@ export type Field = {
   disabled?: boolean;
   visible?: boolean;
   options?: Array<{ value: string; label: string }>;
+  // Optional grouped options for select fields; when present, render as optgroups.
+  groups?: Array<{ label: string; options: Array<{ value: string; label: string }> }>;
   error?: string | null;
   pending?: boolean;
   meta?: any;
@@ -19,6 +21,7 @@ export type Patch =
   | { op: 'batch'; ops: Patch[] }
   | { op: 'setFieldValue'; key: string; value: unknown }
   | { op: 'setFieldOptions'; key: string; options: Array<{ value: string; label: string }> }
+  | { op: 'setFieldGroups'; key: string; groups: Array<{ label: string; options: Array<{ value: string; label: string }> }> }
   | { op: 'setFieldVisible'; key: string; visible: boolean }
   | { op: 'setFieldDisabled'; key: string; disabled: boolean }
   | { op: 'setFieldError'; key: string; error: string | null }

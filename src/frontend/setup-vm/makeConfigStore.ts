@@ -65,6 +65,27 @@ export function makeConfigStore<Seed, Full>(
     }
   };
 
+  // Dispatch BOOT on creation so VMs can populate async model lists, etc.
+  (async () => {
+    try {
+      const boot = vm.reduce(currentFields, { type: 'BOOT' });
+      if (boot.patches) {
+        currentFields = applyPatches(currentFields, boot.patches);
+        notify();
+      }
+      if (boot.effects) {
+        await runEffects(boot.effects);
+      }
+      // Propagate initial config if valid
+      try {
+        const v = vm.validateToFull(currentFields);
+        opts?.onConfigChange?.(v.ok ? (v.full as Full) : null);
+      } catch { opts?.onConfigChange?.(null); }
+    } catch {
+      // ignore BOOT errors
+    }
+  })();
+
   return {
     get snap(): ConfigSnapshot {
       return {

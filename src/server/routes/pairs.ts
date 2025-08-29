@@ -10,8 +10,8 @@ export function pairsRoutes(includeNonApi = false) {
     const origin = new URL(c.req.url).origin
     const created = await pairs.createPair()
     const base = origin
-    const a2a = `${base}/api/bridge/${created.pairId}/a2a`
-    const mcp = `${base}/api/bridge/${created.pairId}/mcp`
+    const a2a = `${base}/api/rooms/${created.pairId}/a2a`
+    const mcp = `${base}/api/rooms/${created.pairId}/mcp`
     const agentCard = `${base}/rooms/${created.pairId}/agent-card.json`
     const tasks = `${base}/api/pairs/${created.pairId}/server-events`
     return c.json({

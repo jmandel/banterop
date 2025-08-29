@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { applyPatch } from 'fast-json-patch';
-import type { ScenarioConfiguration } from '$src/types/scenario-configuration.types';
-import type { ScenarioItem } from '$src/db/scenario.store';
+import type { ScenarioConfiguration } from '../../../types/scenario-configuration.types';
+type ScenarioItem = { id: string; name: string; config: any; history: any[]; createdAt: string; modifiedAt: string };
 type JSONPatchOperation = { op: 'add'|'remove'|'replace'|'copy'|'move'|'test'; path: string; value?: unknown; from?: string };
 import { ChatPanel } from './ChatPanel';
 import { ScenarioEditor } from './ScenarioEditor';
@@ -184,57 +184,24 @@ export function ScenarioBuilderPage() {
       const llmConfig = await api.getLLMConfig();
       
       if (llmConfig.success && llmConfig.data?.providers) {
-        // Filter out providers we don't want to expose to users and those that aren't available
-        const providersAll = llmConfig.data.providers;
-        const providers = providersAll.filter((p: any) => 
-          p.name !== 'browserside' && 
-          p.name !== 'mock' && 
-          p.available !== false
-        );
+        const providersAll: Array<{ name:string; models?: string[]; available?: boolean }> = llmConfig.data.providers as any[];
+        const avail = providersAll.filter(p => p.available !== false);
+        const unionModels = Array.from(new Set(avail.flatMap(p => Array.isArray(p.models) ? p.models : []))).filter(Boolean) as string[];
+
+        // Prefer showing real providers (excluding mock) when they advertise models; otherwise show a single 'server' group
+        let providers: Array<{ name: string; models: string[] }> = avail
+          .filter(p => p.name !== 'mock' && Array.isArray(p.models) && p.models!.length > 0)
+          .map(p => ({ name: p.name, models: p.models as string[] }));
+        if (providers.length === 0) {
+          const fallbackModels = unionModels.length ? unionModels : ['openai/gpt-oss-120b:nitro'];
+          providers = [{ name: 'server', models: fallbackModels }];
+        }
+
+        // Pick default model: saved one if still present; else first available from providers; else fallback
         const savedModel = getSavedModel();
-        
-        // Check if saved model is still available in the filtered providers
-        let modelExists = false;
-        for (const provider of providers) {
-          if (provider.models?.includes(savedModel)) {
-            modelExists = true;
-            break;
-          }
-        }
-        
-        let defaultModel = savedModel;
-        
-        // If saved model doesn't exist, find a new default
-        if (!modelExists) {
-          defaultModel = 'gemini-2.5-flash-lite';
-          
-          // Try to find a 'lite' model first
-          for (const provider of providers) {
-            const liteModel = provider.models?.find((m: string) => m.includes('lite'));
-            if (liteModel) {
-              defaultModel = liteModel;
-              break;
-            }
-          }
-          
-          // If no 'lite' model found, try 'flash'
-          if (!providers.some((p: any) => p.models?.some((m: string) => m.includes('lite')))) {
-            for (const provider of providers) {
-              const flashModel = provider.models?.find((m: string) => m.includes('flash'));
-              if (flashModel) {
-                defaultModel = flashModel;
-                break;
-              }
-            }
-          }
-          
-          // If no 'lite' or 'flash' model found, use first available model
-          if (!providers.some((p: any) => p.models?.some((m: string) => m.includes('lite') || m.includes('flash'))) 
-              && providers.length > 0 && providers[0].models?.length > 0) {
-            defaultModel = providers[0].models[0];
-          }
-        }
-        
+        const modelExists = providers.some(p => p.models.includes(savedModel));
+        const defaultModel = modelExists ? savedModel : (providers[0]?.models?.[0] || 'openai/gpt-oss-120b:nitro');
+
         setState(prev => ({
           ...prev,
           schemaText,
@@ -248,7 +215,7 @@ export function ScenarioBuilderPage() {
           ...prev,
           schemaText,
           examplesText,
-          availableProviders: []
+          availableProviders: [{ name:'server', models: ['openai/gpt-oss-120b:nitro'] }]
         }));
       }
     } catch (error) {

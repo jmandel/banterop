@@ -6,7 +6,8 @@
     <title>Scenario Builder</title>
     <link rel="stylesheet" href="../ui/app.css" />
     <script>
-      window.__APP_CONFIG__ = { API_BASE: "http://localhost:3000/api" };
+      // Use same-origin API by default to avoid CORS during local dev
+      window.__APP_CONFIG__ = { API_BASE: "/api" };
     </script>
   </head>
   <body>

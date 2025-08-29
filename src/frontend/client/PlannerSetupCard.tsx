@@ -176,29 +176,21 @@ export function PlannerSetupCard() {
                 }
               }
             }
-            const pillText = (() => {
-              if (isTool) return `Tool — ${raw && raw.startsWith('Executing') ? raw : (name ? `Executing ${name}` : 'Executing')}`;
-              if (phase === 'idle') return `Idle ${planner?.name || 'Planner'}`;
-              const cap = phase.slice(0,1).toUpperCase() + phase.slice(1);
-              return raw ? `${cap} — ${raw}` : cap;
+            // Emphasize actual info: for tools → "name(args)"; otherwise show raw label or minimal phase
+            const compactArgs = (() => {
+              if (!argsText) return '';
+              try {
+                const obj = JSON.parse(argsText);
+                const keys = Object.keys(obj || {});
+                const preview = keys.slice(0, 3).map(k => `${k}:${JSON.stringify(obj[k])}`).join(', ');
+                return `(${preview}${keys.length > 3 ? ', …' : ''})`;
+              } catch { return `(${argsText.length > 40 ? argsText.slice(0, 37) + '…' : argsText})`; }
             })();
-            let tooltip: string | undefined;
-            if (isTool && name) {
-              let parsed: any = undefined;
-              try { if (argsText) parsed = JSON.parse(argsText); } catch {}
-              const fullObj: any = { name, args: parsed ?? (argsText ? String(argsText) : {}) };
-              try { tooltip = JSON.stringify(fullObj, null, 2); } catch {}
-            }
-            return (
-              <>
-                <span className="pill">{pillText}</span>
-                {isTool && name && (
-                  <span className="hud-json" title={tooltip || `{\n  \"name\": \"${name}\",\n  \"args\": ${argsText ? argsText : '{}'}\n}`}>
-                    {`{\"name\":\"${name}\", \"args\": ${argsText ? argsText : '{}'}}`}
-                  </span>
-                )}
-              </>
-            );
+            const pillText = isTool
+              ? [name || 'tool', compactArgs].filter(Boolean).join(' ')
+              : (raw || (phase === 'idle' ? (planner?.name ? `Idle — ${planner.name}` : 'Idle') : phase));
+
+            return (<span className="pill" title={raw || undefined}>{pillText}</span>);
           })()}
         </div>
         {canShowBegin && <button className="btn" type="button" onClick={() => useAppStore.getState().kickoffConversationWithPlanner()}>Begin conversation</button>}
@@ -239,7 +231,26 @@ function renderField(f: any, setField: (k: string, v: any) => void) {
     onChange={e => handleFieldChange(f.key, e.target.value)}
   />;
   if (f.type === 'checkbox') return (<input type="checkbox" checked={!!f.value} onChange={e => handleFieldChange(f.key, e.target.checked)} />);
-  if (f.type === 'select') return <select className="input" value={String(f.value || '')} onChange={e => handleFieldChange(f.key, e.target.value)}>{(f.options || []).map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>;
+  if (f.type === 'select') {
+    const hasGroups = Array.isArray((f as any).groups) && (f as any).groups.length > 0;
+    if (hasGroups) {
+      const groups = (f as any).groups as Array<{ label:string; options:Array<{value:string; label:string}> }>;
+      return (
+        <select className="input" value={String(f.value || '')} onChange={e => handleFieldChange(f.key, e.target.value)}>
+          {groups.map(g => (
+            <optgroup key={g.label || 'group'} label={g.label || ''}>
+              {g.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </optgroup>
+          ))}
+        </select>
+      );
+    }
+    return (
+      <select className="input" value={String(f.value || '')} onChange={e => handleFieldChange(f.key, e.target.value)}>
+        {(f.options || []).map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    );
+  }
   if (f.type === 'checkbox-group') {
     const sel = new Set<string>(Array.isArray(f.value) ? f.value : []);
     const toggle = (v: string) => {

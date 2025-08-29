@@ -375,6 +375,10 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
       const { epoch } = ensureEpoch(pairId)
       return { initiatorTaskId: initTaskId(pairId, epoch), responderTaskId: respTaskId(pairId, epoch), epoch }
     },
+    async beginNewEpochTasksForPair(pairId: string): Promise<{ initiatorTaskId: string; responderTaskId: string; epoch: number }> {
+      const { epoch } = ensureEpochForSend(pairId)
+      return { initiatorTaskId: initTaskId(pairId, epoch), responderTaskId: respTaskId(pairId, epoch), epoch }
+    },
     // SAB helpers
     hasActiveBackend(roomId: string) { return hasActiveBackend(roomId) },
     acquireBackend(roomId: string, connId: string, takeover?: boolean) { return acquireBackend(roomId, connId, takeover) },

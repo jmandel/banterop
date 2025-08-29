@@ -20,6 +20,7 @@ import { extractNextState, computeStatesForNext } from './core/finality'
 import controlHtml from '../frontend/control/index.html'
 import clientHtml from '../frontend/client/index.html'
 import roomsHtml from '../frontend/rooms/index.html'
+import scenariosHtml from '../frontend/scenarios/index.html'
 
 export type AppBindings = {
   Bindings: Env
@@ -106,6 +107,7 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
       '/control/': controlHtml,
       '/client/': clientHtml,
       '/rooms/': roomsHtml,
+      '/scenarios/': scenariosHtml,
       // Serve dynamic room page directly (same bundled HTML)
       '/rooms/:roomId': roomsHtml,
     },
@@ -116,6 +118,7 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
         '/control/': controlHtml,
         '/client/': clientHtml,
         '/rooms/': roomsHtml,
+        '/scenarios/': scenariosHtml,
       }
       const html = staticPages[url.pathname]
       if (html) return new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } })

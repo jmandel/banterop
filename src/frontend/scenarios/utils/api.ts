@@ -1,9 +1,11 @@
-// v3 API shim that matches v2 scenario-builder expectations
+// v3 API shim adapted to this project's /api backend
+// Normalizes server responses (which return raw config JSON) to the
+// scenario-builder's expected shape: { id, name, config, history? }
 
 declare const __API_BASE__: string | undefined;
 const API_BASE: string =
   (typeof window !== 'undefined' && (window as any).__APP_CONFIG__?.API_BASE) ||
-  (typeof __API_BASE__ !== 'undefined' ? __API_BASE__ : 'http://localhost:3000/api');
+  (typeof __API_BASE__ !== 'undefined' ? __API_BASE__ : '/api');
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const url = `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
@@ -21,36 +23,67 @@ export const api = {
 
   async getScenarios() {
     const list = await http<any[]>(`/scenarios`);
-    return { success: true, data: { scenarios: list } };
+    // Server returns an array of raw configs; wrap them
+    const normalized = (Array.isArray(list) ? list : []).map((cfg: any) => ({
+      id: String(cfg?.metadata?.id || ''),
+      name: String(cfg?.metadata?.title || cfg?.metadata?.id || 'Untitled'),
+      config: cfg,
+      history: [],
+    }));
+    return { success: true, data: { scenarios: normalized } };
   },
 
   async getScenario(id: string) {
-    const item = await http<any>(`/scenarios/${encodeURIComponent(id)}`);
-    return { success: true, data: item };
+    const cfg = await http<any>(`/scenarios/${encodeURIComponent(id)}`);
+    const wrapped = {
+      id: String(cfg?.metadata?.id || id),
+      name: String(cfg?.metadata?.title || cfg?.metadata?.id || id),
+      config: cfg,
+      history: [],
+    };
+    return { success: true, data: wrapped };
   },
 
   async createScenario(name: string, config: any, history: any[] = []) {
-    const item = await http<any>(`/scenarios`, {
+    const cfg = await http<any>(`/scenarios`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, config, history })
     });
-    return { success: true, data: item };
+    const wrapped = {
+      id: String(cfg?.metadata?.id || ''),
+      name: String(cfg?.metadata?.title || cfg?.metadata?.id || name || 'Untitled'),
+      config: cfg,
+      history: Array.isArray(history) ? history : [],
+    };
+    return { success: true, data: wrapped };
   },
 
   async updateScenario(id: string, updates: any) {
-    const item = await http<any>(`/scenarios/${encodeURIComponent(id)}`, {
+    const cfg = await http<any>(`/scenarios/${encodeURIComponent(id)}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates)
     });
-    return { success: true, data: item };
+    const wrapped = {
+      id: String(cfg?.metadata?.id || id),
+      name: String(cfg?.metadata?.title || cfg?.metadata?.id || id),
+      config: cfg,
+      history: [],
+    };
+    return { success: true, data: wrapped };
   },
 
   async updateScenarioConfig(id: string, config: any) {
     // Server supports PUT /scenarios/:id with { name?, config? }
-    const item = await http<any>(`/scenarios/${encodeURIComponent(id)}`, {
+    const cfg = await http<any>(`/scenarios/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ config })
     });
-    return { success: true, data: item };
+    const wrapped = {
+      id: String(cfg?.metadata?.id || id),
+      name: String(cfg?.metadata?.title || cfg?.metadata?.id || id),
+      config: cfg,
+      history: [],
+    };
+    return { success: true, data: wrapped };
   },
 
   async deleteScenario(id: string) {

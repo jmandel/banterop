@@ -65,7 +65,7 @@ function useRoom() {
   const roomId = qp || parts[1] || ''
   const base = `${url.origin}`
   const a2a = `${base}/api/rooms/${roomId}/a2a`
-  const mcp = `${base}/api/bridge/${roomId}/mcp`
+  const mcp = `${base}/api/rooms/${roomId}/mcp`
   const tasks = `${base}/api/pairs/${roomId}/server-events?mode=backend`
   const agentCard = `${base}/rooms/${roomId}/agent-card.json`
   return { roomId, a2a, mcp, tasks, agentCard }
