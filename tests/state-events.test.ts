@@ -24,7 +24,7 @@ describe('State events reflect correct turn semantics and include message text',
 
     // Read the next state from events.log
     const ac = new AbortController();
-    const es = await fetch(S.base + `/api/pairs/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
+    const es = await fetch(S.base + `/api/rooms/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
     expect(es.ok).toBeTrue();
     let lastState: any = null;
     for await (const ev of parseSse<any>(es.body!)) {

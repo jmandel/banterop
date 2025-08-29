@@ -80,8 +80,8 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
   app.route('/api', pairsRoutes())
   app.route('/api', a2aRoutes())
   app.route('/api', mcpRoutes())
-  app.route('/api', pairsRoutes(true))
-  app.route('/', createRoomsRoutes())
+  // pairsRoutes removed; events + backchannel moved under /api/rooms
+  app.route('/api', createRoomsRoutes())
   // Mount LLM + Scenarios routes (previously via install script)
   try {
     const scenarios = createScenariosStore(sqlite)

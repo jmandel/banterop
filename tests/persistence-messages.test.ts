@@ -104,7 +104,7 @@ describe("Persistence — messages and state across restart", () => {
     // Verify SSE ring was seeded on startup: epoch-begin, two messages, then a state
     {
       const ac = new AbortController();
-      const es = await fetch(S.base + `/api/pairs/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
+      const es = await fetch(S.base + `/api/rooms/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
       expect(es.ok).toBeTrue();
       let sawEpoch = false, sawM1 = false, sawM2 = false, sawState = false;
       for await (const ev of parseSse<any>(es.body!)) {
@@ -205,7 +205,7 @@ describe("Persistence — messages and state across restart", () => {
     // SSE seeding only for latest epoch (#2): should see m3 and m4, not m1/m2
     {
       const ac = new AbortController();
-      const es = await fetch(S.base + `/api/pairs/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
+      const es = await fetch(S.base + `/api/rooms/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
       expect(es.ok).toBeTrue();
       let gotEpoch2 = false, gotM3 = false, gotM4 = false, sawE1 = false, sawState = false;
       for await (const ev of parseSse<any>(es.body!)) {

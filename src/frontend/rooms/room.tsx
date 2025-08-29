@@ -23,6 +23,7 @@ import { ClientSettingsModal } from '../client/ClientSettingsModal'
 import { LinksCard } from './components/LinksCard'
 import { AutomationCard } from '../components/AutomationCard'
 import { LogCard } from '../components/LogCard'
+import { Settings, Copy } from 'lucide-react'
 
 // EXPERIMENTAL: WebRTC datachannel keepalive to avoid Chrome Energy Saver freezing
 // See: https://developer.chrome.com/blog/freezing-on-energy-saver
@@ -72,7 +73,7 @@ function useRoom() {
   const base = `${url.origin}`
   const a2a = `${base}/api/rooms/${roomId}/a2a`
   const mcp = `${base}/api/rooms/${roomId}/mcp`
-  const tasks = `${base}/api/pairs/${roomId}/server-events?mode=backend`
+  const tasks = `${base}/api/rooms/${roomId}/server-events?mode=backend`
   const agentCard = `${base}/api/rooms/${roomId}/.well-known/agent-card.json`
   return { roomId, a2a, mcp, tasks, agentCard }
 }
@@ -80,18 +81,7 @@ function useRoom() {
 function App() {
   const { roomId, a2a, mcp, tasks, agentCard } = useRoom()
   const store = useAppStore()
-  const [backendGranted, setGranted] = useState<boolean | null>(null)
-  const [leaseId, setLeaseId] = useState<string | null>(null)
-  // Build clean events base without accidental duplicate params
-  const eventsBase = useMemo(() => String(tasks).split('?')[0], [tasks])
-  function buildEsUrl(opts?: { leaseId?: string; takeover?: boolean }) {
-    const qs = new URLSearchParams();
-    qs.set('mode','backend');
-    if (opts?.takeover) qs.set('takeover','1');
-    if (opts?.leaseId) qs.set('leaseId', String(opts.leaseId));
-    return `${eventsBase}?${qs.toString()}`
-  }
-  const [esUrl, setEsUrl] = useState<string>(buildEsUrl())
+  // legacy locals removed; use store.rooms slice instead
   const [sending, setSending] = useState(false)
   const [showDebug, setShowDebug] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -138,49 +128,12 @@ function App() {
     ;(window as any).__a2aAdapter = adapter
   }, [a2a])
 
-  // Token ref lives outside effect to detect stale events
-  const esTokenRef = useRef(0)
-
-  // Backend SSE: acquire lease, handle subscribe, set taskId
+  // Start/store backend SSE via rooms slice
   useEffect(() => {
-    // Token to ignore late events from a prior stream
-    const myToken = (esTokenRef.current = (esTokenRef.current || 0) + 1)
-    const es = new EventSource(esUrl)
-    es.onmessage = (ev) => {
-      if (esTokenRef.current !== myToken) return; // ignore stale stream events
-      try {
-        const payload = JSON.parse(ev.data)
-        const msg = payload.result
-        if (msg?.type === 'backend-granted') {
-          setGranted(true)
-          if (msg.leaseId) setLeaseId(String(msg.leaseId))
-          try { ((window as any).__a2aAdapter as A2AAdapter | undefined)?.setBackendLease(String(msg.leaseId||'')) } catch {}
-          // Record leaseId for privileged sends; keep current SSE open.
-          // Future reconnects (e.g., after reload) can use this leaseId from storage.
-        }
-        if (msg?.type === 'backend-denied') setGranted(false)
-        if (msg?.type === 'backend-revoked') {
-          setGranted(false)
-          setLeaseId(null)
-          try { ((window as any).__a2aAdapter as A2AAdapter | undefined)?.setBackendLease(null) } catch {}
-        }
-        if (msg?.type === 'subscribe' && msg.taskId) {
-          useAppStore.getState().setTaskId(String(msg.taskId))
-        }
-      } catch {}
-    }
-    es.onerror = () => {}
-    return () => { try { es.close() } catch {} }
-  }, [esUrl])
-
-  
-
-  // Start planner controller only when lease granted
-  useEffect(() => {
-    if (backendGranted === true) {
-      try { startPlannerController() } catch {}
-    }
-  }, [backendGranted])
+    const base = `${new URL(a2a).origin}/api/rooms/${encodeURIComponent(roomId)}/server-events`;
+    useAppStore.getState().rooms.start(roomId, base);
+    try { startPlannerController() } catch {}
+  }, [roomId, a2a])
 
   const roomTitle = `Room: ${roomId}`
   const taskId = useAppStore(s => s.taskId)
@@ -232,7 +185,9 @@ function App() {
     }
     return false;
   }, [facts, approved, sentComposeIds])
-  const observing = backendGranted === false
+  const connState2 = useAppStore(s => s.rooms.byId[roomId]?.connState)
+  const isOwner = connState2 === 'connected'
+  const observing = connState2 === 'observing'
   const [autoScroll, setAutoScroll] = useState(true)
   const transcriptRef = React.useRef<HTMLDivElement|null>(null)
   React.useLayoutEffect(() => {
@@ -317,26 +272,14 @@ function App() {
     if (uiStatus === 'submitted' || uiStatus==='initializing') return { text:'Setting up…', tone:'gray' as const };
     return { text: uiStatus || 'Unknown', tone:'gray' as const };
   })();
-  // Graceful release on unload only (allow background operation; do not release on hidden)
+  // Graceful release on unload
   useEffect(() => {
-    function release() {
-      if (!leaseId) return;
-      try {
-        const u = new URL(window.location.origin)
-        const rel = `${u.origin}/api/pairs/${encodeURIComponent(roomId)}/backend/release`
-        const fd = new FormData(); fd.set('leaseId', leaseId)
-        navigator.sendBeacon(rel, fd)
-      } catch {}
-    }
+    function release() { try { useAppStore.getState().rooms.release(roomId) } catch {} }
     window.addEventListener('beforeunload', release)
     return () => { window.removeEventListener('beforeunload', release) }
-  }, [leaseId, roomId])
+  }, [roomId])
 
-  function forceTakeover() {
-    try { ((window as any).__a2aAdapter as A2AAdapter | undefined)?.setBackendLease(null) } catch {}
-    setLeaseId(null)
-    setEsUrl(buildEsUrl({ takeover: true }))
-  }
+  // takeover handled by store slice
 
   // Actions
   async function handleManualSend(text: string, nextState: A2ANextState) {
@@ -350,19 +293,51 @@ function App() {
     useAppStore.getState().addUserGuidance(t);
   }
 
+  // Fixed sidebar on large screens: compute left position and dynamic top under sticky bars
+  const gridRef = React.useRef<HTMLDivElement|null>(null)
+  const metaRef = React.useRef<HTMLDivElement|null>(null)
+  const [fixedSide, setFixedSide] = useState(false)
+  const [sideLeft, setSideLeft] = useState<number | null>(null)
+  const [sideTop, setSideTop] = useState<number>(96)
+  useEffect(() => {
+    function recalc() {
+      const isWide = window.innerWidth >= 1024; // ~tailwind lg breakpoint
+      setFixedSide(isWide)
+      const r = gridRef.current?.getBoundingClientRect()
+      if (isWide && r) setSideLeft(Math.round(r.right - 340))
+      else setSideLeft(null)
+      // measure bottom of MetaBar to avoid occlusion
+      const m = metaRef.current?.getBoundingClientRect();
+      if (m) setSideTop(Math.max(0, Math.round(m.bottom + 8)))
+    }
+    recalc();
+    window.addEventListener('resize', recalc)
+    window.addEventListener('scroll', recalc, { passive: true } as any)
+    window.addEventListener('load', recalc)
+    return () => { window.removeEventListener('resize', recalc); window.removeEventListener('scroll', recalc as any); window.removeEventListener('load', recalc) }
+  }, [])
+
   return (
     <div className={`wrap ${showDebug ? 'with-debug' : ''}`}>
       <TopBar
         left={(
-          <>
-            <div className="row compact" style={{ alignItems:'baseline', gap: 8 }}>
-              <span className="small muted">Room</span>
-              <span className="text-sm font-semibold">{roomTitleFromHash || roomId || '—'}</span>
-              <span className={`pill ${backendGranted ? 'ok' : (backendGranted===false ? 'warn' : 'info')}`}>{backendGranted ? 'Connected' : (backendGranted===false ? 'Observing only' : 'Connecting…')}</span>
-            </div>
-          </>
+          <div className="row compact" style={{ alignItems:'baseline', gap: 8 }}>
+            <span className="small muted">Room</span>
+            <span className="text-sm font-semibold">{roomTitleFromHash || roomId || '—'}</span>
+            <span className={`pill ${isOwner ? 'ok' : (observing ? 'warn' : 'info')}`}>{isOwner ? 'Connected' : (observing ? 'Observing only' : 'Connecting…')}</span>
+          </div>
         )}
-        right={<button title="Settings" aria-label="Settings" onClick={()=>setShowSettings(true)} className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0">⚙️</button>}
+        right={(
+          <button
+            title="Settings"
+            aria-label="Settings"
+            onClick={()=>setShowSettings(true)}
+            className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact"
+          >
+            <Settings size={18} strokeWidth={1.75} />
+            <span className="text-sm">Config</span>
+          </button>
+        )}
       />
 
   {(() => {
@@ -373,19 +348,26 @@ function App() {
       if (hashIdx >= 0) return `…${t.slice(hashIdx)}`;
       return t.length > 12 ? `…${t.slice(-12)}` : t;
     }
-    const copyBtn = taskId ? (
-      <button
-        className="btn secondary"
-        title="Copy Task ID"
-        aria-label="Copy Task ID"
-        onClick={() => { try { navigator.clipboard.writeText(taskId) } catch {} }}
-      >📋 Copy</button>
-    ) : undefined;
     return (
       <MetaBar
-        left={<span className="small muted">Task</span>}
-        chips={[{ text: summarizeTaskId(taskId), tone: 'gray' }, turnChip]}
-        right={copyBtn}
+        elRef={metaRef}
+        left={(
+          <div className="row compact">
+            <span className="small muted">Task</span>
+            <span className="pill">{summarizeTaskId(taskId)}</span>
+            {!!taskId && (
+              <button
+                className="p-1 rounded hover:bg-gray-100 text-gray-600"
+                title="Copy Task ID"
+                aria-label="Copy Task ID"
+                onClick={() => { try { navigator.clipboard.writeText(taskId) } catch {} }}
+              >
+                <Copy size={16} strokeWidth={1.75} />
+              </button>
+            )}
+          </div>
+        )}
+        chips={[turnChip]}
       />
     );
   })()}
@@ -396,13 +378,13 @@ function App() {
           <span className="small" style={{ marginLeft: 8 }}>
             Tip: use Ctrl‑Shift‑A (or Cmd‑Shift‑A on macOS) and search for the room ID “{roomId}”.{roomTitleFromHash ? ` (You can also try the title “${roomTitleFromHash}”.)` : ''}
           </span>
-          <button className="btn secondary" style={{ marginLeft: 10 }} onClick={forceTakeover}>Force take over</button>
+          <button className="btn secondary" style={{ marginLeft: 10 }} onClick={()=>useAppStore.getState().rooms.takeover(roomId)}>Force take over</button>
         </div>
       )}
 
       {showDebug && <DebugPanel />}
 
-      <div className="grid grid-cols-[1fr_340px] gap-3">
+      <div className="grid grid-cols-[1fr_340px] gap-3" ref={gridRef}>
         <div>
           <div className="card">
             <div className="small muted mb-1.5">Conversation</div>
@@ -481,24 +463,29 @@ function App() {
           </div>
         </div>
 
-        <div className="flex flex-col gap-3">
-          <LinksCard
-            agentCard={agentCard}
-            mcpUrl={mcp}
-            onCopyAgent={copyCard}
-            onCopyMcp={copyMcp}
-            copiedAgent={copiedCard}
-            copiedMcp={copiedMcp}
-            clientHref={clientHref}
-          />
+        <div
+          className={(fixedSide ? 'flex flex-col gap-3' : 'sticky top-24 overflow-y-auto')}
+          style={fixedSide ? { position:'fixed', left: (sideLeft ?? 0), top: sideTop, width: 340, height: `calc(100vh - ${sideTop}px)`, overflow: 'hidden', minHeight: 0 } : { maxHeight: 'calc(100vh - 96px)' }}
+        >
+          <div className="flex flex-col gap-3 min-h-0 h-full">
+            <LinksCard
+              agentCard={agentCard}
+              mcpUrl={mcp}
+              onCopyAgent={copyCard}
+              onCopyMcp={copyMcp}
+              copiedAgent={copiedCard}
+              copiedMcp={copiedMcp}
+              clientHref={clientHref}
+            />
 
-          <AutomationCard
-            mode={plannerMode as any}
-            onModeChange={(m)=>useAppStore.getState().setPlannerMode(m)}
-            plannerSelect={<PlannerSelector />}
-          />
+            <AutomationCard
+              mode={plannerMode as any}
+              onModeChange={(m)=>useAppStore.getState().setPlannerMode(m)}
+              plannerSelect={<PlannerSelector />}
+            />
 
-          <LogCard rows={facts.slice(-100).map((f:any)=>({ id:f.id, ts:f.ts, type:f.type }))} />
+            <LogCard rows={facts.slice(-100) as any} all={facts as any} fill />
+          </div>
         </div>
       </div>
 

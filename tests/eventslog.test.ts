@@ -15,7 +15,7 @@ describe("Control-plane event log", () => {
     // Backlog replay from since=0 should include pair-created as first event
     {
       const ac = new AbortController();
-      const es = await fetch(S.base + `/api/pairs/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
+      const es = await fetch(S.base + `/api/rooms/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
       expect(es.ok).toBeTrue();
       let got = false;
       for await (const ev of parseSse<any>(es.body!)) {
@@ -37,13 +37,13 @@ describe("Control-plane event log", () => {
     }
 
     // Hard reset: keep same pair, log is cleared, tasks canceled
-    const hr = await fetch(S.base + `/api/pairs/${pairId}/reset`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ type: 'hard' }) });
+    const hr = await fetch(S.base + `/api/rooms/${pairId}/reset`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ type: 'hard' }) });
     expect(hr.ok).toBeTrue();
 
     // Verify unsubscribe + combined canceled state after reset
     {
       const ac2 = new AbortController();
-      const es2 = await fetch(S.base + `/api/pairs/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac2.signal });
+      const es2 = await fetch(S.base + `/api/rooms/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac2.signal });
       let unsub=false, gotCombined=false;
       for await (const ev of parseSse<any>(es2.body!)) {
         if (ev.type === 'backchannel' && ev.action === 'unsubscribe') unsub = true;
@@ -59,7 +59,7 @@ describe("Control-plane event log", () => {
     let resetEpoch = 0;
     {
       const ac3 = new AbortController();
-      const es3 = await fetch(S.base + `/api/pairs/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac3.signal });
+      const es3 = await fetch(S.base + `/api/rooms/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac3.signal });
       for await (const ev of parseSse<any>(es3.body!)) {
         if (ev.type === 'reset-complete' && typeof ev.epoch === 'number') { resetEpoch = ev.epoch; ac3.abort(); break; }
       }

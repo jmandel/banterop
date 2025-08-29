@@ -127,7 +127,7 @@ export type Store = {
 
   // Rooms backend/lease slice (lightweight)
   rooms: {
-    byId: Record<string, { leaseId?: string; connState: 'connecting'|'connected'|'observing'|'revoked'|'denied'; token: number; eventsBase?: string }>;
+    byId: Record<string, { leaseId?: string; connState: 'connecting'|'connected'|'observing'|'revoked'|'denied'; token: number; eventsBase?: string; es?: EventSource }>;
     start(roomId: string, eventsBase: string): void; // try backend acquire once
     observe(roomId: string, eventsBase: string): void; // observer mode (no lease)
     takeover(roomId: string): void; // explicit takeover
@@ -588,9 +588,16 @@ export const useAppStore = create<Store>((set, get) => ({
       const s = get();
       const byId = { ...(s.rooms.byId || {}) } as any;
       const token = (byId[roomId]?.token || 0) + 1;
-      byId[roomId] = { ...(byId[roomId]||{}), connState:'connecting', token, eventsBase };
+      // Close prior stream if present
+      try { byId[roomId]?.es?.close?.() } catch {}
+      byId[roomId] = { ...(byId[roomId]||{}), connState:'connecting', token, eventsBase, es: undefined };
       set((st:any)=>({ rooms: { ...st.rooms, byId } }));
-      const url = `${eventsBase}?mode=backend`;
+      // Attempt rebind if we have a stored lease for this room
+      let url = `${eventsBase}?mode=backend`;
+      try {
+        const stored = sessionStorage.getItem(`lease:${roomId}`);
+        if (stored && stored.trim()) url = `${eventsBase}?mode=backend&leaseId=${encodeURIComponent(stored)}`;
+      } catch {}
       const es = new EventSource(url);
       es.onmessage = (ev) => {
         const cur = get().rooms.byId[roomId]; if (!cur || cur.token !== token) return;
@@ -602,16 +609,18 @@ export const useAppStore = create<Store>((set, get) => ({
             const leaseId = String(msg.leaseId || '');
             try { get().adapter && (get().adapter as any)?.setBackendLease?.(leaseId); } catch {}
             try { sessionStorage.setItem(`lease:${roomId}`, leaseId); } catch {}
-            const byId2 = { ...(get().rooms.byId) } as any; byId2[roomId] = { ...byId2[roomId], leaseId, connState:'connected' };
+            const byId2 = { ...(get().rooms.byId) } as any; byId2[roomId] = { ...byId2[roomId], leaseId, connState:'connected', es };
             set((st:any)=>({ rooms: { ...st.rooms, byId: byId2 } }));
           } else if (msg?.type === 'backend-denied') {
-            const byId2 = { ...(get().rooms.byId) } as any; byId2[roomId] = { ...byId2[roomId], connState:'observing' };
+            const byId2 = { ...(get().rooms.byId) } as any; byId2[roomId] = { ...byId2[roomId], connState:'observing', es };
             set((st:any)=>({ rooms: { ...st.rooms, byId: byId2 } }));
           } else if (msg?.type === 'backend-revoked') {
             try { get().adapter && (get().adapter as any)?.setBackendLease?.(null); } catch {}
             try { sessionStorage.removeItem(`lease:${roomId}`) } catch {}
-            const byId2 = { ...(get().rooms.byId) } as any; byId2[roomId] = { ...byId2[roomId], leaseId: undefined, connState:'revoked' };
+            const byId2 = { ...(get().rooms.byId) } as any; byId2[roomId] = { ...byId2[roomId], leaseId: undefined, connState:'revoked', es };
             set((st:any)=>({ rooms: { ...st.rooms, byId: byId2 } }));
+          } else if (msg?.type === 'subscribe' && msg.taskId) {
+            try { get().setTaskId(String(msg.taskId)) } catch {}
           }
         } catch {}
       };
@@ -622,17 +631,21 @@ export const useAppStore = create<Store>((set, get) => ({
       const s = get();
       const byId = { ...(s.rooms.byId || {}) } as any;
       const token = (byId[roomId]?.token || 0) + 1;
-      byId[roomId] = { ...(byId[roomId]||{}), connState:'observing', token, eventsBase };
+      try { byId[roomId]?.es?.close?.() } catch {}
+      byId[roomId] = { ...(byId[roomId]||{}), connState:'observing', token, eventsBase, es: undefined };
       set((st:any)=>({ rooms: { ...st.rooms, byId } }));
       const url = `${eventsBase}?mode=observer`;
       const es = new EventSource(url);
-      es.onmessage = (ev) => { /* ignore, observer channel not managing lease */ };
+      es.onmessage = () => {};
       es.onerror = () => {};
+      const byId2 = { ...(get().rooms.byId) } as any; byId2[roomId] = { ...byId2[roomId], es };
+      set((st:any)=>({ rooms: { ...st.rooms, byId: byId2 } }));
     },
     takeover(roomId: string) {
       const cur = get().rooms.byId[roomId]; if (!cur?.eventsBase) return;
       const token = (cur.token || 0) + 1;
-      const byId = { ...(get().rooms.byId) } as any; byId[roomId] = { ...cur, connState:'connecting', token };
+      try { cur.es?.close?.() } catch {}
+      const byId = { ...(get().rooms.byId) } as any; byId[roomId] = { ...cur, connState:'connecting', token, es: undefined };
       set((st:any)=>({ rooms: { ...st.rooms, byId } }));
       const es = new EventSource(`${cur.eventsBase}?mode=backend&takeover=1`);
       es.onmessage = (ev) => {
@@ -644,10 +657,10 @@ export const useAppStore = create<Store>((set, get) => ({
             const leaseId = String(msg.leaseId || '');
             try { get().adapter && (get().adapter as any)?.setBackendLease?.(leaseId); } catch {}
             try { sessionStorage.setItem(`lease:${roomId}`, leaseId); } catch {}
-            const byId2 = { ...(get().rooms.byId) } as any; byId2[roomId] = { ...byId2[roomId], leaseId, connState:'connected' };
+            const byId2 = { ...(get().rooms.byId) } as any; byId2[roomId] = { ...byId2[roomId], leaseId, connState:'connected', es };
             set((st:any)=>({ rooms: { ...st.rooms, byId: byId2 } }));
           } else if (msg?.type === 'backend-denied') {
-            const byId2 = { ...(get().rooms.byId) } as any; byId2[roomId] = { ...byId2[roomId], connState:'observing' };
+            const byId2 = { ...(get().rooms.byId) } as any; byId2[roomId] = { ...byId2[roomId], connState:'observing', es };
             set((st:any)=>({ rooms: { ...st.rooms, byId: byId2 } }));
           }
         } catch {}
@@ -658,12 +671,13 @@ export const useAppStore = create<Store>((set, get) => ({
       const cur = get().rooms.byId[roomId]; if (!cur?.leaseId) return;
       try {
         const u = new URL(window.location.origin);
-        const rel = `${u.origin}/api/pairs/${encodeURIComponent(roomId)}/backend/release`;
+        const rel = `${u.origin}/api/rooms/${encodeURIComponent(roomId)}/backend/release`;
         const fd = new FormData(); fd.set('leaseId', cur.leaseId);
         navigator.sendBeacon(rel, fd);
       } catch {}
       try { sessionStorage.removeItem(`lease:${roomId}`) } catch {}
-      const byId = { ...(get().rooms.byId) } as any; byId[roomId] = { ...byId[roomId], leaseId: undefined, connState:'observing' };
+      try { cur.es?.close?.() } catch {}
+      const byId = { ...(get().rooms.byId) } as any; byId[roomId] = { ...byId[roomId], leaseId: undefined, connState:'observing', es: undefined };
       set((st:any)=>({ rooms: { ...st.rooms, byId } }));
     }
   },
@@ -711,14 +725,29 @@ function stampAndAppend(set: any, get: any, proposed: ProposedFact[]) {
     filtered.push(p);
   }
   // When we send a new outgoing message, dismiss any prior suggested drafts
+  // Skip the draft(s) that are being sent in this batch to avoid confusing "dismissed" on the same composeId
   try {
     if (filtered.some(p => p && p.type === 'remote_sent')) {
       const facts: Fact[] = get().facts || [];
       const dismissed = new Set<string>(facts.filter(f=>f.type==='compose_dismissed').map((f:any)=>String((f as any).composeId||'')));
+      const inflight0 = get().inFlightSends as Map<string, { composeId: string }>;
+      const justSent = new Set<string>();
+      for (const p of filtered) {
+        if ((p as any)?.type === 'remote_sent') {
+          const mid = String((p as any).messageId || '');
+          const link = inflight0?.get?.(mid);
+          if (link?.composeId) justSent.add(String(link.composeId));
+        }
+      }
+      // Also skip any composeIds that have been explicitly approved (resilient if servers change messageId)
+      try {
+        const approvedSet = get().composeApproved as Set<string>;
+        if (approvedSet && approvedSet.size) for (const cid of approvedSet) justSent.add(String(cid));
+      } catch {}
       for (const f of facts) {
         if (f.type === 'compose_intent') {
           const cid = String((f as any).composeId || '');
-          if (cid && !dismissed.has(cid)) {
+          if (cid && !dismissed.has(cid) && !justSent.has(cid)) {
             filtered.push({ type:'compose_dismissed', composeId: cid } as any as ProposedFact);
             dismissed.add(cid);
           }

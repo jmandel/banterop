@@ -22,8 +22,9 @@ export function a2aToFacts(frame: Frame): ProposedFact[] {
   // (2) Status-update
   if ((frame as A2AStatusUpdate).kind === 'status-update') {
     const su = frame as A2AStatusUpdate;
-    out.push({ type:'status_changed', a2a: su.status?.state || 'submitted' } as ProposedFact);
+    // Show message first, then status — improves perceived ordering in logs
     if (su.status?.message) out.push(...messageToFacts(su.status.message));
+    out.push({ type:'status_changed', a2a: su.status?.state || 'submitted' } as ProposedFact);
     return out;
   }
 

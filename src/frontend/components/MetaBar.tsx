@@ -13,9 +13,9 @@ function chipClass(tone?: Chip['tone']): string {
   }
 }
 
-export function MetaBar({ left, chips, right }:{ left: React.ReactNode; chips: Chip[]; right?: React.ReactNode }) {
+export function MetaBar({ left, chips, right, elRef }:{ left: React.ReactNode; chips: Chip[]; right?: React.ReactNode; elRef?: React.Ref<HTMLDivElement> }) {
   return (
-    <div className="card compact sticky top-12">
+    <div ref={elRef as any} className="card compact sticky top-12">
       <div className="row compact w-full">
         <div className="row compact">
           {left}

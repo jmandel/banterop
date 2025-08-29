@@ -26,6 +26,8 @@ import { LogCard } from '../components/LogCard';
 import { ClientLinksCard } from './components/ClientLinksCard';
 import { TopBar } from '../components/TopBar';
 import { MetaBar } from '../components/MetaBar';
+import { Settings } from 'lucide-react';
+import { Copy } from 'lucide-react';
 
 function useQuery() {
   const u = new URL(window.location.href);
@@ -233,6 +235,28 @@ function App() {
     return 'Not our turn yet…';
   }
 
+  // Fixed sidebar on large screens: compute left position and dynamic top under sticky bars
+  const gridRef = React.useRef<HTMLDivElement|null>(null);
+  const metaRef = React.useRef<HTMLDivElement|null>(null);
+  const [fixedSide, setFixedSide] = useState(false);
+  const [sideLeft, setSideLeft] = useState<number | null>(null);
+  const [sideTop, setSideTop] = useState<number>(96);
+  useEffect(() => {
+    function recalc() {
+      const isWide = window.innerWidth >= 1024;
+      setFixedSide(isWide);
+      const r = gridRef.current?.getBoundingClientRect();
+      if (isWide && r) setSideLeft(Math.round(r.right - 340)); else setSideLeft(null);
+      const m = metaRef.current?.getBoundingClientRect();
+      if (m) setSideTop(Math.max(0, Math.round(m.bottom + 8)));
+    }
+    recalc();
+    window.addEventListener('resize', recalc);
+    window.addEventListener('scroll', recalc, { passive: true } as any);
+    window.addEventListener('load', recalc);
+    return () => { window.removeEventListener('resize', recalc); window.removeEventListener('scroll', recalc as any); window.removeEventListener('load', recalc); };
+  }, []);
+
   return (
     <div className={`wrap ${showDebug ? 'with-debug' : ''}`}>
       <TopBar
@@ -243,14 +267,33 @@ function App() {
           </div>
         )}
         right={(
-          <button title="Settings" aria-label="Settings" onClick={()=>setShowSettings(true)} className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0">⚙️</button>
+          <button title="Settings" aria-label="Settings" onClick={()=>setShowSettings(true)} className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact">
+            <Settings size={18} strokeWidth={1.75} />
+            <span className="text-sm">Config</span>
+          </button>
         )}
       />
 
       <MetaBar
-        left={<span className="small muted">Task</span>}
+        elRef={metaRef}
+        left={(
+          <div className="row compact">
+            <span className="small muted">Task</span>
+            <span className="pill">{taskId ? taskId : 'No task'}</span>
+            {!!taskId && (
+              <button
+                className="p-1 rounded hover:bg-gray-100 text-gray-600"
+                title="Copy Task ID"
+                aria-label="Copy Task ID"
+                onClick={() => { try { navigator.clipboard.writeText(taskId) } catch {} }}
+              >
+                <Copy size={16} strokeWidth={1.75} />
+              </button>
+            )}
+          </div>
+        )}
         chips={(() => {
-          const chips:any[] = [{ text: taskId ? `Task ${taskId}` : 'No task', tone: 'gray' as const }];
+          const chips:any[] = [];
           const dismissed = new Set<string>(facts.filter((f:any)=>f.type==='compose_dismissed').map((f:any)=>String(f.composeId||'')));
           let pendingReview = false;
           for (let i = facts.length - 1; i >= 0; --i) { const f:any = facts[i]; if (f.type==='remote_sent') break; if (f.type==='compose_intent' && !dismissed.has(String(f.composeId||''))) { pendingReview = true; break; } }
@@ -269,7 +312,7 @@ function App() {
 
       {showDebug && <DebugPanel />}
 
-      <div className="grid grid-cols-[1fr_340px] gap-3">
+      <div className="grid grid-cols-[1fr_340px] gap-3" ref={gridRef}>
         <div>
           {hasTranscript && (
             <div className="card">
@@ -351,14 +394,16 @@ function App() {
           )}
         </div>
 
-        <div className="flex flex-col gap-3">
-          <AutomationCard
-            mode={useAppStore.getState().plannerMode as any}
-            onModeChange={(m)=>useAppStore.getState().setPlannerMode(m)}
-            plannerSelect={<PlannerSelector />}
-          />
-          <ClientLinksCard />
-          <LogCard rows={facts.slice(-100).map((f:any)=>({ id:f.id, ts:f.ts, type:f.type }))} />
+        <div className={fixedSide ? 'flex flex-col gap-3' : 'sticky top-24 overflow-y-auto'} style={fixedSide ? { position:'fixed', left:(sideLeft ?? 0), top: sideTop, width: 340, height: `calc(100vh - ${sideTop}px)`, overflow:'hidden', minHeight: 0 } : { maxHeight: 'calc(100vh - 96px)' }}>
+          <div className="flex flex-col gap-3 min-h-0 h-full">
+            <AutomationCard
+              mode={useAppStore.getState().plannerMode as any}
+              onModeChange={(m)=>useAppStore.getState().setPlannerMode(m)}
+              plannerSelect={<PlannerSelector />}
+            />
+            <ClientLinksCard />
+            <LogCard rows={facts.slice(-100) as any} all={facts as any} fill />
+          </div>
         </div>
       </div>
 

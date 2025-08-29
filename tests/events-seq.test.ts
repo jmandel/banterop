@@ -16,17 +16,17 @@ describe('events.log invariants', () => {
     let firstSeq = 0;
     {
       const ac = new AbortController();
-      const es = await fetch(S.base + `/api/pairs/${pairId}/events.log?since=0&backlogOnly=1`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
+      const es = await fetch(S.base + `/api/rooms/${pairId}/events.log?since=0&backlogOnly=1`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
       for await (const ev of parseSse<any>(es.body!)) { firstSeq = Number(ev?.seq || 0); ac.abort(); break; }
       expect(firstSeq).toBeGreaterThan(0);
     }
 
     // Cause activity by issuing a hard reset (emits unsubscribe/state/reset-complete)
-    await fetch(`${S.base}/api/pairs/${pairId}/reset`, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ type: 'hard' }) });
+    await fetch(`${S.base}/api/rooms/${pairId}/reset`, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ type: 'hard' }) });
 
     // Fetch backlog again and assert latest seq increased
     {
-      const es = await fetch(S.base + `/api/pairs/${pairId}/events.log?since=0&backlogOnly=1`, { headers:{ accept:'text/event-stream' } });
+      const es = await fetch(S.base + `/api/rooms/${pairId}/events.log?since=0&backlogOnly=1`, { headers:{ accept:'text/event-stream' } });
       let lastSeq = 0;
       for await (const ev of parseSse<any>(es.body!)) { lastSeq = Number(ev?.seq || 0); }
       expect(lastSeq).toBeGreaterThan(firstSeq);

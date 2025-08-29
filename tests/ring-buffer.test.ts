@@ -28,7 +28,7 @@ describe("Event ring buffer trims old events", () => {
     }
 
     // Backlog since=0 should be limited by ring max (100) and not include the original pair-created
-    const es = await fetch(S.base + `/api/pairs/${pairId}/events.log?since=0&backlogOnly=1`, { headers:{ accept:'text/event-stream' } });
+    const es = await fetch(S.base + `/api/rooms/${pairId}/events.log?since=0&backlogOnly=1`, { headers:{ accept:'text/event-stream' } });
     expect(es.ok).toBeTrue();
     const collected: any[] = [];
     for await (const ev of parseSse<any>(es.body!)) collected.push(ev);

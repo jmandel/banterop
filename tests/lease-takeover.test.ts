@@ -19,7 +19,7 @@ describe("Lease management: explicit takeover or leaseId required", () => {
     const pairId = `t-${crypto.randomUUID()}`;
 
     // 1) Acquire initial lease (backend1)
-    const url = `${S.base}/api/pairs/${pairId}/server-events?mode=backend`;
+    const url = `${S.base}/api/rooms/${pairId}/server-events?mode=backend`;
     const backend1 = await fetch(url, { headers:{ accept:'text/event-stream' } });
     expect(backend1.ok).toBeTrue();
     const ev1 = await readFirstEvent(backend1);
@@ -34,7 +34,7 @@ describe("Lease management: explicit takeover or leaseId required", () => {
     expect(ev2?.type).toBe('backend-denied');
 
     // 3) Rebind with matching leaseId → granted (same lease)
-    const rebindUrl = `${S.base}/api/pairs/${pairId}/server-events?mode=backend&leaseId=${encodeURIComponent(leaseId)}`;
+    const rebindUrl = `${S.base}/api/rooms/${pairId}/server-events?mode=backend&leaseId=${encodeURIComponent(leaseId)}`;
     const backend3 = await fetch(rebindUrl, { headers:{ accept:'text/event-stream' } });
     expect(backend3.ok).toBeTrue();
     const ev3 = await readFirstEvent(backend3);
@@ -42,7 +42,7 @@ describe("Lease management: explicit takeover or leaseId required", () => {
     expect(String(ev3?.leaseId)).toBe(leaseId);
 
     // 4) Takeover explicitly → granted with a new lease id
-    const takeoverUrl = `${S.base}/api/pairs/${pairId}/server-events?mode=backend&takeover=1`;
+    const takeoverUrl = `${S.base}/api/rooms/${pairId}/server-events?mode=backend&takeover=1`;
     const backend4 = await fetch(takeoverUrl, { headers:{ accept:'text/event-stream' } });
     expect(backend4.ok).toBeTrue();
     const ev4 = await readFirstEvent(backend4);

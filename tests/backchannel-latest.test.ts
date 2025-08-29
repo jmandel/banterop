@@ -25,7 +25,7 @@ describe('Backchannel emits only latest subscribe on connect', () => {
 
     // Connect backchannel server-events
     const ac = new AbortController();
-    const es = await fetch(S.base + `/api/pairs/${pairId}/server-events`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
+    const es = await fetch(S.base + `/api/rooms/${pairId}/server-events`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
     expect(es.ok).toBeTrue();
     let first: any = null;
     for await (const ev of parseSse<any>(es.body!)) { first = ev; break; }

@@ -57,7 +57,7 @@ export function tmpDbPath(): string {
 
 // Open a backend lease for a room (pairId) and keep it until stopServer
 export async function openBackend(s: Spawned, pairId: string) {
-  const url = `${s.base}/api/pairs/${pairId}/server-events?mode=backend`;
+  const url = `${s.base}/api/rooms/${pairId}/server-events?mode=backend`;
   const res = await fetch(url, { headers:{ accept:'text/event-stream' } });
   if (!res.ok) throw new Error('failed to open backend');
   __openBackends.push(res);
