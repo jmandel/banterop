@@ -70,7 +70,39 @@ Template-driven card overrides:
   - Finality: none | turn | conversation.
   - Send gating: send when `input-required` or no task yet; after cancel, shows “Send on new task”.
   - Cancel task (non-terminal states): calls `tasks/cancel`.
-  - Clear task (terminal states): clears local history and taskId to start fresh.
+- Clear task (terminal states): clears local history and taskId to start fresh.
+
+### URL Hash Schema (Readable JSON)
+- Purpose: Share most client settings via human-readable JSON in the URL hash.
+- Accepted formats: Raw JSON or percent‑encoded JSON in the hash (e.g., `#%7B...%7D`).
+- Transport inference: `transport` is omitted. The app infers it from URLs:
+  - If `agentCardUrl` is present → A2A
+  - Else if `mcpUrl` is present → MCP
+- Top-level fields:
+  - `agentCardUrl`: string (A2A only)
+  - `mcpUrl`: string (MCP only)
+  - `llm`: `{ provider: "server" | "client-openai", model: string, baseUrl?: string }`
+    - `apiKey` is intentionally excluded from the hash. Keys live only in `sessionStorage`.
+  - `planner`: `{ id: "off" | "llm-drafter" | "scenario-v0.3" | "simple-demo", mode: "approve" | "auto" }`
+  - `planners`: `{ [activeId]: { seed: object } }`  // current planner’s seed only
+  - `rev`: number (monotonic; stale‑update protection)
+
+Examples
+```
+# {"agentCardUrl":"https://…/agent-card.json","llm":{"provider":"server","model":"openai/gpt-oss-120b:nitro"},"planner":{"id":"llm-drafter","mode":"approve"}}
+
+# {"mcpUrl":"https://…/mcp.json","llm":{"provider":"client-openai","baseUrl":"https://openrouter.ai/api/v1","model":"openai/gpt-4o"},"planner":{"id":"scenario-v0.3","mode":"auto"},"planners":{"scenario-v0.3":{"seed":{"scenarioUrl":"https://…/scenario.json"}}}}
+```
+
+Behavior
+- On load, the app hydrates session defaults from the readable JSON hash before endpoint resolution.
+- API keys are never read from the hash; any existing key in `sessionStorage` is preserved.
+- When the store updates, the app writes a fresh JSON hash reflecting:
+  - `agentCardUrl` or `mcpUrl` (not both),
+  - `llm` provider, model, and `baseUrl` (for `client-openai` only),
+  - `planner` id/mode,
+  - `planners` seed for the active planner,
+  - `rev` incremented to avoid stale overwrites.
 
 ## Persistence
 - DB: `FLIPPROXY_DB` (default `:memory:`) — SQLite via Bun.
