@@ -33,7 +33,7 @@ function ControlApp() {
           if (hPair) {
             setPair(hPair)
             const origin = window.location.origin
-            const cardUrl = `${origin}/rooms/${hPair}/agent-card.json`
+            const cardUrl = `${origin}/api/rooms/${hPair}/.well-known/agent-card.json`
             useControlStore.setState({
               initiatorJoinUrl: `${origin}/client/?agentCardUrl=${encodeURIComponent(cardUrl)}`,
               responderJoinUrl: `${origin}/rooms/${hPair}`,

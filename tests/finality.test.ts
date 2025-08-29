@@ -49,7 +49,7 @@ describe('Finality transitions', () => {
     expect(i1.status.state).toBe('working');
 
     // Responder replies with finality=turn
-    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s2', method:'message/send', params:{ message:{ parts:[textPart('two','working')], taskId: respId, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json', ...require('./utils').leaseHeaders(pairId) }, body: JSON.stringify({ jsonrpc:'2.0', id:'s2', method:'message/send', params:{ message:{ parts:[textPart('two','working')], taskId: respId, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
     const r2 = await tasksGet(a2a, initId);
     expect(r2.status.state).toBe('input-required');
   });

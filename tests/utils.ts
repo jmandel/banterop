@@ -27,7 +27,7 @@ export async function startServer(opts?: { dbPath?: string; env?: Record<string,
   const base = String(server.url);
   // Probe readiness
   const ok = await waitUntil(async () => {
-    try { const r = await fetch(base + "/.well-known/agent-card.json"); return r.ok; } catch { return false; }
+    try { const r = await fetch(base + "/.well-known/healthz"); return r.ok; } catch { return false; }
   }, 15000, 100);
   if (!ok) throw new Error("Server did not start");
   const port = Number(new URL(base).port || '0');

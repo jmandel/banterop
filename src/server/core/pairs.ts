@@ -4,6 +4,7 @@ import { extractNextState, computeStatesForNext } from './finality'
 import { validateParts } from './validators'
 import { initTaskId, respTaskId, parseTaskId } from './ids'
 import { createEventStore } from './events'
+import { validateMessageSendParams, validateMessageWithReport, validateTaskWithReport, validateTaskStatusUpdateEventWithReport, toA2AMessage, toA2ATask } from './a2a-validator'
 
 type Deps = { db: Persistence; events: ReturnType<typeof createEventStore>; baseUrl: string }
 
@@ -21,6 +22,31 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
   const metadata = new Map<string, any>()
   // Single Active Backend (SAB) lease map
   const backendByRoom = new Map<string, { leaseId: string; connId: string; lastSeen: number; leaseGen: number }>()
+
+  // Helper to create and validate TaskStatusUpdateEvent
+  interface StatusUpdateParams {
+    taskId: string
+    pairId: string
+    state: TaskState
+    message?: any
+    isFinal: boolean
+  }
+  
+  function createStatusUpdateEvent(params: StatusUpdateParams) {
+    const { taskId, pairId, state, message, isFinal } = params
+    let statusUpdate = {
+      kind: 'status-update' as const,
+      taskId,
+      contextId: pairId,
+      status: {
+        state,
+        message
+      },
+      final: isFinal
+    }
+    // Validate and attach report (returns new object)
+    return validateTaskStatusUpdateEventWithReport(statusUpdate, { pairId, taskId, roomId: pairId })
+  }
 
   function hasActiveBackend(roomId: string): boolean {
     const l = backendByRoom.get(roomId)
@@ -83,12 +109,17 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
     let statusMessage: any = undefined
     if (last) {
       const obj = (()=>{ try { return JSON.parse(last.json) } catch { return {} } })()
-      const desired = extractNextState(obj) ?? 'input-required'
+      const desired = extractNextState(obj) ?? 'working'  // Default: turn-ending (it's your turn)
       const both = computeStatesForNext(last.author, desired)
       state = (viewerRole === 'init' ? (both as any).init : (both as any).resp) as TaskState
       statusMessage = projectForViewer(obj, viewerTaskId, viewerRole, last.author)
     }
-    return { id: row.task_id, contextId: row.pair_id, kind:'task', status:{ state, message: statusMessage }, history: hist }
+    let snapshot = { id: row.task_id, contextId: row.pair_id, kind:'task', status:{ state, message: statusMessage }, history: hist }
+    
+    // Validate and attach report to outbound task (returns new object)
+    snapshot = validateTaskWithReport(snapshot, { pairId: row.pair_id, taskId: row.task_id, roomId: row.pair_id })
+    
+    return snapshot
   }
 
   function projectForViewer(message: any, viewerTaskId: string, viewerRole: 'init'|'resp', authorRoleHint?: 'init'|'resp', viewerLeaseId?: string | null) {
@@ -126,7 +157,7 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
     if (!last) return 'submitted'
     let obj: any = {}
     try { obj = JSON.parse(last.json) } catch {}
-    const desired = extractNextState(obj) ?? 'input-required'
+    const desired = extractNextState(obj) ?? 'working'  // Default: turn-ending (it's your turn)
     const both = computeStatesForNext(last.author, desired)
     return (viewerRole === 'init' ? (both as any).init : (both as any).resp) as TaskState
   }
@@ -218,12 +249,15 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
     },
 
     async messageSend(pairId: string, m: any, configuration?: { historyLength?: number }, viewerLeaseId?: string | null) {
+      // Validate MessageSendParams at the entry point (non-breaking)
+      validateMessageSendParams({ message: m, configuration }, { pairId })
+      
       const hasTaskId = !!m?.taskId
       const { epoch } = hasTaskId ? ensureEpoch(pairId) : ensureEpochForSend(pairId)
 
       const senderId = m?.taskId ?? initTaskId(pairId, epoch)
       const { role: senderRole } = parseTaskId(senderId)
-      const msg = {
+      let msg = {
         role: m?.role ?? 'user',
         parts: m?.parts ?? [],
         messageId: m?.messageId ?? crypto.randomUUID(),
@@ -233,9 +267,13 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
         metadata: m?.metadata,
       }
 
+      // Validate message and attach report (returns new object)
+      msg = validateMessageWithReport(msg, { pairId, messageId: msg.messageId, roomId: pairId })
+      
+      // Existing parts validation (throws on errors)
       validateParts(msg.parts)
 
-      const desired = extractNextState(msg) ?? 'input-required'
+      const desired = extractNextState(msg) ?? 'working'  // Default: turn-ending (it's your turn)
       const states = computeStatesForNext(senderRole, desired)
 
       // Persist caller's attempted message first (idempotent by messageId)
@@ -311,38 +349,89 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
       const self = this
       return (async function* () {
         const { epoch } = ensureEpoch(pairId)
+        const senderId = m?.taskId ?? initTaskId(pairId, epoch)
+        const { role: viewerRole } = parseTaskId(senderId)
 
+        // If no message or empty parts, just return current state
         if (!m || (Array.isArray(m.parts) && m.parts.length === 0)) {
-          const snap = db.getTask(initTaskId(pairId, epoch))!
-          const limit = 10_000 // default when no configuration provided
-          yield toSnapshot(snap, limit)
+          const snap = db.getTask(senderId)!
+          const currentState = snap ? toSnapshot(snap).status.state : 'submitted'
+          const isTerminal = isTerminal(currentState)
+          const needsInput = currentState === 'input-required'
+          
+          const statusMessage = snap ? toSnapshot(snap).status.message : undefined
+          yield createStatusUpdateEvent({
+            taskId: senderId,
+            pairId,
+            state: currentState,
+            message: statusMessage,
+            isFinal: isTerminal || needsInput
+          })
           return
         }
 
-        const senderId = m.taskId ?? initTaskId(pairId, epoch)
+        // Send the message and get result
         const result = await self.messageSend(pairId, { ...(m||{}), taskId: senderId }, m?.configuration)
-        yield result
-        try {
-          const st = (result as any)?.status?.state || 'submitted'
-          yield { kind:'status-update', status:{ state: st } }
-        } catch {}
+        const state = (result as any)?.status?.state || 'submitted'
+        const message = (result as any)?.status?.message
+        const isTerminalState = isTerminal(state)
+        const needsInput = state === 'input-required'
+        
+        // Send TaskStatusUpdateEvent with all required fields
+        yield createStatusUpdateEvent({
+          taskId: senderId,
+          pairId,
+          state,
+          message,
+          isFinal: isTerminalState || needsInput
+        })
       })()
     },
 
     tasksResubscribe(pairId: string, id: string) {
       const row = db.getTask(id)
-      const initial = row ? toSnapshot(row) : { kind:'task', id, contextId: pairId, status:{ state:'submitted' }, history:[] }
-
+      const { role: viewerRole } = parseTaskId(id)
+      
       const stream = (async function* () {
-        yield initial
+        // Send initial status update
+        const initialSnapshot = row ? toSnapshot(row) : { status: { state: 'submitted' as TaskState }, history: [] }
+        const initialState = initialSnapshot.status.state
+        const isInitialTerminal = isTerminal(initialState)
+        
+        yield createStatusUpdateEvent({
+          taskId: id,
+          pairId,
+          state: initialState,
+          message: initialSnapshot.status.message,
+          isFinal: isInitialTerminal
+        })
+        
+        // If already terminal, don't continue streaming
+        if (isInitialTerminal) {
+          return
+        }
+        
+        // Stream subsequent state changes
         for await (const ev of (events as any).stream(pairId, 0)) {
           const e = ev.result
           if (e.type === 'state') {
             const now = db.getTask(id)
             if (now) {
-              const role: 'init'|'resp' = id.startsWith('init:') ? 'init' : 'resp'
-              const st = currentStateForEpoch(pairId, parseTaskId(id).epoch, role)
-              yield { kind:'status-update', status: { state: st } }
+              const st = currentStateForEpoch(pairId, parseTaskId(id).epoch, viewerRole)
+              const isTerminalState = isTerminal(st)
+              
+              yield createStatusUpdateEvent({
+                taskId: id,
+                pairId,
+                state: st,
+                message: e.status?.message,
+                isFinal: isTerminalState
+              })
+              
+              // Close stream only if terminal
+              if (isTerminalState) {
+                break
+              }
             }
           }
         }

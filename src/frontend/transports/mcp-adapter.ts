@@ -157,12 +157,28 @@ export class MCPAdapter implements TransportAdapter {
   }
 
   async cancel(taskId: string): Promise<void> {
+    // Reset local state
     this.messages = [];
     this.status = 'submitted';
     this.conversationId = undefined;
-    try { await this.transport?.terminateSession?.(); } catch {}
-    try { await this.client?.close(); } catch {}
-    this.client = null; this.transport = null;
+
+    // Capture references before mutating
+    const transport = this.transport as any;
+    const client = this.client;
+
+    // Wake any paused long-poll loop waiting for a send
+    try { this.resumeAfterSend?.(); } catch {}
+    this.resumeAfterSend = null;
+
+    // IMPORTANT: Close the transport to stop keep-alive/retry timers
+    try { await transport?.terminateSession?.(); } catch {}
+    try { await transport?.close?.(); } catch {}
+
+    // Then close the client
+    try { await client?.close(); } catch {}
+
+    this.client = null;
+    this.transport = null;
   }
 
   private waitForNextSendOrAbort(signal?: AbortSignal): Promise<void> {

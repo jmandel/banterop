@@ -32,10 +32,11 @@ describe("A2A JSON-RPC", () => {
     const frames: any[] = [];
     for await (const result of parseSse<any>(res.body!)) {
       frames.push({ result });
-      if (frames.length >= 2) break; // snapshot + status-update
+      if (frames.length >= 1) break; // Now only sends one status-update
     }
-    expect(frames[0].result.kind).toBe('task');
-    expect(frames[1].result.kind).toBe('status-update');
+    expect(frames[0].result.kind).toBe('status-update');
+    expect(frames[0].result.taskId).toContain('init:');
+    expect(frames[0].result.contextId).toBe(pairId);
 
     // Verify responder sees mirrored message and is input-required
     const respTaskId = `resp:${pairId}#1`;
@@ -51,7 +52,7 @@ describe("A2A JSON-RPC", () => {
     const { pairId, a2a } = await createPairAndA2A();
     // First start an epoch by streaming empty (creates tasks)
     const res = await fetch(a2a, { method:'POST', headers: { 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id: 's', method:'message/stream', params: { message: { role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
-    for await (const _ of parseSse<any>(res.body!)) break; // snapshot only
+    for await (const _ of parseSse<any>(res.body!)) break; // status-update only now
 
     // Invalid FilePart (both bytes and uri)
     const bad = await fetch(a2a, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ jsonrpc:'2.0', id: 10, method:'message/send', params: { message: { role:'user', parts: [{ kind:'file', file: { name:'x', mimeType:'text/plain', bytes:'QQ==', uri:'http://x' } }], taskId: `init:${pairId}#1`, messageId: crypto.randomUUID() } } }) });
@@ -97,7 +98,7 @@ describe("A2A JSON-RPC", () => {
     // Create epoch #1 via a no-op stream (no taskId)
     {
       const res = await fetch(a2a, { method:'POST', headers: { 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params: { message: { role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
-      for await (const _ of parseSse<any>(res.body!)) break; // snapshot only
+      for await (const _ of parseSse<any>(res.body!)) break; // status-update only now
     }
 
     // Now send without taskId — should bump to epoch #2
@@ -113,7 +114,7 @@ describe("A2A JSON-RPC", () => {
     const { pairId, a2a } = await createPairAndA2A();
     // Start epoch by streaming empty (creates tasks)
     const res = await fetch(a2a, { method:'POST', headers: { 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id: 's', method:'message/stream', params: { message: { role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
-    for await (const _ of parseSse<any>(res.body!)) break; // snapshot only
+    for await (const _ of parseSse<any>(res.body!)) break; // status-update only now
 
     // Send a message via message/send (turn)
     const send = await fetch(a2a, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ jsonrpc:'2.0', id:'m', method:'message/send', params:{ message:{ parts:[textPart('hello','working')], taskId: `init:${pairId}#1`, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });

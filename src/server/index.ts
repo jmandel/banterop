@@ -65,7 +65,7 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
         last = { author: r.author, msg }
       }
       if (last) {
-        const desired = extractNextState(last.msg) ?? 'input-required'
+        const desired = extractNextState(last.msg) ?? 'working'  // Default: turn-ending (it's your turn)
         const states = computeStatesForNext(last.author, desired)
         events.push(pairId, { type:'state', epoch, states, status:{ message:last.msg } } as any)
       } else {

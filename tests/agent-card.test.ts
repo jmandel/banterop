@@ -10,7 +10,7 @@ describe('Per-room agent card', () => {
     const r = await fetch(S.base + '/api/pairs', { method:'POST' });
     const j = await r.json();
     const roomId = j.pairId as string;
-    const res = await fetch(S.base + `/rooms/${roomId}/agent-card.json`);
+    const res = await fetch(S.base + `/api/rooms/${roomId}/.well-known/agent-card.json`);
     expect(res.ok).toBeTrue();
     const card = await res.json();
     expect(String(card?.name || '')).toContain(`Conversational Interop Room`);

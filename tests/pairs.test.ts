@@ -15,7 +15,7 @@ describe("Pairs API", () => {
     expect(j.pairId).toBeString();
     expect(j.endpoints.a2a).toContain(`/api/rooms/${j.pairId}/a2a`);
     expect(j.endpoints.mcp).toContain(`/api/rooms/${j.pairId}/mcp`);
-    expect(j.endpoints.agentCard).toContain(`/rooms/${j.pairId}/agent-card.json`);
+    expect(j.endpoints.agentCard).toContain(`/api/rooms/${j.pairId}/.well-known/agent-card.json`);
     expect(j.links.initiator.joinClient).toContain('/client/?agentCardUrl=');
     expect(j.links.initiator.joinMcp).toContain('/client/?mcpUrl=');
     expect(j.links.responder.openRoom).toContain(`/rooms/${j.pairId}`);

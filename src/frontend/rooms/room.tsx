@@ -67,7 +67,7 @@ function useRoom() {
   const a2a = `${base}/api/rooms/${roomId}/a2a`
   const mcp = `${base}/api/rooms/${roomId}/mcp`
   const tasks = `${base}/api/pairs/${roomId}/server-events?mode=backend`
-  const agentCard = `${base}/rooms/${roomId}/agent-card.json`
+  const agentCard = `${base}/api/rooms/${roomId}/.well-known/agent-card.json`
   return { roomId, a2a, mcp, tasks, agentCard }
 }
 
@@ -132,6 +132,7 @@ function App() {
   const roomTitle = `Room: ${roomId}`
   const taskId = useAppStore(s => s.taskId)
   const uiStatus = useAppStore(s => s.uiStatus())
+  const isFinal = ['completed','canceled','failed','rejected'].includes(uiStatus)
   const facts = useAppStore(s => s.facts)
   const plannerId = useAppStore(s => s.plannerId)
   const plannerMode = useAppStore(s => s.plannerMode)
@@ -274,7 +275,7 @@ function App() {
 
       {hasTranscript && (
         <div className="card">
-          <div className={`transcript ${observing ? 'faded' : ''}`} aria-live="polite" ref={transcriptRef}>
+          <div className={`transcript ${(observing || isFinal) ? 'faded' : ''}`} aria-live="polite" ref={transcriptRef}>
             {facts.map((f:any) => {
             if (f.type === 'remote_received' || f.type === 'remote_sent') {
               const isMe = f.type === 'remote_sent'
@@ -342,7 +343,7 @@ function App() {
         </div>
       )}
 
-      {!observing && plannerId === 'off' && (
+      {!observing && plannerId === 'off' && !isFinal && (
         <ManualComposer
           disabled={uiStatus !== 'input-required'}
           hint={uiStatus !== 'input-required' ? 'Not your turn' : undefined}

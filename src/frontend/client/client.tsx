@@ -184,7 +184,7 @@ function App() {
       {showDebug && <DebugPanel />}
       {hasTranscript && (
         <div className="card">
-          <div className="transcript" aria-live="polite" ref={transcriptRef}>
+          <div className={`transcript ${['completed','canceled','failed','rejected'].includes(uiStatus) ? 'faded' : ''}`} aria-live="polite" ref={transcriptRef}>
             {facts.map((f) => {
               if (f.type === 'remote_received' || f.type === 'remote_sent') {
                 const isMe = f.type === 'remote_sent';

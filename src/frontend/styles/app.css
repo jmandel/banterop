@@ -57,6 +57,8 @@ header { display:flex; gap:10px; align-items:center; margin-bottom: 12px; }
 /* Read-only/observer visuals */
 .faded { opacity: 0.55; }
 
+ 
+
 /* Small success check icon for copy buttons */
 .icon-check { opacity: 0; transition: opacity 0.2s ease; margin-left: 6px; color: #16a34a; font-weight: 600; }
 .icon-check.show { opacity: 1; }
