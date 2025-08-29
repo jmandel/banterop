@@ -6,11 +6,20 @@ import { encodeSetup } from '../../../shared/setup-hash';
 
 type Protocol = 'a2a' | 'mcp';
 
-// removed encodeBase64Url
-function encodeBase64Url(obj: unknown): string { /* removed */ return ''; }
-  const json = JSON.stringify(obj);
-  const base64 = btoa(json).replace(/=+$/, '');
-  return base64.replace(/\+/g, '-').replace(/\//g, '_');
+// Local stub for a previously imported helper used only in dead code below
+function buildBridgeEndpoint(_apiBase: string, protocol: Protocol, _config64: string): { label: string; url: string } {
+  return { label: protocol.toUpperCase(), url: '' };
+}
+
+// Encode object to base64url (safe no-op fallback)
+function encodeBase64Url(obj: unknown): string {
+  try {
+    const json = JSON.stringify(obj);
+    const base64 = btoa(json).replace(/=+$/, '');
+    return base64.replace(/\+/g, '-').replace(/\//g, '_');
+  } catch {
+    return '';
+  }
 }
 
 export function RunWizardPage() {
@@ -33,6 +42,8 @@ export function RunWizardPage() {
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [instructions, setInstructions] = useState<string>('');
   const [agentInstructions, setAgentInstructions] = useState<Record<string, string>>({});
+  // Used by hidden UI and dead code paths; keep to satisfy JSX references
+  const [startFirst, setStartFirst] = useState<string>('');
   
 
   useEffect(() => {
@@ -106,9 +117,8 @@ export function RunWizardPage() {
     return agentIds.find((a) => a !== role) || agentIds[0] || '';
   }, [agentIds, role]);
 
-  // Helper function to build metadata for simulation
-  // removed buildMeta
-const buildMeta = () => { /* removed */ return {}; }
+  // Helper function to build metadata for simulation (used only in disabled code path)
+  const buildMeta = () => {
     const cfg = scenario?.config || scenario;
     const sid = cfg?.metadata?.id || scenarioId;
     const agents = (cfg?.agents || []).map((a: any) => {
@@ -122,8 +132,8 @@ const buildMeta = () => { /* removed */ return {}; }
       title: `Run: ${cfg?.metadata?.title || scenario?.name || ''}`,
       scenarioId: sid,
       agents,
-      startingAgentId: startFirst || agents[0]?.id || '',
-    };
+      startingAgentId: startFirst || (agents[0] as any)?.id || '',
+    } as any;
   };
 
   const onLaunch = () => {
@@ -299,9 +309,7 @@ const buildMeta = () => { /* removed */ return {}; }
         {/* Step 4: Simulated agent config */}
         <Card className="space-y-3">
           <CardHeader title="Step 4: Configure the Simulated Agent" />
-          {
-            <div className="text-sm text-slate-600">Platform will simulate: <span className="font-mono">{simulatedAgentId || '(choose role first)'}</span></div>
-          )}
+          <div className="text-sm text-slate-600">Platform will simulate: <span className="font-mono">{simulatedAgentId || '(choose role first)'}</span></div>
           <div className="space-y-3">
             <div className="space-y-1">
               <label htmlFor="run-llm-model" className="text-sm text-slate-600">LLM Model</label>
