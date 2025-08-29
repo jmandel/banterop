@@ -646,7 +646,8 @@ export function buildScenarioAgentCard(baseUrlToA2A: URL, config64: string, orch
 
   // Minimal, scenario-specific card
   return {
-    protocolVersion: '0.2.9',
+    protocolVersion: '0.3.0',
+    version: '0.0.1',
     name: `A2A Bridge · ${title}`,
     description: 'JSON-RPC A2A facade over the conversation orchestrator (streaming enabled).',
     url: baseUrlToA2A.toString(),
