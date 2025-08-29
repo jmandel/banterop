@@ -60,6 +60,14 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
     return { leaseId: l.leaseId, connId: l.connId, leaseGen: l.leaseGen }
   }
 
+  function rebindLease(roomId: string, leaseId: string, newConnId: string): boolean {
+    const l = backendByRoom.get(roomId)
+    if (!l) return false
+    if (l.leaseId !== leaseId) return false
+    backendByRoom.set(roomId, { ...l, connId: newConnId, lastSeen: Date.now() })
+    return true
+  }
+
   function acquireBackend(roomId: string, connId: string, takeover?: boolean): { granted: boolean; leaseId?: string; leaseGen?: number; takeover?: boolean } {
     const existing = backendByRoom.get(roomId)
     if (hasActiveBackend(roomId) && !takeover) return { granted: false }
@@ -216,6 +224,9 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
     async getMetadata(pairId: string) {
       return metadata.get(pairId) ?? null
     },
+
+    getLease,
+    rebindLease,
 
     async tasksGet(pairId: string, id: string) {
       const row = db.getTask(id)

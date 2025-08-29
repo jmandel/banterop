@@ -26,11 +26,9 @@ afterAll(async () => {
 });
 
   it("persists pair meta and tasks across restart", async () => {
-    // Create a pair and start an epoch to create tasks
-    const r = await fetch(S.base + "/api/pairs", { method:'POST' });
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    // Create an implicit room and start an epoch to create tasks
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
     await openBackend(S, pairId);
     const initTaskId = `init:${pairId}#1`;
 

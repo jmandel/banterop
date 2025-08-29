@@ -9,11 +9,9 @@ afterAll(async () => { await stopServer(S); });
 
 describe('Resubscribe reconnect', () => {
   it('closing and reopening tasks/resubscribe still yields frames', async () => {
-    const r = await fetch(S.base + '/api/pairs', { method:'POST' });
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
-    await openBackend(S, pairId);
+  const pairId = `t-${crypto.randomUUID()}`;
+  await openBackend(S, pairId);
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
     const respId = `resp:${pairId}#1`;
 
     // Start epoch

@@ -5,24 +5,7 @@ import { sse } from '../core/sse'
 export function pairsRoutes(includeNonApi = false) {
   const r = new Hono<AppBindings>()
 
-  r.post('/pairs', async (c) => {
-    const pairs = c.get('pairs')
-    const origin = new URL(c.req.url).origin
-    const created = await pairs.createPair()
-    const base = origin
-    const a2a = `${base}/api/rooms/${created.pairId}/a2a`
-    const mcp = `${base}/api/rooms/${created.pairId}/mcp`
-    const agentCard = `${base}/api/rooms/${created.pairId}/.well-known/agent-card.json`
-    const tasks = `${base}/api/pairs/${created.pairId}/server-events`
-    return c.json({
-      pairId: created.pairId,
-      endpoints: { a2a, mcp, agentCard },
-      links: {
-        initiator: { joinClient: `${base}/client/?agentCardUrl=${encodeURIComponent(agentCard)}`, joinMcp: `${base}/client/?mcpUrl=${encodeURIComponent(mcp)}` },
-        responder: { openRoom: `${base}/rooms/${created.pairId}` },
-      }
-    })
-  })
+  // Note: Explicit pair creation endpoint removed; rooms are created implicitly on first use
 
   r.get('/pairs/:pairId/metadata', async (c) => {
     const { pairId } = c.req.param()
@@ -72,12 +55,35 @@ export function pairsRoutes(includeNonApi = false) {
           let granted = false
           let leaseId: string | undefined
           let ping: any = null
+          const requestedLeaseId = String(c.req.query('leaseId') || '')
           // Attempt backend lease if requested
           if (mode === 'backend') {
             try {
-              const acq = (pairs as any).acquireBackend(pairId, connId, takeover)
-              if (acq?.granted) { leaseId = acq.leaseId; write({ type:'backend-granted', leaseId: acq.leaseId, leaseGen: acq.leaseGen }) ; granted = true }
-              else { write({ type:'backend-denied' }) }
+              const existing = (pairs as any).getLease(pairId)
+              if (!existing) {
+                // No lease exists. Allow fresh acquisition only if no requestedLeaseId and not takeover
+                if (requestedLeaseId) {
+                  write({ type:'backend-denied' })
+                } else {
+                  const acq = (pairs as any).acquireBackend(pairId, connId, takeover)
+                  if (acq?.granted) { leaseId = acq.leaseId; write({ type:'backend-granted', leaseId: acq.leaseId, leaseGen: acq.leaseGen }) ; granted = true }
+                  else { write({ type:'backend-denied' }) }
+                }
+              } else {
+                // Lease exists. Require explicit takeover or matching leaseId rebind
+                if (takeover) {
+                  const acq = (pairs as any).acquireBackend(pairId, connId, true)
+                  if (acq?.granted) { leaseId = acq.leaseId; write({ type:'backend-granted', leaseId: acq.leaseId, leaseGen: acq.leaseGen }) ; granted = true }
+                  else { write({ type:'backend-denied' }) }
+                } else if (requestedLeaseId && requestedLeaseId === existing.leaseId) {
+                  // Rebind same lease to this connection id
+                  const ok = (pairs as any).rebindLease(pairId, requestedLeaseId, connId)
+                  if (ok) { leaseId = requestedLeaseId; write({ type:'backend-granted', leaseId: requestedLeaseId, leaseGen: existing.leaseGen }) ; granted = true }
+                  else { write({ type:'backend-denied' }) }
+                } else {
+                  write({ type:'backend-denied' })
+                }
+              }
             } catch {}
           }
           ping = setInterval(() => { try {

@@ -14,10 +14,8 @@ async function tasksGet(a2a: string, id: string) {
 
 describe('Finality transitions', () => {
   it("nextState=input-required keeps responder working and initiator input-required", async () => {
-    const r = await fetch(S.base + "/api/pairs", { method:'POST' });
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
     await openBackend(S, pairId);
     const initId = `init:${pairId}#1`;
     const respId = `resp:${pairId}#1`;
@@ -33,10 +31,8 @@ describe('Finality transitions', () => {
   });
 
   it("nextState=working flips turn: responder input-required then initiator input-required", async () => {
-    const r = await fetch(S.base + "/api/pairs", { method:'POST' });
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
     await openBackend(S, pairId);
     const initId = `init:${pairId}#1`;
     const respId = `resp:${pairId}#1`;
@@ -55,10 +51,8 @@ describe('Finality transitions', () => {
   });
 
   it("nextState=completed completes both", async () => {
-    const r = await fetch(S.base + "/api/pairs", { method:'POST' });
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
     await openBackend(S, pairId);
     const initId = `init:${pairId}#1`;
     const respId = `resp:${pairId}#1`;

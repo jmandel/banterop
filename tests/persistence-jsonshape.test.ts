@@ -21,10 +21,8 @@ describe('Persistence — stored JSON shape', () => {
   });
 
   it('strips role, taskId, and contextId from persisted messages', async () => {
-    const r = await fetch(S.base + '/api/pairs', { method: 'POST' });
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
 
     const initTaskId = `init:${pairId}#1`;
     const messageId = `m:${crypto.randomUUID()}`;

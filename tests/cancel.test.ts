@@ -9,12 +9,9 @@ afterAll(async () => { await stopServer(S); });
 
 describe("Cancel semantics", () => {
   it("cancels both sides, responder stream sees status=canceled, and events.log shows unsubscribe + state", async () => {
-    // Create pair and start epoch
-    const r = await fetch(S.base + "/api/pairs", { method:'POST' });
-    expect(r.ok).toBeTrue();
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    // Create implicit room and start epoch
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
     await openBackend(S, pairId);
     const initTaskId = `init:${pairId}#1`;
     const respTaskId = `resp:${pairId}#1`;
@@ -76,10 +73,8 @@ describe("Cancel semantics", () => {
   });
 
   it("cancel is idempotent (double cancel keeps tasks canceled)", async () => {
-    const r = await fetch(S.base + "/api/pairs", { method:'POST' });
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
     await openBackend(S, pairId);
     const initTaskId = `init:${pairId}#1`;
     const respTaskId = `resp:${pairId}#1`;
@@ -111,10 +106,8 @@ describe("Cancel semantics", () => {
   });
 
   it("after cancel, message/send without taskId starts next epoch", async () => {
-    const r = await fetch(S.base + "/api/pairs", { method:'POST' });
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
     await openBackend(S, pairId);
     const initTaskId = `init:${pairId}#1`;
     const respTaskId = `resp:${pairId}#1`;

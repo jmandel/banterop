@@ -8,11 +8,9 @@ beforeAll(async () => { S = await startServer(); });
 afterAll(async () => { await stopServer(S); });
 
 async function createPairA2A() {
-  const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
-  const j = await r.json();
-  const pairId = j.pairId as string;
+  const pairId = `t-${crypto.randomUUID()}`;
   await openBackend(S, pairId);
-  return { pairId, a2a: j.endpoints.a2a };
+  return { pairId, a2a: `${S.base}/api/rooms/${pairId}/a2a` };
 }
 
 describe("Message events and history", () => {

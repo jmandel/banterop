@@ -8,11 +8,10 @@ beforeAll(async () => { S = await startServer(); });
 afterAll(async () => { await stopServer(S); });
 
 async function createPairAndA2A() {
-  const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
-  const j = await r.json();
-  const pairId = j.pairId as string;
+  const pairId = `t-${crypto.randomUUID()}`;
   await openBackend(S, pairId);
-  return { pairId, a2a: j.endpoints.a2a };
+  const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
+  return { pairId, a2a };
 }
 
 describe("A2A JSON-RPC", () => {
@@ -67,10 +66,8 @@ describe("A2A JSON-RPC", () => {
   });
 
   it("message/send without taskId creates epoch and uses initiator id", async () => {
-    const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
 
     // Send without taskId — should auto-create epoch and use init:<pair>#1
     const body = { jsonrpc:'2.0', id:'m0', method:'message/send', params:{ message:{ parts:[textPart('auto turn','working')], messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } };
@@ -90,10 +87,8 @@ describe("A2A JSON-RPC", () => {
   });
 
   it("message/send without taskId starts next epoch if tasks already exist", async () => {
-    const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
 
     // Create epoch #1 via a no-op stream (no taskId)
     {

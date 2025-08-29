@@ -14,7 +14,8 @@ class OpenRouterLLM extends LLMProvider {
     this.client = new OpenAI({ apiKey: cfg.apiKey, baseURL: 'https://openrouter.ai/api/v1' });
   }
   static getMetadata(): LLMProviderMetadata {
-    return { name:'openrouter', description:'OpenRouter AI Gateway', models:['openai/gpt-oss-120b:nitro','qwen/qwen3-235b-a22b-2507:nitro','openai/gpt-5'], defaultModel:'openai/gpt-oss-120b:nitro' };
+    // Advertise a single preset model; override via LLM_MODELS_OPENROUTER_INCLUDE if desired
+    return { name:'openrouter', description:'OpenRouter AI Gateway', models:['@preset/chitchat'], defaultModel:'@preset/chitchat' };
   }
   getMetadata(): LLMProviderMetadata { return OpenRouterLLM.getMetadata() }
 

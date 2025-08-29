@@ -17,7 +17,7 @@ import { createScenariosStore } from './core/scenarios-store'
 import { createScenariosRoutes } from './routes/scenarios'
 import { createLLMRoutes } from './routes/llm'
 import { extractNextState, computeStatesForNext } from './core/finality'
-import controlHtml from '../frontend/control/index.html'
+// controlHtml removed as default landing; scenarios becomes the main page
 import clientHtml from '../frontend/client/index.html'
 import roomsHtml from '../frontend/rooms/index.html'
 import scenariosHtml from '../frontend/scenarios/index.html'
@@ -103,8 +103,7 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
     //development: isDev ? { hmr: true, console: true } : undefined,
     development: true,
     routes: {
-      '/': controlHtml,
-      '/control/': controlHtml,
+      '/': scenariosHtml,
       '/client/': clientHtml,
       '/rooms/': roomsHtml,
       '/scenarios/': scenariosHtml,
@@ -114,8 +113,7 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
     async fetch(req, srv) {
       const url = new URL(req.url)
       const staticPages: Record<string, string> = {
-        '/': controlHtml,
-        '/control/': controlHtml,
+        '/': scenariosHtml,
         '/client/': clientHtml,
         '/rooms/': roomsHtml,
         '/scenarios/': scenariosHtml,

@@ -101,6 +101,15 @@ export type PlanContext<Cfg = unknown> = {
   llm: LlmProvider;
 };
 
+export type ReadableHashPayload = {
+  agentCardUrl?: string;
+  mcpUrl?: string;
+  llm?: { provider?: 'server'|'client-openai'; model?: string; baseUrl?: string };
+  planner?: { id?: 'off'|'llm-drafter'|'scenario-v0.3'|'simple-demo'; mode?: 'approve'|'auto'; seed?: any };
+  planners?: Record<string, { seed: any }>;
+  rev?: number;
+};
+
 export type Planner<Cfg = unknown> = {
   id: string;
   name: string;
@@ -116,6 +125,6 @@ export type Planner<Cfg = unknown> = {
   dehydrate?: (config: Cfg) => Record<string, unknown>;
   hydrate?: (seed: Record<string, unknown>, context: any) => Promise<{ config: Cfg; ready: boolean }>;
 
-  // Optional: provide a peer setup payload for constructing counterpart URLs (planner-agnostic hook)
-  makePeerSetup?: (opts: { fullConfig: Cfg; facts?: ReadonlyArray<Fact>; mode?: 'approve'|'auto' }) => import('./setup-hash').SetupPayload | null;
+  // Optional: provide a peer setup payload for constructing counterpart URLs using readable-hash schema
+  makePeerSetup?: (opts: { fullConfig: Cfg; facts?: ReadonlyArray<Fact>; mode?: 'approve'|'auto' }) => ReadableHashPayload | null;
 };

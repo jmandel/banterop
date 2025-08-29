@@ -7,9 +7,8 @@ beforeAll(async () => { S = await startServer(); });
 afterAll(async () => { await stopServer(S); });
 
 async function createPairA2A() {
-  const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
-  const j = await r.json();
-  return { pairId: j.pairId as string, a2a: j.endpoints.a2a };
+  const pairId = `t-${crypto.randomUUID()}`;
+  return { pairId, a2a: `${S.base}/api/rooms/${pairId}/a2a` };
 }
 
 describe("historyLength edge cases", () => {

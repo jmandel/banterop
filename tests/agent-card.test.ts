@@ -7,9 +7,7 @@ afterAll(async () => { await stopServer(S); });
 
 describe('Per-room agent card', () => {
   it('returns endpoints for the given room', async () => {
-    const r = await fetch(S.base + '/api/pairs', { method:'POST' });
-    const j = await r.json();
-    const roomId = j.pairId as string;
+    const roomId = `t-${crypto.randomUUID()}`;
     const res = await fetch(S.base + `/api/rooms/${roomId}/.well-known/agent-card.json`);
     expect(res.ok).toBeTrue();
     const card = await res.json();

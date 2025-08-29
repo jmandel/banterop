@@ -79,16 +79,16 @@ The harness plans only once per logical trigger instance:
 
 - Save & Apply: The Setup card calls `reconfigurePlanner({ config, ready, rewind:true })` on the app store.
   - Store updates `configByPlanner[plannerId]` and `readyByPlanner[plannerId]`.
-  - The centralized URL sync dehydrates FullConfig and writes `#setup=…` with a monotonic `rev`.
+  - Centralized URL sync dehydrates FullConfig and writes a human‑readable JSON hash with a monotonic `rev`.
 
-- Deep-link bootstrap: On page load, a centralized `startUrlSync()` reads `#setup=…`, sets planner id/mode, hydrates the seed via the planner’s `hydrate()`, then commits `{ config, ready }` to the store.
+- Deep-link bootstrap: On page load, `startUrlSync()` reads the readable JSON hash, sets planner id/mode, extracts a seed from `planners[<id>].seed` (or `planner.seed`/`seed` for tolerance), hydrates via the planner’s `hydrate()`, then commits `{ config, ready }` to the store.
 
 - Harness wiring: The planner controller watches store changes and rebuilds the harness when `plannerId`, `readyByPlanner`, or `configByPlanner` change, passing the FullConfig directly to the harness.
 
 ## Deep-Linking Contract
 
 - Planners should implement both hooks:
-  - `dehydrate(config)` returns a small, URL‑safe seed; exclude large fields (e.g., fetched documents) and include only what’s needed to reconstruct intent.
+  - `dehydrate(config)` returns a small seed; exclude large fields and include only what’s needed to reconstruct intent.
   - `hydrate(seed, ctx)` returns `{ config, ready }` usable by the harness; may fetch and should preserve user choices when still valid.
 - The generic store/UI do not read/write the URL directly — a centralized service coordinates both directions.
 

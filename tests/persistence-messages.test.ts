@@ -21,12 +21,9 @@ describe("Persistence — messages and state across restart", () => {
   });
 
   it("reconstructs status and history from DB and seeds SSE on restart", async () => {
-    // Create pair and derive endpoints
-    const r = await fetch(S.base + "/api/pairs", { method:'POST' });
-    expect(r.ok).toBeTrue();
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    // Create implicit room and derive endpoints
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
     await openBackend(S, pairId);
     const initTaskId = `init:${pairId}#1`;
     const respTaskId = `resp:${pairId}#1`;
@@ -122,12 +119,9 @@ describe("Persistence — messages and state across restart", () => {
   });
 
   it("persists multi-epoch history and isolates per-epoch after restart", async () => {
-    // New pair
-    const r = await fetch(S.base + "/api/pairs", { method:'POST' });
-    expect(r.ok).toBeTrue();
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    // New implicit room
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
     await openBackend(S, pairId);
 
     const init1 = `init:${pairId}#1`;

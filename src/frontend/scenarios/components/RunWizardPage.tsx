@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, CardHeader, Button, ModelSelect } from '../../ui';
 import { api } from '../utils/api';
-import { encodeSetup } from '../../../shared/setup-hash';
 
 type Protocol = 'a2a' | 'mcp';
 
@@ -68,9 +67,14 @@ export function RunWizardPage() {
             const filtered = (p.data.providers || []).filter((x: any) =>
               x.name !== 'browserside' && x.name !== 'mock' && x.available !== false
             );
-            setProviders(filtered);
-            const flat = filtered.flatMap((x: any) => x.models || []);
-            if (flat[0]) setSelectedModel(flat[0]);
+            // Prefer OpenRouter provider, if present
+            const openrouter = filtered.find((x: any) => x.name === 'openrouter');
+            const others = filtered.filter((x: any) => x.name !== 'openrouter');
+            const ordered = openrouter ? [openrouter, ...others] : filtered;
+            setProviders(ordered);
+            const flat = ordered.flatMap((x: any) => x.models || []);
+            const defaultModel = flat.includes('@preset/chitchat') ? '@preset/chitchat' : (flat[0] || '');
+            if (defaultModel) setSelectedModel(defaultModel);
           }
         } catch {}
       } catch (e: any) {
@@ -142,6 +146,7 @@ export function RunWizardPage() {
     const base = api.getBaseUrl();
     const scenarioUrl = `${base}/api/scenarios/${encodeURIComponent(String(sid))}`;
     const defaultSteps = 20;
+    const scenarioTitle = cfg?.metadata?.title || scenario?.name || String(sid);
 
     // Choose who the platform will control vs. who the participant provides
     const myAgentForServer = simulatedAgentId || '';
@@ -155,10 +160,17 @@ export function RunWizardPage() {
         model: selectedModel || '',
         myAgentId: myAgentForServer,
         maxInlineSteps: defaultSteps,
+        ...(instructions && instructions.trim() ? { instructions: instructions.trim() } : {}),
       };
-      const setup = { v: 2, planner: { id: 'scenario-v0.3', mode: 'auto' as const, seed, rev: 2 } };
       const roomId = String(sid || 'room');
-      const href = `/rooms/${encodeURIComponent(roomId)}#${encodeSetup(setup as any)}`;
+      const readable = {
+        planner: { id: 'scenario-v0.3', mode: 'approve' as const },
+        planners: { ['scenario-v0.3']: { seed } },
+        llm: { provider: 'server', model: selectedModel || '' },
+        roomTitle: scenarioTitle,
+        rev: 1,
+      };
+      const href = `/rooms/${encodeURIComponent(roomId)}#${JSON.stringify(readable)}`;
       try { window.open(href, '_blank'); } catch { navigate(href); }
     } else {
       // Participant has a SERVER → open /client prefilled with server URL (MCP or Agent Card) + scenario planner in approve mode
@@ -168,16 +180,51 @@ export function RunWizardPage() {
         model: selectedModel || '',
         myAgentId: myAgentForClient,
         maxInlineSteps: defaultSteps,
+        ...(instructions && instructions.trim() ? { instructions: instructions.trim() } : {}),
       };
-      const setup = { v: 2, planner: { id: 'scenario-v0.3', mode: 'approve' as const, seed, rev: 2 } };
-      const params = new URLSearchParams();
       const trimmed = serverUrl.trim();
-      if (protocol === 'mcp') params.set('mcpUrl', trimmed);
-      else params.set('agentCardUrl', trimmed);
-      const href = `/client/?${params.toString()}#${encodeSetup(setup as any)}`;
+      const readable = {
+        ...(protocol === 'mcp' ? { mcpUrl: trimmed } : { agentCardUrl: trimmed }),
+        planner: { id: 'scenario-v0.3', mode: 'approve' as const },
+        planners: { ['scenario-v0.3']: { seed } },
+        llm: { provider: 'server', model: selectedModel || '' },
+        rev: 1,
+      };
+      const href = `/client/#${encodeURIComponent(JSON.stringify(readable))}`;
       try { window.open(href, '_blank'); } catch { navigate(href); }
     }
   };
+
+  // Precompute share links so users can right‑click or copy
+  const computedRoomHref = React.useMemo(() => {
+    try {
+      if (!scenario) return '';
+      const cfg = scenario?.config || scenario;
+      const sid = cfg?.metadata?.id || scenarioId || '';
+      const base = api.getBaseUrl();
+      const scenarioUrl = `${base}/api/scenarios/${encodeURIComponent(String(sid))}`;
+      const defaultSteps = 20;
+      const myAgentForServer = simulatedAgentId || '';
+      const seed: any = {
+        v: 2,
+        scenarioUrl,
+        model: selectedModel || '',
+        myAgentId: myAgentForServer,
+        maxInlineSteps: defaultSteps,
+        ...(instructions && instructions.trim() ? { instructions: instructions.trim() } : {}),
+      };
+      const roomId = String(sid || 'room');
+      const scenarioTitle = cfg?.metadata?.title || scenario?.name || String(sid);
+      const readable: any = {
+        planner: { id: 'scenario-v0.3', mode: 'approve' as const },
+        planners: { ['scenario-v0.3']: { seed } },
+        llm: { provider: 'server', model: selectedModel || '' },
+        roomTitle: scenarioTitle,
+        rev: 1,
+      };
+      return `/rooms/${encodeURIComponent(roomId)}#${encodeURIComponent(JSON.stringify(readable))}`;
+    } catch { return ''; }
+  }, [scenario, scenarioId, simulatedAgentId, selectedModel, instructions]);
 
   // (Removed) Live preview URL; Step 3 should not show a server endpoint
 
@@ -410,17 +457,19 @@ export function RunWizardPage() {
                 </div>
               );
             } else if (hasClient) {
-              // Client mode - launch monitoring page
+              // Client mode - launch monitoring page (link with href for right-click & inspection)
               return (
                 <div className="space-y-3">
                   <h3 className="text-lg font-semibold text-slate-800">Ready to Connect</h3>
-                  <Button 
-                    variant="primary"
-                    className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold py-4 px-6 rounded-lg shadow-lg transition-colors text-lg"
-                    onClick={onLaunch}
+                  <a
+                    href={computedRoomHref || '#'}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center justify-center w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold py-4 px-6 rounded-lg shadow-lg transition-colors text-lg"
+                    onClick={(e)=>{ if (!computedRoomHref) e.preventDefault(); }}
                   >
                     📊 Open Server Manager
-                  </Button>
+                  </a>
                   <p className="text-xs text-slate-600 text-center">
                     Configure server endpoint and monitor connection
                   </p>

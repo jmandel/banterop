@@ -9,11 +9,10 @@ afterAll(async () => { await stopServer(S); });
 
 describe('State events reflect correct turn semantics and include message text', () => {
   it('state after message/send(working) shows responder=input-required, initiator=working with message text', async () => {
-    const r = await fetch(S.base + '/api/pairs', { method:'POST' });
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
     await openBackend(S, pairId);
+    
 
     // Start epoch
     const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params:{ message:{ role:'user', parts: [], messageId: crypto.randomUUID() } } }) });

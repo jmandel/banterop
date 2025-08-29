@@ -9,10 +9,7 @@ afterAll(async () => { await stopServer(S); });
 
 describe("Control-plane event log", () => {
   it("supports since= backlog replay, reset emits unsubscribe+state, and epoch increments", async () => {
-    const r = await fetch(S.base + "/api/pairs", { method:'POST' });
-    expect(r.ok).toBeTrue();
-    const j = await r.json();
-    const pairId = j.pairId as string;
+    const pairId = `t-${crypto.randomUUID()}`;
     await openBackend(S, pairId);
 
     // Backlog replay from since=0 should include pair-created as first event
@@ -24,7 +21,7 @@ describe("Control-plane event log", () => {
       for await (const ev of parseSse<any>(es.body!)) {
         expect(ev.pairId).toBe(pairId);
         expect(typeof ev.seq).toBe('number');
-        expect(ev.type).toBe('pair-created');
+        expect(ev.type).toBe('epoch-begin');
         got = true;
         ac.abort();
         break;
@@ -33,7 +30,7 @@ describe("Control-plane event log", () => {
     }
 
     // Start epoch by streaming a no-op message
-    const a2a = j.endpoints.a2a;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
     {
       const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start', method:'message/stream', params:{ message:{ role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
       for await (const _ of parseSse<any>(res.body!)) break;

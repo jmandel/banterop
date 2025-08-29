@@ -1,16 +1,15 @@
 import type { Planner, PlanInput, PlanContext, ProposedFact, Fact, AttachmentMeta } from "../../../shared/journal-types";
+import { LLMDrafterSetup, dehydrateLLM, hydrateLLM } from './llm-drafter.setup';
 import { chatWithValidationRetry, cleanModelText } from "../../../shared/llm-retry";
+import { DEFAULT_CHITCHAT_MODEL } from '../../../shared/llm-provider';
 
 type Cfg = {
   endpoint?: string;
-  model?: string;
   temperature?: number;
   systemPrompt?: string;
   systemAppend?: string;
   targetWords?: number;
 };
-
-const DEFAULT_MODEL = "openai/gpt-oss-120b:nitro";
 const DEFAULT_TEMP = 0.2;
 
 function latestStatus(facts: ReadonlyArray<Fact>): string {
@@ -95,10 +94,20 @@ function buildPrompt(input: PlanInput, ctx: PlanContext<Cfg>): { system: string;
 export const LLMDrafterPlanner: Planner<Cfg> = {
   id: 'llm-drafter',
   name: 'LLM Drafter',
+  // New per-planner setup API
+  // @ts-ignore — Planner type allows optional methods
+  SetupComponent: LLMDrafterSetup,
+  // @ts-ignore — hydrate/dehydrate present for URL sync
+  dehydrate: (cfg: any) => dehydrateLLM({
+    systemAppend: String(cfg?.systemPrompt || cfg?.systemAppend || ''),
+    targetWords: Math.max(0, Math.min(1000, Number(cfg?.targetWords || 0)))
+  }),
+  // @ts-ignore
+  hydrate: async (seed: any) => hydrateLLM(seed),
   async plan(input, ctx) {
     ctx.hud('planning', 'LLM drafting…', 0.4);
     const p = buildPrompt(input, ctx);
-    const model = (ctx.config?.model || ctx.model || DEFAULT_MODEL);
+    const model = ctx.model || DEFAULT_CHITCHAT_MODEL;
     const temperature = typeof ctx.config?.temperature === 'number' ? ctx.config!.temperature! : DEFAULT_TEMP;
     let text: string | null = null;
     try {
@@ -124,5 +133,5 @@ export const LLMDrafterPlanner: Planner<Cfg> = {
     return [{ type:'compose_intent', composeId: ctx.newId('c'), text } as ProposedFact];
   },
 
-  // Config management methods will be attached by llm-drafter-setup-vm.ts
+  // Planning logic unchanged
 };

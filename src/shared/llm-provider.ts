@@ -2,13 +2,13 @@ import type { LlmMessage, LlmProvider, LlmResponse } from './journal-types';
 
 // Use same-origin backend by default
 export const DEFAULT_CHITCHAT_ENDPOINT = '/api/llm/complete';
-export const DEFAULT_CHITCHAT_MODEL = 'openai/gpt-oss-120b:nitro';
+export const DEFAULT_CHITCHAT_MODEL = '@preset/chitchat';
 
 export function makeChitchatProvider(endpoint?: string): LlmProvider {
   const ep = (endpoint || DEFAULT_CHITCHAT_ENDPOINT).trim();
 
   // Available models (dynamic from backend; fallback to curated)
-  let AVAILABLE_MODELS = ['openai/gpt-oss-120b:nitro'];
+  let AVAILABLE_MODELS = ['@preset/chitchat'];
 
   return {
     async chat(req: { model?: string; messages: LlmMessage[]; temperature?: number; maxTokens?: number; signal?: AbortSignal }): Promise<LlmResponse> {

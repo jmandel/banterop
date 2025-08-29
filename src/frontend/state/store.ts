@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import type { SavedField, PlannerConfigStore } from '../planner/config/types';
 import type { A2APart, A2AStatus, A2ANextState } from '../../shared/a2a-types';
 import type { Fact, ProposedFact, AttachmentMeta } from '../../shared/journal-types';
 import type { TransportAdapter } from '../transports/types';
@@ -7,7 +6,8 @@ import { a2aToFacts } from '../../shared/a2a-translator';
 import { validateParts } from '../../shared/parts-validator';
 import { nowIso, rid } from '../../shared/core';
 import { resolvePlanner } from '../planner/registry';
-import { makeChitchatProvider, DEFAULT_CHITCHAT_ENDPOINT } from '../../shared/llm-provider';
+import { fetchJsonCapped } from '../../shared/net';
+import { validateScenarioConfig } from '../../shared/scenario-validator';
 
 type Role = 'initiator'|'responder';
 
@@ -41,9 +41,24 @@ export type Store = {
   // planner setup
   configByPlanner: Record<string, any>;
   readyByPlanner: Record<string, boolean>;
-  savedFieldsByPlanner: Record<string, SavedField[] | undefined>;
-  // new config system
-  configStores: Record<string, PlannerConfigStore>;
+  // new config system — store-driven setup state
+  plannerSetup: {
+    byPlanner: Record<string, {
+      draft?: any;
+      lastApplied?: any;
+      seed?: any;
+      valid: boolean;
+      dirty: boolean;
+      summary?: string;
+      pending?: boolean;
+      errors?: Record<string,string>;
+    }>;
+  };
+  catalogs: {
+    llmModels: string[];
+    llmModelsLoaded: boolean;
+    scenarioCache: Map<string, any>;
+  };
   // journal
   facts: Fact[];
   seq: number;
@@ -64,9 +79,13 @@ export type Store = {
   setPlanner(id:'off'|'llm-drafter'|'scenario-v0.3'|'simple-demo'): void;
   setPlannerMode(mode:'approve'|'auto'): void;
   setPlannerConfig(config: any, ready: boolean): void;
-  setPlannerSavedFields(saved: SavedField[]): void;
-  // new config system actions
-  onConfigChange(plannerId: string, config: any): void;
+  // setup actions
+  setSetupDraft(plannerId: string, partialDraft: any): void;
+  setSetupMeta(plannerId: string, meta: Partial<{ valid: boolean; seed?: any; summary?: string; pending?: boolean; errors?: Record<string,string> }>): void;
+  applySetup(plannerId: string): void;
+  hydrateFromSeed(plannerId: string, seed: any): Promise<void>;
+  ensureLlmModelsLoaded(): Promise<void>;
+  loadScenario(url: string): Promise<any>;
   // rewind + reconfigure
   rewindJournal(): void; // always rewinds to last public event
   reconfigurePlanner(opts: { config: any; ready: boolean; rewind?: boolean }): void;
@@ -105,6 +124,15 @@ export type Store = {
   onPlannerSelected(newPid: string, readyNow: boolean): void;
   onPlannerReadyFlip(readyNow: boolean): void;
   onApplyClicked(): void;
+
+  // Rooms backend/lease slice (lightweight)
+  rooms: {
+    byId: Record<string, { leaseId?: string; connState: 'connecting'|'connected'|'observing'|'revoked'|'denied'; token: number; eventsBase?: string }>;
+    start(roomId: string, eventsBase: string): void; // try backend acquire once
+    observe(roomId: string, eventsBase: string): void; // observer mode (no lease)
+    takeover(roomId: string): void; // explicit takeover
+    release(roomId: string): void; // best-effort release via beacon
+  };
 };
 
 export const useAppStore = create<Store>((set, get) => ({
@@ -115,8 +143,8 @@ export const useAppStore = create<Store>((set, get) => ({
   plannerMode: 'approve',
   configByPlanner: {},
   readyByPlanner: {},
-  savedFieldsByPlanner: {},
-  configStores: {},
+  plannerSetup: { byPlanner: {} },
+  catalogs: { llmModels: [], llmModelsLoaded: false, scenarioCache: new Map() },
   facts: [],
   seq: 0,
   hud: null,
@@ -139,63 +167,7 @@ export const useAppStore = create<Store>((set, get) => ({
     }
   },
 
-  setPlanner(id) {
-    const prevId = get().plannerId;
-    console.log('[AppStore] setPlanner:', { from: prevId, to: id });
-
-    // Switch planner id
-    set({ plannerId: id });
-
-    // Clean up the previous planner's config store to avoid leaks
-    if (prevId && prevId !== id) {
-      const prevStore = get().configStores[prevId];
-      if (prevStore && typeof prevStore.destroy === 'function') {
-        try { prevStore.destroy(); } catch {}
-      }
-      set(s => {
-        const next = { ...s.configStores };
-        delete next[prevId];
-        return { configStores: next };
-      });
-    }
-
-    // If switching to a planner that supports config, create the config store
-    if (id !== 'off' && id !== prevId) {
-      const planner = resolvePlanner(id);
-      console.log('[AppStore] setPlanner: resolved planner:', {
-        id,
-        planner: !!planner,
-        hasCreateConfigStore: !!(planner && planner.createConfigStore)
-      });
-
-      if (planner.createConfigStore) {
-        const llm = makeChitchatProvider(DEFAULT_CHITCHAT_ENDPOINT);
-        console.log('[AppStore] setPlanner: creating config store for', id);
-
-        const configStore = planner.createConfigStore({
-          llm,
-          onConfigChange: (config) => {
-            console.log('[AppStore] onConfigChange called:', { id, config });
-            get().onConfigChange(id, config);
-          }
-        });
-
-        console.log('[AppStore] setPlanner: config store created:', !!configStore);
-
-        set(s => ({
-          configStores: { ...s.configStores, [id]: configStore }
-        }));
-
-        console.log('[AppStore] setPlanner: config store stored in state');
-
-        // Initialize the config store (this will trigger model loading)
-        console.log('[AppStore] setPlanner: initializing config store');
-        // The config store facade doesn't expose getState, so we need to initialize it differently
-        // For now, we'll initialize it when it's first accessed by the UI
-        console.log('[AppStore] setPlanner: config store ready for initialization');
-      }
-    }
-  },
+  setPlanner(id) { set({ plannerId: id }); },
   setPlannerMode(mode) {
     set({ plannerMode: mode });
   },
@@ -208,18 +180,91 @@ export const useAppStore = create<Store>((set, get) => ({
     }));
   },
 
-  setPlannerSavedFields(saved) {
-    const pid = get().plannerId;
-    set((s:any) => ({ savedFieldsByPlanner: { ...s.savedFieldsByPlanner, [pid]: saved } }));
+  // New setup API actions
+  setSetupDraft(plannerId, partialDraft) {
+    set(s => {
+      const row = s.plannerSetup.byPlanner[plannerId] || { valid: false, dirty: false };
+      const draft = { ...(row.draft || {}), ...(partialDraft || {}) };
+      const dirty = !shallowJsonEqual(draft, row.lastApplied);
+      return { plannerSetup: { ...s.plannerSetup, byPlanner: { ...s.plannerSetup.byPlanner, [plannerId]: { ...row, draft, dirty } } } } as any;
+    });
   },
-
-  // New config system actions
-  onConfigChange(plannerId, config) {
-    // Mirror working config live for URL sync / previews,
-    // but do NOT flip readiness here — Save & Apply handles that.
-    set(s => ({
-      configByPlanner: { ...s.configByPlanner, [plannerId]: config }
-    }));
+  setSetupMeta(plannerId, meta) {
+    set(s => {
+      const row = s.plannerSetup.byPlanner[plannerId] || { valid: false, dirty: false };
+      const next = { ...row, ...(meta || {}) };
+      return { plannerSetup: { ...s.plannerSetup, byPlanner: { ...s.plannerSetup.byPlanner, [plannerId]: next } } } as any;
+    });
+  },
+  applySetup(plannerId) {
+    const s = get();
+    const row = s.plannerSetup.byPlanner[plannerId];
+    if (!row?.valid || !row?.draft) return;
+    set({
+      configByPlanner: { ...s.configByPlanner, [plannerId]: row.draft },
+      readyByPlanner:  { ...s.readyByPlanner,  [plannerId]: true },
+      plannerSetup: {
+        ...s.plannerSetup,
+        byPlanner: { ...s.plannerSetup.byPlanner, [plannerId]: { ...row, lastApplied: row.draft, dirty: false } }
+      }
+    });
+    get().reconfigurePlanner({ config: row.draft, ready: true, rewind: true });
+  },
+  async hydrateFromSeed(plannerId, seed) {
+    const planner: any = resolvePlanner(plannerId);
+    if (!planner?.hydrate) return;
+    const cache = new Map<string, any>();
+    const fetchJson = async (url: string) => fetchJsonCapped(url);
+    const res = await planner.hydrate(seed, { fetchJson, cache });
+    const config = (res as any)?.config ?? (res as any)?.full;
+    const ready = (res as any)?.ready ?? !!config;
+    if (config) {
+      set(s => ({
+        configByPlanner: { ...s.configByPlanner, [plannerId]: config },
+        readyByPlanner: { ...s.readyByPlanner, [plannerId]: !!ready },
+        plannerSetup: {
+          ...s.plannerSetup,
+          byPlanner: {
+            ...s.plannerSetup.byPlanner,
+            [plannerId]: {
+              draft: config,
+              lastApplied: config,
+              valid: true,
+              dirty: false,
+              seed,
+            }
+          }
+        }
+      }));
+    }
+  },
+  async ensureLlmModelsLoaded() {
+    const s = get();
+    if (s.catalogs.llmModelsLoaded) return;
+    try {
+      const arr = await fetchJsonCapped('/api/llm/providers');
+      const providers = Array.isArray(arr) ? arr : [];
+      // Prefer OpenRouter and hide mock to avoid noisy defaults
+      const filtered = providers.filter((p:any)=>p && p.available!==false && p.name !== 'mock');
+      const preferOpenRouter = filtered.filter((p:any)=>p.name === 'openrouter');
+      const used = preferOpenRouter.length ? preferOpenRouter : filtered;
+      const models = Array.from(new Set(used.flatMap((p:any)=>Array.isArray(p.models)?p.models:[]))).filter(Boolean) as string[];
+      set({ catalogs: { ...get().catalogs, llmModels: models, llmModelsLoaded: true } });
+    } catch {
+      set({ catalogs: { ...get().catalogs, llmModels: [], llmModelsLoaded: true } });
+    }
+  },
+  async loadScenario(url: string) {
+    const s = get();
+    const key = String(url || '');
+    if (!key) throw new Error('Missing URL');
+    const cached = s.catalogs.scenarioCache.get(key);
+    if (cached) return cached;
+    const raw = await fetchJsonCapped(key);
+    const val = validateScenarioConfig(raw);
+    if (!val.ok) throw new Error(val.errors.join('\n').slice(0, 1000));
+    s.catalogs.scenarioCache.set(key, val.value);
+    return val.value;
   },
 
   rewindJournal() {
@@ -535,9 +580,100 @@ export const useAppStore = create<Store>((set, get) => ({
   onApplyClicked() {
     set(s => ({ setupUi: { ...s.setupUi, panel: 'collapsed' } }));
   },
+
+  // Rooms slice implementation
+  rooms: {
+    byId: {},
+    start(roomId: string, eventsBase: string) {
+      const s = get();
+      const byId = { ...(s.rooms.byId || {}) } as any;
+      const token = (byId[roomId]?.token || 0) + 1;
+      byId[roomId] = { ...(byId[roomId]||{}), connState:'connecting', token, eventsBase };
+      set((st:any)=>({ rooms: { ...st.rooms, byId } }));
+      const url = `${eventsBase}?mode=backend`;
+      const es = new EventSource(url);
+      es.onmessage = (ev) => {
+        const cur = get().rooms.byId[roomId]; if (!cur || cur.token !== token) return;
+        try {
+          const payload = JSON.parse(ev.data);
+          const msg = payload?.result;
+          if (msg?.type === 'backend-granted') {
+            // Record lease, set adapter header, write-through to sessionStorage
+            const leaseId = String(msg.leaseId || '');
+            try { get().adapter && (get().adapter as any)?.setBackendLease?.(leaseId); } catch {}
+            try { sessionStorage.setItem(`lease:${roomId}`, leaseId); } catch {}
+            const byId2 = { ...(get().rooms.byId) } as any; byId2[roomId] = { ...byId2[roomId], leaseId, connState:'connected' };
+            set((st:any)=>({ rooms: { ...st.rooms, byId: byId2 } }));
+          } else if (msg?.type === 'backend-denied') {
+            const byId2 = { ...(get().rooms.byId) } as any; byId2[roomId] = { ...byId2[roomId], connState:'observing' };
+            set((st:any)=>({ rooms: { ...st.rooms, byId: byId2 } }));
+          } else if (msg?.type === 'backend-revoked') {
+            try { get().adapter && (get().adapter as any)?.setBackendLease?.(null); } catch {}
+            try { sessionStorage.removeItem(`lease:${roomId}`) } catch {}
+            const byId2 = { ...(get().rooms.byId) } as any; byId2[roomId] = { ...byId2[roomId], leaseId: undefined, connState:'revoked' };
+            set((st:any)=>({ rooms: { ...st.rooms, byId: byId2 } }));
+          }
+        } catch {}
+      };
+      es.onerror = () => {};
+      // No es close tracking; a new start bumps token and supersedes this stream
+    },
+    observe(roomId: string, eventsBase: string) {
+      const s = get();
+      const byId = { ...(s.rooms.byId || {}) } as any;
+      const token = (byId[roomId]?.token || 0) + 1;
+      byId[roomId] = { ...(byId[roomId]||{}), connState:'observing', token, eventsBase };
+      set((st:any)=>({ rooms: { ...st.rooms, byId } }));
+      const url = `${eventsBase}?mode=observer`;
+      const es = new EventSource(url);
+      es.onmessage = (ev) => { /* ignore, observer channel not managing lease */ };
+      es.onerror = () => {};
+    },
+    takeover(roomId: string) {
+      const cur = get().rooms.byId[roomId]; if (!cur?.eventsBase) return;
+      const token = (cur.token || 0) + 1;
+      const byId = { ...(get().rooms.byId) } as any; byId[roomId] = { ...cur, connState:'connecting', token };
+      set((st:any)=>({ rooms: { ...st.rooms, byId } }));
+      const es = new EventSource(`${cur.eventsBase}?mode=backend&takeover=1`);
+      es.onmessage = (ev) => {
+        const live = get().rooms.byId[roomId]; if (!live || live.token !== token) return;
+        try {
+          const payload = JSON.parse(ev.data);
+          const msg = payload?.result;
+          if (msg?.type === 'backend-granted') {
+            const leaseId = String(msg.leaseId || '');
+            try { get().adapter && (get().adapter as any)?.setBackendLease?.(leaseId); } catch {}
+            try { sessionStorage.setItem(`lease:${roomId}`, leaseId); } catch {}
+            const byId2 = { ...(get().rooms.byId) } as any; byId2[roomId] = { ...byId2[roomId], leaseId, connState:'connected' };
+            set((st:any)=>({ rooms: { ...st.rooms, byId: byId2 } }));
+          } else if (msg?.type === 'backend-denied') {
+            const byId2 = { ...(get().rooms.byId) } as any; byId2[roomId] = { ...byId2[roomId], connState:'observing' };
+            set((st:any)=>({ rooms: { ...st.rooms, byId: byId2 } }));
+          }
+        } catch {}
+      }
+      es.onerror = () => {};
+    },
+    release(roomId: string) {
+      const cur = get().rooms.byId[roomId]; if (!cur?.leaseId) return;
+      try {
+        const u = new URL(window.location.origin);
+        const rel = `${u.origin}/api/pairs/${encodeURIComponent(roomId)}/backend/release`;
+        const fd = new FormData(); fd.set('leaseId', cur.leaseId);
+        navigator.sendBeacon(rel, fd);
+      } catch {}
+      try { sessionStorage.removeItem(`lease:${roomId}`) } catch {}
+      const byId = { ...(get().rooms.byId) } as any; byId[roomId] = { ...byId[roomId], leaseId: undefined, connState:'observing' };
+      set((st:any)=>({ rooms: { ...st.rooms, byId } }));
+    }
+  },
 }));
 
 // --- helpers ---
+
+function shallowJsonEqual(a: any, b: any) {
+  try { return JSON.stringify(a) === JSON.stringify(b); } catch { return a === b; }
+}
 
 function stampAndAppend(set: any, get: any, proposed: ProposedFact[]) {
   if (!proposed.length) return;

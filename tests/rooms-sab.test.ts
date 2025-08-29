@@ -9,10 +9,8 @@ afterAll(async () => { await stopServer(S); });
 
 describe("Rooms SAB and protocol errors", () => {
   it("backend endpoint responds and normal sends remain functional", async () => {
-    const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
     const url = S.base + `/api/pairs/${pairId}/server-events?mode=backend`;
 
     const backend = await fetch(url, { headers:{ accept:'text/event-stream' } });
@@ -27,10 +25,8 @@ describe("Rooms SAB and protocol errors", () => {
     expect(js.result?.status?.state).not.toBe('failed');
   });
   it("with active backend, message/send follows normal flow (no failed)", async () => {
-    const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
 
     // Acquire backend lease by opening server-events in backend mode (keep open)
     const url = S.base + `/api/pairs/${pairId}/server-events?mode=backend`;
@@ -49,10 +45,8 @@ describe("Rooms SAB and protocol errors", () => {
   });
 
   it("message/send without backend returns protocol error snapshot with failed state and guidance text", async () => {
-    const r = await fetch(S.base + "/api/pairs", { method: 'POST' });
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
 
     // Send without backend
     const send = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({

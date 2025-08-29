@@ -15,6 +15,7 @@ import type {
   Fact, AttachmentMeta
 } from '../../../shared/journal-types'; // ← adjust path if needed
 import { chatWithValidationRetry } from '../../../shared/llm-retry';
+import { ScenarioPlannerSetup, dehydrateScenario, hydrateScenario } from './scenario.setup';
 import { b64ToUtf8 } from '../../../shared/codec';
 import type { ScenarioConfiguration, Tool as ScenarioTool } from '../../../types/scenario-configuration.types'; // ← adjust
 
@@ -25,8 +26,7 @@ import type { ScenarioConfiguration, Tool as ScenarioTool } from '../../../types
 export interface ScenarioPlannerConfig {
   scenario: ScenarioConfiguration;  // Pure scenario object
   scenarioUrl: string;              // URL stored separately (no monkeypatch)
-  /** Optional model override; otherwise ctx.model is used. */
-  model?: string;
+  /** Model is selected at client level; cfg no longer carries model. */
   /** Optional list of tool names to enforce; if omitted, all tools enabled. */
   enabledTools?: string[];
   /** Which agent we are playing as (agentId). Defaults to first agent. */
@@ -35,18 +35,28 @@ export interface ScenarioPlannerConfig {
   enabledCoreTools?: string[];
   /** Max planner steps within one pass (reserved; defaults handled by planner). */
   maxInlineSteps?: number;
+  /** Optional global additional instructions appended to system prompt. */
+  instructions?: string;
 }
 
 export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
   id: 'scenario-v0.3',
   name: 'Scenario Planner (v0.3)',
-
-  // Config management - use the clean VM adapter
-  createConfigStore: (opts) => {
-    const { makeConfigStore } = require('../../setup-vm/makeConfigStore');
-    const { createScenarioSetupVM } = require('./scenario-setup-vm');
-    return makeConfigStore(createScenarioSetupVM(), opts);
-  },
+  // New per-planner setup API
+  // @ts-ignore
+  SetupComponent: ScenarioPlannerSetup,
+  // @ts-ignore
+  dehydrate: (cfg: any) => dehydrateScenario({
+    scenario: cfg?.scenario,
+    scenarioUrl: String(cfg?.scenarioUrl || ''),
+    myAgentId: String(cfg?.myAgentId || ''),
+    enabledTools: Array.isArray(cfg?.enabledTools) ? cfg.enabledTools : [],
+    enabledCoreTools: Array.isArray(cfg?.enabledCoreTools) ? cfg.enabledCoreTools : ['sendMessageToRemoteAgent','sendMessageToMyPrincipal','readAttachment','sleep','done'],
+    maxInlineSteps: Number(cfg?.maxInlineSteps ?? 20),
+    instructions: (typeof cfg?.instructions === 'string' && cfg.instructions.trim()) ? String(cfg.instructions) : undefined,
+  }),
+  // @ts-ignore
+  hydrate: async (seed: any, ctx: any) => hydrateScenario(seed, ctx),
 
   async plan(input: PlanInput, ctx: PlanContext<ScenarioPlannerConfig>): Promise<ProposedFact[]> {
     const { facts } = input;
@@ -100,12 +110,15 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
     const allowSendToRemote = status === 'input-required';
     const enabledScenarioTools = Array.isArray((ctx.config as any)?.enabledTools) ? (ctx.config as any).enabledTools as string[] : undefined;
     const coreAllowed = new Set<string>(Array.isArray(cfg.enabledCoreTools) && cfg.enabledCoreTools.length ? cfg.enabledCoreTools : ['sendMessageToRemoteAgent','sendMessageToMyPrincipal','readAttachment','sleep','done']);
-    const model = cfg.model || ctx.model;
+    const model = ctx.model;
     const maxSteps = Math.max(1, Math.min(50, Number(cfg.maxInlineSteps ?? 20)));
 
     const out: ProposedFact[] = [];
     const workingFacts: any[] = [...facts];
-    const sys: LlmMessage = { role: 'system', content: SYSTEM_PREAMBLE };
+    const extra = (cfg as any)?.instructions;
+    const sysContent = String(SYSTEM_PREAMBLE)
+      + (typeof extra === 'string' && extra.trim() ? `\n<IMPORTANT_INSTRUCITOSM>\n${extra.trim()}\n</IMPORTANT_INSTRUCITOSM>\n` : '');
+    const sys: LlmMessage = { role: 'system', content: sysContent };
 
     for (let step = 0; step < maxSteps; step++) {
       const filesAtCut = listAttachmentMetasAtCut(workingFacts as any);

@@ -55,7 +55,7 @@ function Layout({ children }: { children: React.ReactNode }) {
       right={(
         <nav className="flex items-center gap-3">
           <Link to="/scenarios">Scenarios</Link>
-          <Link to="/scenarios/create">Create</Link>
+          <a href="/client/">Client</a>
         </nav>
       )}
     >

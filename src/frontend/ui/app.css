@@ -18,3 +18,60 @@
   --color-bg: var(--bg);
 }
 
+/* Base + component aliases (migrate away from bespoke CSS by mapping to Tailwind) */
+@layer base {
+  body { @apply bg-[var(--color-bg)] text-[var(--color-text)] p-5 m-0 font-sans; }
+}
+
+@layer components {
+  .wrap { @apply max-w-[1200px] mx-auto pr-0; }
+  .with-debug { @apply pr-[380px]; }
+  .card { @apply bg-white border border-[var(--color-border)] rounded-2xl p-3 mb-3 shadow-sm; }
+  .row { @apply flex items-center gap-2.5; }
+  .row.compact { @apply gap-1.5 flex-wrap; }
+  .pill { @apply inline-block px-2.5 py-1 rounded-full bg-gray-100 text-gray-800; }
+  .pill.ok { @apply bg-green-50 text-green-800; }
+  .pill.warn { @apply bg-amber-50 text-amber-800; }
+  .pill.info { @apply bg-blue-50 text-blue-800; }
+  .pill.danger { @apply bg-rose-50 text-rose-800; }
+  .btn { @apply bg-blue-600 text-white border border-blue-600 rounded-lg px-2.5 py-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed; }
+  .btn.ghost { @apply bg-transparent text-blue-600 border border-blue-600; }
+  .btn.secondary { @apply bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200; }
+  .input { @apply border border-gray-300 rounded-lg px-2.5 py-2; }
+  .muted { @apply text-gray-500; }
+  .small { @apply text-xs; }
+
+  .sticky { @apply sticky z-20 bg-white; }
+
+  /* Transcript + bubbles */
+  .transcript { @apply flex flex-col gap-2.5; }
+  .bubble { @apply max-w-[88%] p-2.5 rounded-xl; }
+  .me { @apply self-start bg-blue-50; }
+  .them { @apply self-end bg-white border border-gray-200; }
+  .private { @apply bg-white border border-dashed border-gray-300 rounded-md p-2.5; }
+  .stripe { @apply border-l-4 pl-2.5 border-gray-300; }
+  .stripe.draft { @apply border-indigo-300; }
+  .stripe.question { @apply border-red-300; }
+  .stripe.answer { @apply border-green-300; }
+  .stripe.whisper { @apply border-purple-300; }
+  .stripe-head { @apply text-[11px] uppercase tracking-wider text-gray-500 mb-1; }
+  .stripe-body { @apply text-sm; }
+
+  .attachments { @apply flex flex-col gap-1 mt-1.5; }
+  .attachments .att { @apply block; }
+
+  .transcript-bar { @apply sticky bottom-0 bg-white border-t border-[var(--color-border)] px-2.5 py-1.5 flex justify-end items-center rounded-b-2xl; }
+
+  /* Rooms */
+  .chip { @apply inline-block px-2.5 py-1 rounded-full bg-gray-100; }
+  .chip.ok { @apply bg-green-50 text-green-700; }
+  .chip.warn { @apply bg-amber-50 text-amber-700; }
+  .banner { @apply bg-amber-50 border border-amber-300 text-amber-700 px-3 py-2 rounded-2xl mb-3; }
+
+  /* Debug panel */
+  .debug-panel { @apply fixed top-0 right-0 h-screen w-[360px] bg-slate-900 text-blue-100 border-l border-slate-700 z-[1000] flex flex-col; }
+  .debug-header { @apply p-2.5 border-b border-slate-700 flex items-center gap-2; }
+  .debug-body { @apply flex-1 overflow-auto p-2.5; }
+  .debug-pre { @apply whitespace-pre font-mono text-[12px] leading-snug; }
+  .debug-btn { @apply bg-blue-600 text-white border border-blue-600 px-2 py-1 rounded-md cursor-pointer; }
+}

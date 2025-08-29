@@ -81,19 +81,26 @@ export function ScenarioRunPage() {
           try {
             const p = await api.getLLMConfig();
             if (p.success) {
-              const filtered = (p.data.providers || []).filter((x: any) => 
-                x.name !== 'browserside' && 
-                x.name !== 'mock' && 
+              const filtered = (p.data.providers || []).filter((x: any) =>
+                x.name !== 'browserside' &&
+                x.name !== 'mock' &&
                 x.available !== false
               );
-              setProviders(filtered);
-              const flat = filtered.flatMap((x: any) => x.models || []);
-              setModelOptions(flat);
-              // Initialize agent models
+              // Prefer OpenRouter and put it first if available
+              const openrouter = filtered.find((x: any) => x.name === 'openrouter');
+              const others = filtered.filter((x: any) => x.name !== 'openrouter');
+              const ordered = openrouter ? [openrouter, ...others] : filtered;
+              setProviders(ordered);
+              // Build model list preferring OpenRouter's preset when present
+              const flat = ordered.flatMap((x: any) => x.models || []);
+              // Ensure @preset/chitchat is the first option if available
+              const hasPreset = flat.includes('@preset/chitchat');
+              const ordFlat = hasPreset ? ['@preset/chitchat', ...flat.filter((m: string) => m !== '@preset/chitchat')] : flat;
+              setModelOptions(ordFlat);
+              // Initialize per-agent model selection with preferred default
+              const defaultModel = ordFlat.includes('@preset/chitchat') ? '@preset/chitchat' : (ordFlat[0] || '');
               const initial: Record<string, string> = {};
-              for (const a of cfg.agents || []) {
-                initial[a.agentId] = flat[0] || '';
-              }
+              for (const a of cfg.agents || []) initial[a.agentId] = defaultModel;
               setAgentModels(initial);
             }
           } catch {

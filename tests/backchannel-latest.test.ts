@@ -9,10 +9,8 @@ afterAll(async () => { await stopServer(S); });
 
 describe('Backchannel emits only latest subscribe on connect', () => {
   it('connect after multiple epochs → first subscribe is for latest epoch', async () => {
-    const r = await fetch(S.base + '/api/pairs', { method:'POST' });
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
     await openBackend(S, pairId);
 
     // Create epoch #1

@@ -10,10 +10,8 @@ afterAll(async () => { await stopServer(S); });
 
 describe("Event ring buffer trims old events", () => {
   it("keeps only the most recent N per pair", async () => {
-    const r = await fetch(S.base + "/api/pairs", { method:'POST' });
-    const j = await r.json();
-    const pairId = j.pairId as string;
-    const a2a = j.endpoints.a2a;
+    const pairId = `t-${crypto.randomUUID()}`;
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
 
     // Start epoch (adds epoch-begin)
     {
