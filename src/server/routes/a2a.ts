@@ -53,6 +53,8 @@ async function a2aHandler(c: Context<AppBindings>) {
 async function agentCardHandler(c: Context<AppBindings>) {
   const { roomId } = c.req.param()
   const origin = new URL(c.req.url).origin
+  // Use BASE_URL from environment if available, otherwise fall back to request origin
+  const baseUrl = (c.env as any)?.BASE_URL || process.env.BASE_URL || origin
 
   function deepMerge<T extends Record<string, any>>(a: T, b: Partial<T>): T {
     const out: any = Array.isArray(a) ? [...(a as any)] : { ...(a as any) }
@@ -66,10 +68,10 @@ async function agentCardHandler(c: Context<AppBindings>) {
     return out
   }
 
-  const a2aAlias = `${origin}/api/rooms/${roomId}/a2a`
-  const a2a = `${origin}/api/rooms/${roomId}/a2a`
-  const mcp = `${origin}/api/rooms/${roomId}/mcp`
-  const tasks = `${origin}/api/rooms/${roomId}/server-events`
+  const a2aAlias = `${baseUrl}/api/rooms/${roomId}/a2a`
+  const a2a = `${baseUrl}/api/rooms/${roomId}/a2a`
+  const mcp = `${baseUrl}/api/rooms/${roomId}/mcp`
+  const tasks = `${baseUrl}/api/rooms/${roomId}/server-events`
   const defaultCard: any = {
     protocolVersion: '0.3.0',
     name: `Conversational Interop Room: ${roomId}`,
