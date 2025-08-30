@@ -371,9 +371,9 @@ async def main():
         # Default to localhost
         url = "http://localhost:3003/api/rooms/please-replace-this-placeholder-1756426027739-gvr0wy/a2a"
     
-    # Override for chitchat test
-    if len(sys.argv) > 1 and sys.argv[1] == '--chitchat':
-        url = "https://chitchat.fhir.me/api/bridge/eyJ0aXRsZSI6IlJ1bjogS25lZSBNUkkgUHJpb3IgQXV0aCIsInNjZW5hcmlvSWQiOiJzY2VuX2tuZWVfbXJpXzAxIiwiYWdlbnRzIjpbeyJpZCI6InBhdGllbnQtYWdlbnQifSx7ImlkIjoiaW5zdXJhbmNlLWF1dGgtc3BlY2lhbGlzdCIsImNvbmZpZyI6eyJtb2RlbCI6Im9wZW5haS9ncHQtb3NzLTEyMGI6bml0cm8ifX1dLCJzdGFydGluZ0FnZW50SWQiOiJwYXRpZW50LWFnZW50In0/a2a"
+    # Override for banterop test
+    if len(sys.argv) > 1 and sys.argv[1] == '--banterop':
+        url = "https://banterop.fhir.me/api/bridge/eyJ0aXRsZSI6IlJ1bjogS25lZSBNUkkgUHJpb3IgQXV0aCIsInNjZW5hcmlvSWQiOiJzY2VuX2tuZWVfbXJpXzAxIiwiYWdlbnRzIjpbeyJpZCI6InBhdGllbnQtYWdlbnQifSx7ImlkIjoiaW5zdXJhbmNlLWF1dGgtc3BlY2lhbGlzdCIsImNvbmZpZyI6eyJtb2RlbCI6Im9wZW5haS9ncHQtb3NzLTEyMGI6bml0cm8ifX1dLCJzdGFydGluZ0FnZW50SWQiOiJwYXRpZW50LWFnZW50In0/a2a"
     
     # Create client
     client = SimpleA2AClient(url)

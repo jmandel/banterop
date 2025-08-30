@@ -38,7 +38,7 @@ export function mcpRoutes() {
 }
 
 async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer> {
-  const s = new McpServer({ name: 'flipproxy-mcp', version: '0.1.0' })
+  const s = new McpServer({ name: 'banterop-mcp', version: '0.1.0' })
   const pairs = c.get('pairs')
   const db = c.get('db')
   const events = c.get('events')

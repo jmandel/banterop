@@ -39,7 +39,7 @@ OPENROUTER_PROVIDER_CONFIG='{"ignore":["baseten"],"allow_fallbacks":true,"sort":
 
 # Per-provider model includes (optional)
 LLM_MODELS_GOOGLE_INCLUDE=gemini-2.5-flash,gemini-2.5-pro
-LLM_MODELS_OPENROUTER_INCLUDE=@preset/chitchat
+LLM_MODELS_OPENROUTER_INCLUDE=@preset/banterop
 
 # Scenario guard
 PUBLISHED_EDIT_TOKEN=secret-token

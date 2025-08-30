@@ -40,10 +40,10 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
   app.use('*', cors())
   app.use('*', logger())
 
-  const sqlite = new Database(env.FLIPPROXY_DB || ':memory:')
+  const sqlite = new Database(env.BANTEROP_DB || ':memory:')
   sqlite.exec('PRAGMA journal_mode = WAL;')
   const db = createPersistenceFromDb(sqlite)
-  const eventsMax = Number(((opts?.env as any)?.FLIPPROXY_EVENTS_MAX ?? process.env.FLIPPROXY_EVENTS_MAX ?? 5000))
+  const eventsMax = Number(((opts?.env as any)?.BANTEROP_EVENTS_MAX ?? process.env.BANTEROP_EVENTS_MAX ?? 5000))
   const events = createEventStore({ maxPerPair: eventsMax })
   const pairs = createPairsService({ db, events, baseUrl: env.BASE_URL })
 
@@ -129,5 +129,5 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
 
 if (import.meta.main) {
   const server = createServer()
-  try { console.log(`[flipproxy] ${((Bun.env.NODE_ENV || process.env.NODE_ENV) !== 'production') ? 'Dev' : 'Prod'} server listening on ${server.url}`) } catch {}
+  try { console.log(`[banterop] ${((Bun.env.NODE_ENV || process.env.NODE_ENV) !== 'production') ? 'Dev' : 'Prod'} server listening on ${server.url}`) } catch {}
 }

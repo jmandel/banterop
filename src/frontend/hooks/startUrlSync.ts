@@ -4,7 +4,7 @@ import { resolvePlanner } from '../planner/registry';
 // New readable-hash format support
 // Example:
 // #{"transport":"a2a","agentCardUrl":"https://…/agent-card.json","mcpUrl":"",
-//   "llm":{"provider":"server","model":"@preset/chitchat"},
+//   "llm":{"provider":"server","model":"@preset/banterop"},
 //   "planner":{"id":"scenario-v0.3","mode":"auto"},
 //   "planners":{"scenario-v0.3":{"seed":{...}},"llm-drafter":{"seed":{...}}},
 //   "rev": 3}

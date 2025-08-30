@@ -73,7 +73,7 @@ export function RunWizardPage() {
             const ordered = openrouter ? [openrouter, ...others] : filtered;
             setProviders(ordered);
             const flat = ordered.flatMap((x: any) => x.models || []);
-            const defaultModel = flat.includes('@preset/chitchat') ? '@preset/chitchat' : (flat[0] || '');
+            const defaultModel = flat.includes('@preset/banterop') ? '@preset/banterop' : (flat[0] || '');
             if (defaultModel) setSelectedModel(defaultModel);
           }
         } catch {}

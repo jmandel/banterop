@@ -21,7 +21,7 @@ describe("nextState metadata placement", () => {
         message: {
           taskId: initId,
           messageId: crypto.randomUUID(),
-          metadata: { 'https://chitchat.fhir.me/a2a-ext': { nextState: 'working' } },
+          metadata: { 'https://banterop.fhir.me/a2a-ext': { nextState: 'working' } },
           parts: [{ kind:'text', text:'hi' }]
         },
         configuration: { historyLength: 0 }
@@ -50,8 +50,8 @@ describe("nextState metadata placement", () => {
         message: {
           taskId: initId,
           messageId: crypto.randomUUID(),
-          metadata: { 'https://chitchat.fhir.me/a2a-ext': { nextState: 'input-required' } },
-          parts: [{ kind:'text', text:'hi', metadata: { 'https://chitchat.fhir.me/a2a-ext': { nextState: 'completed' } } }]
+          metadata: { 'https://banterop.fhir.me/a2a-ext': { nextState: 'input-required' } },
+          parts: [{ kind:'text', text:'hi', metadata: { 'https://banterop.fhir.me/a2a-ext': { nextState: 'completed' } } }]
         },
         configuration: { historyLength: 0 }
       }

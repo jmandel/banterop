@@ -34,11 +34,11 @@ metadata:
   namespace: banterop
 data:
   PORT: "3000"
-  FLIPPROXY_DB: "/data/banterop.db"
+  BANTEROP_DB: "/data/banterop.db"
   DEFAULT_LLM_PROVIDER: "openrouter"
   DEFAULT_LLM_MODEL: "openai/gpt-oss-120b:nitro"
   BASE_URL: "https://banterop.fhir.me"
-  FLIPPROXY_EVENTS_MAX: "5000"
+  BANTEROP_EVENTS_MAX: "5000"
 ---
 # NOTE: Secret intentionally managed separately to avoid accidental resets on apply.
 # Use k8s/update-secrets.sh or kubectl to create/update the app-secrets Secret, e.g.:

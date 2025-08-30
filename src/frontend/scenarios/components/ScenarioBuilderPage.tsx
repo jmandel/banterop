@@ -193,14 +193,14 @@ export function ScenarioBuilderPage() {
           .filter(p => p.name !== 'mock' && Array.isArray(p.models) && p.models!.length > 0)
           .map(p => ({ name: p.name, models: p.models as string[] }));
         if (providers.length === 0) {
-          const fallbackModels = unionModels.length ? unionModels : ['@preset/chitchat'];
+          const fallbackModels = unionModels.length ? unionModels : ['@preset/banterop'];
           providers = [{ name: 'server', models: fallbackModels }];
         }
 
         // Pick default model: saved one if still present; else first available from providers; else fallback
         const savedModel = getSavedModel();
         const modelExists = providers.some(p => p.models.includes(savedModel));
-        const defaultModel = modelExists ? savedModel : (providers[0]?.models?.[0] || '@preset/chitchat');
+        const defaultModel = modelExists ? savedModel : (providers[0]?.models?.[0] || '@preset/banterop');
 
         setState(prev => ({
           ...prev,
@@ -215,7 +215,7 @@ export function ScenarioBuilderPage() {
           ...prev,
           schemaText,
           examplesText,
-        availableProviders: [{ name:'server', models: ['@preset/chitchat'] }]
+        availableProviders: [{ name:'server', models: ['@preset/banterop'] }]
         }));
       }
     } catch (error) {

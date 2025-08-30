@@ -23,7 +23,7 @@ export function randomPort(): number { return 3000 + Math.floor(Math.random() * 
 export async function startServer(opts?: { dbPath?: string; env?: Record<string,string> }): Promise<Spawned> {
   // Programmatically start server with a free port
   if (opts?.env) { for (const [k,v] of Object.entries(opts.env)) { try { (process as any).env[k] = v } catch {} } }
-  const server = createServer({ port: 0, env: { FLIPPROXY_DB: opts?.dbPath ?? ':memory:', ...(opts?.env || {}) } });
+  const server = createServer({ port: 0, env: { BANTEROP_DB: opts?.dbPath ?? ':memory:', ...(opts?.env || {}) } });
   const base = String(server.url);
   // Probe readiness
   const ok = await waitUntil(async () => {
@@ -76,5 +76,5 @@ export async function openBackend(s: Spawned, pairId: string) {
 
 export function leaseHeaders(pairId: string): Record<string,string> {
   const id = __leaseByPair.get(pairId);
-  return id ? { 'X-FlipProxy-Backend-Lease': id } : {};
+  return id ? { 'X-Banterop-Backend-Lease': id } : {};
 }

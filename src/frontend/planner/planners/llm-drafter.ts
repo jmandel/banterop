@@ -1,7 +1,7 @@
 import type { Planner, PlanInput, PlanContext, ProposedFact, Fact, AttachmentMeta } from "../../../shared/journal-types";
 import { LLMDrafterSetup, dehydrateLLM, hydrateLLM } from './llm-drafter.setup';
 import { chatWithValidationRetry, cleanModelText } from "../../../shared/llm-retry";
-import { DEFAULT_CHITCHAT_MODEL } from '../../../shared/llm-provider';
+import { DEFAULT_BANTEROP_MODEL } from '../../../shared/llm-provider';
 
 type Cfg = {
   endpoint?: string;
@@ -107,7 +107,7 @@ export const LLMDrafterPlanner: Planner<Cfg> = {
   async plan(input, ctx) {
     ctx.hud('planning', 'LLM drafting…', 0.4);
     const p = buildPrompt(input, ctx);
-    const model = ctx.model || DEFAULT_CHITCHAT_MODEL;
+    const model = ctx.model || DEFAULT_BANTEROP_MODEL;
     const temperature = typeof ctx.config?.temperature === 'number' ? ctx.config!.temperature! : DEFAULT_TEMP;
     let text: string | null = null;
     try {

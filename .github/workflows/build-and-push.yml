@@ -44,8 +44,8 @@ jobs:
             # SHA for every build
             type=sha,prefix={{branch}}-
           labels: |
-            org.opencontainers.image.title=Banterop FlipProxy
-            org.opencontainers.image.description=FlipProxy for banterop.fhir.me
+            org.opencontainers.image.title=Banterop
+            org.opencontainers.image.description=Banterop for banterop.fhir.me
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.url=https://banterop.fhir.me
 
@@ -64,8 +64,3 @@ jobs:
         run: |
           echo "Successfully built and pushed the following tags:"
           echo "${{ steps.meta.outputs.tags }}"
-          echo ""
-          echo "To deploy to Kubernetes, use:"
-          echo "  kubectl set image deployment/flipproxy-api api=ghcr.io/jmandel/banterop:${{ github.ref_name }} -n interop"
-          echo ""
-          echo "Or update k8s/app.yaml to use: ghcr.io/jmandel/banterop:${{ github.ref_name }}"

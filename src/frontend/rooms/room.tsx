@@ -16,7 +16,7 @@ import { startUrlSync } from '../hooks/startUrlSync'
 import { DraftInline } from '../components/DraftInline'
 import { Markdown } from '../components/Markdown'
 import { resolvePlanner } from '../planner/registry'
-import { DEFAULT_CHITCHAT_MODEL } from '../../shared/llm-provider'
+import { DEFAULT_BANTEROP_MODEL } from '../../shared/llm-provider'
 import { TopBar } from '../components/TopBar'
 import { MetaBar } from '../components/MetaBar'
 import { ClientSettingsModal } from '../client/ClientSettingsModal'
@@ -235,8 +235,8 @@ function App() {
             }
           }
         } catch {}
-        // Choose a default LLM model for the client: prefer seed.model when present, else chitchat preset
-        const defaultModel = (seed && typeof seed.model === 'string' && seed.model.trim()) ? seed.model : DEFAULT_CHITCHAT_MODEL
+        // Choose a default LLM model for the client: prefer seed.model when present, else banterop preset
+        const defaultModel = (seed && typeof seed.model === 'string' && seed.model.trim()) ? seed.model : DEFAULT_BANTEROP_MODEL
         const payload: any = {
           agentCardUrl: agentCard,
           llm: { provider: 'server', model: defaultModel },

@@ -15,7 +15,7 @@ describe('Per-room agent card', () => {
     // Main URL points to alias under /api/rooms/:roomId/a2a
     expect(String(card?.url || '')).toContain(`/api/rooms/${roomId}/a2a`);
     const exts = Array.isArray(card?.capabilities?.extensions) ? card.capabilities.extensions : [];
-    const fp = exts.find((e:any)=>String(e?.uri||'')==='https://chitchat.fhir.me/a2a-ext');
+    const fp = exts.find((e:any)=>String(e?.uri||'')==='https://banterop.fhir.me/a2a-ext');
     expect(!!fp).toBeTrue();
     expect(String(fp?.params?.a2a || '')).toContain(`/api/rooms/${roomId}/a2a`);
     expect(String(fp?.params?.mcp || '')).toContain(`/api/rooms/${roomId}/mcp`);

@@ -93,12 +93,12 @@ export function ScenarioRunPage() {
               setProviders(ordered);
               // Build model list preferring OpenRouter's preset when present
               const flat = ordered.flatMap((x: any) => x.models || []);
-              // Ensure @preset/chitchat is the first option if available
-              const hasPreset = flat.includes('@preset/chitchat');
-              const ordFlat = hasPreset ? ['@preset/chitchat', ...flat.filter((m: string) => m !== '@preset/chitchat')] : flat;
+              // Ensure @preset/banterop is the first option if available
+              const hasPreset = flat.includes('@preset/banterop');
+              const ordFlat = hasPreset ? ['@preset/banterop', ...flat.filter((m: string) => m !== '@preset/banterop')] : flat;
               setModelOptions(ordFlat);
               // Initialize per-agent model selection with preferred default
-              const defaultModel = ordFlat.includes('@preset/chitchat') ? '@preset/chitchat' : (ordFlat[0] || '');
+              const defaultModel = ordFlat.includes('@preset/banterop') ? '@preset/banterop' : (ordFlat[0] || '');
               const initial: Record<string, string> = {};
               for (const a of cfg.agents || []) initial[a.agentId] = defaultModel;
               setAgentModels(initial);

@@ -28,7 +28,7 @@ describe('Persistence — stored JSON shape', () => {
     const messageId = `m:${crypto.randomUUID()}`;
     // Intentionally send role/taskId/contextId — server should not persist these fields
     const res = await fetch(a2a, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
-      jsonrpc:'2.0', id:'m', method:'message/send', params: { message: { role:'user', taskId: initTaskId, contextId: pairId, parts:[textPart('hello')], metadata:{ 'https://chitchat.fhir.me/a2a-ext': { nextState:'working' } }, messageId } }
+      jsonrpc:'2.0', id:'m', method:'message/send', params: { message: { role:'user', taskId: initTaskId, contextId: pairId, parts:[textPart('hello')], metadata:{ 'https://banterop.fhir.me/a2a-ext': { nextState:'working' } }, messageId } }
     }) });
     expect(res.ok).toBeTrue();
 
@@ -39,7 +39,7 @@ describe('Persistence — stored JSON shape', () => {
     const obj = JSON.parse(row!.json);
     expect(obj.messageId).toBe(messageId);
     expect(Array.isArray(obj.parts)).toBeTrue();
-    const ext = obj?.metadata?.['https://chitchat.fhir.me/a2a-ext'];
+    const ext = obj?.metadata?.['https://banterop.fhir.me/a2a-ext'];
     if (ext) expect(ext.nextState).toBe('working');
     expect(obj.role).toBeUndefined();
     expect(obj.taskId).toBeUndefined();

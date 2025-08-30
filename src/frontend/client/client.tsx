@@ -8,7 +8,7 @@ import { statusLabel } from '../components/status-labels';
 import { MCPAdapter } from '../transports/mcp-adapter';
 import { startPlannerController } from '../planner/controller';
 import { resolvePlanner } from '../planner/registry';
-import { makeChitchatProvider, DEFAULT_CHITCHAT_ENDPOINT, DEFAULT_CHITCHAT_MODEL } from '../../shared/llm-provider';
+import { makeBanteropProvider, DEFAULT_BANTEROP_ENDPOINT, DEFAULT_BANTEROP_MODEL } from '../../shared/llm-provider';
 import { b64ToUtf8, normalizeB64 } from '../../shared/codec';
 import { startUrlSync } from '../hooks/startUrlSync';
 import { PlannerSetupCard } from './PlannerSetupCard';
@@ -79,7 +79,7 @@ function App() {
           if (j && typeof j === 'object') {
             const llm = j.llm || {};
             const provider = (llm.provider === 'client-openai') ? 'client-openai' : 'server';
-            const model = typeof llm.model === 'string' && llm.model.trim() ? llm.model.trim() : DEFAULT_CHITCHAT_MODEL;
+            const model = typeof llm.model === 'string' && llm.model.trim() ? llm.model.trim() : DEFAULT_BANTEROP_MODEL;
             const baseUrl = provider === 'client-openai' ? (llm.baseUrl || 'https://openrouter.ai/api/v1') : undefined;
             // Do NOT read apiKey from the hash; keep any existing value
             const apiKey = provider === 'client-openai' ? (existingApiKey || '') : undefined;
@@ -99,9 +99,9 @@ function App() {
       const raw = window.sessionStorage.getItem('clientSettings');
       if (raw) return JSON.parse(raw);
     } catch {}
-    if (cardUrl) return { transport: 'a2a', a2aCardUrl: cardUrl, mcpUrl: '', llm: { provider: 'server', model: DEFAULT_CHITCHAT_MODEL } };
-    if (mcpUrl)  return { transport: 'mcp', a2aCardUrl: '', mcpUrl, llm: { provider: 'server', model: DEFAULT_CHITCHAT_MODEL } };
-    return { transport: 'a2a', a2aCardUrl: '', mcpUrl: '', llm: { provider: 'server', model: DEFAULT_CHITCHAT_MODEL } };
+    if (cardUrl) return { transport: 'a2a', a2aCardUrl: cardUrl, mcpUrl: '', llm: { provider: 'server', model: DEFAULT_BANTEROP_MODEL } };
+    if (mcpUrl)  return { transport: 'mcp', a2aCardUrl: '', mcpUrl, llm: { provider: 'server', model: DEFAULT_BANTEROP_MODEL } };
+    return { transport: 'a2a', a2aCardUrl: '', mcpUrl: '', llm: { provider: 'server', model: DEFAULT_BANTEROP_MODEL } };
   }
   const [clientSettings, setClientSettings] = useState<ClientSettings>(loadClientSettings);
   function saveClientSettings(next: ClientSettings) {

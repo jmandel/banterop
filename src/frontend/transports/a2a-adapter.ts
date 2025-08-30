@@ -14,7 +14,7 @@ export class A2AAdapter implements TransportAdapter {
   private leaseId: string | null = null;
   constructor(endpoint: string) {
     this.client = new A2AClient(endpoint, () => {
-      return this.leaseId ? { 'X-FlipProxy-Backend-Lease': this.leaseId } : undefined;
+      return this.leaseId ? { 'X-Banterop-Backend-Lease': this.leaseId } : undefined;
     });
   }
   setBackendLease(leaseId: string | null) { this.leaseId = leaseId; }

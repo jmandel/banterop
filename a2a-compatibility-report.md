@@ -1,6 +1,6 @@
-# A2A v0.3.0 Compatibility Report — FlipProxy Demo
+# A2A v0.3.0 Compatibility Report — Banterop Demo
 
-This document evaluates the FlipProxy demo (Bun + Hono + React) against the Agent2Agent (A2A) Protocol Specification v0.3.0 and provides concrete recommendations to reach baseline compliance for the JSON‑RPC transport and SSE streaming.
+This document evaluates the Banterop demo (Bun + Hono + React) against the Agent2Agent (A2A) Protocol Specification v0.3.0 and provides concrete recommendations to reach baseline compliance for the JSON‑RPC transport and SSE streaming.
 
 
 ## Summary
@@ -109,7 +109,7 @@ Minimal Agent Card example for this demo:
 ```json
 {
   "protocolVersion": "0.3.0",
-  "name": "FlipProxy Bridge Agent",
+  "name": "Banterop Bridge Agent",
   "description": "Pairs two participants and mirrors messages using JSON-RPC and SSE.",
   "url": "https://localhost:3000/a2a/v1",
   "preferredTransport": "JSONRPC",

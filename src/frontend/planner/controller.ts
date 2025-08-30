@@ -1,4 +1,4 @@
-import { DEFAULT_CHITCHAT_ENDPOINT, DEFAULT_CHITCHAT_MODEL, makeChitchatProvider } from '../../shared/llm-provider';
+import { DEFAULT_BANTEROP_ENDPOINT, DEFAULT_BANTEROP_MODEL, makeBanteropProvider } from '../../shared/llm-provider';
 import { makeOpenAICompatibleProvider } from '../../shared/llm-provider-openai';
 import { useAppStore } from '../state/store';
 import { PlannerHarness } from './harness';
@@ -9,7 +9,7 @@ let currentHarness: PlannerHarness<any> | null = null;
 let lastBuildKey = '';      // fingerprint to avoid redundant rebuilds
 let lastSeenPlanNonce = 0;  // to run exactly once per request
 // Default provider; may be overridden per-session in rebuild
-const defaultLlmProvider = makeChitchatProvider(DEFAULT_CHITCHAT_ENDPOINT);
+const defaultLlmProvider = makeBanteropProvider(DEFAULT_BANTEROP_ENDPOINT);
 
 const NopPlanner = { id:'nop', name:'No-op', async plan(){ return []; } } as const;
 
@@ -65,13 +65,13 @@ export function startPlannerController() {
       }
     } catch {}
     // Resolve model with session default as fallback
-    let model = (config?.model && String(config.model).trim()) || modelFromSession || DEFAULT_CHITCHAT_MODEL;
+    let model = (config?.model && String(config.model).trim()) || modelFromSession || DEFAULT_BANTEROP_MODEL;
     // If using server-hosted provider, verify model is available; fallback if not
     try {
       const models = useAppStore.getState().catalogs.llmModels || [];
       const usingServer = provider === defaultLlmProvider; // crude check: browserside/server
       if (usingServer && models.length && !models.includes(model)) {
-        const fallback = models[0] || DEFAULT_CHITCHAT_MODEL;
+        const fallback = models[0] || DEFAULT_BANTEROP_MODEL;
         if (fallback !== model) {
           try { console.warn('[planner/controller] Model not available on server:', model, '→ using', fallback); } catch {}
           model = fallback;

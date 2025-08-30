@@ -37,7 +37,7 @@ export function ClientSettingsModal({
   ];
 
   const modelOptions = draft.llm.provider === 'server'
-    ? (serverModels?.length ? serverModels : ['@preset/chitchat'])
+    ? (serverModels?.length ? serverModels : ['@preset/banterop'])
     : [];
 
   function save() { onSave(draft); }

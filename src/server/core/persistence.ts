@@ -101,7 +101,7 @@ export function createPersistenceFromDb(db: Database): Persistence {
 }
 
 export function createPersistence(env: Env): Persistence {
-  const db = new Database(env.FLIPPROXY_DB || ':memory:')
+  const db = new Database(env.BANTEROP_DB || ':memory:')
   db.exec('PRAGMA journal_mode = WAL;')
   return createPersistenceFromDb(db)
 }

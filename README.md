@@ -1,11 +1,11 @@
-# FlipProxy Demo (Bun + Hono + React)
+# Banterop Demo (Bun + Hono + React)
 
 A tiny mirror relay (**flip proxy**) that pairs two tabs and reflects messages between them using a minimal A2A-like API. Only the responder listens to a small backchannel; the initiator is a pure A2A Client. An optional MCP-compatible HTTP bridge is available alongside the A2A endpoint for initiator-side integrations.
 
 ## Current Features
 - JSON-RPC: `message/stream` (SSE), `tasks/resubscribe` (SSE), `tasks/get`, `tasks/cancel`.
 - Finality hint (turn semantics):
-  - Sender sets `message.metadata['https://chitchat.fhir.me/a2a-ext'].finality` to `none|turn|conversation`.
+  - Sender sets `message.metadata['https://banterop.fhir.me/a2a-ext'].finality` to `none|turn|conversation`.
   - Bridge updates task status and echoes the hint in streaming frames.
 - Pair management:
   - `POST /api/pairs` (optional `{ metadata?: object }`) → creates a pair and returns structured endpoints and join links.
@@ -39,7 +39,7 @@ Rooms provide a stable workspace per `roomId` (alias of `pairId`), with exactly 
 - Agent Card: `GET /rooms/:roomId/agent-card.json` (spec-like). The default includes:
   - `url`: `/api/rooms/:roomId/a2a` (JSONRPC alias of `/api/bridge/:roomId/a2a`).
   - `preferredTransport`: `JSONRPC` and `additionalInterfaces` repeating the same URL for clarity.
-  - `capabilities.extensions[0]` with `uri: https://chitchat.fhir.me/a2a-ext` and `params: { a2a, mcp, tasks }`.
+  - `capabilities.extensions[0]` with `uri: https://banterop.fhir.me/a2a-ext` and `params: { a2a, mcp, tasks }`.
   - Provider defaults can be customized (see AGENT_CARD_TEMPLATE below).
 - Feature flag (conceptual): when the backend isn’t open, ingress returns an in-band guidance message and marks the task failed; the message includes a full room URL for easy clicking.
 
@@ -104,8 +104,38 @@ Behavior
   - `planners` seed for the active planner,
   - `rev` incremented to avoid stale overwrites.
 
+## Environment Variables
+
+### Core Server Configuration
+- `PORT`: HTTP server port (default: `3000`)
+- `BASE_URL`: Public base URL for generating absolute URLs in agent cards (default: `http://localhost:${PORT}`)
+- `NODE_ENV`: Environment mode (`production` or `development`); affects logging and error handling
+
+### Database & Storage
+- `BANTEROP_DB`: SQLite database file path (default: `:memory:` for in-memory database)
+- `BANTEROP_EVENTS_MAX`: Maximum number of SSE events to keep in memory per pair/room (default: `5000`)
+
+### LLM Provider Configuration
+- `DEFAULT_LLM_PROVIDER`: Fallback LLM provider when none specified (default: `mock`)
+- `DEFAULT_LLM_MODEL`: Default model for the fallback provider
+- `GOOGLE_API_KEY`: API key for Google Gemini provider
+- `OPENROUTER_API_KEY`: API key for OpenRouter AI Gateway
+- `OPENROUTER_PROVIDER_CONFIG`: JSON config for OpenRouter routing (default: `{"ignore":["baseten"],"allow_fallbacks":true,"sort":"throughput"}`)
+- `LLM_MODELS_{PROVIDER}_INCLUDE`: Restrict available models for a specific provider (e.g., `LLM_MODELS_GOOGLE_INCLUDE=gemini-2.5-flash,gemini-2.5-pro`)
+
+### Scenario Management
+- `PUBLISHED_EDIT_TOKEN`: Secret token required in `X-Edit-Token` header to edit published scenarios
+
+### Agent Card Customization
+- `AGENT_CARD_TEMPLATE`: JSON template for customizing agent cards with placeholders (`{{roomId}}`, `{{BASE_URL}}`, `{{origin}}`)
+
+### Development & Debugging
+- `DEBUG_LLM_REQUESTS`: Enable logging of LLM requests/responses to filesystem (set to `1` or `true`)
+- `LLM_DEBUG_DIR`: Directory for LLM debug logs (default: `/tmp/llm-debug`)
+- `TEST_TIMEOUT`: Test execution timeout in seconds (default: `5`)
+
 ## Persistence
-- DB: `FLIPPROXY_DB` (default `:memory:`) — SQLite via Bun.
+- DB: `BANTEROP_DB` (default `:memory:`) — SQLite via Bun.
 - Schema: `pairs`, `tasks`, and `messages(pair_id,epoch,author,json)` with JSON checks and unique index on `$.messageId`.
 - Ordering: FIFO via rowid; optional stronger ordering can add a surrogate primary key.
 - On startup, current epochs seed the SSE ring: `epoch-begin`, replay `message` events, then a derived `state`.
@@ -164,8 +194,8 @@ curl -sS -X POST \
 ## Project layout
 ```
 src/
-  server/flipproxy.ts   # Hono API + Bun.serve dev routes + bun-storage persistence
-  server/bridge/mcp-on-flipproxy.ts  # MCP bridge mounted at /api/bridge/:pairId/mcp
+  server/banterop.ts   # Hono API + Bun.serve dev routes + bun-storage persistence
+  server/bridge/mcp-on-banterop.ts  # MCP bridge mounted at /api/bridge/:pairId/mcp
   shared/               # shared types across server + frontend
     a2a-types.ts
     backchannel-types.ts

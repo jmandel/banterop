@@ -43,7 +43,7 @@ export class MCPAdapter implements TransportAdapter {
     if (this.connecting) { while (this.connecting) await new Promise(r=>setTimeout(r,10)); return; }
     this.connecting = true;
     try {
-      this.client = new Client({ name: 'flipproxy-web', version: '0.1.0' });
+      this.client = new Client({ name: 'banterop-web', version: '0.1.0' });
       const url = new URL(this.endpoint);
       // Provide a fetch wrapper that returns 405 for SSE GET to keep things simple (JSON responses only)
       const fetchWrap = (input: any, init?: any) => {

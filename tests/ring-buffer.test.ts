@@ -5,7 +5,7 @@ import { startServer, stopServer, Spawned, decodeA2AUrl, textPart } from "./util
 let S: Spawned;
 
 // Event store enforces a minimum of 100; use 100 to keep the loop modest
-beforeAll(async () => { S = await startServer({ env: { FLIPPROXY_EVENTS_MAX: '100' } }); });
+beforeAll(async () => { S = await startServer({ env: { BANTEROP_EVENTS_MAX: '100' } }); });
 afterAll(async () => { await stopServer(S); });
 
 describe("Event ring buffer trims old events", () => {

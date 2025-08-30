@@ -1,4 +1,4 @@
-// FlipProxy + Planner Plugin — Journal Types (v0.4 — unified compose-only send path)
+// Banterop + Planner Plugin — Journal Types (v0.4 — unified compose-only send path)
 export interface Cut { seq:number }
 
 export interface AttachmentMeta {

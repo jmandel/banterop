@@ -52,8 +52,8 @@ Interactive client for testing A2A server implementations.
 # Connect to a specific server
 python a2a_client.py <a2a-server-url>
 
-# Use the chitchat.fhir.me test server
-python a2a_client.py --chitchat
+# Use the banterop.fhir.me test server
+python a2a_client.py --banterop
 
 # Interactive launcher with menu
 ./run_client.sh
@@ -67,11 +67,11 @@ python a2a_client.py --chitchat
 
 ## Tested Servers
 
-1. **localhost:3003** - FlipProxy local server
+1. **localhost:3003** - Banterop local server
    - Requires active room ID
    - URL format: `http://localhost:3003/api/rooms/{room-id}/a2a`
 
-2. **chitchat.fhir.me** - A2A test scenarios
+2. **banterop.fhir.me** - A2A test scenarios
    - Knee MRI Prior Auth scenario
    - Protocol v0.3.0 compatible
 

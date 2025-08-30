@@ -1,7 +1,7 @@
 # TODOs / Cleanup
 
 ## Cleanup
-- Remove unused `accept` variable in `src/server/flipproxy.ts` (lint-only).
+- Remove unused `accept` variable in `src/server/banterop.ts` (lint-only).
 - Add explicit SSE headers on backchannel endpoints for proxy-friendliness:
   - `Cache-Control: no-cache, no-transform`
   - `Content-Type: text/event-stream; charset=utf-8`

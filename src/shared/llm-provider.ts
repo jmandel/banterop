@@ -1,20 +1,20 @@
 import type { LlmMessage, LlmProvider, LlmResponse } from './journal-types';
 
 // Use same-origin backend by default
-export const DEFAULT_CHITCHAT_ENDPOINT = '/api/llm/complete';
-export const DEFAULT_CHITCHAT_MODEL = '@preset/chitchat';
+export const DEFAULT_BANTEROP_ENDPOINT = '/api/llm/complete';
+export const DEFAULT_BANTEROP_MODEL = '@preset/banterop';
 
-export function makeChitchatProvider(endpoint?: string): LlmProvider {
-  const ep = (endpoint || DEFAULT_CHITCHAT_ENDPOINT).trim();
+export function makeBanteropProvider(endpoint?: string): LlmProvider {
+  const ep = (endpoint || DEFAULT_BANTEROP_ENDPOINT).trim();
 
   // Available models (dynamic from backend; fallback to curated)
-  let AVAILABLE_MODELS = ['@preset/chitchat'];
+  let AVAILABLE_MODELS = ['@preset/banterop'];
 
   return {
     async chat(req: { model?: string; messages: LlmMessage[]; temperature?: number; maxTokens?: number; signal?: AbortSignal }): Promise<LlmResponse> {
       // Single attempt only; retries are handled by a shared wrapper
       const body = JSON.stringify({
-        model: req.model || DEFAULT_CHITCHAT_MODEL,
+        model: req.model || DEFAULT_BANTEROP_MODEL,
         messages: req.messages,
         temperature: typeof req.temperature === 'number' ? req.temperature : 0.2,
         maxTokens: typeof req.maxTokens === 'number' ? req.maxTokens : undefined,

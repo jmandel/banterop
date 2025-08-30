@@ -1,6 +1,6 @@
-# Kubernetes Deployment for Banterop FlipProxy
+# Kubernetes Deployment for Banterop
 
-This folder contains Kubernetes manifests and utilities to deploy the FlipProxy application to `banterop.fhir.me`.
+This folder contains Kubernetes manifests and utilities to deploy the Banterop application to `banterop.fhir.me`.
 
 ## Quick Start
 

@@ -15,7 +15,7 @@ class OpenRouterLLM extends LLMProvider {
   }
   static getMetadata(): LLMProviderMetadata {
     // Advertise a single preset model; override via LLM_MODELS_OPENROUTER_INCLUDE if desired
-    return { name:'openrouter', description:'OpenRouter AI Gateway', models:['@preset/chitchat'], defaultModel:'@preset/chitchat' };
+    return { name:'openrouter', description:'OpenRouter AI Gateway', models:['@preset/banterop'], defaultModel:'@preset/banterop' };
   }
   getMetadata(): LLMProviderMetadata { return OpenRouterLLM.getMetadata() }
 

@@ -24,7 +24,7 @@ async function a2aHandler(c: Context<AppBindings>) {
         return sse(c, stream, { rpcId: id })
       }
       case 'message/send': {
-        const leaseHeader = c.req.header('x-flipproxy-backend-lease') || c.req.header('X-FlipProxy-Backend-Lease') || null
+        const leaseHeader = c.req.header('x-banterop-backend-lease') || c.req.header('X-Banterop-Backend-Lease') || null
         const snap = await pairs.messageSend(pairId, params?.message, params?.configuration, leaseHeader)
         return c.json({ jsonrpc: '2.0', id, result: snap })
       }
@@ -79,7 +79,7 @@ async function agentCardHandler(c: Context<AppBindings>) {
     additionalInterfaces: [ { url: a2aAlias, transport: 'JSONRPC' } ],
     provider: { organization: 'Josh Mandel', url: 'https://joshuamandel.com' },
     version: '1.0.0',
-    capabilities: { streaming: true, pushNotifications: false, stateTransitionHistory: true, extensions: [ { uri: A2A_EXT_URL, description: 'FlipProxy extension fields (e.g., nextState) used in A2A messages', required: false, params: { a2a: a2aAlias, mcp, tasks } } ] },
+    capabilities: { streaming: true, pushNotifications: false, stateTransitionHistory: true, extensions: [ { uri: A2A_EXT_URL, description: 'Banterop extension fields (e.g., nextState) used in A2A messages', required: false, params: { a2a: a2aAlias, mcp, tasks } } ] },
     defaultInputModes: ['text/plain','application/json','application/octet-stream'],
     defaultOutputModes: ['text/plain','application/json','application/octet-stream'],
     skills: [ { id:'conversational-interoperability', name:'Conversational Interoperability', description:'Engage in multi-turn conversations to accomplish healthcare tasks with interoperable messaging and planning.', tags:['healthcare','interop','conversation'], inputModes:['text/plain','application/json'], outputModes:['text/plain','application/json'] } ],
