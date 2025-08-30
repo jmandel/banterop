@@ -111,6 +111,7 @@ function App() {
   // Start centralized URL sync
   useEffect(() => { startUrlSync(); }, []);
 
+
   // Resolve endpoints from settings (if A2A, fetch Agent Card)
   useEffect(() => {
     let cancelled = false;
@@ -313,7 +314,7 @@ function App() {
       {showDebug && <DebugPanel />}
 
       <div className="grid grid-cols-[1fr_340px] gap-3" ref={gridRef}>
-        <div>
+        <div className="flex flex-col gap-3">
           {hasTranscript && (
             <div className="card">
               <div className={`transcript ${['completed','canceled','failed','rejected'].includes(uiStatus) ? 'faded' : ''}`} aria-live="polite" ref={transcriptRef}>
@@ -392,6 +393,16 @@ function App() {
               )}
             </div>
           )}
+          {plannerId === 'off' && !['completed','canceled','failed','rejected'].includes(uiStatus) && (
+            <ManualComposer
+              disabled={!canSendManual}
+              hint={!canSendManual ? (['completed','canceled','failed','rejected'].includes(uiStatus) ? `Task ${uiStatus}.` : (initiatorCanStart ? 'First send will start a conversation' : 'Not your turn')) : undefined}
+              placeholder={composerPlaceholder()}
+              onSend={handleManualSend}
+              sending={sending}
+            />
+          )}
+          <PlannerSetupCard />
         </div>
 
         <div className={fixedSide ? 'flex flex-col gap-3' : 'sticky top-24 overflow-y-auto'} style={fixedSide ? { position:'fixed', left:(sideLeft ?? 0), top: sideTop, width: 340, height: `calc(100vh - ${sideTop}px)`, overflow:'hidden', minHeight: 0 } : { maxHeight: 'calc(100vh - 96px)' }}>
@@ -407,16 +418,6 @@ function App() {
         </div>
       </div>
 
-      {plannerId === 'off' && !['completed','canceled','failed','rejected'].includes(uiStatus) && (
-        <ManualComposer
-          disabled={!canSendManual}
-          hint={!canSendManual ? (['completed','canceled','failed','rejected'].includes(uiStatus) ? `Task ${uiStatus}.` : (initiatorCanStart ? 'First send will start a conversation' : 'Not your turn')) : undefined}
-          placeholder={composerPlaceholder()}
-          onSend={handleManualSend}
-          sending={sending}
-        />
-      )}
-
       <div className="card hidden">
         <Whisper onSend={sendWhisper} />
       </div>
@@ -425,7 +426,7 @@ function App() {
           {`Task ${uiStatus}. Click here to begin again`}
         </button>
       )}
-      <PlannerSetupCard />
+      
 
       <ClientSettingsModal
         open={showSettings}

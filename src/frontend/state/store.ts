@@ -278,11 +278,11 @@ export const useAppStore = create<Store>((set, get) => ({
       set({ facts: [], seq: 0, composing: undefined, composeApproved: new Set(), inFlightSends: new Map(), sendErrorByCompose: new Map(), attachmentsIndex: new Map(), hud: null });
       return;
     }
-    // Find last public event (remote_sent or remote_received)
+    // Find last public event (remote_sent, remote_received, or status_changed)
     let cutIdx = -1;
     for (let i = facts.length - 1; i >= 0; --i) {
       const t = facts[i].type;
-      if (t === 'remote_sent' || t === 'remote_received') { cutIdx = i; break; }
+      if (t === 'remote_sent' || t === 'remote_received' || t === 'status_changed') { cutIdx = i; break; }
     }
     if (cutIdx < 0) {
       set({ facts: [], seq: 0, composing: undefined, composeApproved: new Set(), inFlightSends: new Map(), sendErrorByCompose: new Map(), attachmentsIndex: new Map(), hud: null });
@@ -724,37 +724,7 @@ function stampAndAppend(set: any, get: any, proposed: ProposedFact[]) {
     }
     filtered.push(p);
   }
-  // When we send a new outgoing message, dismiss any prior suggested drafts
-  // Skip the draft(s) that are being sent in this batch to avoid confusing "dismissed" on the same composeId
-  try {
-    if (filtered.some(p => p && p.type === 'remote_sent')) {
-      const facts: Fact[] = get().facts || [];
-      const dismissed = new Set<string>(facts.filter(f=>f.type==='compose_dismissed').map((f:any)=>String((f as any).composeId||'')));
-      const inflight0 = get().inFlightSends as Map<string, { composeId: string }>;
-      const justSent = new Set<string>();
-      for (const p of filtered) {
-        if ((p as any)?.type === 'remote_sent') {
-          const mid = String((p as any).messageId || '');
-          const link = inflight0?.get?.(mid);
-          if (link?.composeId) justSent.add(String(link.composeId));
-        }
-      }
-      // Also skip any composeIds that have been explicitly approved (resilient if servers change messageId)
-      try {
-        const approvedSet = get().composeApproved as Set<string>;
-        if (approvedSet && approvedSet.size) for (const cid of approvedSet) justSent.add(String(cid));
-      } catch {}
-      for (const f of facts) {
-        if (f.type === 'compose_intent') {
-          const cid = String((f as any).composeId || '');
-          if (cid && !dismissed.has(cid) && !justSent.has(cid)) {
-            filtered.push({ type:'compose_dismissed', composeId: cid } as any as ProposedFact);
-            dismissed.add(cid);
-          }
-        }
-      }
-    }
-  } catch {}
+  // Note: We no longer auto-dismiss older drafts on send; planner gating is handled elsewhere
   if (!filtered.length) return;
   const seq0 = get().seq || 0;
   const ts = nowIso();

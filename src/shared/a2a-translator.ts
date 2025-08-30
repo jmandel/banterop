@@ -12,10 +12,11 @@ export function a2aToFacts(frame: Frame): ProposedFact[] {
   // (1) Task snapshot
   if ((frame as A2ATask).kind === 'task') {
     const t = frame as A2ATask;
-    const st = t.status?.state || 'submitted';
-    out.push({ type:'status_changed', a2a: st } as ProposedFact);
+    // Emit messages first (history, then current status message), then the status change
     for (const m of t.history || []) out.push(...messageToFacts(m));
     if (t.status?.message) out.push(...messageToFacts(t.status.message));
+    const st = t.status?.state || 'submitted';
+    out.push({ type:'status_changed', a2a: st } as ProposedFact);
     return out;
   }
 

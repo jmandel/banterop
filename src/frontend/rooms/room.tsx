@@ -385,7 +385,7 @@ function App() {
       {showDebug && <DebugPanel />}
 
       <div className="grid grid-cols-[1fr_340px] gap-3" ref={gridRef}>
-        <div>
+        <div className="flex flex-col gap-3">
           <div className="card">
             <div className="small muted mb-1.5">Conversation</div>
             <div className={`transcript ${(observing || isFinal) ? 'faded' : ''}`} aria-live="polite" ref={transcriptRef}>
@@ -461,6 +461,16 @@ function App() {
               </div>
             )}
           </div>
+          {!observing && plannerId === 'off' && !isFinal && (
+            <ManualComposer
+              disabled={uiStatus !== 'input-required'}
+              hint={uiStatus !== 'input-required' ? 'Not your turn' : undefined}
+              placeholder={uiStatus === 'input-required' ? 'Type a message to the other side…' : 'Not your turn yet…'}
+              onSend={handleManualSend}
+              sending={sending}
+            />
+          )}
+          {!observing && <PlannerSetupCard />}
         </div>
 
         <div
@@ -489,22 +499,11 @@ function App() {
         </div>
       </div>
 
-      {!observing && plannerId === 'off' && !isFinal && (
-        <ManualComposer
-          disabled={uiStatus !== 'input-required'}
-          hint={uiStatus !== 'input-required' ? 'Not your turn' : undefined}
-          placeholder={uiStatus === 'input-required' ? 'Type a message to the other side…' : 'Not your turn yet…'}
-          onSend={handleManualSend}
-          sending={sending}
-        />
-      )}
-
       {!observing && (
         <div className="card" style={{ display: 'none' }}>
           <Whisper onSend={sendWhisper} />
         </div>
       )}
-      {!observing && <PlannerSetupCard />}
 
       <ClientSettingsModal
         open={showSettings}

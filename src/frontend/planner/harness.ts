@@ -38,6 +38,7 @@ export class PlannerHarness<Cfg = unknown> {
   private lastUserAnswerPlannedSeq = 0;
   private lastOutboundPlannedSeq = 0;
   private lastHead = 0;
+  
 
   // Coalescing scheduler: call this often; we run at most once per microtask
   schedulePlan(): Promise<void> {
@@ -110,12 +111,13 @@ export class PlannerHarness<Cfg = unknown> {
     const whisperTriggered = lastWhisperSeq > this.lastWhisperPlannedSeq;
     const userAnswerTriggered = lastUserAnswerSeq > this.lastUserAnswerPlannedSeq;
 
+    const dismissed = new Set<string>(facts.filter(f=>f.type==='compose_dismissed').map((f:any)=>f.composeId));
     // Only plan when a trigger fired
     if (!(statusTriggered || inboundTriggered || outboundTriggered || whisperTriggered || userAnswerTriggered)) return;
     // Status must be input-required
     if (lastStatus !== 'input-required') return;
     // Unsent compose gate (ignore dismissed): if there's a compose with no remote_sent after it, park
-    const dismissed = new Set<string>(facts.filter(f=>f.type==='compose_dismissed').map((f:any)=>f.composeId));
+    // For normal passes, compute unsent compose gate again (dismissed set already computed)
     const hasUnsentCompose = (() => {
       for (let i = facts.length - 1; i >= 0; --i) {
         const f = facts[i];

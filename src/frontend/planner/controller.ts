@@ -83,6 +83,13 @@ export function startPlannerController() {
   }
 
   rebuildHarness();
+  // Initial UI sync for setup panel based on current readiness
+  try {
+    const s0 = useAppStore.getState();
+    const pid0 = s0.plannerId;
+    const ready0 = !!s0.readyByPlanner[pid0];
+    s0.onPlannerSelected(pid0, ready0);
+  } catch {}
   // Rebuild harness when it matters (including config changes)
   useAppStore.subscribe((s, prev) => {
     const pid = s.plannerId;
@@ -113,6 +120,7 @@ export function startPlannerController() {
     if (!prevReady && ready && s.taskId) {
       try { useAppStore.getState().requestReplan('boot-ready'); } catch {}
     }
+    // Note: avoid set-state here to prevent nested update loops
   });
   // Trigger planning when journal head advances
   let prevSeq = useAppStore.getState().seq || 0;

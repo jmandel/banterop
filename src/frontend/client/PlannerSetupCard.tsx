@@ -62,6 +62,8 @@ export function PlannerSetupCard() {
 
   const SetupComp = (planner as any)?.SetupComponent as (undefined | (() => React.ReactElement));
 
+  // Note: planners that don't require config (e.g., llm-drafter) auto-apply defaults in their Setup component
+
   // If no SetupComponent, show a tiny message
   if (!SetupComp) {
     return (
@@ -119,7 +121,7 @@ export function PlannerSetupCard() {
         {canShowBegin && <button className="btn" type="button" onClick={() => useAppStore.getState().kickoffConversationWithPlanner()}>Begin conversation</button>}
         {!collapsed && (!ready || (row?.dirty)) && (
           <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-            <button className="btn" type="submit" disabled={row?.pending || !(row?.valid) || !(row?.dirty)}>
+            <button className="btn" type="submit" disabled={row?.pending || !(row?.valid) || (ready ? !(row?.dirty) : false)}>
               {ready ? 'Save Changes' : 'Save & Apply'}
             </button>
             {applyErr && <span className="small" style={{ color:'#b91c1c' }}>{applyErr}</span>}

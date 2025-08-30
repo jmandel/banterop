@@ -26,6 +26,7 @@ export function LLMDrafterSetup() {
   const draft = useAppStore(s => s.plannerSetup.byPlanner[pid]?.draft) || (DEFAULTS as LlmDrafterDraft);
   const setDraft = useAppStore(s => s.setSetupDraft);
   const setMeta = useAppStore(s => s.setSetupMeta);
+  const ready = useAppStore(s => !!s.readyByPlanner[pid]);
 
   function update(next: Partial<LlmDrafterDraft>) {
     const full = { ...draft, ...next } as LlmDrafterDraft;
@@ -38,6 +39,21 @@ export function LLMDrafterSetup() {
       seed: valid ? dehydrateLLM(full) : undefined
     });
   }
+
+  // Auto-apply defaults if planner not ready and no prior config
+  React.useEffect(() => {
+    if (ready) return;
+    const s = useAppStore.getState();
+    const row = s.plannerSetup.byPlanner[pid];
+    const hasApplied = !!row?.lastApplied;
+    if (!hasApplied) {
+      try {
+        s.setSetupDraft(pid, DEFAULTS as any);
+        s.setSetupMeta(pid, { valid: true, summary: 'LLM Drafter ready', seed: dehydrateLLM(DEFAULTS as any) });
+        s.applySetup(pid);
+      } catch {}
+    }
+  }, [ready]);
 
   return (
     <div style={{display:'grid', gap:10, maxWidth:680}}>

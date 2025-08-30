@@ -26,6 +26,7 @@
 @layer components {
   .wrap { @apply max-w-[1200px] mx-auto pr-0; }
   .with-debug { @apply pr-[380px]; }
+  .with-fixed-sidebar { @apply pr-[360px]; }
   .card { @apply bg-white border border-[var(--color-border)] rounded-2xl p-3 mb-3 shadow-sm; }
   .row { @apply flex items-center gap-2.5; }
   .row.compact { @apply gap-1.5 flex-wrap; }
