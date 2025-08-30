@@ -78,7 +78,16 @@ export function startPlannerController() {
         }
       }
     } catch {}
-    currentHarness = new PlannerHarness(getFacts, getHead, append, hud, planner as any, cfg as any, { otherAgentId:'counterpart', model }, provider);
+    currentHarness = new PlannerHarness(
+      getFacts,
+      getHead,
+      append,
+      hud,
+      planner as any,
+      cfg as any,
+      { otherAgentId:'counterpart', model, existingTask: !!s.taskId } as any,
+      provider
+    );
     // Don't auto-plan on rebuild - let explicit requests handle it
   }
 

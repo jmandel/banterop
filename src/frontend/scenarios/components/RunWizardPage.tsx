@@ -168,7 +168,6 @@ export function RunWizardPage() {
         planners: { ['scenario-v0.3']: { seed } },
         llm: { provider: 'server', model: selectedModel || '' },
         roomTitle: scenarioTitle,
-        rev: 1,
       };
       const href = `/rooms/${encodeURIComponent(roomId)}#${JSON.stringify(readable)}`;
       try { window.open(href, '_blank'); } catch { navigate(href); }
@@ -188,9 +187,8 @@ export function RunWizardPage() {
         planner: { id: 'scenario-v0.3', mode: 'approve' as const },
         planners: { ['scenario-v0.3']: { seed } },
         llm: { provider: 'server', model: selectedModel || '' },
-        rev: 1,
       };
-      const href = `/client/#${encodeURIComponent(JSON.stringify(readable))}`;
+      const href = `/client/#${JSON.stringify(readable)}`;
       try { window.open(href, '_blank'); } catch { navigate(href); }
     }
   };
@@ -220,11 +218,39 @@ export function RunWizardPage() {
         planners: { ['scenario-v0.3']: { seed } },
         llm: { provider: 'server', model: selectedModel || '' },
         roomTitle: scenarioTitle,
-        rev: 1,
       };
-      return `/rooms/${encodeURIComponent(roomId)}#${encodeURIComponent(JSON.stringify(readable))}`;
+      return `/rooms/${encodeURIComponent(roomId)}#${JSON.stringify(readable)}`;
     } catch { return ''; }
   }, [scenario, scenarioId, simulatedAgentId, selectedModel, instructions]);
+
+  // Precompute client link for "server mode" so users can right‑click/copy
+  const computedClientHref = React.useMemo(() => {
+    try {
+      const trimmed = serverUrl.trim();
+      if (!trimmed) return '';
+      const cfg = scenario?.config || scenario;
+      const sid = cfg?.metadata?.id || scenarioId || '';
+      const base = api.getBaseUrl();
+      const scenarioUrl = `${base}/api/scenarios/${encodeURIComponent(String(sid))}`;
+      const defaultSteps = 20;
+      const myAgentForClient = role || '';
+      const seed = {
+        v: 2,
+        scenarioUrl,
+        model: selectedModel || '',
+        myAgentId: myAgentForClient,
+        maxInlineSteps: defaultSteps,
+        ...(instructions && instructions.trim() ? { instructions: instructions.trim() } : {}),
+      };
+      const readable: any = {
+        ...(protocol === 'mcp' ? { mcpUrl: trimmed } : { agentCardUrl: trimmed }),
+        planner: { id: 'scenario-v0.3', mode: 'approve' as const },
+        planners: { ['scenario-v0.3']: { seed } },
+        llm: { provider: 'server', model: selectedModel || '' },
+      };
+      return `/client/#${JSON.stringify(readable)}`;
+    } catch { return ''; }
+  }, [serverUrl, scenario, scenarioId, role, selectedModel, instructions, protocol]);
 
   // (Removed) Live preview URL; Step 3 should not show a server endpoint
 
@@ -476,18 +502,20 @@ export function RunWizardPage() {
                 </div>
               );
       } else {
-        // Server mode - open client
+        // Server mode - open client (use proper link with href for copy/right-click)
+        const href = computedClientHref;
         return (
           <div className="space-y-3">
             <h3 className="text-lg font-semibold text-slate-800">Ready to Connect</h3>
-            <Button 
-              variant="primary"
-              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold py-4 px-6 rounded-lg shadow-lg transition-colors text-lg"
-              onClick={onLaunch}
-              disabled={!serverUrl.trim()}
+            <a
+              href={href || '#'}
+              target="_blank"
+              rel="noreferrer"
+              className={`inline-flex items-center justify-center w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold py-4 px-6 rounded-lg shadow-lg transition-colors text-lg ${!href ? 'opacity-60 pointer-events-none' : ''}`}
+              onClick={(e)=>{ if (!href) e.preventDefault(); }}
             >
               💬 Open Client & Connect
-            </Button>
+            </a>
             <p className="text-xs text-slate-600 text-center">
               Opens client in new tab to connect to your server
             </p>

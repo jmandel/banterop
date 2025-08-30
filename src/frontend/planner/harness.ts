@@ -42,6 +42,7 @@ export class PlannerHarness<Cfg = unknown> {
 
   // Coalescing scheduler: call this often; we run at most once per microtask
   schedulePlan(): Promise<void> {
+    try { console.debug('[planner/harness] schedulePlan() requested; queued=%o', this.planSched); } catch {}
     if (this.planSched) return Promise.resolve();
     this.planSched = true;
     queueMicrotask(() => { this.planSched = false; void this.runPlanningPass(); });
@@ -68,8 +69,12 @@ export class PlannerHarness<Cfg = unknown> {
     this.lastHead = headNow;
 
     const facts = this.getFacts();
-    if (!facts.length) return;
-    if (runawayGuardActive(facts.length)) {
+    // Bootstrap trigger: allow a single planning pass when journal is empty.
+    // This avoids needing a synthetic status fact for the first proposal.
+    const hasExistingTask = !!(this.ids as any)?.existingTask;
+    const bootstrap = facts.length === 0 && !hasExistingTask;
+    try { console.debug('[planner/harness] pass begin: facts=%d head=%d bootstrap=%o', facts.length, headNow, bootstrap); } catch {}
+    if (!bootstrap && runawayGuardActive(facts.length)) {
       try {
         const msg = `🧊 Runaway guard: planner frozen (entries=${facts.length} ≥ cap=${JOURNAL_HARD_CAP})`;
         this.hud('waiting', msg);
@@ -112,10 +117,21 @@ export class PlannerHarness<Cfg = unknown> {
     const userAnswerTriggered = lastUserAnswerSeq > this.lastUserAnswerPlannedSeq;
 
     const dismissed = new Set<string>(facts.filter(f=>f.type==='compose_dismissed').map((f:any)=>f.composeId));
-    // Only plan when a trigger fired
-    if (!(statusTriggered || inboundTriggered || outboundTriggered || whisperTriggered || userAnswerTriggered)) return;
-    // Status must be input-required
-    if (lastStatus !== 'input-required') return;
+    // Only plan when a trigger fired (including bootstrap for empty journal)
+    const anyTrigger = statusTriggered || inboundTriggered || outboundTriggered || whisperTriggered || userAnswerTriggered || bootstrap;
+    try {
+      console.debug('[planner/harness] triggers:', {
+        status: lastStatus || 'none', lastStatusSeq,
+        lastPublic,
+        inboundTriggered, outboundTriggered, statusTriggered, whisperTriggered, userAnswerTriggered, bootstrap,
+      });
+    } catch {}
+    if (!anyTrigger) return;
+    // Status must be input-required, unless this is the bootstrap pass
+    if (!bootstrap && lastStatus !== 'input-required') {
+      try { console.debug('[planner/harness] gate: status not input-required → skip (status=%o)', lastStatus); } catch {}
+      return;
+    }
     // Unsent compose gate (ignore dismissed): if there's a compose with no remote_sent after it, park
     // For normal passes, compute unsent compose gate again (dismissed set already computed)
     const hasUnsentCompose = (() => {
@@ -154,7 +170,10 @@ export class PlannerHarness<Cfg = unknown> {
       }
       // If couldn't find the draft defensively, fall through to standard guard (which will park)
     }
-    if (hasUnsentCompose) return;
+    if (hasUnsentCompose) {
+      try { console.debug('[planner/harness] gate: unsent compose present → park'); } catch {}
+      return;
+    }
 
     const ctx: PlanContext<any> = {
       signal: undefined,

@@ -152,6 +152,14 @@ function App() {
     const adapter = transport === 'mcp' ? new MCPAdapter(endpointMcp) : new A2AAdapter(endpointA2A);
     store.init('initiator' as any, adapter, undefined);
     startPlannerController();
+    // If user clicked Begin before adapter/controller were ready, honor it now
+    try {
+      const s = useAppStore.getState();
+      if (s.pendingKickoff) {
+        useAppStore.setState({ pendingKickoff: false });
+        s.requestReplan('kickoff');
+      }
+    } catch {}
   }, [transport, resolvedA2A, resolvedMcp, mcpUrl]);
 
   // Load available server models for settings UI
@@ -403,6 +411,12 @@ function App() {
             />
           )}
           <PlannerSetupCard />
+
+          {['completed','canceled','failed','rejected'].includes(uiStatus) && (
+            <button className="btn w-full py-4 mt-3" onClick={clearTask}>
+              {`Task ${uiStatus}. Click here to begin again`}
+            </button>
+          )}
         </div>
 
         <div className={fixedSide ? 'flex flex-col gap-3' : 'sticky top-24 overflow-y-auto'} style={fixedSide ? { position:'fixed', left:(sideLeft ?? 0), top: sideTop, width: 340, height: `calc(100vh - ${sideTop}px)`, overflow:'hidden', minHeight: 0 } : { maxHeight: 'calc(100vh - 96px)' }}>
@@ -421,11 +435,6 @@ function App() {
       <div className="card hidden">
         <Whisper onSend={sendWhisper} />
       </div>
-      {['completed','canceled','failed','rejected'].includes(uiStatus) && (
-        <button className="btn w-full py-4 mt-3" onClick={clearTask}>
-          {`Task ${uiStatus}. Click here to begin again`}
-        </button>
-      )}
       
 
       <ClientSettingsModal

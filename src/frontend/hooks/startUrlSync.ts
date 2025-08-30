@@ -54,15 +54,36 @@ function buildReadableHashFromStore(): string {
   try { const raw = window.sessionStorage.getItem('clientSettings'); client = raw ? JSON.parse(raw) : {}; } catch {}
   // Preserve optional roomTitle across rewrites when present
   let roomTitle: string | undefined;
+  let seedFromHash: any | undefined;
   try {
     const cur = tryParseReadableHash(window.location.hash);
     if (cur && typeof (cur as any).roomTitle === 'string') roomTitle = (cur as any).roomTitle;
+    const pid0 = s.plannerId;
+    if (cur && typeof cur === 'object' && pid0 && (cur as any).planners && (cur as any).planners[pid0] && (cur as any).planners[pid0].seed) {
+      seedFromHash = (cur as any).planners[pid0].seed;
+    }
   } catch {}
   const pid = s.plannerId;
   const planner: any = resolvePlanner(pid);
   const row = (s as any).plannerSetup?.byPlanner?.[pid];
   const cfg = row?.draft || (s as any).configByPlanner?.[pid];
-  const seed = (cfg && planner?.dehydrate) ? planner.dehydrate(cfg) : undefined;
+  // Prefer dehydrate(cfg) when complete; if incomplete, fill missing fields from the hash seed
+  function isEmpty(val: any): boolean { return val == null || (typeof val === 'string' && val.trim() === ''); }
+  function fillMissing(base: any, fallback: any): any {
+    if (!fallback || typeof fallback !== 'object') return base;
+    const out: any = Array.isArray(base) ? [...base] : { ...(base || {}) };
+    for (const k of Object.keys(fallback)) {
+      const v = (out as any)[k];
+      if (isEmpty(v)) (out as any)[k] = (fallback as any)[k];
+    }
+    return out;
+  }
+  let seed: any = undefined;
+  try {
+    const dehydrated = (cfg && planner?.dehydrate) ? planner.dehydrate(cfg) : undefined;
+    if (dehydrated && seedFromHash) seed = fillMissing(dehydrated, seedFromHash);
+    else seed = dehydrated || seedFromHash || undefined;
+  } catch { seed = seedFromHash || undefined; }
   const payload: any = {
     // transport omitted; infer from URLs
     // include only the active URL based on inferred transport
@@ -151,15 +172,10 @@ export function startUrlSync() {
     const cfg = rowNow?.draft || (s as any).configByPlanner?.[pid];
     try { console.debug('[urlSync] store→url: pid=%o mode=%o cfg=%o summary=%o', pid, s.plannerMode, !!cfg, summarizeConfigForLog(pid, cfg)); } catch {}
 
-    // Attach rev and write human-readable JSON into hash
-    let payload: any = {};
-    try { payload = JSON.parse(core); } catch {}
-    payload.rev = ++localRev;
-
+    // Write human-readable JSON into hash (no rev; keep existing values stable)
     suppress = true;
     try {
-      const json = JSON.stringify(payload);
-      window.location.hash = json; // readable JSON in hash
+      window.location.hash = core;
     } catch {}
     finally { setTimeout(() => { suppress = false; }, 0); }
   });

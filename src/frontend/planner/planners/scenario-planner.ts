@@ -60,6 +60,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
 
   async plan(input: PlanInput, ctx: PlanContext<ScenarioPlannerConfig>): Promise<ProposedFact[]> {
     const { facts } = input;
+    const bootstrap = facts.length === 0;
     const cfg = ctx.config || ({} as ScenarioPlannerConfig);
     const includeWhy = true;
 
@@ -76,7 +77,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
     const status = getLastStatus(facts) || 'initializing';
 
     // 2) Hold during 'working' (no tools/no nudges)
-    if (status === 'working' || status === 'submitted' || status === 'initializing') {
+    if (!bootstrap && (status === 'working' || status === 'submitted' || status === 'initializing')) {
       return [sleepFact(`Counterpart working or not ready (status=${status})`, includeWhy)];
     }
 
@@ -107,7 +108,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
     const scenario = cfg.scenario;
     const myId = cfg.myAgentId || scenario?.agents?.[0]?.agentId || 'planner';
     const counterpartId = (scenario?.agents?.find(a => a.agentId !== myId)?.agentId) || (scenario?.agents?.[1]?.agentId) || 'counterpart';
-    const allowSendToRemote = status === 'input-required';
+    const allowSendToRemote = (status === 'input-required') || bootstrap;
     const enabledScenarioTools = Array.isArray((ctx.config as any)?.enabledTools) ? (ctx.config as any).enabledTools as string[] : undefined;
     const coreAllowed = new Set<string>(Array.isArray(cfg.enabledCoreTools) && cfg.enabledCoreTools.length ? cfg.enabledCoreTools : ['sendMessageToRemoteAgent','sendMessageToMyPrincipal','readAttachment','sleep','done']);
     const model = ctx.model;

@@ -112,6 +112,8 @@ export type Store = {
   // planning baton
   planNonce: number;
   requestReplan(reason?: string): void;
+  // one-shot kickoff if Begin clicked before adapter/controller are ready
+  pendingKickoff?: boolean;
 
   // setup UI state machine
   setupUi: {
@@ -149,6 +151,7 @@ export const useAppStore = create<Store>((set, get) => ({
   seq: 0,
   hud: null,
   planNonce: 0,
+  pendingKickoff: false,
   setupUi: {
     panel: 'collapsed' as 'open' | 'collapsed',
     lastPlannerId: '',
@@ -472,7 +475,10 @@ export const useAppStore = create<Store>((set, get) => ({
     const hasAnyStatus = facts.some(f => f.type === 'status_changed');
     const unsent = findUnsentComposes(facts);
     if (hasAnyStatus || unsent.length) return;
-    stampAndAppend(set, get, [{ type:'status_changed', a2a:'input-required' } as ProposedFact]);
+    // If adapter/controller not ready yet, arm a pending kickoff
+    if (!get().adapter) { set({ pendingKickoff: true }); return; }
+    // Ask the harness for a bootstrap pass; no journal mutation needed.
+    try { get().requestReplan('kickoff'); } catch {}
   },
 
   async cancelAndClear() {

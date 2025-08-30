@@ -15,6 +15,17 @@ export function PlannerSetupCard() {
 
   const [applyErr, setApplyErr] = React.useState<string | null>(null);
 
+  // Auto open/collapse based on sufficiency: open when not ready; collapse when ready
+  React.useEffect(() => {
+    const s = useAppStore.getState();
+    if (ready) {
+      if (!collapsed) s.collapseSetup();
+    } else {
+      if (collapsed) s.openSetup();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pid, ready]);
+
   const canBegin = ready && role === 'initiator' && !taskId;
   const facts = useAppStore(s => s.facts);
   const hasUnsentDraft = React.useMemo(() => {

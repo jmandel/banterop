@@ -221,6 +221,19 @@ function App() {
       if (plannerReady && planner) {
         let seed: any = undefined
         try { if (planner && typeof planner.dehydrate === 'function' && plannerConfig) seed = planner.dehydrate(plannerConfig) } catch {}
+        // If scenario planner, flip myAgentId so sample client plays the OTHER agent
+        try {
+          if (plannerId === 'scenario-v0.3' && plannerConfig && (plannerConfig as any).scenario) {
+            const scen = (plannerConfig as any).scenario;
+            const agents = Array.isArray(scen?.agents) ? scen.agents : [];
+            const myId = String((plannerConfig as any).myAgentId || (agents[0]?.agentId || ''));
+            const other = agents.find((a:any) => String(a?.agentId || '') !== myId) || agents[1] || agents[0];
+            const otherId = String(other?.agentId || myId);
+            if (seed && typeof seed === 'object') {
+              seed = { ...seed, myAgentId: otherId };
+            }
+          }
+        } catch {}
         // Choose a default LLM model for the client: prefer seed.model when present, else chitchat preset
         const defaultModel = (seed && typeof seed.model === 'string' && seed.model.trim()) ? seed.model : DEFAULT_CHITCHAT_MODEL
         const payload: any = {
@@ -228,12 +241,11 @@ function App() {
           llm: { provider: 'server', model: defaultModel },
           planner: { id: plannerId, mode: plannerMode },
           ...(seed ? { planners: { [plannerId]: { seed } } } : {}),
-          rev: 1,
         }
-        return `${base}#${encodeURIComponent(JSON.stringify(payload))}`
+        return `${base}#${JSON.stringify(payload)}`
       }
-      return `${base}#${encodeURIComponent(JSON.stringify({ agentCardUrl: agentCard, planner: { id: plannerId, mode: plannerMode } }))}`
-    } catch { return `${window.location.origin}/client/#${encodeURIComponent(JSON.stringify({ agentCardUrl: agentCard }))}` }
+      return `${base}#${JSON.stringify({ agentCardUrl: agentCard, planner: { id: plannerId, mode: plannerMode } })}`
+    } catch { return `${window.location.origin}/client/#${JSON.stringify({ agentCardUrl: agentCard })}` }
   }, [agentCard, plannerId, plannerReady, plannerConfig, plannerMode])
 
   // Optional roomTitle from readable JSON hash
