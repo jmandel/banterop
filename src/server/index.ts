@@ -77,6 +77,7 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
   app.use('*', async (c, next) => { c.set('db', db); c.set('events', events); c.set('pairs', pairs); await next() })
 
   app.route('/.well-known', wellKnownRoutes())
+  app.get('/api/health', (c) => c.json({ ok: true }))
   app.route('/api', pairsRoutes())
   app.route('/api', a2aRoutes())
   app.route('/api', mcpRoutes())
