@@ -129,5 +129,8 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
 
 if (import.meta.main) {
   const server = createServer()
-  try { console.log(`[banterop] ${((Bun.env.NODE_ENV || process.env.NODE_ENV) !== 'production') ? 'Dev' : 'Prod'} server listening on ${server.url}`) } catch {}
+  const env = loadEnv()
+  const isDev = (Bun.env.NODE_ENV || process.env.NODE_ENV) !== 'production'
+  const displayUrl = env.BASE_URL || server.url
+  try { console.log(`[banterop] ${isDev ? 'Dev' : 'Prod'} server listening on ${displayUrl}`) } catch {}
 }
