@@ -100,8 +100,7 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
   const server = serve({
     idleTimeout: IDLE_TIMEOUT,
     port,
-    //development: isDev ? { hmr: true, console: true } : undefined,
-    development: true,
+    development: isDev,
     routes: {
       '/': scenariosHtml,
       '/client/': clientHtml,
