@@ -9,7 +9,6 @@ RUN bun install --ci
 # Copy source
 COPY src ./src
 COPY tests ./tests
-COPY scripts ./scripts
 
 # Create non-root user (UID 10001) and switch
 # Create non-root user (Debian-compatible invocation)
