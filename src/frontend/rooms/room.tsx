@@ -24,6 +24,7 @@ import { LinksCard } from './components/LinksCard'
 import { AutomationCard } from '../components/AutomationCard'
 import { LogCard } from '../components/LogCard'
 import { Settings, Copy } from 'lucide-react'
+import { AppLayout as SharedAppLayout } from '../ui'
 
 // EXPERIMENTAL: WebRTC datachannel keepalive to avoid Chrome Energy Saver freezing
 // See: https://developer.chrome.com/blog/freezing-on-energy-saver
@@ -330,27 +331,29 @@ function App() {
   }, [])
 
   return (
-    <div className={`wrap ${showDebug ? 'with-debug' : ''}`}>
-      <TopBar
-        left={(
-          <div className="row compact" style={{ alignItems:'baseline', gap: 8 }}>
-            <span className="small muted">Room</span>
-            <span className="text-sm font-semibold">{roomTitleFromHash || roomId || '—'}</span>
-            <span className={`pill ${isOwner ? 'ok' : (observing ? 'warn' : 'info')}`}>{isOwner ? 'Connected' : (observing ? 'Observing only' : 'Connecting…')}</span>
-          </div>
-        )}
-        right={(
-          <button
-            title="Settings"
-            aria-label="Settings"
-            onClick={()=>setShowSettings(true)}
-            className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact"
-          >
-            <Settings size={18} strokeWidth={1.75} />
-            <span className="text-sm">Config</span>
-          </button>
-        )}
-      />
+    <SharedAppLayout
+      title="Banterop"
+      fullWidth
+      breadcrumbs={(
+        <>
+          <span>•</span>
+          <span className="truncate">Room: {roomTitleFromHash || roomId || '—'}</span>
+          <span className={`pill ${isOwner ? 'ok' : (observing ? 'warn' : 'info')}`}>{isOwner ? 'Connected' : (observing ? 'Observing only' : 'Connecting…')}</span>
+        </>
+      )}
+      headerRight={(
+        <button
+          title="Settings"
+          aria-label="Settings"
+          onClick={()=>setShowSettings(true)}
+          className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact"
+        >
+          <Settings size={18} strokeWidth={1.75} />
+          <span className="text-sm">Config</span>
+        </button>
+      )}
+    >
+      <div className={`wrap ${showDebug ? 'with-debug' : ''}`}>
 
   {(() => {
     function summarizeTaskId(full?: string | null): string {
@@ -363,6 +366,7 @@ function App() {
     return (
       <MetaBar
         elRef={metaRef}
+        offset={48}
         left={(
           <div className="row compact">
             <span className="small muted">Task</span>
@@ -411,7 +415,7 @@ function App() {
               return (
                 <div key={f.id} className={'bubble ' + (isMe ? 'me' : 'them')}>
                   <div className="row items-center small muted mb-1">
-                    <span className={`pill ${isMe ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}`}>{who}</span>
+                    <span className={`pill ${isMe ? 'bg-primary-100 text-primary-800' : 'bg-gray-100 text-gray-800'}`}>{who}</span>
                     <span className="muted">{time}</span>
                   </div>
                   <Markdown text={f.text} />
@@ -485,11 +489,8 @@ function App() {
           {!observing && <PlannerSetupCard />}
         </div>
 
-        <div
-          className={(fixedSide ? 'flex flex-col gap-3' : 'sticky top-24 overflow-y-auto')}
-          style={fixedSide ? { position:'fixed', left: (sideLeft ?? 0), top: sideTop, width: 340, height: `calc(100vh - ${sideTop}px)`, overflow: 'hidden', minHeight: 0 } : { maxHeight: 'calc(100vh - 96px)' }}
-        >
-          <div className="flex flex-col gap-3 min-h-0 h-full">
+        <div className={'sticky overflow-y-auto'} style={{ top: sideTop, maxHeight: `calc(100vh - ${sideTop}px)` }}>
+          <div className="flex flex-col gap-3 min-h-0">
             <LinksCard
               agentCard={agentCard}
               mcpUrl={mcp}
@@ -527,7 +528,8 @@ function App() {
         serverModels={useAppStore.getState().catalogs.llmModels}
         variant="rooms"
       />
-    </div>
+      </div>
+    </SharedAppLayout>
   )
 }
 

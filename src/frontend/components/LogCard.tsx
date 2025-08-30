@@ -6,8 +6,8 @@ function typeLabel(type: string): string { return String(type || '').replace(/_/
 
 function tagFor(type: string): { label:string; cls:string } {
   switch (type) {
-    case 'status_changed': return { label: typeLabel(type), cls:'bg-blue-50 text-blue-700' };
-    case 'compose_intent': return { label: typeLabel(type), cls:'bg-indigo-50 text-indigo-700' };
+    case 'status_changed': return { label: typeLabel(type), cls:'bg-primary-50 text-primary-800' };
+    case 'compose_intent': return { label: typeLabel(type), cls:'bg-accent-50 text-accent-800' };
     case 'tool_call':
     case 'tool_result': return { label: typeLabel(type), cls:'bg-amber-50 text-amber-700' };
     case 'remote_received': return { label: typeLabel(type), cls:'bg-purple-50 text-purple-700' };

@@ -1,0 +1,189 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: banterop
+---
+# Database storage (existing)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: banterop-db
+  namespace: banterop
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+# Debug logs storage - 10GB
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: debug-logs
+  namespace: banterop
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: banterop
+data:
+  PORT: "3000"
+  FLIPPROXY_DB: "/data/banterop.db"
+  DEFAULT_LLM_PROVIDER: "openrouter"
+  DEFAULT_LLM_MODEL: "openai/gpt-oss-120b:nitro"
+  BASE_URL: "https://banterop.fhir.me"
+  FLIPPROXY_EVENTS_MAX: "5000"
+---
+# NOTE: Secret intentionally managed separately to avoid accidental resets on apply.
+# Use k8s/update-secrets.sh or kubectl to create/update the app-secrets Secret, e.g.:
+#   kubectl -n banterop create secret generic app-secrets \
+#     --from-literal=OPENROUTER_API_KEY=your-key \
+#     --from-literal=GOOGLE_API_KEY=your-key \
+#     --from-literal=PUBLISHED_EDIT_TOKEN=your-token \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+# Example (commented out):
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: app-secrets
+#   namespace: banterop
+# type: Opaque
+# stringData:
+#   GOOGLE_API_KEY: ""
+#   OPENROUTER_API_KEY: ""
+#   PUBLISHED_EDIT_TOKEN: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: banterop-api
+  namespace: banterop
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: banterop-api
+  template:
+    metadata:
+      labels:
+        app: banterop-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: api
+          image: ghcr.io/jmandel/banterop:main
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+              name: http
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: debug-logs
+              mountPath: /debug
+            - name: public
+              mountPath: /app/public
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secrets
+          # Debug-specific environment variables
+          env:
+            - name: DEBUG_LLM_REQUESTS
+              value: "true"
+            - name: LLM_DEBUG_DIR
+              value: "/debug/llm-debug"
+            - name: LLM_MODELS_OPENROUTER_INCLUDE
+              value: "openai/gpt-oss-120b:nitro,qwen/qwen3-235b-a22b-2507:nitro"
+            - name: NODE_ENV
+              value: "development"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    ln -snf /debug/llm-debug /app/public/debug-logs 2>/dev/null || true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: banterop-db
+        - name: debug-logs
+          persistentVolumeClaim:
+            claimName: debug-logs
+        - name: public
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: banterop-api
+  namespace: banterop
+spec:
+  selector:
+    app: banterop-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: banterop-api
+  namespace: banterop
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - banterop.fhir.me
+      secretName: banterop-fhir-me-tls
+  rules:
+    - host: banterop.fhir.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: banterop-api
+                port:
+                  number: 80

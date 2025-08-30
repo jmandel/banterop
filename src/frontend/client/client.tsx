@@ -28,6 +28,7 @@ import { TopBar } from '../components/TopBar';
 import { MetaBar } from '../components/MetaBar';
 import { Settings } from 'lucide-react';
 import { Copy } from 'lucide-react';
+import { AppLayout as SharedAppLayout } from '../ui';
 
 function useQuery() {
   const u = new URL(window.location.href);
@@ -267,8 +268,9 @@ function App() {
   }, []);
 
   return (
-    <div className={`wrap ${showDebug ? 'with-debug' : ''}`}>
-      <TopBar
+    <SharedAppLayout title="Banterop" fullWidth>
+      <div className={`wrap ${showDebug ? 'with-debug' : ''}`}>
+      <TopBar offset={48}
         left={(
           <div className="row compact">
             <span className="small muted">Client</span>
@@ -285,6 +287,7 @@ function App() {
 
       <MetaBar
         elRef={metaRef}
+        offset={96}
         left={(
           <div className="row compact">
             <span className="small muted">Task</span>
@@ -419,8 +422,8 @@ function App() {
           )}
         </div>
 
-        <div className={fixedSide ? 'flex flex-col gap-3' : 'sticky top-24 overflow-y-auto'} style={fixedSide ? { position:'fixed', left:(sideLeft ?? 0), top: sideTop, width: 340, height: `calc(100vh - ${sideTop}px)`, overflow:'hidden', minHeight: 0 } : { maxHeight: 'calc(100vh - 96px)' }}>
-          <div className="flex flex-col gap-3 min-h-0 h-full">
+        <div className={'sticky overflow-y-auto'} style={{ top: sideTop, maxHeight: `calc(100vh - ${sideTop}px)` }}>
+          <div className="flex flex-col gap-3 min-h-0">
             <AutomationCard
               mode={useAppStore.getState().plannerMode as any}
               onModeChange={(m)=>useAppStore.getState().setPlannerMode(m)}
@@ -444,7 +447,8 @@ function App() {
         onSave={(next)=>{ saveClientSettings(next); setShowSettings(false); }}
         serverModels={serverModels}
       />
-    </div>
+      </div>
+    </SharedAppLayout>
   );
 }
 

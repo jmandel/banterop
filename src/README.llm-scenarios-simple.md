@@ -31,7 +31,7 @@ DEFAULT_LLM_PROVIDER=mock
 DEFAULT_LLM_MODEL=mock-model
 
 # Keys for server-backed providers
-GEMINI_API_KEY=...                   # or GOOGLE_API_KEY
+GOOGLE_API_KEY=...                   # Google Gemini API key
 OPENROUTER_API_KEY=...
 
 # OpenRouter provider routing (optional JSON)

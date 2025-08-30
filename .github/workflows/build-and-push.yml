@@ -1,0 +1,71 @@
+name: Build and Publish Docker image to GHCR
+
+on:
+  push:
+    branches: [ main, v4 ]
+    tags: [ 'v*' ]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # This MUST match the image in k8s/app.yaml and k8s/app-with-debug.yaml
+          images: |
+            ghcr.io/jmandel/banterop
+          tags: |
+            # branch event - use branch name as tag
+            type=ref,event=branch
+            # tag event - use tag name
+            type=ref,event=tag
+            # For main branch, also tag as 'latest'
+            type=raw,value=latest,enable={{is_default_branch}}
+            # SHA for every build
+            type=sha,prefix={{branch}}-
+          labels: |
+            org.opencontainers.image.title=Banterop FlipProxy
+            org.opencontainers.image.description=FlipProxy for banterop.fhir.me
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.url=https://banterop.fhir.me
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Print image tags
+        run: |
+          echo "Successfully built and pushed the following tags:"
+          echo "${{ steps.meta.outputs.tags }}"
+          echo ""
+          echo "To deploy to Kubernetes, use:"
+          echo "  kubectl set image deployment/flipproxy-api api=ghcr.io/jmandel/banterop:${{ github.ref_name }} -n interop"
+          echo ""
+          echo "Or update k8s/app.yaml to use: ghcr.io/jmandel/banterop:${{ github.ref_name }}"

@@ -68,8 +68,8 @@ export function StructuredView({ config }: { config: any; onConfigChange?: (c: a
           <div className="text-sm">{agentConfig.principal?.name} ({agentConfig.principal?.type})</div>
         </div>
         <div>
-          <div className="text-xs font-medium text-[color:var(--muted)] mb-1">System Prompt</div>
-          <div className="text-sm whitespace-pre-wrap bg-[color:var(--panel)] border border-[color:var(--border)] p-2 rounded">{agentConfig.systemPrompt}</div>
+        <div className="text-xs font-medium text-muted mb-1">System Prompt</div>
+        <div className="text-sm whitespace-pre-wrap bg-panel border border-border p-2 rounded">{agentConfig.systemPrompt}</div>
         </div>
         <div>
           <div className="text-xs font-medium text-gray-600 mb-1">Situation</div>
@@ -84,7 +84,7 @@ export function StructuredView({ config }: { config: any; onConfigChange?: (c: a
         {agentConfig.messageToUseWhenInitiatingConversation && (
           <div>
             <div className="text-xs font-medium text-gray-600 mb-1">Conversation Starter</div>
-            <div className="text-sm italic bg-blue-50 p-2 rounded">
+          <div className="text-sm italic bg-primary-50 p-2 rounded">
               "{agentConfig.messageToUseWhenInitiatingConversation}"
             </div>
           </div>
@@ -94,7 +94,7 @@ export function StructuredView({ config }: { config: any; onConfigChange?: (c: a
           {renderJsonPreview(agentConfig.knowledgeBase, 'knowledge base')}
         </div>
         <div>
-          <div className="text-xs font-medium text-[color:var(--muted)] mb-1">Tools</div>
+        <div className="text-xs font-medium text-muted mb-1">Tools</div>
           {renderTools(agentConfig.tools)}
         </div>
       </div>
@@ -115,13 +115,13 @@ export function StructuredView({ config }: { config: any; onConfigChange?: (c: a
             <div className="text-sm">{config?.metadata?.description || <span className="text-gray-500 italic">No description</span>}</div>
           </div>
           <div>
-            <div className="text-xs font-medium text-[color:var(--muted)] mb-1">Tags</div>
+            <div className="text-xs font-medium text-muted mb-1">Tags</div>
             <div className="flex flex-wrap gap-2 items-center">
               {(config?.metadata?.tags || []).map((tag: string, i: number) => (
                 <Badge key={i} variant="neutral">{tag}</Badge>
               ))}
               {(!config?.metadata?.tags || config?.metadata?.tags.length === 0) && (
-                <span className="text-[color:var(--muted)] italic text-xs">No tags</span>
+                <span className="text-muted italic text-xs">No tags</span>
               )}
             </div>
           </div>

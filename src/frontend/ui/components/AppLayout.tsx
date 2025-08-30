@@ -1,5 +1,5 @@
 import React from 'react';
-import logoImage from '../interlocked-speech-bubbles.png';
+import logoImage from '../logo.png';
 
 interface AppLayoutProps {
   title: string;
@@ -21,22 +21,24 @@ export function AppLayout({
   const [menuOpen, setMenuOpen] = React.useState(false);
   const toggleMenu = () => setMenuOpen(v => !v);
   const closeMenu = () => setMenuOpen(false);
+  const year = new Date().getFullYear();
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
       {/* Header */}
-      <header className="sticky top-0 z-30 border-b bg-white/90 backdrop-blur">
-        <div className="container mx-auto px-4 py-2 flex items-center justify-between">
-          <div className="flex items-center gap-3 text-gray-900">
-            {logo || <img src={logoImage} alt="Logo" className="w-10 h-10 object-contain" />}
-            <h1 className="text-xl font-semibold">{title}</h1>
+      <header className="sticky top-0 z-30 border-b bg-white/95 backdrop-blur">
+        <div className="container mx-auto px-3 h-12 flex items-center justify-between">
+          <div className="flex items-center gap-3 text-gray-900 min-w-0">
+            <a href="/" className="flex items-center gap-3 text-gray-900 hover:opacity-80 no-underline" aria-label="Go to home">
+              {logo || <img src={logoImage} alt="Banterop logo" className="w-10 h-10 -m-1 object-contain block" />}
+              <h1 className="text-2xl font-bold tracking-tight whitespace-nowrap">{title}</h1>
+            </a>
+            {breadcrumbs && (
+              <nav className="ml-3 hidden md:flex items-center gap-2 text-sm text-muted truncate">
+                {breadcrumbs}
+              </nav>
+            )}
           </div>
-          
-          {breadcrumbs && (
-            <nav className="hidden md:flex items-center gap-2 text-sm">
-              {breadcrumbs}
-            </nav>
-          )}
-          
+
           <div className="flex items-center gap-2">
             {headerRight && (
               <div className="hidden sm:flex items-center gap-4">
@@ -47,7 +49,7 @@ export function AppLayout({
             <div className="relative">
               <button
                 aria-label="Open menu"
-                className="inline-flex items-center justify-center w-10 h-10 rounded-full border border-gray-200 bg-white text-gray-700 hover:bg-gray-100"
+                className="inline-flex items-center justify-center w-9 h-9 rounded-full border border-gray-200 bg-white text-gray-700 hover:bg-gray-100"
                 onClick={toggleMenu}
               >
                 <span className="text-xl leading-none">☰</span>
@@ -80,22 +82,38 @@ export function AppLayout({
       {/* Footer */}
       <footer className="border-t bg-white">
         <div className="container mx-auto px-4 py-2 flex items-center justify-between">
-          <p className="text-xs text-gray-600">
-            Conversational Interoperability - Testing healthcare workflows through dialogue
-          </p>
+          <p className="text-xs text-gray-600">Banterop © {year}</p>
           <div className="flex gap-4 text-xs">
             <a 
-              href="https://github.com/jmandel/conversational-interop" 
-              className="text-blue-600 hover:text-blue-800 no-underline"
+              href="https://github.com/banterop"
+              className="text-primary hover:opacity-80 no-underline"
               target="_blank"
               rel="noopener noreferrer"
             >
-              Reference Implementation
+              github.com/banterop
             </a>
             <span className="text-gray-400">•</span>
-            <a 
-              href="https://confluence.hl7.org/spaces/FHIR/pages/358260686/2025+-+09+Language+First+Interoperability" 
-              className="text-blue-600 hover:text-blue-800 no-underline"
+            <a
+              href="https://github.com/banterop/banterop/issues/new"
+              className="text-primary hover:opacity-80 no-underline"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Report an issue
+            </a>
+            <span className="text-gray-400">•</span>
+            <a
+              href="https://chat.fhir.org/#narrow/channel/323443-Artificial-Intelligence.2FMachine-Learning-.28AI.2FML.29"
+              className="text-primary hover:opacity-80 no-underline"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Zulip chat
+            </a>
+            <span className="text-gray-400">•</span>
+            <a
+              href="https://confluence.hl7.org/spaces/FHIR/pages/358260686/2025+-+09+Language+First+Interoperability"
+              className="text-primary hover:opacity-80 no-underline"
               target="_blank"
               rel="noopener noreferrer"
             >

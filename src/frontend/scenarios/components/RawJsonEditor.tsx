@@ -24,7 +24,7 @@ export function RawJsonEditor({ config, onChange, isReadOnly }: { config: any; o
     <div>
       <textarea
         ref={taRef}
-        className="w-full border border-[color:var(--border)] rounded-2xl bg-[color:var(--panel)] text-[color:var(--text)] font-mono text-sm px-3 py-2 resize-none overflow-hidden leading-snug"
+        className="w-full border border-border rounded-2xl bg-panel text-text font-mono text-sm px-3 py-2 resize-none overflow-hidden leading-snug"
         value={text}
         onChange={(e) => setText(e.target.value)}
         onInput={autoSize}

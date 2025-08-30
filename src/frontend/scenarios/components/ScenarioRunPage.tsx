@@ -223,7 +223,7 @@ export function ScenarioRunPage() {
                 mode.disabled 
                   ? 'border-gray-200 bg-gray-50 opacity-50 cursor-not-allowed' 
                   : runMode===key
-                    ? 'border-blue-600 bg-blue-50 cursor-pointer'
+                    ? 'border-primary bg-primary-50 cursor-pointer'
                     : 'border-gray-200 hover:border-gray-300 cursor-pointer'
               }`} 
               onClick={() => !mode.disabled && setRunMode(key as RunModeKey)}
@@ -237,7 +237,7 @@ export function ScenarioRunPage() {
         </div>
         
         {/* Mode description */}
-        <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
+        <div className="p-3 rounded-lg text-xs bg-primary-50 text-primary-800">
           {runMode === 'internal' && "Both agents will be simulated internally by this platform. You'll watch the conversation unfold between simulated agents using the models you configure below."}
           {runMode === 'mcp-client' && "Plug in an external MCP client (like Claude Desktop) to act as one agent. This platform will simulate the other agent and provide an MCP server for your client to connect to."}
           {runMode === 'mcp-server' && "Plug in an external MCP server. This platform will simulate an MCP client that connects to your external MCP server."}
@@ -247,17 +247,17 @@ export function ScenarioRunPage() {
 
         <div>
           <label className="block text-sm text-slate-700 mb-1">Conversation Title</label>
-          <input className="w-full border border-[color:var(--border)] rounded-2xl px-3 py-2 bg-[color:var(--panel)] text-[color:var(--text)]" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <input className="w-full border border-border rounded-2xl px-3 py-2 bg-panel text-text" value={title} onChange={(e) => setTitle(e.target.value)} />
         </div>
 
         <div>
           <label className="block text-sm text-slate-700 mb-1">Description (optional)</label>
-          <textarea className="w-full border border-[color:var(--border)] rounded-2xl px-3 py-2 bg-[color:var(--panel)] text-[color:var(--text)]" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+          <textarea className="w-full border border-border rounded-2xl px-3 py-2 bg-panel text-text" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
 
         <div>
           <label className="block text-sm text-slate-700 mb-1">{runMode !== 'internal' ? `External Agent (${runMode.toUpperCase().replace('-', ' ')})` : 'Starting Agent'}</label>
-          <select className="w-full border border-[color:var(--border)] rounded-2xl px-3 py-2 bg-[color:var(--panel)] text-[color:var(--text)]" value={startingAgentId} onChange={(e) => setStartingAgentId(e.target.value)}>
+          <select className="w-full border border-border rounded-2xl px-3 py-2 bg-panel text-text" value={startingAgentId} onChange={(e) => setStartingAgentId(e.target.value)}>
             {agentOptions.map((id: string) => (<option key={id} value={id}>{id}</option>))}
           </select>
         </div>
@@ -274,7 +274,7 @@ export function ScenarioRunPage() {
                     <div className="col-span-1 text-xs text-slate-600">Model</div>
                     <div className="col-span-2">
                       <select
-                        className="w-full border border-[color:var(--border)] rounded-2xl px-2 py-1 text-sm bg-[color:var(--panel)] text-[color:var(--text)]"
+                        className="w-full border border-border rounded-2xl px-2 py-1 text-sm bg-panel text-text"
                         value={agentModels[a.agentId] || modelOptions[0] || ''}
                         onChange={(e) => setAgentModels((m) => ({ ...m, [a.agentId]: e.target.value }))}
                       >
@@ -290,7 +290,7 @@ export function ScenarioRunPage() {
                     <label className="col-span-1 text-xs text-slate-600">Additional system prompt</label>
                     <div className="col-span-2">
                       <textarea
-                        className="w-full border border-[color:var(--border)] rounded-2xl px-2 py-1 text-xs bg-[color:var(--panel)] text-[color:var(--text)]"
+                        className="w-full border border-border rounded-2xl px-2 py-1 text-xs bg-panel text-text"
                         rows={2}
                         placeholder="Optional text appended to this agent's system prompt"
                         value={agentSystemExtra[a.agentId] || ''}
@@ -302,7 +302,7 @@ export function ScenarioRunPage() {
                     <label className="col-span-1 text-xs text-slate-600">Initiating message extra</label>
                     <div className="col-span-2">
                       <textarea
-                        className="w-full border border-[color:var(--border)] rounded-2xl px-2 py-1 text-xs bg-[color:var(--panel)] text-[color:var(--text)]"
+                        className="w-full border border-border rounded-2xl px-2 py-1 text-xs bg-panel text-text"
                         rows={2}
                         placeholder="Optional text appended to the initiating message for this agent"
                         value={agentInitiatingExtra[a.agentId] || ''}

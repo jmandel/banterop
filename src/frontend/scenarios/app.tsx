@@ -51,7 +51,7 @@ type ScenarioItem = { id: string; name: string; config: any; history: any[]; cre
 function Layout({ children }: { children: React.ReactNode }) {
   return (
     <SharedAppLayout
-      title="Scenario Builder"
+      title="Banterop"
       right={(
         <nav className="flex items-center gap-3">
           <Link to="/scenarios">Scenarios</Link>
@@ -82,19 +82,19 @@ function LandingPage() {
     <Layout>
       <div className="flex items-center justify-between mb-3">
         <div className="font-semibold">Available Scenarios</div>
-        <Button variant="primary" onClick={() => navigate('/scenarios/create')}>New Scenario</Button>
+        <Button as="a" href="#/scenarios/create" variant="primary">New Scenario</Button>
       </div>
       {loading ? (
-        <div className="text-xs text-[color:var(--muted)]">Loading…</div>
+        <div className="text-xs text-muted">Loading…</div>
       ) : (
         <div className="flex flex-wrap gap-3">
           {scenarios.map(sc => (
-            <Card key={sc.id} style={{ width: 360 }}>
+            <Card key={sc.id} className="w-[360px]">
               <div className="font-semibold">{sc.name}</div>
-              <div className="text-xs text-[color:var(--muted)] mt-1 mb-2">{sc.id}</div>
+              <div className="text-xs text-muted mt-1 mb-2">{sc.id}</div>
               <div className="flex items-center gap-2">
-                <Button variant="secondary" onClick={() => navigate(`/scenarios/${encodeURIComponent(sc.id)}`)}>Edit</Button>
-                <Button variant="secondary" onClick={() => navigate(`/scenarios/${encodeURIComponent(sc.id)}/run`)}>Run</Button>
+                <Button as="a" href={`#/scenarios/${encodeURIComponent(sc.id)}`} variant="secondary">Edit</Button>
+                <Button as="a" href={`#/scenarios/${encodeURIComponent(sc.id)}/run`} variant="secondary">Run</Button>
               </div>
             </Card>
           ))}
@@ -171,32 +171,32 @@ function BuilderPage() {
 
   return (
     <Layout>
-      {loading ? (<div className="text-xs text-[color:var(--muted)]">Loading…</div>) : (
+      {loading ? (<div className="text-xs text-muted">Loading…</div>) : (
         <div className="flex items-start gap-3">
-          <div style={{ flex: 1 }}>
+          <div className="flex-1">
             <Card>
               <div className="flex items-center gap-2 mb-2">
-                <input className="flex-1 border border-[color:var(--border)] rounded-2xl px-3 py-2 bg-[color:var(--panel)] text-[color:var(--text)]" value={name} onChange={(e) => setName(e.target.value)} />
+                <input className="flex-1 border border-border rounded-2xl px-3 py-2 bg-panel text-text" value={name} onChange={(e) => setName(e.target.value)} />
                 {locked && (
                   <Button variant="secondary" onClick={() => { setPendingToken(getEditToken()); setUnlockOpen(true); }}>Unlock to edit</Button>
                 )}
                 <Button variant="primary" onClick={save} disabled={locked}>{isCreate ? 'Create' : 'Save'}</Button>
               </div>
-              <textarea className="w-full border border-[color:var(--border)] rounded-2xl px-3 py-2 bg-[color:var(--panel)] text-[color:var(--text)]" style={{ height: 480 }} value={json} onChange={(e) => setJson(e.target.value)} readOnly={locked} />
-              {status && <div className="text-xs text-[color:var(--muted)] mt-2">{status}</div>}
+              <textarea className="w-full h-[480px] border border-border rounded-2xl px-3 py-2 bg-panel text-text" value={json} onChange={(e) => setJson(e.target.value)} readOnly={locked} />
+              {status && <div className="text-xs text-muted mt-2">{status}</div>}
               {locked && (
                 <div className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">Published scenario is locked. Unlock to edit.</div>
               )}
             </Card>
           </div>
-          <div style={{ width: 360 }}>
+          <div className="w-[360px]">
             <Card>
               <CardHeader title="Quick Run (config64)" />
-              <div className="text-xs text-[color:var(--muted)] mb-2">Generates a base64 URL to launch a configured scenario run.</div>
-              <div className="text-xs text-[color:var(--muted)] break-words">{config64 || '(invalid config)'}</div>
+              <div className="text-xs text-muted mb-2">Generates a base64 URL to launch a configured scenario run.</div>
+              <div className="text-xs text-muted break-words">{config64 || '(invalid config)'}</div>
               <div className="flex items-center gap-2 mt-2">
                 <Button variant="secondary" disabled={!config64} onClick={() => navigator.clipboard.writeText(`# /scenarios/configured/${config64}`)}>Copy Hash URL</Button>
-                <Link to={`/scenarios/configured/${config64}`} className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl text-sm border border-[color:var(--border)] bg-[color:var(--panel)]">Open</Link>
+                <Link to={`/scenarios/configured/${config64}`} className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl text-sm border border-border bg-panel">Open</Link>
               </div>
             </Card>
           </div>
@@ -241,7 +241,7 @@ function ConfiguredPage() {
 
   return (
     <Layout>
-      {error && <Card className="text-[color:var(--danger)]">Error: {error}</Card>}
+      {error && <Card className="text-danger">Error: {error}</Card>}
       {!error && conversationId && (
         <Card>
           <div>Conversation created: #{conversationId}</div>
@@ -301,17 +301,17 @@ function RunPage() {
   };
   return (
     <Layout>
-      {error && <Card className="text-[color:var(--danger)]">Error: {error}</Card>}
+      {error && <Card className="text-danger">Error: {error}</Card>}
       {snap && (
         <Card>
           <div className="font-semibold">{snap.name}</div>
-          <div className="text-xs text-[color:var(--muted)] mt-1 mb-2">{snap.id}</div>
+          <div className="text-xs text-muted mt-1 mb-2">{snap.id}</div>
           <Button variant="primary" onClick={launch} disabled={creating}>{creating ? 'Launching…' : 'Launch + Open Watch'}</Button>
         </Card>
       )}
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [pendingToken, setPendingToken] = useState('');
-      {!error && !snap && <div className="text-xs text-[color:var(--muted)]">Loading…</div>}
+      {!error && !snap && <div className="text-xs text-muted">Loading…</div>}
     </Layout>
   );
 }

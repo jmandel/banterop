@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card } from '../../ui';
+import { Card, Button } from '../../ui';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { DropdownButton } from './DropdownButton';
@@ -152,11 +152,11 @@ export function ScenarioLandingPage() {
         <div className="flex items-center justify-between">
           <div className="flex gap-2">
             <button
-              className={`px-3 py-1 text-xs rounded ${showMode === 'published' ? 'bg-blue-600 text-white' : 'border border-gray-300 text-gray-700'}`}
+              className={`px-3 py-1 text-xs rounded ${showMode === 'published' ? 'bg-primary text-primary-foreground' : 'border border-gray-300 text-gray-700'}`}
               onClick={() => { _setShowMode('published'); setShowMode('published'); setShowingFallbackNote(false); }}
             >Published</button>
             <button
-              className={`px-3 py-1 text-xs rounded ${showMode === 'all' ? 'bg-blue-600 text-white' : 'border border-gray-300 text-gray-700'}`}
+              className={`px-3 py-1 text-xs rounded ${showMode === 'all' ? 'bg-primary text-primary-foreground' : 'border border-gray-300 text-gray-700'}`}
               onClick={() => { _setShowMode('all'); setShowMode('all'); setShowingFallbackNote(false); }}
             >All</button>
           </div>
@@ -201,7 +201,7 @@ export function ScenarioLandingPage() {
                     </div>
                   )}
                   
-                  <div className="text-xs text-blue-600 mb-2">
+                  <div className="text-xs text-primary mb-2">
                     {getAgentNames(scenario)}
                   </div>
                   
@@ -211,14 +211,11 @@ export function ScenarioLandingPage() {
                 </div>
 
                 <div className="flex gap-2 items-center">
-                  <a href={`#/scenarios/${scenario.config.metadata.id}`} className="inline-flex items-center justify-center gap-2 px-2 py-1 text-xs border border-[color:var(--border)] rounded-2xl bg-[color:var(--panel)]" style={{ minHeight: '28px' }}>View</a>
-                  <a href={`#/scenarios/${scenario.config.metadata.id}/edit`} className="inline-flex items-center justify-center gap-2 px-2 py-1 text-xs border border-[color:var(--border)] rounded-2xl bg-[color:var(--panel)]" style={{ minHeight: '28px' }}>Edit</a>
-                  <button
-                    className="inline-flex items-center justify-center gap-2 px-2 py-1 text-xs rounded-2xl bg-[color:var(--primary)] text-[color:var(--primary-foreground)]"
-                    onClick={() => navigate(`/scenarios/${scenario.config.metadata.id}/run`)}
-                  >
+                  <a href={`#/scenarios/${scenario.config.metadata.id}`} className="inline-flex items-center justify-center gap-2 px-2 py-1 text-xs border border-border rounded-2xl bg-panel min-h-[28px]">View</a>
+                  <a href={`#/scenarios/${scenario.config.metadata.id}/edit`} className="inline-flex items-center justify-center gap-2 px-2 py-1 text-xs border border-border rounded-2xl bg-panel min-h-[28px]">Edit</a>
+                  <Button as="a" size="sm" variant="primary" href={`#/scenarios/${scenario.config.metadata.id}/run`}>
                     Run
-                  </button>
+                  </Button>
                 </div>
               </Card>
             ))
@@ -231,7 +228,7 @@ export function ScenarioLandingPage() {
         <div className="space-y-3">
           <div className="flex gap-2">
             <textarea
-              className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary resize-none"
               placeholder="Enter scenario description..."
               value={newScenarioIdea}
               onChange={(e) => setNewScenarioIdea(e.target.value)}
@@ -257,7 +254,7 @@ export function ScenarioLandingPage() {
             </button>
           </div>
           <button
-            className="w-full px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+            className="w-full px-4 py-2 text-sm bg-primary text-primary-foreground rounded-md hover:opacity-90 disabled:opacity-50"
             onClick={createNewScenario}
             disabled={!newScenarioIdea.trim()}
           >

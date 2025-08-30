@@ -363,7 +363,7 @@ export function ScenarioConfiguredPage() {
                   title="Finalize this conversation and stop agents"
                 >Cancel</button>
               )}
-              <a className="px-3 py-1 text-sm bg-indigo-600 text-white rounded" href={`/watch/#/conversation/${conversationId}`} target="_blank" rel="noreferrer">Open in Watch</a>
+              <a className="px-3 py-1 text-sm rounded bg-primary text-primary-foreground hover:opacity-90" href={`/watch/#/conversation/${conversationId}`} target="_blank" rel="noreferrer">Open in Watch</a>
             </div>
           </div>
 
@@ -455,7 +455,7 @@ export function ScenarioConfiguredPage() {
         <div className="border rounded bg-white p-3 space-y-2">
           <div className="text-sm">{error ? <span className="text-rose-700">Error: {error}</span> : 'Ready to start a conversation'}</div>
           <div className="flex gap-2">
-            <button disabled={!config || isCreating} className="px-3 py-1 text-sm bg-blue-600 text-white rounded disabled:opacity-50" onClick={startConversationNow}>
+            <button disabled={!config || isCreating} className="px-3 py-1 text-sm rounded bg-primary text-primary-foreground disabled:opacity-50 hover:opacity-90" onClick={startConversationNow}>
               {isCreating ? 'Starting…' : 'Start Conversation'}
             </button>
           </div>

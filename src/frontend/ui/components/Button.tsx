@@ -13,7 +13,7 @@ type ButtonProps = React.HTMLAttributes<HTMLElement> & {
 
 export function Button({ as = 'button', variant = 'primary', size = 'md', className = '', ...props }: ButtonProps) {
   const Comp: any = as;
-  const base = 'inline-flex items-center justify-center gap-2 rounded-2xl font-medium disabled:opacity-50';
+  const base = 'inline-flex items-center justify-center gap-2 rounded-2xl font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-700 focus-visible:ring-offset-2';
   const sizes: Record<Size, string> = {
     sm: 'px-2 py-1 text-xs',
     md: 'px-3 py-2 text-sm',
@@ -21,10 +21,10 @@ export function Button({ as = 'button', variant = 'primary', size = 'md', classN
   };
   const look = (
     {
-      primary: 'bg-[color:var(--primary)] text-[color:var(--primary-foreground)] hover:opacity-90',
-      secondary: 'border border-[color:var(--border)] bg-[color:var(--panel)] hover:bg-gray-50',
-      danger: 'bg-[color:var(--danger)] text-white hover:opacity-90',
-      ghost: 'text-[color:var(--muted)] hover:bg-gray-50',
+      primary: 'bg-primary text-primary-foreground hover:bg-primary-700',
+      secondary: 'border border-border bg-panel hover:bg-gray-50',
+      danger: 'bg-danger text-white hover:opacity-90',
+      ghost: 'text-muted hover:bg-gray-50',
     } as const
   )[variant];
   const typeProps = Comp === 'button' ? { type: 'button', ...props } : props;

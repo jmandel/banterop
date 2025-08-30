@@ -5,8 +5,17 @@
   --muted: #64748b;
   --border: #e2e8f0;
 
-  --primary: #2563eb;
+  /* Banterop brand (teal + warm accent) */
+  --primary: #0d9488; /* teal-600 */
   --primary-foreground: #ffffff;
+  --primary-50: #f0fdfa; /* teal-50 */
+  --primary-100: #ccfbf1; /* teal-100 */
+  --primary-700: #0f766e; /* teal-700 */
+  --primary-800: #115e59; /* teal-800 */
+
+  --accent: #f59e0b; /* amber-500 (from logo) */
+  --accent-50: #fffbeb; /* amber-50 */
+  --accent-800: #92400e; /* amber-800 */
 
   --success: #059669;
   --warning: #d97706;
@@ -24,7 +33,13 @@
   --muted: #94a3b8;
   --border: #1e293b;
 
-  --primary: #60a5fa;
+  --primary: #2dd4bf; /* teal-400 */
   --primary-foreground: #0b1220;
+  --primary-50: #064e3b; /* darker surface hint */
+  --primary-100: #0f766e;
+  --primary-700: #0f766e;
+  --primary-800: #115e59;
+  --accent: #fbbf24;
+  --accent-50: #78350f;
+  --accent-800: #fde68a;
 }
-

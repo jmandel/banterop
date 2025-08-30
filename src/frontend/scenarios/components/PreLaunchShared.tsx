@@ -63,7 +63,6 @@ export function PreLaunchShared({ heading, serverUrlLabel, serverUrl, onCopy, co
         >
           <div
             className="font-mono p-2 bg-slate-50 rounded border text-sm truncate grow select-none"
-            style={{ userSelect: 'none', WebkitUserSelect: 'none', msUserSelect: 'none', MozUserSelect: 'none', WebkitTouchCallout: 'none' } as React.CSSProperties}
             onMouseDown={(e) => { e.preventDefault(); }}
             onSelectStart={(e) => { e.preventDefault(); }}
             draggable={false}
@@ -71,7 +70,7 @@ export function PreLaunchShared({ heading, serverUrlLabel, serverUrl, onCopy, co
           >
             {displayUrl(serverUrl)}
           </div>
-          <button onClick={onCopy} className={`px-3 py-2 rounded text-sm shadow ${copied ? 'bg-green-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+          <button onClick={onCopy} className={`px-3 py-2 rounded text-sm shadow ${copied ? 'bg-green-600 text-white' : 'bg-primary text-primary-foreground hover:opacity-90'}`}>
             {copied ? 'Copied!' : 'Copy URL'}
           </button>
         </div>
@@ -135,7 +134,7 @@ export function PreLaunchShared({ heading, serverUrlLabel, serverUrl, onCopy, co
                 i
               </button>
               {showInfo && tipPos && (
-                <div className="fixed z-50 w-72 p-3 bg-[color:var(--panel)] border border-[color:var(--border)] rounded shadow-lg text-xs text-[color:var(--text)]" style={{ left: tipPos.left, top: tipPos.top }}>
+                <div className="fixed z-50 w-72 p-3 bg-panel border border-border rounded shadow-lg text-xs text-text" style={{ left: tipPos.left, top: tipPos.top }}>
                   <div className="font-medium mb-1">Template hash</div>
                   <div className="mb-2">Used to stamp and discover conversations that match this pre‑launch config.</div>
                   <div className="font-mono break-all text-slate-600">{hash || '(computing…)'}
@@ -151,7 +150,7 @@ export function PreLaunchShared({ heading, serverUrlLabel, serverUrl, onCopy, co
             {matches.map((cid) => (
               <div key={cid} className="flex items-center gap-3 text-sm">
                 <span>Conversation #{cid}</span>
-                <a className="text-blue-600 hover:underline" href={`/watch/#/conversation/${cid}`} target="_blank" rel="noreferrer">Open in Watch</a>
+                <a className="text-primary hover:underline" href={`/watch/#/conversation/${cid}`} target="_blank" rel="noreferrer">Open in Watch</a>
               </div>
             ))}
           </div>

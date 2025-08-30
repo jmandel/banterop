@@ -29,7 +29,7 @@ export function ScenarioEditor({
   
   return (
     <Card>
-      <div className="sticky top-0 z-10 bg-[color:var(--panel)]/95 backdrop-blur border-b border-[color:var(--border)] p-2 lg:p-3 flex items-center justify-between">
+      <div className="sticky top-0 z-10 bg-panel/95 backdrop-blur border-b border-border p-2 lg:p-3 flex items-center justify-between">
         <div className="flex gap-1 p-0.5 bg-slate-100 rounded">
           <button className={`px-3 py-1 text-xs rounded transition ${viewMode === 'structured' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`} onClick={() => onViewModeChange('structured')}>Structured View</button>
           <button className={`px-3 py-1 text-xs rounded transition ${viewMode === 'rawJson' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`} onClick={() => onViewModeChange('rawJson')}>Raw JSON</button>
@@ -41,7 +41,7 @@ export function ScenarioEditor({
             ) : (
               <>
                 <Button as="a" href={`#/scenarios/${scenarioId}/edit`} size="sm" variant="secondary">Edit</Button>
-                <Button size="sm" onClick={() => navigate(`/scenarios/${scenarioId}/run`)}>
+                <Button as="a" size="sm" href={`#/scenarios/${scenarioId}/run`}>
                   Run
                 </Button>
               </>

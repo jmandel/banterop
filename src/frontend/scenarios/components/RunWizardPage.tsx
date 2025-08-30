@@ -279,7 +279,7 @@ export function RunWizardPage() {
               const situationShort = situation ? (situation.length > 140 ? situation.slice(0, 140) + '…' : situation) : '';
               const toolNames: string[] = Array.isArray(a?.tools) ? a.tools.map((t: any) => String(t?.toolName || t?.name || '')).filter(Boolean) : [];
               return (
-                <label key={id} className={`p-3 rounded-lg border-2 cursor-pointer ${role === id ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                <label key={id} className={`p-3 rounded-lg border-2 cursor-pointer ${role === id ? 'border-primary bg-primary-50' : 'border-gray-200 hover:border-gray-300'}`}>
                   <div className="flex items-center gap-2">
                     <input type="radio" name="role" checked={role === id} onChange={() => { setRole(id); }} />
                     <div className="font-medium">{id}</div>
@@ -307,7 +307,7 @@ export function RunWizardPage() {
           <CardHeader title="Step 2: Choose Your Connection Pattern" />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4" role="radiogroup" aria-label="Connection pattern">
             <div
-              className={`rounded-lg p-4 border-2 ${hasClient ? 'border-blue-600 bg-blue-50' : 'border-gray-200'} cursor-pointer`}
+              className={`rounded-lg p-4 border-2 ${hasClient ? 'border-primary bg-primary-50' : 'border-gray-200'} cursor-pointer`}
               role="radio"
               aria-checked={hasClient}
               tabIndex={0}
@@ -321,7 +321,7 @@ export function RunWizardPage() {
               <p className="text-sm text-slate-600 mt-1">Platform provides a server endpoint for your client.</p>
             </div>
             <div
-              className={`rounded-lg p-4 border-2 ${!hasClient ? 'border-blue-600 bg-blue-50' : 'border-gray-200'} cursor-pointer`}
+              className={`rounded-lg p-4 border-2 ${!hasClient ? 'border-primary bg-primary-50' : 'border-gray-200'} cursor-pointer`}
               role="radio"
               aria-checked={!hasClient}
               tabIndex={0}
@@ -341,14 +341,14 @@ export function RunWizardPage() {
         <Card className="space-y-3">
           <CardHeader title="Step 3: Choose Protocol" />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <label className={`p-3 rounded-lg border-2 cursor-pointer ${protocol === 'a2a' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}>
+            <label className={`p-3 rounded-lg border-2 cursor-pointer ${protocol === 'a2a' ? 'border-primary bg-primary-50' : 'border-gray-200 hover:border-gray-300'}`}>
               <div className="flex items-center gap-2">
                 <input type="radio" name="protocol" checked={protocol === 'a2a'} onChange={() => setProtocol('a2a')} />
                 <div className="font-medium">Use A2A Protocol</div>
               </div>
               <div className="text-sm text-slate-600 mt-1">JSON‑RPC with optional SSE streaming; aligns with A2A.</div>
             </label>
-            <label className={`p-3 rounded-lg border-2 cursor-pointer ${protocol === 'mcp' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}>
+            <label className={`p-3 rounded-lg border-2 cursor-pointer ${protocol === 'mcp' ? 'border-primary bg-primary-50' : 'border-gray-200 hover:border-gray-300'}`}>
               <div className="flex items-center gap-2">
                 <input type="radio" name="protocol" checked={protocol === 'mcp'} onChange={() => setProtocol('mcp')} />
                 <div className="font-medium">Use MCP Protocol</div>
@@ -405,7 +405,7 @@ export function RunWizardPage() {
                   onChange={(e) => setInstructions(e.target.value)}
                 />
               </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3" style={{ display: 'none' }}>
+            <div className="hidden md:grid grid-cols-1 md:grid-cols-2 gap-3">
                 {agentIds.map((id) => (
                   <div key={id} className="space-y-1">
                     <div className="text-sm text-slate-700 font-medium">{id} Instructions</div>
@@ -434,7 +434,7 @@ export function RunWizardPage() {
         </Card>
 
         {/* Action Buttons */}
-        <Card className="p-4 bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
+        <Card className="p-4 bg-gradient-to-br from-primary-50 to-primary-50 border-primary-100">
           {(() => {
             if (false) {
               // Simulation mode - direct client launch
@@ -473,7 +473,7 @@ export function RunWizardPage() {
                     target="_blank" 
                     rel="noreferrer" 
                     variant="primary"
-                    className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold py-4 px-6 rounded-lg shadow-lg transition-colors text-lg"
+                    className="w-full py-4 px-6 text-lg rounded-lg shadow-md"
                   >
                     🚀 Launch Simulation Client
                   </Button>
@@ -487,15 +487,17 @@ export function RunWizardPage() {
               return (
                 <div className="space-y-3">
                   <h3 className="text-lg font-semibold text-slate-800">Ready to Connect</h3>
-                  <a
+                  <Button
+                    as="a"
                     href={computedRoomHref || '#'}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center justify-center w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold py-4 px-6 rounded-lg shadow-lg transition-colors text-lg"
-                    onClick={(e)=>{ if (!computedRoomHref) e.preventDefault(); }}
+                    variant="primary"
+                    className="w-full py-4 px-6 text-lg rounded-lg shadow-md"
+                    onClick={(e:any)=>{ if (!computedRoomHref) e.preventDefault(); }}
                   >
                     📊 Open Server Manager
-                  </a>
+                  </Button>
                   <p className="text-xs text-slate-600 text-center">
                     Configure server endpoint and monitor connection
                   </p>
@@ -507,15 +509,17 @@ export function RunWizardPage() {
         return (
           <div className="space-y-3">
             <h3 className="text-lg font-semibold text-slate-800">Ready to Connect</h3>
-            <a
+            <Button
+              as="a"
               href={href || '#'}
               target="_blank"
               rel="noreferrer"
-              className={`inline-flex items-center justify-center w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold py-4 px-6 rounded-lg shadow-lg transition-colors text-lg ${!href ? 'opacity-60 pointer-events-none' : ''}`}
-              onClick={(e)=>{ if (!href) e.preventDefault(); }}
+              variant="primary"
+              className={`w-full py-4 px-6 text-lg rounded-lg shadow-md ${!href ? 'opacity-60 pointer-events-none' : ''}`}
+              onClick={(e:any)=>{ if (!href) e.preventDefault(); }}
             >
               💬 Open Client & Connect
-            </a>
+            </Button>
             <p className="text-xs text-slate-600 text-center">
               Opens client in new tab to connect to your server
             </p>

@@ -37,9 +37,9 @@ class GoogleLLM extends LLMProvider {
 const desc: ProviderDescriptor = {
   name: 'google',
   getMetadata: (_env) => GoogleLLM.getMetadata(),
-  isAvailable: (env) => !!(env.GEMINI_API_KEY || env.GOOGLE_API_KEY),
+  isAvailable: (env) => !!env.GOOGLE_API_KEY,
   create: (env, cfg) => {
-    const apiKey = env.GEMINI_API_KEY || env.GOOGLE_API_KEY;
+    const apiKey = env.GOOGLE_API_KEY;
     if (!apiKey) throw new Error(`API key for provider 'google' not found`);
     return new GoogleLLM({ provider:'google', apiKey, model: cfg?.model } as LLMProviderConfig);
   }

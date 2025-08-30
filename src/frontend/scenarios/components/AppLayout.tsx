@@ -109,7 +109,7 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <SharedAppLayout 
-      title="Scenario Tool"
+      title="Banterop"
       breadcrumbs={
         breadcrumbs && breadcrumbs.length > 0 ? (
           <>
@@ -117,7 +117,7 @@ export function AppLayout({ children }: AppLayoutProps) {
               <React.Fragment key={index}>
                 {index > 0 && <span className="text-gray-400">/</span>}
                 {crumb.path ? (
-                  <Link to={crumb.path} className="text-blue-600 hover:text-blue-800 no-underline">
+                  <Link to={crumb.path} className="text-primary hover:opacity-80 no-underline">
                     {crumb.label}
                   </Link>
                 ) : (
