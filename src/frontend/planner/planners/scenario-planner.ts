@@ -216,7 +216,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       const callId = ctx.newId(`call:${decision.tool}:`);
       try { ctx.hud('tool', `Tool: ${decision.tool}(${shortArgs(decision.args || {})})`, 0.7); } catch {}
       out.push(({ type:'tool_call', callId, name: decision.tool, args: decision.args || {}, ...(includeWhy ? { why: reasoning } : {}) } as ProposedFact));
-      const exec = await runToolOracle({ tool: tdef, args: decision.args || {}, scenario, myAgentId: myId, conversationHistory: xmlHistory, leadingThought: reasoning, llm: ctx.llm, model });
+      const exec = await runToolOracle({ tool: tdef, args: decision.args || {}, scenario, myAgentId: myId, conversationHistory: xmlHistory, leadingThought: reasoning, llm: ctx.llm, model, callId });
       if (!exec.ok) {
         out.push(({ type:'tool_result', callId, ok:false, error: exec.error || 'Tool failed', ...(includeWhy ? { why:'Tool execution error.' } : {}) } as ProposedFact));
         out.push(sleepFact('Tool error → sleeping.', includeWhy));
@@ -227,22 +227,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       const existingNames = new Set<string>();
       for (const f of workingFacts as any[]) { if (f?.type === 'attachment_added' && f.name) existingNames.add(String(f.name)); }
       for (const f of facts as any[]) { if (f?.type === 'attachment_added' && f.name) existingNames.add(String(f.name)); }
-      // Check if the tool result is a JSON object with no docId and add it as an attachment
-      const allAttachments = [...exec.attachments];
-      if (exec.result && typeof exec.result === 'object' && !(exec.result as any).docId) {
-        const jsonAttachmentName = `${tdef.toolName}_${callId}.json`;
-        if (!existingNames.has(jsonAttachmentName)) {
-          const prettyJson = JSON.stringify(exec.result, null, 2);
-          const jsonAttachment = {
-            name: jsonAttachmentName,
-            mimeType: 'text/json',
-            bytesBase64: toBase64(prettyJson)
-          };
-          allAttachments.push(jsonAttachment);
-        }
-      }
-      
-      const newAttachments = allAttachments.filter(a => a?.name && !existingNames.has(String(a.name)));
+      const newAttachments = exec.attachments.filter(a => a?.name && !existingNames.has(String(a.name)));
       for (const doc of newAttachments) {
         out.push(({ type:'attachment_added', name: doc.name, mimeType: doc.mimeType, bytes: doc.bytesBase64, origin:'synthesized', producedBy:{ callId, name: tdef.toolName, args: decision.args || {} }, ...(includeWhy ? { why:'Synthesized by scenario tool.' } : {}) } as ProposedFact));
         existingNames.add(String(doc.name));
@@ -743,6 +728,7 @@ async function runToolOracle(opts: {
   leadingThought?: string;
   llm: PlanContext['llm'];
   model?: string;
+  callId?: string;
 }): Promise<OracleExec> {
   const prompt = buildOraclePromptAligned(opts);
   try {
@@ -752,7 +738,7 @@ async function runToolOracle(opts: {
     ];
     const parsed = await chatWithValidationRetry(opts.llm, req as any, (text) => parseOracleResponseAligned(text), { attempts: 3, retryMessages });
     const { output } = parsed;
-    const attachments = extractAttachmentsFromOutput(output);
+    const attachments = extractAttachmentsFromOutput(output, opts.tool.toolName, opts.callId);
     return { ok: true, result: output, attachments };
   } catch (e:any) {
     return { ok: false, error: String(e?.message || 'oracle failed'), attachments: [] };
@@ -1030,7 +1016,7 @@ function heuristicParseAligned(content: string): { reasoning: string; output: un
   return { reasoning, output };
 }
 
-function extractAttachmentsFromOutput(output: unknown): Array<{ name: string; mimeType: string; bytesBase64: string }> {
+function extractAttachmentsFromOutput(output: unknown, toolName?: string, callId?: string): Array<{ name: string; mimeType: string; bytesBase64: string }> {
   const results: Array<{ name: string; mimeType: string; bytesBase64: string }> = [];
   const maybePushDoc = (d: any) => {
     const name = String(d?.name || '').trim();
@@ -1049,6 +1035,17 @@ function extractAttachmentsFromOutput(output: unknown): Array<{ name: string; mi
       // Legacy documents array
       const docs = (output as any).documents;
       if (Array.isArray(docs)) for (const d of docs) maybePushDoc(d);
+      
+      // If output is a JSON object with no docId, add it as a JSON attachment
+      if (toolName && callId && !(output as any).docId) {
+        const jsonAttachmentName = `${toolName}_${callId}.json`;
+        const prettyJson = JSON.stringify(output, null, 2);
+        results.push({
+          name: jsonAttachmentName,
+          mimeType: 'text/json',
+          bytesBase64: toBase64(prettyJson)
+        });
+      }
     }
   } catch {}
   return results;
