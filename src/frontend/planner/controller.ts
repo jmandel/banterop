@@ -8,6 +8,7 @@ let started = false;
 let currentHarness: PlannerHarness<any> | null = null;
 let lastBuildKey = '';      // fingerprint to avoid redundant rebuilds
 let lastSeenPlanNonce = 0;  // to run exactly once per request
+let stashedPlanNonce = 0;
 // Default provider; may be overridden per-session in rebuild
 const defaultLlmProvider = makeBanteropProvider(DEFAULT_BANTEROP_ENDPOINT);
 
@@ -89,6 +90,7 @@ export function startPlannerController() {
       provider
     );
     // Don't auto-plan on rebuild - let explicit requests handle it
+    try { console.debug('[planner/controller] harness rebuilt', { pid: plannerId, ready, task: !!s.taskId }); } catch {}
   }
 
   rebuildHarness();
@@ -114,6 +116,12 @@ export function startPlannerController() {
     if (basicChanged || configChanged) {
       lastBuildKey = basicKey;
       rebuildHarness();
+      // Flush any stashed plan request once barrier opens
+      const canPlan = (() => s.plannerId !== 'off' && !!s.readyByPlanner[s.plannerId] && !!s.adapter)();
+      if (canPlan && stashedPlanNonce > lastSeenPlanNonce) {
+        lastSeenPlanNonce = stashedPlanNonce;
+        try { currentHarness?.schedulePlan(); } catch {}
+      }
     }
 
     // Setup UI state machine transitions
@@ -137,16 +145,35 @@ export function startPlannerController() {
     const seq = s.seq || 0;
     if (seq !== prevSeq) {
       prevSeq = seq;
+      try { console.debug('[planner/controller] journal advanced', { seq }); } catch {}
       try { currentHarness?.schedulePlan(); } catch {}
     }
   });
 
-  // Run exactly once when someone requests a replan (apply / boot-ready)
+  // Run exactly once when someone requests a replan; stash if barrier closed
   useAppStore.subscribe((s) => {
     const nonce = (s as any).planNonce || 0;
     if (nonce !== lastSeenPlanNonce) {
-      lastSeenPlanNonce = nonce;
-      currentHarness?.schedulePlan();
+      const canPlan = (s.plannerId !== 'off' && !!s.readyByPlanner[s.plannerId] && !!s.adapter);
+      if (canPlan) {
+        try { console.debug('[planner/controller] planNonce observed (barrier open)', { nonce }); } catch {}
+        lastSeenPlanNonce = nonce;
+        currentHarness?.schedulePlan();
+      } else {
+        stashedPlanNonce = nonce;
+        try { console.debug('[planner/controller] planNonce stashed (barrier closed)', { nonce }); } catch {}
+      }
+    }
+  });
+
+  // When barrier opens (adapter + planner ready), flush stashed plan
+  useAppStore.subscribe((s, prev) => {
+    const wasClosed = !(prev.plannerId !== 'off' && !!prev.readyByPlanner[prev.plannerId] && !!prev.adapter);
+    const nowOpen = (s.plannerId !== 'off' && !!s.readyByPlanner[s.plannerId] && !!s.adapter);
+    if (wasClosed && nowOpen && (s.pendingKickoff || stashedPlanNonce > lastSeenPlanNonce)) {
+      try { console.debug('[planner/controller] barrier opened — flushing stashed or pending kickoff', { stashedPlanNonce, lastSeenPlanNonce, pendingKickoff: s.pendingKickoff }); } catch {}
+      lastSeenPlanNonce = Math.max(lastSeenPlanNonce, stashedPlanNonce);
+      try { currentHarness?.schedulePlan(); } catch {}
     }
   });
 }

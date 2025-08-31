@@ -40,9 +40,9 @@ export function RunWizardPage() {
   const [providers, setProviders] = useState<Array<{ name: string; models: string[] }>>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [instructions, setInstructions] = useState<string>('');
-  const [agentInstructions, setAgentInstructions] = useState<Record<string, string>>({});
-  // Used by hidden UI and dead code paths; keep to satisfy JSX references
-  const [startFirst, setStartFirst] = useState<string>('');
+  // Room link customization (client path)
+  const [roomId, setRoomId] = useState<string>('');
+  const [roomTitle, setRoomTitle] = useState<string>('');
   
 
   useEffect(() => {
@@ -56,11 +56,8 @@ export function RunWizardPage() {
         const cfg = s.config || s;
         const firstId = (cfg?.agents?.[0]?.agentId) || '';
         setRole(firstId);
-        try {
-          const initInstr: Record<string, string> = {};
-          for (const a of (cfg?.agents || [])) initInstr[a.agentId] = '';
-          setAgentInstructions(initInstr);
-        } catch {}
+        // Initialize default room title from scenario metadata
+        try { setRoomTitle(s?.config?.metadata?.title || s?.name || String(scenarioId || 'Room')); } catch {}
         try {
           const p = await api.getLLMConfig();
           if (p.success) {
@@ -121,24 +118,23 @@ export function RunWizardPage() {
     return agentIds.find((a) => a !== role) || agentIds[0] || '';
   }, [agentIds, role]);
 
-  // Helper function to build metadata for simulation (used only in disabled code path)
-  const buildMeta = () => {
-    const cfg = scenario?.config || scenario;
-    const sid = cfg?.metadata?.id || scenarioId;
-    const agents = (cfg?.agents || []).map((a: any) => {
-      const conf: Record<string, unknown> = {};
-      if (selectedModel) conf.model = selectedModel;
-      const extra = (agentInstructions[a.agentId] || '').trim();
-      if (extra) conf.systemPromptExtra = extra;
-      return Object.keys(conf).length ? { id: a.agentId, config: conf } : { id: a.agentId };
-    });
-    return {
-      title: `Run: ${cfg?.metadata?.title || scenario?.name || ''}`,
-      scenarioId: sid,
-      agents,
-      startingAgentId: startFirst || (agents[0] as any)?.id || '',
-    } as any;
-  };
+  // Generate a default room id when role/simulated agent changes
+  useEffect(() => {
+    if (!simulatedAgentId) return;
+    // Preserve user edits; only initialize if empty
+    if (roomId && roomTitle) return;
+    const rand = String(Math.floor(10000 + Math.random() * 90000));
+    const base = `${simulatedAgentId}-Agent-${rand}`;
+    // slug-safe id for URL path
+    const slug = base.replace(/[^a-zA-Z0-9_-]+/g, '-');
+    if (!roomId) setRoomId(slug);
+    if (!roomTitle) {
+      const cfg = scenario?.config || scenario;
+      const scenarioTitle = cfg?.metadata?.title || scenario?.name || String(scenarioId || 'Room');
+      setRoomTitle(String(scenarioTitle));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [simulatedAgentId, scenarioId]);
 
   const onLaunch = () => {
     const cfg = scenario?.config || scenario;
@@ -162,14 +158,14 @@ export function RunWizardPage() {
         maxInlineSteps: defaultSteps,
         ...(instructions && instructions.trim() ? { instructions: instructions.trim() } : {}),
       };
-      const roomId = String(sid || 'room');
+      const rid = (roomId || String(sid || 'room')).trim();
       const readable = {
         planner: { id: 'scenario-v0.3', mode: 'approve' as const },
         planners: { ['scenario-v0.3']: { seed } },
         llm: { provider: 'server', model: selectedModel || '' },
-        roomTitle: scenarioTitle,
+        roomTitle: roomTitle || scenarioTitle,
       };
-      const href = `/rooms/${encodeURIComponent(roomId)}#${JSON.stringify(readable)}`;
+      const href = `/rooms/${encodeURIComponent(rid)}#${JSON.stringify(readable)}`;
       try { window.open(href, '_blank'); } catch { navigate(href); }
     } else {
       // Participant has a SERVER → open /client prefilled with server URL (MCP or Agent Card) + scenario planner in approve mode
@@ -211,17 +207,17 @@ export function RunWizardPage() {
         maxInlineSteps: defaultSteps,
         ...(instructions && instructions.trim() ? { instructions: instructions.trim() } : {}),
       };
-      const roomId = String(sid || 'room');
+      const rid = (roomId || String(sid || 'room')).trim();
       const scenarioTitle = cfg?.metadata?.title || scenario?.name || String(sid);
       const readable: any = {
         planner: { id: 'scenario-v0.3', mode: 'approve' as const },
         planners: { ['scenario-v0.3']: { seed } },
         llm: { provider: 'server', model: selectedModel || '' },
-        roomTitle: scenarioTitle,
+        roomTitle: (roomTitle || scenarioTitle),
       };
-      return `/rooms/${encodeURIComponent(roomId)}#${JSON.stringify(readable)}`;
+      return `/rooms/${encodeURIComponent(rid)}#${JSON.stringify(readable)}`;
     } catch { return ''; }
-  }, [scenario, scenarioId, simulatedAgentId, selectedModel, instructions]);
+  }, [scenario, scenarioId, simulatedAgentId, selectedModel, instructions, roomId, roomTitle]);
 
   // Precompute client link for "server mode" so users can right‑click/copy
   const computedClientHref = React.useMemo(() => {
@@ -405,88 +401,38 @@ export function RunWizardPage() {
                   onChange={(e) => setInstructions(e.target.value)}
                 />
               </div>
-            <div className="hidden md:grid grid-cols-1 md:grid-cols-2 gap-3">
-                {agentIds.map((id) => (
-                  <div key={id} className="space-y-1">
-                    <div className="text-sm text-slate-700 font-medium">{id} Instructions</div>
-                    <textarea
-                      className="w-full border rounded px-2 py-2 text-sm bg-white"
-                      rows={4}
-                      placeholder={`Optional guidance for ${id}`}
-                      value={agentInstructions[id] || ''}
-                      onChange={(e) => setAgentInstructions((prev) => ({ ...prev, [id]: e.target.value }))}
-                    />
-                  </div>
-                ))}
-                <div className="space-y-1 md:col-span-2">
-                  <div className="text-sm text-slate-700 font-medium">Starting Agent</div>
-                  <div className="flex gap-4 text-sm text-slate-700">
-                    {agentIds.map((id) => (
-                      <label key={`start-${id}`} className="flex items-center gap-2">
-                        <input type="radio" name="start-first" checked={startFirst === id} onChange={() => setStartFirst(id)} />
-                        {id}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
+            {/* Per-agent instructions and starting agent selection removed */}
           </div>
         </Card>
 
-        {/* Action Buttons */}
+        {/* Action: Launch */}
         <Card className="p-4 bg-gradient-to-br from-primary-50 to-primary-50 border-primary-100">
           {(() => {
-            if (false) {
-              // Simulation mode - direct client launch
-              const config64ForSim = encodeBase64Url(buildMeta());
-              const base = api.getBaseUrl();
-              const apiBase = `${base}/api`;
-              const { label: endpointLabel, url: serverUrl } = buildBridgeEndpoint(apiBase, protocol, config64ForSim);
-              const cfg = (scenario?.config || scenario);
-              const agents: string[] = (cfg?.agents || []).map((a: any) => a.agentId);
-              const plannerId = startFirst || agents[0] || '';
-              const counterpart = agents.find(a => a !== plannerId) || '';
-              const params = new URLSearchParams({
-                scenarioUrl: `${base}/api/scenarios/${encodeURIComponent(String(scenarioId!))}`,
-                plannerAgentId: plannerId,
-                counterpartAgentId: counterpart,
-                endpoint: serverUrl,
-              });
-              if (selectedModel) {
-                params.set('defaultModel', selectedModel);
-              }
-              if (instructions && instructions.trim()) {
-                params.set('instructions', instructions.trim());
-              }
-              const href = `/client/#/?${params.toString()}`;
-              
-              return (
-                <div className="space-y-3">
-                  <h3 className="text-lg font-semibold text-slate-800">Ready to Launch</h3>
-                  <div className="text-sm text-slate-600 bg-white rounded p-3 border border-slate-200">
-                    <div className="font-medium mb-1">{endpointLabel}:</div>
-                    <div className="font-mono text-xs break-all text-slate-500">{serverUrl}</div>
-                  </div>
-                  <Button 
-                    as="a" 
-                    href={href} 
-                    target="_blank" 
-                    rel="noreferrer" 
-                    variant="primary"
-                    className="w-full py-4 px-6 text-lg rounded-lg shadow-md"
-                  >
-                    🚀 Launch Simulation Client
-                  </Button>
-                  <p className="text-xs text-slate-600 text-center">
-                    Opens in a new tab with all settings pre-configured
-                  </p>
-                </div>
-              );
-            } else if (hasClient) {
+            if (hasClient) {
               // Client mode - launch monitoring page (link with href for right-click & inspection)
               return (
                 <div className="space-y-3">
                   <h3 className="text-lg font-semibold text-slate-800">Ready to Connect</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-sm text-slate-700 font-medium">Room ID</label>
+                      <input
+                        className="w-full border rounded px-2 py-2 text-sm bg-white"
+                        value={roomId}
+                        onChange={(e)=>setRoomId(e.target.value)}
+                        placeholder="e.g., sleep_provider-Agent-12345"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm text-slate-700 font-medium">Room Title</label>
+                      <input
+                        className="w-full border rounded px-2 py-2 text-sm bg-white"
+                        value={roomTitle}
+                        onChange={(e)=>setRoomTitle(e.target.value)}
+                        placeholder={scenarioTitle}
+                      />
+                    </div>
+                  </div>
                   <Button
                     as="a"
                     href={computedRoomHref || '#'}
@@ -496,10 +442,10 @@ export function RunWizardPage() {
                     className="w-full py-4 px-6 text-lg rounded-lg shadow-md"
                     onClick={(e:any)=>{ if (!computedRoomHref) e.preventDefault(); }}
                   >
-                    📊 Open Server Manager
+                    🏠 Open Room
                   </Button>
                   <p className="text-xs text-slate-600 text-center">
-                    Configure server endpoint and monitor connection
+                    Create the room and monitor connection
                   </p>
                 </div>
               );

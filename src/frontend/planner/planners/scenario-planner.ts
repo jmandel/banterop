@@ -67,19 +67,13 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
     // --- HUD: planning lifecycle
     try { ctx.hud('planning', 'Thinking…', 0.1); } catch {}
 
-    // 0) Gate on unanswered agent_question (harness likely gates too, but be safe)
-    const openQ = findOpenQuestion(facts);
-    if (openQ) {
-      return [sleepFact(`Waiting on user's answer to ${openQ.qid}`, includeWhy)];
-    }
+    // Harness centrally gates unanswered agent_question; planner assumes preconditions are satisfied
 
     // 1) Read current status pill
     const status = getLastStatus(facts) || 'initializing';
 
     // 2) Hold during 'working' (no tools/no nudges)
-    if (!bootstrap && (status === 'working' || status === 'submitted' || status === 'initializing')) {
-      return [sleepFact(`Counterpart working or not ready (status=${status})`, includeWhy)];
-    }
+    // Harness gates status/turn; planner proceeds based on domain logic
 
     // 3) Allow one wrap-up after 'completed'
     if (status === 'completed') {

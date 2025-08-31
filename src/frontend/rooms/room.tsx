@@ -235,6 +235,13 @@ function App() {
             }
           }
         } catch {}
+        // For sample client link: exclude any additional instructions from our planner config
+        try {
+          if (plannerId === 'scenario-v0.3' && seed && typeof seed === 'object' && 'instructions' in seed) {
+            const { instructions: _omit, ...rest } = seed as any;
+            seed = rest;
+          }
+        } catch {}
         // Choose a default LLM model for the client: prefer seed.model when present, else banterop preset
         const defaultModel = (seed && typeof seed.model === 'string' && seed.model.trim()) ? seed.model : DEFAULT_BANTEROP_MODEL
         const payload: any = {
@@ -276,6 +283,7 @@ function App() {
     return false;
   }, [facts]);
   const turnChip = (() => {
+    if (!taskId) return { text: 'Waiting for client', tone: 'gray' as const };
     if (uiStatus === 'completed') return { text: 'Completed', tone: 'green' as const };
     if (uiStatus === 'failed' || uiStatus === 'rejected') return { text: 'Failed', tone: 'amber' as const };
     if (uiStatus === 'canceled') return { text: 'Canceled', tone: 'amber' as const };
@@ -336,8 +344,7 @@ function App() {
       fullWidth
       breadcrumbs={(
         <>
-          <span>•</span>
-          <span className="truncate">Room: {roomTitleFromHash || roomId || '—'}</span>
+          <span className="truncate font-semibold text-gray-900">Room: {roomTitleFromHash || roomId || '—'}</span>
           <span className={`pill ${isOwner ? 'ok' : (observing ? 'warn' : 'info')}`}>{isOwner ? 'Connected' : (observing ? 'Observing only' : 'Connecting…')}</span>
         </>
       )}
@@ -383,7 +390,10 @@ function App() {
             )}
           </div>
         )}
-        chips={[turnChip]}
+        chips={(() => {
+          const chips:any[] = [turnChip];
+          return chips;
+        })()}
       />
     );
   })()}
@@ -400,8 +410,8 @@ function App() {
 
       {showDebug && <DebugPanel />}
 
-      <div className="grid grid-cols-[1fr_340px] gap-3" ref={gridRef}>
-        <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-3" ref={gridRef}>
+        <div className="flex flex-col gap-3 order-2 lg:order-none">
           <div className="card">
             <div className="small muted mb-1.5">Conversation</div>
             <div className={`transcript ${(observing || isFinal) ? 'faded' : ''}`} aria-live="polite" ref={transcriptRef}>
@@ -489,7 +499,15 @@ function App() {
           {!observing && <PlannerSetupCard />}
         </div>
 
-        <div className={'sticky overflow-y-auto'} style={{ top: sideTop, maxHeight: `calc(100vh - ${sideTop}px)` }}>
+        <div
+          className="side-panel order-1 lg:order-none"
+          style={{
+            position: fixedSide ? 'sticky' as const : 'static' as const,
+            top: fixedSide ? sideTop : undefined,
+            maxHeight: fixedSide ? `calc(100vh - ${sideTop}px)` : undefined,
+            overflowY: fixedSide ? 'auto' : undefined,
+          }}
+        >
           <div className="flex flex-col gap-3 min-h-0">
             <LinksCard
               agentCard={agentCard}
@@ -507,7 +525,7 @@ function App() {
               plannerSelect={<PlannerSelector />}
             />
 
-            <LogCard rows={facts.slice(-100) as any} all={facts as any} fill />
+            <LogCard rows={facts.slice(-100) as any} all={facts as any} fill={fixedSide} />
           </div>
         </div>
       </div>

@@ -81,9 +81,9 @@ export function AppLayout({
 
       {/* Footer */}
       <footer className="border-t bg-white">
-        <div className="container mx-auto px-4 py-2 flex items-center justify-between">
+        <div className="container mx-auto px-4 py-2 flex items-center justify-between overflow-x-hidden">
           <p className="text-xs text-gray-600">Banterop © {year}</p>
-          <div className="flex gap-4 text-xs">
+          <div className="flex gap-x-4 gap-y-1 flex-wrap text-xs">
             <a 
               href="https://github.com/banterop"
               className="text-primary hover:opacity-80 no-underline"

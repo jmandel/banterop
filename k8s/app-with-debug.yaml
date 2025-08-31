@@ -35,8 +35,8 @@ metadata:
 data:
   PORT: "3000"
   BANTEROP_DB: "/data/banterop.db"
-  DEFAULT_LLM_PROVIDER: "openrouter"
-  DEFAULT_LLM_MODEL: "openai/gpt-oss-120b:nitro"
+  #DEFAULT_LLM_PROVIDER: "openrouter"
+  #DEFAULT_LLM_MODEL: "openai/gpt-oss-120b:nitro"
   BASE_URL: "https://banterop.fhir.me"
   BANTEROP_EVENTS_MAX: "5000"
 ---
@@ -101,16 +101,6 @@ spec:
                 name: app-config
             - secretRef:
                 name: app-secrets
-          # Debug-specific environment variables
-          env:
-            - name: DEBUG_LLM_REQUESTS
-              value: "true"
-            - name: LLM_DEBUG_DIR
-              value: "/debug/llm-debug"
-            - name: LLM_MODELS_OPENROUTER_INCLUDE
-              value: "openai/gpt-oss-120b:nitro,qwen/qwen3-235b-a22b-2507:nitro"
-            - name: NODE_ENV
-              value: "development"
           resources:
             requests:
               memory: "512Mi"

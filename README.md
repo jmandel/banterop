@@ -1,219 +1,187 @@
-# Banterop Demo (Bun + Hono + React)
+# 💬 Banterop: A Testbed for Conversational Interoperability
 
-A tiny mirror relay (**flip proxy**) that pairs two tabs and reflects messages between them using a minimal A2A-like API. Only the responder listens to a small backchannel; the initiator is a pure A2A Client. An optional MCP-compatible HTTP bridge is available alongside the A2A endpoint for initiator-side integrations.
+This project provides a transparent, extensible environment for testing and developing autonomous AI agents. Its core purpose is to make it easy to create a high-fidelity, interactive, and inspectable **simulated agent** to act as a conversational partner for your **real agent**.
 
-## Current Features
-- JSON-RPC: `message/stream` (SSE), `tasks/resubscribe` (SSE), `tasks/get`, `tasks/cancel`.
-- Finality hint (turn semantics):
-  - Sender sets `message.metadata['https://banterop.fhir.me/a2a-ext'].finality` to `none|turn|conversation`.
-  - Bridge updates task status and echoes the hint in streaming frames.
-- Pair management:
-  - `POST /api/pairs` (optional `{ metadata?: object }`) → creates a pair and returns structured endpoints and join links.
-  - `POST /pairs/:pairId/reset` (hard reset only) → cancels current tasks, bumps epoch; next initiator send starts a fresh epoch for the same pair.
-- Backchannel (responder only): `GET /pairs/:pairId/server-events` (SSE).
-- Control-plane event log (live only): `GET /pairs/:pairId/events.log?since=<seq>` (SSE)
-  - Streams concise events; no historical replay across restarts.
-- Persistence (SQLite):
-  - Pairs + tasks and full message histories are stored in SQLite (`messages` normalizes payload via JSON checks; uniqueness on `$.messageId`).
-  - On startup, the server seeds the SSE ring from DB with `epoch-begin`, historical `message` events, and a derived `state`.
+## The Vision: Language-First Interoperability in Healthcare
 
-## Quick start
+Traditional healthcare interoperability is powerful but often requires a lengthy pre-coordination phase where stakeholders negotiate common data formats, draft implementation guides, and stand up dedicated endpoints. This can be a barrier for resource-limited organizations and for workflows where requirements are dynamic and context is critical.
+
+**Banterop explores a new paradigm: Language-First Interoperability.**
+
+The core idea is simple: let AI agents, representing different organizations, communicate with each other in natural language to figure out what data they need, clarify ambiguities, and then provide that data in whatever form is required. This approach aims to:
+
+-   **Shorten the pre-coordination phase** by allowing agents to dynamically negotiate the parameters of an exchange.
+-   **Handle ambiguity and incomplete information** through conversational clarification, mirroring how humans solve these problems today.
+-   **Bridge the gap** between natural language requests and structured data systems like FHIR.
+
+This project is a testbed for this vision, providing a neutral ground where developers can bring their own agents to **banteroperate** with others in a rich, simulated environment.
+
+## Why Banterop? The Perfect Test Partner for Your Agent
+
+Developing a robust conversational agent is hard. Testing it is even harder, especially for complex, multi-turn workflows like prior authorization or clinical trial matching. You need a counterparty that is:
+
+-   **Realistic**: Behaves according to a complex set of rules and has its own private knowledge.
+-   **Dynamic**: Can handle ambiguity and negotiate, not just follow a rigid script.
+-   **Inspectable**: Lets you see "inside its head" to understand why it's making certain choices.
+-   **Controllable**: Allows you to intervene, guide, or even take over its side of the conversation.
+
+**Banterop provides this test partner.** The simulated agents within Banterop are powered by detailed **Scenarios**, making it easy to create a reliable and realistic conversational partner for your real-world agent.
+
+## The Banterop Architecture: A Testbed with Two Modes
+
+You can use Banterop in two primary ways, depending on whether your agent acts as a client or a server. In both modes, the *simulated* side of the conversation is powered by our unique browser-based architecture, giving you full control and visibility.
+
+1.  **Client Mode**: You bring an A2A/MCP **client**. Banterop provides the simulated server endpoint.
+2.  **Server Mode**: You bring an A2A/MCP **server**. Banterop provides the simulated client to connect to you.
+
+### The Browser as Your Control Panel (The "Flip Proxy" Magic)
+
+Banterop uses the magic of the web to push the simulated agent's logic out of a black-box server and directly into your browser. The Banterop server acts as a lightweight **"flip proxy"**, creating a uniquely powerful and interactive testing loop. This architecture lets you see and control everything.
+
+Here's how it works:
+
+-   Whether your agent is a client or a server, it communicates with a stable endpoint provided by Banterop.
+-   The Banterop server doesn't process the conversational logic itself. Instead, it **"flips"** incoming messages to your browser, which hosts the Banterop UI.
+-   Inside your browser, the `PlannerHarness` (the simulated agent's brain) runs. It reads the message, consults its scenario-defined goals, private knowledge, and simulated tools, and decides on a response.
+-   Crucially, because this logic runs in your browser, you can **watch its decisions in real-time**, inspect its internal state, pause execution, adjust its proposed responses, or even switch between automated planners and manual control.
+-   Once a response is ready, it's sent back via the "flip proxy" through the Banterop server to your real agent.
+
+This turns the simulated agent from an opaque endpoint into a transparent, interactive partner.
+
+```mermaid
+graph TB
+    subgraph ClientMode ["🤖 Client Mode (You Bring the Client)"]
+        ClientAgent[Your Agent<br/>A2A/MCP Client]
+        BanteropServer[Banterop Server<br/>Stable Endpoint]
+        ClientAgent -->|"Connects to"| BanteropServer
+    end
+
+    subgraph Browser ["🌐 Your Browser (The Control Panel)"]
+        RoomApp[Room App UI]
+        ClientAppUI[Client App UI]
+        PlannerHarness[Planner Harness<br/>Simulated Agent Brain]
+        SimulatedTools[Simulated Tools<br/>EHR Lookup, Policy Checks]
+        KnowledgeBase[Knowledge Base<br/>Powers the Tools]
+        
+        RoomApp -.-> PlannerHarness
+        ClientAppUI -.-> PlannerHarness
+        PlannerHarness --> SimulatedTools
+        SimulatedTools --> KnowledgeBase
+    end
+
+    subgraph ServerMode ["🖥️ Server Mode (You Bring the Server)"]
+        ServerAgent[Your Agent<br/>A2A/MCP Server]
+        BanteropClient[Banterop Client<br/>Connects to You]
+        BanteropClient -->|"Connects to"| ServerAgent
+    end
+
+    BanteropServer <-->|"Flip Proxy"| RoomApp
+    ClientAppUI <-->|"Drives"| BanteropClient
+
+    style ClientMode fill:#d4edda,stroke:#155724
+    style Browser fill:#fff3e0,stroke:#ef6c00
+    style ServerMode fill:#e1f5fe,stroke:#0277bd 
+```
+
+---
+
+## 🔌 Connecting Your Agent: A Developer's Guide
+
+To interoperate with Banterop, you can implement a client or server using one of two fully supported protocols. Both are exposed for every Room created in the platform.
+
+### Option 1: MCP (Model Context Protocol)
+
+Connect your agent to our MCP endpoint using the **Streamable HTTP Transport**.
+
+**Endpoint**: `/api/rooms/:roomId/mcp`
+
+Your agent must support these three tools:
+
+#### `begin_chat_thread`
+-   **Description**: Starts a new conversation thread for the room.
+-   **Input**: `(none)`
+-   **Output (JSON string)**: `{ "conversationId": "<string>" }` (The ID will correspond to the current task epoch for the initiator).
+
+#### `send_message_to_chat_thread`
+-   **Description**: Sends a message from your agent to the other party.
+-   **Input (JSON)**: `{ "conversationId": string, "message": string, "attachments"?: [...] }`
+-   **Output (JSON string)**: `{ "guidance": "Message sent...", "status": "working" }`
+
+#### `check_replies`
+-   **Description**: Long-polls for new messages from the other party.
+-   **Input (JSON)**: `{ "conversationId": string, "waitMs"?: 10000 }`
+-   **Output (JSON string)**: `{ "messages": [...], "guidance": string, "status": "working" | "input-required" | "completed", "conversation_ended": boolean }`
+
+### Option 2: A2A (Agent-to-Agent)
+
+Connect your agent using our JSON-RPC and SSE implementation of the A2A specification.
+
+#### Endpoints & Discovery
+-   **JSON-RPC URL**: `/api/rooms/:roomId/a2a`
+-   **Agent Card**: `GET /rooms/:roomId/.well-known/agent-card.json` (for discovery)
+
+#### Key JSON-RPC Methods
+-   **`message/send`**: Sends a message. Creates a new task if `taskId` is absent. Returns a `Task` snapshot.
+-   **`message/stream`**: Same as `message/send` but returns an SSE stream of `Task`, `message`, and `status-update` frames.
+-   **`tasks/get`**: Fetches a `Task` snapshot by ID.
+-   **`tasks/resubscribe`**: Subscribes to an SSE stream for an existing task.
+-   **`tasks/cancel`**: Cancels a task.
+
+---
+
+## 🚀 Getting Started with the Reference Stack
 
 ```bash
+# 1. Install dependencies
 bun install
+
+# 2. Start the server
 bun run dev
-# open http://localhost:3000/ (Control Plane)
 ```
+The server will start on `http://localhost:3000`.
 
-Use the Control Plane to create a pair; it shows links you can open in new tabs:
-- `/client/?card=<AgentCard URL>` → Client (initiator). Back-compat: `/client/?a2a=<A2A URL>`.
-- `/rooms/<PAIR_ID>` → Room backend (responder)
+### The Banterop UI Suite
+1.  **Scenario Editor (`/scenarios`)**: Create and manage the "worlds" your simulated agent will inhabit.
+2.  **Rooms (`/rooms/:roomId`)**: Your live control panel for the simulated agent when testing your external **client**.
+3.  **Client (`/client`)**: A reference A2A/MCP client, which serves as the control panel when testing your external **server**.
 
-Send messages and choose finality (`turn` to pass the token; `conversation` to complete). After a hard reset, the next initiator send starts a new epoch. No popups are used; links are displayed for manual opening.
+---
 
-## Rooms (optional)
-Rooms provide a stable workspace per `roomId` (alias of `pairId`), with exactly one active backend (a `/rooms/:roomId` tab) at a time.
+## ⚙️ Environment Variables
 
-- Open `/rooms/:roomId` to acquire the backend lease for the room; a second tab becomes an observer (banner explains how to take over).
-- Header includes: “Open client” (launches `/client/?a2a=…`), copy Agent Card URL, copy MCP URL.
-- Agent Card: `GET /rooms/:roomId/agent-card.json` (spec-like). The default includes:
-  - `url`: `/api/rooms/:roomId/a2a` (JSONRPC alias of `/api/bridge/:roomId/a2a`).
-  - `preferredTransport`: `JSONRPC` and `additionalInterfaces` repeating the same URL for clarity.
-  - `capabilities.extensions[0]` with `uri: https://banterop.fhir.me/a2a-ext` and `params: { a2a, mcp, tasks }`.
-  - Provider defaults can be customized (see AGENT_CARD_TEMPLATE below).
-- Feature flag (conceptual): when the backend isn’t open, ingress returns an in-band guidance message and marks the task failed; the message includes a full room URL for easy clicking.
+Configuration is managed through environment variables.
 
-Template-driven card overrides:
-- Env `AGENT_CARD_TEMPLATE` may contain JSON used as a base (deep-merged with defaults, then with `pairs.metadata.agentCard`).
-- Template supports placeholders: `{{roomId}}`, `{{BASE_URL}}`, `{{origin}}`.
+| Variable | Description | Default |
+| --- | --- | --- |
+| **Core Server** | | |
+| `PORT` | HTTP server port. | `3000` |
+| `BASE_URL` | Public base URL for generating absolute URLs. | `http://localhost:${PORT}` |
+| **Database** | | |
+| `BANTEROP_DB` | Path to the SQLite database file. | `:memory:` |
+| `BANTEROP_EVENTS_MAX`| Max SSE events to keep in memory per room. | `5000` |
+| **LLM Providers** | | |
+| `DEFAULT_LLM_PROVIDER` | Fallback LLM provider if not specified. | `mock` |
+| `GOOGLE_API_KEY` | API key for Google Gemini. | |
+| `OPENROUTER_API_KEY` | API key for OpenRouter. | |
+| `LLM_MODELS_{PROVIDER}_INCLUDE` | Comma-separated list to restrict a provider's models. | |
+| **Scenario Management** | | |
+| `PUBLISHED_EDIT_TOKEN`| Secret token to edit published scenarios. | |
 
-## Control Plane
-- Header: Create Pair, Hard reset, persistent join links when `#pair=<id>` is in the URL.
-- Events section:
-  - Status dot (idle/connecting/connected/error).
-  - Since field resubscribes on blur (no dedicated reconnect button).
-  - Buttons: Copy / Clear / Download.
-  - Pretty JSON + Wrap toggles for raw inspection.
-- Canonical compact rendering (no local timestamps):
-  - `[pair-created] epoch=1`
-  - `[epoch-begin] epoch=2`
-  - `[reset-start] reason=hard 1→2`, `[reset-complete] epoch=2`
-  - `[backchannel] subscribe epoch=1 task=resp:... turn=initiator`
-  - `[state] initiator=input-required responder=working`
-  - Note: This reference implementation does not emit separate `[message]` events. The latest message content is available within the `[state]` event’s embedded task `status.message`.
-- Legend: “?” button opens a sheet describing event types.
+---
 
-## Client app (A2A)
-- URL params: `a2a=<JSON-RPC endpoint>`, optional `transport=mcp&mcp=<MCP endpoint>`.
-- UX:
-  - Enter to send, tab order (input → finality → send), autofocus.
-  - Finality: none | turn | conversation.
-  - Send gating: send when `input-required` or no task yet; after cancel, shows “Send on new task”.
-  - Cancel task (non-terminal states): calls `tasks/cancel`.
-- Clear task (terminal states): clears local history and taskId to start fresh.
+## 💾 Persistence & Testing
 
-### URL Hash Schema (Readable JSON)
-- Purpose: Share most client settings via human-readable JSON in the URL hash.
-- Accepted formats: Raw JSON or percent‑encoded JSON in the hash (e.g., `#%7B...%7D`).
-- Transport inference: `transport` is omitted. The app infers it from URLs:
-  - If `agentCardUrl` is present → A2A
-  - Else if `mcpUrl` is present → MCP
-- Top-level fields:
-  - `agentCardUrl`: string (A2A only)
-  - `mcpUrl`: string (MCP only)
-  - `llm`: `{ provider: "server" | "client-openai", model: string, baseUrl?: string }`
-    - `apiKey` is intentionally excluded from the hash. Keys live only in `sessionStorage`.
-  - `planner`: `{ id: "off" | "llm-drafter" | "scenario-v0.3" | "simple-demo", mode: "approve" | "auto" }`
-  - `planners`: `{ [activeId]: { seed: object } }`  // current planner’s seed only
-  - `rev`: number (monotonic; stale‑update protection)
+-   **Persistence**: The server uses a SQLite database (configured via `BANTEROP_DB`) to store all conversation history, ensuring that simulations are durable across server restarts.
+-   **Testing**: The project includes a suite of tests for core functionality. Run them with `bun test`.
 
-Examples
-```
-# {"agentCardUrl":"https://…/agent-card.json","llm":{"provider":"server","model":"openai/gpt-oss-120b:nitro"},"planner":{"id":"llm-drafter","mode":"approve"}}
+## 📂 Project Structure
 
-# {"mcpUrl":"https://…/mcp.json","llm":{"provider":"client-openai","baseUrl":"https://openrouter.ai/api/v1","model":"openai/gpt-4o"},"planner":{"id":"scenario-v0.3","mode":"auto"},"planners":{"scenario-v0.3":{"seed":{"scenarioUrl":"https://…/scenario.json"}}}}
-```
-
-Behavior
-- On load, the app hydrates session defaults from the readable JSON hash before endpoint resolution.
-- API keys are never read from the hash; any existing key in `sessionStorage` is preserved.
-- When the store updates, the app writes a fresh JSON hash reflecting:
-  - `agentCardUrl` or `mcpUrl` (not both),
-  - `llm` provider, model, and `baseUrl` (for `client-openai` only),
-  - `planner` id/mode,
-  - `planners` seed for the active planner,
-  - `rev` incremented to avoid stale overwrites.
-
-## Environment Variables
-
-### Core Server Configuration
-- `PORT`: HTTP server port (default: `3000`)
-- `BASE_URL`: Public base URL for generating absolute URLs in agent cards (default: `http://localhost:${PORT}`)
-- `NODE_ENV`: Environment mode (`production` or `development`); affects logging and error handling
-
-### Database & Storage
-- `BANTEROP_DB`: SQLite database file path (default: `:memory:` for in-memory database)
-- `BANTEROP_EVENTS_MAX`: Maximum number of SSE events to keep in memory per pair/room (default: `5000`)
-
-### LLM Provider Configuration
-- `DEFAULT_LLM_PROVIDER`: Fallback LLM provider when none specified (default: `mock`)
-- `DEFAULT_LLM_MODEL`: Default model for the fallback provider
-- `GOOGLE_API_KEY`: API key for Google Gemini provider
-- `OPENROUTER_API_KEY`: API key for OpenRouter AI Gateway
-- `OPENROUTER_PROVIDER_CONFIG`: JSON config for OpenRouter routing (default: `{"ignore":["baseten"],"allow_fallbacks":true,"sort":"throughput"}`)
-- `LLM_MODELS_{PROVIDER}_INCLUDE`: Restrict available models for a specific provider (e.g., `LLM_MODELS_GOOGLE_INCLUDE=gemini-2.5-flash,gemini-2.5-pro`)
-
-### Scenario Management
-- `PUBLISHED_EDIT_TOKEN`: Secret token required in `X-Edit-Token` header to edit published scenarios
-
-### Agent Card Customization
-- `AGENT_CARD_TEMPLATE`: JSON template for customizing agent cards with placeholders (`{{roomId}}`, `{{BASE_URL}}`, `{{origin}}`)
-
-### Development & Debugging
-- `DEBUG_LLM_REQUESTS`: Enable logging of LLM requests/responses to filesystem (set to `1` or `true`)
-- `LLM_DEBUG_DIR`: Directory for LLM debug logs (default: `/tmp/llm-debug`)
-- `TEST_TIMEOUT`: Test execution timeout in seconds (default: `5`)
-
-## Persistence
-- DB: `BANTEROP_DB` (default `:memory:`) — SQLite via Bun.
-- Schema: `pairs`, `tasks`, and `messages(pair_id,epoch,author,json)` with JSON checks and unique index on `$.messageId`.
-- Ordering: FIFO via rowid; optional stronger ordering can add a surrogate primary key.
-- On startup, current epochs seed the SSE ring: `epoch-begin`, replay `message` events, then a derived `state`.
-
-## API Summary
-- `POST /api/pairs` (optional `{ metadata?: object }`) →
-  - `{ pairId, endpoints: { a2a, mcp, agentCard }, links: { initiator: { joinClient, joinMcp }, responder: { openRoom } } }`
-- `GET /api/pairs/:pairId/metadata` → `{ metadata }`
-- `POST /pairs/:pairId/reset` (hard only) → `{ ok, epoch }`
-- `GET /pairs/:pairId/server-events` (SSE; responder backchannel)
-- `GET /pairs/:pairId/events.log?since=<seq>` (SSE; concise live events)
-- Also supports `?backlogOnly=1` for a one-shot backlog response (used in tests)
-- `POST /api/bridge/:pairId/a2a` JSON-RPC (alias: `/api/rooms/:pairId/a2a`):
-  - `message/stream` (SSE), `message/send`, `tasks/get`, `tasks/resubscribe`, `tasks/cancel`.
-
-### MCP Bridge (initiator-side)
-- `POST /api/bridge/:pairId/mcp`
-  - Same base as A2A (relative to initiator API base: `/api/bridge/:pairId/…`).
-  - Accepts MCP Streamable HTTP requests and returns JSON responses for tool invocations.
-  - Tools exposed:
-    - `begin_chat_thread()` → `{ conversationId }` for the current epoch’s initiator task.
-    - `send_message_to_chat_thread({ conversationId, message, attachments? })` → `{ guidance, status: "working" }`.
-    - `check_replies({ conversationId, waitMs=10000 })` → `{ messages, guidance, status, conversation_ended }`.
-
-Example (tool invocation via MCP HTTP transport payloads):
-
-```bash
-# Begin thread
-curl -sS -X POST \
-  -H 'content-type: application/json' \
-  localhost:3000/api/bridge/<PAIR_ID>/mcp \
-  -d '{
-    "method": "tools/call",
-    "params": { "name": "begin_chat_thread", "arguments": {} }
-  }'
-
-# Send message
-curl -sS -X POST \
-  -H 'content-type: application/json' \
-  localhost:3000/api/bridge/<PAIR_ID>/mcp \
-  -d '{
-    "method": "tools/call",
-    "params": { "name": "send_message_to_chat_thread", "arguments": { "conversationId": "init:<PAIR_ID>#<EPOCH>", "message": "Hello", "attachments": [] } }
-  }'
-
-# Check replies (long-poll 10s)
-curl -sS -X POST \
-  -H 'content-type: application/json' \
-  localhost:3000/api/bridge/<PAIR_ID>/mcp \
-  -d '{
-    "method": "tools/call",
-    "params": { "name": "check_replies", "arguments": { "conversationId": "init:<PAIR_ID>#<EPOCH>", "waitMs": 10000 } }
-  }'
-```
-
-## Project layout
 ```
 src/
-  server/banterop.ts   # Hono API + Bun.serve dev routes + bun-storage persistence
-  server/bridge/mcp-on-banterop.ts  # MCP bridge mounted at /api/bridge/:pairId/mcp
-  shared/               # shared types across server + frontend
-    a2a-types.ts
-    backchannel-types.ts
-  frontend/
-    control/index.html      # Control Plane; create pairs + live event log
-    control/app.tsx         # Control Plane UI logic
-    client/index.html       # Client UI shell
-    client/client.tsx       # React entrypoint for Client (A2A)
+├── frontend/     # React apps: /client, /rooms, /scenarios
+├── llm/          # Pluggable LLM provider registry and implementations
+├── server/       # Hono backend server, API routes, and flip proxy logic
+├── shared/       # Types and helpers shared between frontend and backend
+├── types/        # Core type definitions (scenarios, LLM)
+└── README.md     # This file
 ```
-
-## Notes & Limitations
-- Event log is live-only; the server keeps only an in-memory buffer (default 1000) for the current process. It is cleared on hard reset and not persisted across restarts.
-- Pair meta + full task histories are persisted; restarts do not lose chats.
-- Finality semantics: `turn` flips who is `input-required`; `conversation` completes both tasks; `none` keeps sender `input-required` and receiver `working`.
- - File parts: reference implementation only supports inline `bytes` (base64). URIs are not supported for attachments.
- - Security: pairs are not authenticated; anyone with a `pairId` could access backchannel/logs if reachable. Use for demos only.
-
-## Testing
-- `bun test --bail` to fail fast on first error.
-- `npm run test:timeout` (uses a 5s overall timeout by default; override with `TEST_TIMEOUT=<seconds>`).
-- Includes persistence, Rooms, and SSE tests under `tests/`.

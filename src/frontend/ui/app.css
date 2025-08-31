@@ -34,11 +34,18 @@
 
 /* Base + component aliases (migrate away from bespoke CSS by mapping to Tailwind) */
 @layer base {
-  body { @apply bg-bg text-text p-0 m-0 font-sans; }
+  body { @apply bg-bg text-text p-0 m-0 font-sans overflow-x-hidden; }
 }
 
 @layer components {
-  .wrap { @apply max-w-[1200px] mx-auto pr-0; }
+  /* Mobile-safe sidebar override */
+  .side-panel { @apply w-full; }
+  @media (max-width: 1023px) {
+    .side-panel { position: static !important; overflow: visible !important; max-height: none !important; }
+    /* Fallback: if a sidebar still carries sticky + order-1 classes, force it non-sticky */
+    .sticky.order-1 { position: static !important; top: auto !important; max-height: none !important; overflow: visible !important; }
+  }
+  .wrap { @apply max-w-full lg:max-w-[1200px] mx-auto px-3 lg:px-0; }
   .with-debug { @apply pr-[380px]; }
   .with-fixed-sidebar { @apply pr-[360px]; }
   .card { @apply bg-white border border-border rounded-2xl p-3 mb-3 shadow-sm; }

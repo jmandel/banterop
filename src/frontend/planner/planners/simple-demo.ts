@@ -32,21 +32,7 @@ export const SimpleDemoPlanner: Planner<{ mode:'off'|'suggest'|'auto' }> = {
     if (mode === 'off') return [];
     ctx.hud('reading', 'Scanning latest message…', 0.2);
 
-    // Only act when it's our turn (task requires input)
-    const lastStatus = (() => {
-      for (let i = input.facts.length - 1; i >= 0; --i) {
-        const f = input.facts[i];
-        if (f.type === 'status_changed') return f.a2a as string;
-      }
-      return 'unknown';
-    })();
-    if (lastStatus !== 'input-required') {
-      ctx.hud('waiting', 'Not our turn');
-      return [{ type:'sleep', reason:'Not our turn' }];
-    }
-
-    // If a compose is already open and unsent, sleep
-    if (hasUnsentCompose(input)) { ctx.hud('waiting', 'Draft open'); return [{ type:'sleep', reason:'Draft open' }]; }
+    // Harness guarantees turn/draft gating; keep planner focused on domain
 
     // Only respond if the latest public message is from the other side
     const lastPublic = (() => {

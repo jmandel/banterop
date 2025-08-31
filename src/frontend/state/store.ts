@@ -96,6 +96,9 @@ export type Store = {
   addUserAnswer(qid: string, text: string): void;
   dismissCompose(composeId: string): void;
   kickoffConversationWithPlanner(): void;
+  // readiness + kickoff
+  requestKickoff(reason?: string): void;
+  ackKickoffIfPending(): void;
   cancelAndClear(): Promise<void>;
   // backchannel
   attachBackchannel(tasksUrl: string): void;
@@ -177,6 +180,7 @@ export const useAppStore = create<Store>((set, get) => ({
 
   setPlannerConfig(config, ready) {
     const pid = get().plannerId;
+    try { console.debug('[store] setPlannerConfig', { pid, ready, hasConfig: !!config }); } catch {}
     set((s:any) => ({
       configByPlanner: { ...s.configByPlanner, [pid]: config },
       readyByPlanner: { ...s.readyByPlanner, [pid]: !!ready },
@@ -200,6 +204,7 @@ export const useAppStore = create<Store>((set, get) => ({
     });
   },
   applySetup(plannerId) {
+    try { console.debug('[store] applySetup', { plannerId }); } catch {}
     const s = get();
     const row = s.plannerSetup.byPlanner[plannerId];
     if (!row?.valid || !row?.draft) return;
@@ -312,6 +317,7 @@ export const useAppStore = create<Store>((set, get) => ({
   },
 
   reconfigurePlanner({ config, ready, rewind }) {
+    try { console.debug('[store] reconfigurePlanner', { plannerId: get().plannerId, ready, rewind }); } catch {}
     // Default: rewind to last public, unless explicitly disabled
     try {
       if (rewind === undefined || rewind === true) {
@@ -468,6 +474,7 @@ export const useAppStore = create<Store>((set, get) => ({
 
   kickoffConversationWithPlanner() {
     const { taskId, plannerId, readyByPlanner } = get();
+    try { console.debug('[store] kickoffConversationWithPlanner called', { taskId: !!taskId, plannerId, ready: !!readyByPlanner[plannerId], adapter: !!get().adapter }); } catch {}
     if (taskId) return;
     if (plannerId === 'off') return;
     if (!readyByPlanner[plannerId]) return;
@@ -476,9 +483,9 @@ export const useAppStore = create<Store>((set, get) => ({
     const unsent = findUnsentComposes(facts);
     if (hasAnyStatus || unsent.length) return;
     // If adapter/controller not ready yet, arm a pending kickoff
-    if (!get().adapter) { set({ pendingKickoff: true }); return; }
-    // Ask the harness for a bootstrap pass; no journal mutation needed.
-    try { get().requestReplan('kickoff'); } catch {}
+    if (!get().adapter) { try { console.debug('[store] kickoff: adapter not ready → arming latch'); } catch {} set({ pendingKickoff: true }); return; }
+    // Latch kickoff intent
+    try { get().requestKickoff('user-begin'); } catch {}
   },
 
   async cancelAndClear() {
@@ -540,8 +547,10 @@ export const useAppStore = create<Store>((set, get) => ({
   },
   append(batch, opts) {
     const baseSeq = typeof opts?.casBaseSeq === 'number' ? opts!.casBaseSeq : get().seq;
+    try { console.debug('[store] append called', { baseSeq, head:get().seq, count: batch.length, types: batch.map(b=>b.type) }); } catch {}
     if ((get().seq || 0) !== baseSeq) return false;
     stampAndAppend(set, get, batch);
+    try { get().ackKickoffIfPending(); } catch {}
     try {
       const mode = get().plannerMode;
       if (mode === 'auto') {
@@ -562,6 +571,17 @@ export const useAppStore = create<Store>((set, get) => ({
   head() { return get().seq || 0; },
   setHud(phase, label, p) { set({ hud: { phase, label, p } }); },
   requestReplan(_reason) { set(s => ({ planNonce: (s.planNonce || 0) + 1 })); },
+  requestKickoff(reason) {
+    try { console.debug('[store] requestKickoff', { reason }); } catch {}
+    set({ pendingKickoff: true });
+    set(s => ({ planNonce: (s.planNonce || 0) + 1 }));
+  },
+  ackKickoffIfPending() {
+    if (get().pendingKickoff) {
+      try { console.debug('[store] ackKickoffIfPending: clearing latch'); } catch {}
+      set({ pendingKickoff: false });
+    }
+  },
 
   // Setup UI state machine
   openSetup() { set(s => ({ setupUi: { ...s.setupUi, panel: 'open' } })); },

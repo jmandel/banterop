@@ -24,11 +24,27 @@ import { ClientSettingsModal } from './ClientSettingsModal';
 import { AutomationCard } from '../components/AutomationCard';
 import { LogCard } from '../components/LogCard';
 import { ClientLinksCard } from './components/ClientLinksCard';
-import { TopBar } from '../components/TopBar';
 import { MetaBar } from '../components/MetaBar';
 import { Settings } from 'lucide-react';
 import { Copy } from 'lucide-react';
 import { AppLayout as SharedAppLayout } from '../ui';
+
+function pickA2AEndpointFromCard(card: any, cardUrl: string): string {
+  const candidates = [
+    card?.url,                  // { "url": "https://..." }
+    card?.a2a?.url,             // { "a2a": { "url": "..." } }
+    card?.endpoints?.a2a,       // { "endpoints": { "a2a": "..." } }
+    card?.endpoint,             // { "endpoint": "..." }
+  ].filter((v) => typeof v === 'string' && String(v).trim());
+
+  if (!candidates.length) return '';
+
+  try {
+    return new URL(candidates[0] as string, cardUrl).toString();
+  } catch {
+    return String(candidates[0]);
+  }
+}
 
 function useQuery() {
   const u = new URL(window.location.href);
@@ -59,39 +75,44 @@ function App() {
 
   function loadClientSettings(): ClientSettings {
     // Try to boot from readable JSON hash first
+    // Preserve any existing API key in session when reading from hash
+    let existingApiKey: string | undefined = undefined;
     try {
-      // Preserve any existing API key in session when reading from hash
-      let existingApiKey: string | undefined = undefined;
-      try {
-        const prevRaw = window.sessionStorage.getItem('clientSettings');
-        if (prevRaw) {
-          const prev = JSON.parse(prevRaw);
-          existingApiKey = prev?.llm?.apiKey || '';
-        }
-      } catch {}
+      const prevRaw = window.sessionStorage.getItem('clientSettings');
+      if (prevRaw) {
+        const prev = JSON.parse(prevRaw);
+        existingApiKey = prev?.llm?.apiKey || '';
+      }
+    } catch {}
+
+    try {
       const rawHash = window.location.hash?.slice(1) || '';
-      const cand = [rawHash];
-      try { cand.push(decodeURIComponent(rawHash)); } catch {}
-      for (const s of cand) {
-        const t = (s || '').trim();
-        if (t.startsWith('{') && t.endsWith('}')) {
-          const j = JSON.parse(t);
-          if (j && typeof j === 'object') {
-            const llm = j.llm || {};
-            const provider = (llm.provider === 'client-openai') ? 'client-openai' : 'server';
-            const model = typeof llm.model === 'string' && llm.model.trim() ? llm.model.trim() : DEFAULT_BANTEROP_MODEL;
-            const baseUrl = provider === 'client-openai' ? (llm.baseUrl || 'https://openrouter.ai/api/v1') : undefined;
-            // Do NOT read apiKey from the hash; keep any existing value
-            const apiKey = provider === 'client-openai' ? (existingApiKey || '') : undefined;
-            const a2aCardUrl = String(j.agentCardUrl || '');
-            const mcpUrl = String(j.mcpUrl || '');
-            // Infer transport from presence of URLs (prefer A2A when both present)
-            const transport = a2aCardUrl ? 'a2a' : (mcpUrl ? 'mcp' : 'a2a');
-            const boot = { transport, a2aCardUrl, mcpUrl, llm: { provider, model, baseUrl, apiKey } } as ClientSettings;
-            // Persist immediately so controller picks it up
-            try { window.sessionStorage.setItem('clientSettings', JSON.stringify(boot)); } catch {}
-            return boot;
-          }
+      const candidates: string[] = [];
+      const pushIf = (s?: string) => { const t = (s || '').trim(); if (t) candidates.push(t); };
+      pushIf(rawHash);
+      try { pushIf(decodeURIComponent(rawHash)); } catch {}
+      try { pushIf(decodeURIComponent(decodeURIComponent(rawHash))); } catch {}
+
+      for (const s of candidates) {
+        const t = s.trim();
+        if (!(t.startsWith('{') && t.endsWith('}'))) continue;
+        let j: any = null;
+        try { j = JSON.parse(t); } catch { continue; }
+        if (j && typeof j === 'object') {
+          const llm = j.llm || {};
+          const provider = (llm.provider === 'client-openai') ? 'client-openai' : 'server';
+          const model = typeof llm.model === 'string' && llm.model.trim() ? llm.model.trim() : DEFAULT_BANTEROP_MODEL;
+          const baseUrl = provider === 'client-openai' ? (llm.baseUrl || 'https://openrouter.ai/api/v1') : undefined;
+          // Do NOT read apiKey from the hash; keep any existing value
+          const apiKey = provider === 'client-openai' ? (existingApiKey || '') : undefined;
+          const a2aCardUrl = String(j.agentCardUrl || '');
+          const mcpUrl = String(j.mcpUrl || '');
+          // Infer transport from presence of URLs (prefer A2A when both present)
+          const transport = a2aCardUrl ? 'a2a' : (mcpUrl ? 'mcp' : 'a2a');
+          const boot = { transport, a2aCardUrl, mcpUrl, llm: { provider, model, baseUrl, apiKey } } as ClientSettings;
+          // Persist immediately so controller picks it up
+          try { window.sessionStorage.setItem('clientSettings', JSON.stringify(boot)); } catch {}
+          return boot;
         }
       }
     } catch {}
@@ -121,20 +142,34 @@ function App() {
       setResolvedA2A('');
       setResolvedMcp('');
       if (clientSettings.transport === 'mcp') {
-        setResolvedMcp(clientSettings.mcpUrl || '');
+        const m = (clientSettings.mcpUrl || '').trim();
+        try { console.debug('[client] MCP URL (from settings/hash)', { url: m }); } catch {}
+        setResolvedMcp(m);
         return;
       }
+
       const url = (clientSettings.a2aCardUrl || '').trim();
-      if (!url) return;
+      if (!url) { try { console.debug('[client] No agent-card URL present'); } catch {} return; }
+
       try {
+        try { console.debug('[client] Fetching agent-card…', { url }); } catch {}
         const res = await fetch(url, { method: 'GET' });
         if (!res.ok) throw new Error(`fetch card failed: ${res.status}`);
         const card = await res.json();
         if (cancelled) return;
-        const resolved = String(card?.url || '');
-        setResolvedA2A(resolved);
+
+        const endpoint = pickA2AEndpointFromCard(card, url);
+        try { console.debug('[client] Agent-card fetched', { endpoint, cardPreview: Object.keys(card || {}) }); } catch {}
+
+        if (!endpoint) {
+          setCardError('Agent card missing a usable A2A URL (fields tried: url, a2a.url, endpoints.a2a, endpoint)');
+          return;
+        }
+        setResolvedA2A(endpoint);
       } catch (e:any) {
-        setCardError(String(e?.message || 'Failed to load Agent Card'));
+        const msg = String(e?.message || 'Failed to load Agent Card');
+        try { console.debug('[client] Agent-card error', { url, error: msg }); } catch {}
+        setCardError(msg);
       }
     }
     resolveCard();
@@ -150,17 +185,10 @@ function App() {
     const endpointMcp = resolvedMcp || mcpUrl;
     if (transport === 'a2a' && !endpointA2A) return;
     if (transport === 'mcp' && !endpointMcp) return;
+    try { console.debug('[client] Adapter ready', { transport, endpoint: transport==='mcp' ? endpointMcp : endpointA2A }); } catch {}
     const adapter = transport === 'mcp' ? new MCPAdapter(endpointMcp) : new A2AAdapter(endpointA2A);
     store.init('initiator' as any, adapter, undefined);
     startPlannerController();
-    // If user clicked Begin before adapter/controller were ready, honor it now
-    try {
-      const s = useAppStore.getState();
-      if (s.pendingKickoff) {
-        useAppStore.setState({ pendingKickoff: false });
-        s.requestReplan('kickoff');
-      }
-    } catch {}
   }, [transport, resolvedA2A, resolvedMcp, mcpUrl]);
 
   // Load available server models for settings UI
@@ -250,7 +278,7 @@ function App() {
   const metaRef = React.useRef<HTMLDivElement|null>(null);
   const [fixedSide, setFixedSide] = useState(false);
   const [sideLeft, setSideLeft] = useState<number | null>(null);
-  const [sideTop, setSideTop] = useState<number>(96);
+  const [sideTop, setSideTop] = useState<number>(48);
   useEffect(() => {
     function recalc() {
       const isWide = window.innerWidth >= 1024;
@@ -268,26 +296,26 @@ function App() {
   }, []);
 
   return (
-    <SharedAppLayout title="Banterop" fullWidth>
+    <SharedAppLayout
+      title="Banterop"
+      fullWidth
+      breadcrumbs={(
+        <>
+          <span className="truncate font-semibold text-gray-900">Client</span>
+          <span className="pill">{transport === 'mcp' ? 'MCP' : 'A2A'}</span>
+        </>
+      )}
+      headerRight={(
+        <button title="Settings" aria-label="Settings" onClick={()=>setShowSettings(true)} className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact">
+          <Settings size={18} strokeWidth={1.75} />
+          <span className="text-sm">Config</span>
+        </button>
+      )}
+    >
       <div className={`wrap ${showDebug ? 'with-debug' : ''}`}>
-      <TopBar offset={48}
-        left={(
-          <div className="row compact">
-            <span className="small muted">Client</span>
-            <span className="pill">{transport === 'mcp' ? 'MCP' : 'A2A'}</span>
-          </div>
-        )}
-        right={(
-          <button title="Settings" aria-label="Settings" onClick={()=>setShowSettings(true)} className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact">
-            <Settings size={18} strokeWidth={1.75} />
-            <span className="text-sm">Config</span>
-          </button>
-        )}
-      />
-
       <MetaBar
         elRef={metaRef}
-        offset={96}
+        offset={48}
         left={(
           <div className="row compact">
             <span className="small muted">Task</span>
@@ -324,8 +352,8 @@ function App() {
 
       {showDebug && <DebugPanel />}
 
-      <div className="grid grid-cols-[1fr_340px] gap-3" ref={gridRef}>
-        <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-3" ref={gridRef}>
+        <div className="flex flex-col gap-3 order-2 lg:order-none">
           {hasTranscript && (
             <div className="card">
               <div className={`transcript ${['completed','canceled','failed','rejected'].includes(uiStatus) ? 'faded' : ''}`} aria-live="polite" ref={transcriptRef}>
@@ -422,7 +450,15 @@ function App() {
           )}
         </div>
 
-        <div className={'sticky overflow-y-auto'} style={{ top: sideTop, maxHeight: `calc(100vh - ${sideTop}px)` }}>
+        <div
+          className="side-panel order-1 lg:order-none"
+          style={{
+            position: fixedSide ? 'sticky' as const : 'static' as const,
+            top: fixedSide ? sideTop : undefined,
+            maxHeight: fixedSide ? `calc(100vh - ${sideTop}px)` : undefined,
+            overflowY: fixedSide ? 'auto' : undefined,
+          }}
+        >
           <div className="flex flex-col gap-3 min-h-0">
             <AutomationCard
               mode={useAppStore.getState().plannerMode as any}
@@ -430,7 +466,7 @@ function App() {
               plannerSelect={<PlannerSelector />}
             />
             <ClientLinksCard />
-            <LogCard rows={facts.slice(-100) as any} all={facts as any} fill />
+            <LogCard rows={facts.slice(-100) as any} all={facts as any} fill={fixedSide} />
           </div>
         </div>
       </div>

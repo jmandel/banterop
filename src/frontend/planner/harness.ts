@@ -73,7 +73,7 @@ export class PlannerHarness<Cfg = unknown> {
     // This avoids needing a synthetic status fact for the first proposal.
     const hasExistingTask = !!(this.ids as any)?.existingTask;
     const bootstrap = facts.length === 0 && !hasExistingTask;
-    try { console.debug('[planner/harness] pass begin: facts=%d head=%d bootstrap=%o', facts.length, headNow, bootstrap); } catch {}
+    try { console.debug('[planner/harness] pass begin', { facts: facts.length, head: headNow, bootstrap }); } catch {}
     if (!bootstrap && runawayGuardActive(facts.length)) {
       try {
         const msg = `🧊 Runaway guard: planner frozen (entries=${facts.length} ≥ cap=${JOURNAL_HARD_CAP})`;
@@ -119,17 +119,13 @@ export class PlannerHarness<Cfg = unknown> {
     const dismissed = new Set<string>(facts.filter(f=>f.type==='compose_dismissed').map((f:any)=>f.composeId));
     // Only plan when a trigger fired (including bootstrap for empty journal)
     const anyTrigger = statusTriggered || inboundTriggered || outboundTriggered || whisperTriggered || userAnswerTriggered || bootstrap;
-    try {
-      console.debug('[planner/harness] triggers:', {
-        status: lastStatus || 'none', lastStatusSeq,
-        lastPublic,
-        inboundTriggered, outboundTriggered, statusTriggered, whisperTriggered, userAnswerTriggered, bootstrap,
-      });
-    } catch {}
+    try { console.debug('[planner/harness] triggers', { status:lastStatus||'none', lastStatusSeq, lastPublic, inboundTriggered, outboundTriggered, statusTriggered, whisperTriggered, userAnswerTriggered, bootstrap }); } catch {}
     if (!anyTrigger) return;
-    // Status must be input-required, unless this is the bootstrap pass
-    if (!bootstrap && lastStatus !== 'input-required') {
-      try { console.debug('[planner/harness] gate: status not input-required → skip (status=%o)', lastStatus); } catch {}
+    // Status must be input-required, unless this is the bootstrap pass OR it's first-pass on submitted with no public traffic
+    const noPublicTraffic = (lastPublic === null);
+    const allowKickoffOnSubmitted = !bootstrap && noPublicTraffic && (lastStatus === 'submitted');
+    if (!bootstrap && lastStatus !== 'input-required' && !allowKickoffOnSubmitted) {
+      try { console.debug('[planner/harness] gate: status blocked', { status:lastStatus, allowKickoffOnSubmitted }); } catch {}
       return;
     }
     // Unsent compose gate (ignore dismissed): if there's a compose with no remote_sent after it, park
@@ -166,12 +162,30 @@ export class PlannerHarness<Cfg = unknown> {
       if (latestUnsent) {
         const ok = this.append([{ type:'compose_dismissed', composeId: latestUnsent } as any], { casBaseSeq: cut.seq });
         // Do not update whisper counters here so a subsequent pass will plan with the whisper trigger
-        if (ok) return; else return;
+        try { console.debug('[planner/harness] auto-dismissed latest draft due to whisper/user_answer', { composeId: latestUnsent, ok }); } catch {}
+        return;
       }
       // If couldn't find the draft defensively, fall through to standard guard (which will park)
     }
     if (hasUnsentCompose) {
       try { console.debug('[planner/harness] gate: unsent compose present → park'); } catch {}
+      return;
+    }
+
+    // Central open-question gate: if latest agent_question is unanswered and this trigger didn't come from user_answer/whisper or public traffic, park
+    let lastQSeq = 0; let hasAnswer = false; let hasPublicAfterQ = false;
+    for (let i = facts.length - 1; i >= 0; --i) { const f = facts[i] as any; if (f.type === 'agent_question') { lastQSeq = f.seq; break; } }
+    if (lastQSeq) {
+      for (let i = facts.length - 1; i >= 0; --i) {
+        const f = facts[i] as any; if (f.seq <= lastQSeq) break;
+        if (f.type === 'user_answer') { hasAnswer = true; break; }
+        if (f.type === 'remote_sent' || f.type === 'remote_received') { hasPublicAfterQ = true; break; }
+      }
+    }
+    const blockingOpenQ = lastQSeq && !hasAnswer && !whisperTriggered && !userAnswerTriggered && !inboundTriggered && !outboundTriggered && !bootstrap;
+    if (blockingOpenQ) {
+      try { console.debug('[planner/harness] gate: unanswered agent_question'); } catch {}
+      try { this.hud('waiting', 'Awaiting answer to previous question'); } catch {}
       return;
     }
 

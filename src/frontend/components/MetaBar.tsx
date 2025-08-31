@@ -15,16 +15,20 @@ function chipClass(tone?: Chip['tone']): string {
 
 export function MetaBar({ left, chips, right, elRef, offset = 48 }:{ left: React.ReactNode; chips: Chip[]; right?: React.ReactNode; elRef?: React.Ref<HTMLDivElement>; offset?: number }) {
   return (
-    <div ref={elRef as any} className="card compact sticky" style={{ top: offset }}>
-      <div className="row compact w-full">
-        <div className="row compact">
-          {left}
-          {/* chips: left-justified next to the label */}
-          {chips.map((c, i) => (
-            <span key={i} className={`pill ${chipClass(c.tone)}`}>{c.text}</span>
-          ))}
+    <div ref={elRef as any} className="lg:sticky z-20" style={{ top: offset }}>
+      <div className="bg-white">
+        <div className="card compact !mb-0">
+          <div className="row compact w-full">
+            <div className="row compact">
+              {left}
+              {/* chips: left-justified next to the label */}
+              {chips.map((c, i) => (
+                <span key={i} className={`pill ${chipClass(c.tone)}`}>{c.text}</span>
+              ))}
+            </div>
+            {right && <div className="row compact" style={{ marginLeft:'auto' }}>{right}</div>}
+          </div>
         </div>
-        {right && <div className="row compact" style={{ marginLeft:'auto' }}>{right}</div>}
       </div>
     </div>
   );
