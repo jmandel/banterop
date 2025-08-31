@@ -59,7 +59,7 @@ export function pairsRoutes(includeNonApi = false) {
           // Attempt backend lease if requested
           if (mode === 'backend') {
             try {
-              const existing = (pairs as any).getLease(pairId)
+              const existing = (pairs as any).getLeaseInfo(pairId)
               if (!existing) {
                 // No lease exists. Allow fresh acquisition only if no requestedLeaseId and not takeover
                 if (requestedLeaseId) {
@@ -92,7 +92,7 @@ export function pairsRoutes(includeNonApi = false) {
               try { (pairs as any).renewBackend(pairId, connId) } catch {}
               // Detect takeover/revocation: if current lease conn differs, revoke this stream
               try {
-                const l = (pairs as any).getLease(pairId)
+                const l = (pairs as any).getLeaseInfo(pairId)
                 if (!l || l.connId !== connId) {
                   write({ type:'backend-revoked', reason: l ? 'takeover' : 'stale' })
                   clearInterval(ping)
@@ -142,7 +142,7 @@ export function pairsRoutes(includeNonApi = false) {
       const leaseId = form ? String(form.get('leaseId') || '') : ''
       const pairs = c.get('pairs')
       try {
-        const l = (pairs as any).getLease(pairId)
+        const l = (pairs as any).getLeaseInfo(pairId)
         if (l && l.leaseId && leaseId && l.leaseId === leaseId) {
           ;(pairs as any).releaseBackend(pairId, l.connId)
         }

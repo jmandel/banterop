@@ -6,7 +6,7 @@ export function createBlankScenario() {
   const tempId = `please-replace-this-placeholder-${timestamp}-${random}`;
   
   return {
-    metadata: { id: tempId, title: 'Please Replace This Title', background: '', challenges: [] },
+    metadata: { id: tempId, title: 'Please Replace This Title', description: '', background: '', challenges: [] },
     agents: []
   };
 }

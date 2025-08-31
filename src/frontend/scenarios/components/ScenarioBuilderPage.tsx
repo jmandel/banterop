@@ -156,15 +156,17 @@ export function ScenarioBuilderPage() {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
     try {
       const response = await api.getScenarios();
-      if (response.success) {
-        setState(prev => ({
-          ...prev,
-          scenarios: response.data.scenarios,
-          isLoading: false
-        }));
-      } else {
-        throw new Error(response.error || 'Failed to load scenarios');
-      }
+      if (!response.success) throw new Error('Failed to load scenarios');
+      // Map to ScenarioItem shape with createdAt/modifiedAt placeholders
+      const scenarios: ScenarioItem[] = (response.data.scenarios || []).map((s:any) => ({
+        id: s.id,
+        name: s.name,
+        config: s.config,
+        history: s.history || [],
+        createdAt: new Date().toISOString(),
+        modifiedAt: new Date().toISOString(),
+      }));
+      setState(prev => ({ ...prev, scenarios, isLoading: false }));
     } catch (error) {
       setState(prev => ({
         ...prev,
@@ -234,18 +236,15 @@ export function ScenarioBuilderPage() {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
     try {
       const response = await api.getScenario(id);
-      if (response.success) {
-        const scenario = response.data;
-        setState(prev => ({
-          ...prev,
-          activeScenarioId: id,
-          chatHistory: scenario.history || [],
-          pendingConfig: null,
-          isLoading: false
-        }));
-      } else {
-        throw new Error(response.error || 'Failed to load scenario');
-      }
+      if (!response.success) throw new Error('Failed to load scenario');
+      const scenario = response.data;
+      setState(prev => ({
+        ...prev,
+        activeScenarioId: id,
+        chatHistory: scenario.history || [],
+        pendingConfig: scenario.config || null,
+        isLoading: false
+      }));
     } catch (error) {
       setState(prev => ({
         ...prev,
@@ -277,7 +276,7 @@ export function ScenarioBuilderPage() {
           }));
         }
       } else {
-        throw new Error(response.error || 'Failed to delete scenario');
+        throw new Error('Failed to delete scenario');
       }
     } catch (error) {
       setState(prev => ({
@@ -357,7 +356,7 @@ export function ScenarioBuilderPage() {
           messages: [{ role: 'user', content: prompt }],
           model: state.selectedModel,
           temperature: 0.2
-        }, controller.signal, state.scenarioConfig?.metadata?.id);
+        }, controller.signal, state.activeScenarioId || undefined);
       } catch (llmError: any) {
         // Check if it was aborted
         if (llmError.name === 'AbortError') {
@@ -406,11 +405,11 @@ export function ScenarioBuilderPage() {
       }
       
       // 4) Apply locally (patches preferred)
-      let nextScenario = currentScenario;
+      let nextScenario: any = currentScenario;
       if (builderResult.patches && builderResult.patches.length > 0) {
         try {
           // Use the 4th parameter (false) to prevent mutation
-          const patchResult = applyPatch(currentScenario, builderResult.patches, false, false);
+          const patchResult = applyPatch(currentScenario as any, builderResult.patches as any, false, false);
           nextScenario = patchResult.newDocument as typeof currentScenario;
         } catch (patchErr) {
           const errorMsg = {
@@ -428,7 +427,7 @@ export function ScenarioBuilderPage() {
         }
       } else if (builderResult.replaceEntireScenario) {
         // Minimal validation – ensure shape exists
-        const repl = builderResult.replaceEntireScenario;
+        const repl: any = builderResult.replaceEntireScenario;
         if (!repl?.metadata || !Array.isArray(repl?.agents)) {
           const errorMsg = {
             id: `msg_${Date.now() + 2}`,
@@ -453,8 +452,8 @@ export function ScenarioBuilderPage() {
         content: builderResult.message,
         timestamp: Date.now(),
         toolCalls: {
-          patches: builderResult.patches,
-          replaceEntireScenario: builderResult.replaceEntireScenario
+          patches: builderResult.patches as any,
+          replaceEntireScenario: builderResult.replaceEntireScenario as any
         }
       };
       
@@ -495,7 +494,7 @@ export function ScenarioBuilderPage() {
     setState(prev => ({ ...prev, isSaving: true, error: null }));
     
     try {
-      let response;
+      let response: any;
       
       if (state.activeScenarioId === 'new') {
         // Create new scenario
@@ -504,7 +503,7 @@ export function ScenarioBuilderPage() {
         
         if (response.success) {
           // Navigate to the new scenario's edit page using metadata.id
-          const newId = response.data.config.metadata.id;
+          const newId = String(response.data.config?.metadata?.id || state.activeScenarioId || '');
           await loadScenarios(); // Refresh the scenarios list
           navigate(`/scenarios/${newId}/edit`);
           
@@ -539,7 +538,7 @@ export function ScenarioBuilderPage() {
       }
       
       if (!response.success) {
-        throw new Error(response.error || 'Failed to save changes');
+        throw new Error('Failed to save changes');
       }
     } catch (error) {
       setState(prev => ({
@@ -593,7 +592,7 @@ export function ScenarioBuilderPage() {
                   onViewModeChange={toggleViewMode}
                   onConfigChange={updateConfigFromEditor}
                   scenarioName={activeScenario?.name || 'New Scenario'}
-                  scenarioId={isCreateMode ? undefined : state.activeScenarioId}
+                  scenarioId={isCreateMode ? undefined : (state.activeScenarioId || undefined)}
                   isViewMode={isViewMode || isLocked}
                   isEditMode={isEditMode}
                 />
@@ -687,7 +686,7 @@ export function ScenarioBuilderPage() {
                 <Button variant="secondary" size="sm" onClick={() => { setUnlockModalOpen(false); setUnlockError(null); }}>Cancel</Button>
                 <Button variant="primary" size="sm" onClick={() => {
                   try { setEditToken(pendingToken || ''); } catch {}
-                  if (currentScenarioId) setUnlocked(currentScenarioId, true);
+                  setUnlocked(currentScenarioId || '', true);
                   setUnlockModalOpen(false);
                   setUnlockError(null);
                 }}>Unlock</Button>

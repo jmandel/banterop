@@ -13,13 +13,13 @@ class OpenRouterLLM extends LLMProvider {
     this.providerRouting = cfg.providerRouting || { ignore:['baseten'], allow_fallbacks:true, sort:'throughput' };
     this.client = new OpenAI({ apiKey: cfg.apiKey, baseURL: 'https://openrouter.ai/api/v1' });
   }
-  static getMetadata(): LLMProviderMetadata {
+  static override getMetadata(): LLMProviderMetadata {
     // Advertise a single preset model; override via LLM_MODELS_OPENROUTER_INCLUDE if desired
     return { name:'openrouter', description:'OpenRouter AI Gateway', models:['@preset/banterop'], defaultModel:'@preset/banterop' };
   }
-  getMetadata(): LLMProviderMetadata { return OpenRouterLLM.getMetadata() }
+  override getMetadata(): LLMProviderMetadata { return OpenRouterLLM.getMetadata() }
 
-  async complete(req: LLMRequest): Promise<LLMResponse> {
+  override async complete(req: LLMRequest): Promise<LLMResponse> {
     const model = req.model || this.config.model || OpenRouterLLM.getMetadata().defaultModel;
     const logger = getLLMDebugLogger(); const p = await logger.logRequest(req, req.loggingMetadata);
     const completion:any = await (this.client as any).chat.completions.create({

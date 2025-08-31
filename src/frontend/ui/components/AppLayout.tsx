@@ -33,7 +33,7 @@ export function AppLayout({
               <h1 className="text-2xl font-bold tracking-tight whitespace-nowrap">{title}</h1>
             </a>
             {breadcrumbs && (
-              <nav className="ml-3 hidden md:flex items-center gap-2 text-sm text-muted truncate">
+              <nav className="ml-3 flex items-center gap-2 text-sm text-muted truncate min-w-0">
                 {breadcrumbs}
               </nav>
             )}
@@ -41,7 +41,7 @@ export function AppLayout({
 
           <div className="flex items-center gap-2">
             {headerRight && (
-              <div className="hidden sm:flex items-center gap-4">
+              <div className="flex items-center gap-4 shrink-0">
                 {headerRight}
               </div>
             )}

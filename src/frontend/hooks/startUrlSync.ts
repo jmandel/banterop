@@ -65,7 +65,9 @@ export function buildReadableHashFromStore(): string {
     else seed = dehydrated || seedFromHash || undefined;
   } catch { seed = seedFromHash || undefined; }
   const payload: any = {
-    // transport omitted; both URLs are included when present
+    // Explicitly include current transport so reloads honor user choice
+    transport: (client.transport === 'mcp' || client.transport === 'a2a') ? client.transport : (client.a2aCardUrl ? 'a2a' : (client.mcpUrl ? 'mcp' : undefined)),
+    // Include both URLs when present
     ...(client.a2aCardUrl ? { agentCardUrl: client.a2aCardUrl } : {}),
     ...(client.mcpUrl ? { mcpUrl: client.mcpUrl } : {}),
     llm: {

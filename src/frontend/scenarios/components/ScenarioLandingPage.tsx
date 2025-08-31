@@ -63,20 +63,17 @@ export function ScenarioLandingPage() {
     
     try {
       const response = await api.getScenarios();
-      if (response.success) {
-        const list = response.data.scenarios;
-        setScenarios(list);
-        if (getShowMode() === 'published') {
-          const onlyPublished = list.filter(s => isPublished(s.config));
-          if (onlyPublished.length === 0) {
-            // Auto-fallback once to All and show note
-            _setShowMode('all');
-            setShowMode('all');
-            setShowingFallbackNote(true);
-          }
+      if (!response.success) throw new Error('Failed to load scenarios');
+      const list = response.data.scenarios;
+      setScenarios(list);
+      if (getShowMode() === 'published') {
+        const onlyPublished = list.filter(s => isPublished(s.config));
+        if (onlyPublished.length === 0) {
+          // Auto-fallback once to All and show note
+          _setShowMode('all');
+          setShowMode('all');
+          setShowingFallbackNote(true);
         }
-      } else {
-        throw new Error(response.error || 'Failed to load scenarios');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load scenarios');
@@ -97,11 +94,8 @@ export function ScenarioLandingPage() {
 
     try {
       const response = await api.deleteScenario(id);
-      if (response.success) {
-        await loadScenarios();
-      } else {
-        throw new Error(response.error || 'Failed to delete scenario');
-      }
+      if (!response.success) throw new Error('Failed to delete scenario');
+      await loadScenarios();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete scenario');
     }
@@ -125,7 +119,7 @@ export function ScenarioLandingPage() {
   };
 
   const getAgentNames = (scenario: any) => {
-    return scenario.config.agents.map(a => a.principal?.name || a.agentId || 'Unknown').join(' ↔ ');
+    return (Array.isArray(scenario?.config?.agents) ? scenario.config.agents : []).map((a: any) => a?.principal?.name || a?.agentId || 'Unknown').join(' ↔ ');
   };
 
   if (isLoading) {
@@ -188,7 +182,7 @@ export function ScenarioLandingPage() {
               </p>
             </div>
           ) : (
-            filteredScenarios.map((scenario) => (
+            filteredScenarios.map((scenario: any) => (
               <Card key={scenario.config.metadata.id} className="hover:shadow-sm transition">
                 <div className="mb-3">
                   <h3 className="text-sm font-semibold text-gray-900 mb-1">

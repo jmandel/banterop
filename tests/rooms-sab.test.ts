@@ -11,7 +11,7 @@ describe("Rooms SAB and protocol errors", () => {
   it("backend endpoint responds and normal sends remain functional", async () => {
     const pairId = `t-${crypto.randomUUID()}`;
     const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
-    const url = S.base + `/api/pairs/${pairId}/server-events?mode=backend`;
+    const url = S.base + `/api/rooms/${pairId}/server-events?mode=backend`;
 
     const backend = await fetch(url, { headers:{ accept:'text/event-stream' } });
     expect(backend.ok).toBeTrue();
@@ -29,7 +29,7 @@ describe("Rooms SAB and protocol errors", () => {
     const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
 
     // Acquire backend lease by opening server-events in backend mode (keep open)
-    const url = S.base + `/api/pairs/${pairId}/server-events?mode=backend`;
+    const url = S.base + `/api/rooms/${pairId}/server-events?mode=backend`;
     const backend = await fetch(url, { headers:{ accept:'text/event-stream' } });
     expect(backend.ok).toBeTrue();
 

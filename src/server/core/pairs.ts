@@ -123,10 +123,10 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
       state = (viewerRole === 'init' ? (both as any).init : (both as any).resp) as TaskState
       statusMessage = projectForViewer(obj, viewerTaskId, viewerRole, last.author)
     }
-    let snapshot = { id: row.task_id, contextId: row.pair_id, kind:'task', status:{ state, message: statusMessage }, history: hist }
+    const snapshot: TaskSnapshot = { id: row.task_id, contextId: row.pair_id, kind:'task', status:{ state, message: statusMessage }, history: hist }
     
     // Validate outbound task (log-only)
-    try { validateTask(snapshot, { pairId: row.pair_id, taskId: row.task_id, roomId: row.pair_id }) } catch {}
+    try { validateTask(snapshot, { pairId: row.pair_id, taskId: row.task_id }) } catch {}
 
     return snapshot
   }
@@ -286,7 +286,7 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
         (msg.metadata as any) = { ...(msg.metadata || {}), [A2A_EXT_URL]: { ...ext, wireMessage: { raw: b64 } } };
       } catch {}
       // Validate message (log-only)
-      try { validateMessage(msg, { pairId, messageId: msg.messageId, roomId: pairId }) } catch {}
+      try { validateMessage(msg, { pairId, messageId: msg.messageId }) } catch {}
       
       // Existing parts validation (throws on errors)
       validateParts(msg.parts)
@@ -374,7 +374,7 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
         if (!m || (Array.isArray(m.parts) && m.parts.length === 0)) {
           const snap = db.getTask(senderId)!
           const currentState = snap ? toSnapshot(snap).status.state : 'submitted'
-          const isTerminal = isTerminal(currentState)
+          const isTerminalFlag = isTerminal(currentState)
           const needsInput = currentState === 'input-required'
           
           const statusMessage = snap ? toSnapshot(snap).status.message : undefined
@@ -383,7 +383,7 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
             pairId,
             state: currentState,
             message: statusMessage,
-            isFinal: isTerminal || needsInput
+            isFinal: isTerminalFlag || needsInput
           })
           return
         }
@@ -412,7 +412,7 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
       
       const stream = (async function* () {
         // Send initial status update
-        const initialSnapshot = row ? toSnapshot(row) : { status: { state: 'submitted' as TaskState }, history: [] }
+        const initialSnapshot: TaskSnapshot = row ? toSnapshot(row) : { id: id, contextId: pairId, kind:'task', status: { state: 'submitted' as TaskState }, history: [] }
         const initialState = initialSnapshot.status.state
         const isInitialTerminal = isTerminal(initialState)
         
@@ -491,6 +491,6 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
     acquireBackend(roomId: string, connId: string, takeover?: boolean) { return acquireBackend(roomId, connId, takeover) },
     renewBackend(roomId: string, connId: string) { return renewBackend(roomId, connId) },
     releaseBackend(roomId: string, connId: string) { return releaseBackend(roomId, connId) },
-    getLease(roomId: string) { return getLease(roomId) },
+    getLeaseInfo(roomId: string) { return getLease(roomId) },
   }
 }

@@ -4,11 +4,11 @@ import { registerProvider, type ProviderDescriptor } from '../registry';
 import { getLLMDebugLogger } from '../services/debug-logger';
 
 class MockLLM extends LLMProvider {
-  static getMetadata(): LLMProviderMetadata {
+  static override getMetadata(): LLMProviderMetadata {
     return { name: 'mock', description: 'Mock LLM Provider', models: ['mock-model'], defaultModel: 'mock-model' };
   }
-  getMetadata(): LLMProviderMetadata { return MockLLM.getMetadata() }
-  async complete(req: LLMRequest): Promise<LLMResponse> {
+  override getMetadata(): LLMProviderMetadata { return MockLLM.getMetadata() }
+  override async complete(req: LLMRequest): Promise<LLMResponse> {
     const logger = getLLMDebugLogger();
     const p = await logger.logRequest(req, req.loggingMetadata);
     const last = [...(req.messages||[])].reverse().find(m=>m.role==='user');

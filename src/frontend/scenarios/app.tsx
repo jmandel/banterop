@@ -1,12 +1,11 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import ReactDOM from 'react-dom/client';
-import { HashRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Navigate, Link, useNavigate, useParams } from 'react-router-dom';
 import { AppLayout as SharedAppLayout } from '../ui';
 import { AppLayout } from './components/AppLayout';
 import { Button, Card, CardHeader } from '../ui';
 import { ScenarioLandingPage } from './components/ScenarioLandingPage';
 import { ScenarioBuilderPage } from './components/ScenarioBuilderPage';
-import { ScenarioRunPage } from './components/ScenarioRunPage';
 import { RunWizardPage } from './components/RunWizardPage';
 // Disabled non-essential pages in this build to avoid missing deps
 // import { ScenarioPluginPage } from './components/ScenarioPluginPage';
@@ -52,7 +51,7 @@ function Layout({ children }: { children: React.ReactNode }) {
   return (
     <SharedAppLayout
       title="Banterop"
-      right={(
+      headerRight={(
         <nav className="flex items-center gap-3">
           <Link to="/scenarios">Scenarios</Link>
           <a href="/client/">Client</a>
@@ -112,6 +111,8 @@ function BuilderPage() {
   const [json, setJson] = useState('');
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [unlockOpen, setUnlockOpen] = useState(false);
+  const [pendingToken, setPendingToken] = useState('');
   const navigate = useNavigate();
 
   const isCreate = !params.scenarioId;
@@ -195,7 +196,7 @@ function BuilderPage() {
               <div className="text-xs text-muted mb-2">Generates a base64 URL to launch a configured scenario run.</div>
               <div className="text-xs text-muted break-words">{config64 || '(invalid config)'}</div>
               <div className="flex items-center gap-2 mt-2">
-                <Button variant="secondary" disabled={!config64} onClick={() => navigator.clipboard.writeText(`# /scenarios/configured/${config64}`)}>Copy Hash URL</Button>
+                <Button variant="secondary" disabled={!config64} onClick={() => navigator.clipboard.writeText(`#/scenarios/configured/${config64}`)}>Copy Hash URL</Button>
                 <Link to={`/scenarios/configured/${config64}`} className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl text-sm border border-border bg-panel">Open</Link>
               </div>
             </Card>
@@ -207,7 +208,7 @@ function BuilderPage() {
         token={pendingToken}
         setToken={setPendingToken}
         onClose={() => setUnlockOpen(false)}
-        onUnlock={() => { try { setEditToken(pendingToken || ''); } catch {} if (scenarioId) setUnlocked(scenarioId, true); setUnlockOpen(false); }}
+        onUnlock={() => { try { setEditToken(pendingToken || ''); } catch {} setUnlocked(scenarioId || '', true); setUnlockOpen(false); }}
       />
     </Layout>
   );
@@ -282,7 +283,7 @@ function RunPage() {
   useEffect(() => {
     (async () => {
       try {
-        const s = await http<ScenarioItem>(`/scenarios/${encodeURIComponent(params.scenarioId)}`);
+        const s = await http<ScenarioItem>(`/scenarios/${encodeURIComponent(params.scenarioId || '')}`);
         setSnap(s);
       } catch (e) { setError((e as Error).message); }
     })();
@@ -309,8 +310,6 @@ function RunPage() {
           <Button variant="primary" onClick={launch} disabled={creating}>{creating ? 'Launching…' : 'Launch + Open Watch'}</Button>
         </Card>
       )}
-  const [unlockOpen, setUnlockOpen] = useState(false);
-  const [pendingToken, setPendingToken] = useState('');
       {!error && !snap && <div className="text-xs text-muted">Loading…</div>}
     </Layout>
   );

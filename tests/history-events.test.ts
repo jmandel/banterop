@@ -35,7 +35,7 @@ describe("Message events and history", () => {
     // Backlog should include a type:'message' event with matching messageId and epoch=1
     {
       const ac = new AbortController();
-      const es = await fetch(S.base + `/api/pairs/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
+      const es = await fetch(S.base + `/api/rooms/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
       expect(es.ok).toBeTrue();
       let found = false;
       for await (const ev of parseSse<any>(es.body!)) {

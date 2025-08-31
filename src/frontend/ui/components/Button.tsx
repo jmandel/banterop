@@ -9,6 +9,11 @@ type ButtonProps = React.HTMLAttributes<HTMLElement> & {
   size?: Size;
   className?: string;
   disabled?: boolean;
+  // Common anchor/button props to satisfy polymorphic usage
+  href?: string;
+  target?: string;
+  rel?: string;
+  type?: 'button' | 'submit' | 'reset';
 };
 
 export function Button({ as = 'button', variant = 'primary', size = 'md', className = '', ...props }: ButtonProps) {

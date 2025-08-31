@@ -43,6 +43,7 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
   const db = c.get('db')
   const events = c.get('events')
 
+  // Restore explicit schemas (zod) for tools
   s.registerTool('begin_chat_thread', { inputSchema: {}, description: `Begin chat thread for existing pair ${pairId}` }, async () => {
     const ensured = await pairs.beginNewEpochTasksForPair(pairId)
     // Use short conversation id (epoch only) since pair/room is implicit in URL
@@ -60,7 +61,7 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
         content: z.string(),
         summary: z.string().optional(),
       })).optional(),
-    },
+    } as any,
     description: `Send message as initiator for pair ${pairId}`
   }, async (params: any) => {
     const conversationId = String(params?.conversationId ?? '')
@@ -87,7 +88,7 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
   })
 
   s.registerTool('check_replies', {
-    inputSchema: { conversationId: z.string(), waitMs: z.number().default(10000) },
+    inputSchema: { conversationId: z.string(), waitMs: z.number().default(10000) } as any,
     description: 'Poll for replies since your last initiator message.'
   }, async (params:any) => {
     const conversationId = String(params?.conversationId ?? '')

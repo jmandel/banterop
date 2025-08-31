@@ -1,6 +1,6 @@
 import Ajv from 'ajv'
 import type { ValidateFunction } from 'ajv'
-import { A2A_EXT_URL } from '../../shared/core'
+// Note: stamping validation reports into metadata is no longer used.
 
 // Import the A2A JSON schema directly
 import a2aSchemaJson from '../../../a2a/specification/json/a2a.json'
@@ -41,20 +41,6 @@ type ValidationResult = {
   }>
 }
 
-// A2A Extension validation report type
-type ValidationReport = {
-  status: 'valid' | 'invalid'
-  validatedAt: string // ISO 8601 timestamp
-  validatedObjectType: string
-  specificationUrl?: string
-  errors: Array<{
-    instancePath: string
-    schemaPath: string
-    keyword: string
-    params: any
-    message: string
-  }>
-}
 
 // Logger for validation errors (non-breaking)
 function logValidationError(
@@ -107,26 +93,6 @@ function validateWithLogging<T>(
   return { valid: true }
 }
 
-// Create validation report for metadata attachment
-function createValidationReport(
-  result: ValidationResult,
-  objectType: string,
-  specUrl?: string
-): ValidationReport {
-  return {
-    status: result.valid ? 'valid' : 'invalid',
-    validatedAt: new Date().toISOString(),
-    validatedObjectType: objectType,
-    specificationUrl: specUrl || 'https://github.com/a2aproject/A2A/blob/main/specification/json/a2a.json',
-    errors: result.errors?.map(e => ({
-      instancePath: e.path,
-      schemaPath: '', // AJV doesn't provide this in our current setup
-      keyword: e.keyword,
-      params: e.params,
-      message: e.message
-    })) || []
-  }
-}
 
 // Public validation functions
 export function validateMessage(
@@ -136,15 +102,6 @@ export function validateMessage(
   return validateWithLogging(validators.message, message, 'Message', context)
 }
 
-export function validateMessageWithReport<T extends { metadata?: any }>(
-  message: T,
-  context?: { pairId?: string; messageId?: string }
-): T {
-  const result = validateWithLogging(validators.message, message, 'Message', context)
-  const report = createValidationReport(result, 'Message')
-  return withValidationReport(message, report)
-}
-
 export function validateTask(
   task: any,
   context?: { pairId?: string; taskId?: string }
@@ -152,36 +109,10 @@ export function validateTask(
   return validateWithLogging(validators.task, task, 'Task', context)
 }
 
-export function validateTaskWithReport<T extends { metadata?: any }>(
-  task: T,
-  context?: { pairId?: string; taskId?: string; roomId?: string }
-): T {
-  const result = validateWithLogging(validators.task, task, 'Task', context)
-  const report = createValidationReport(result, 'Task')
-  return withValidationReport(task, report)
-}
-
 export function validateAgentCard(card: any, context?: { roomId?: string }): ValidationResult {
   return validateWithLogging(validators.agentCard, card, 'AgentCard', context)
 }
 
-export function validateAgentCardWithReport<T extends { metadata?: any }>(
-  card: T,
-  context?: { roomId?: string }
-): T {
-  const result = validateWithLogging(validators.agentCard, card, 'AgentCard', context)
-  const report = createValidationReport(result, 'AgentCard')
-  return withValidationReport(card, report)
-}
-
-export function validateTaskStatusUpdateEventWithReport<T extends { metadata?: any }>(
-  event: T,
-  context?: { pairId?: string; taskId?: string; roomId?: string }
-): T {
-  const result = validateWithLogging(validators.taskStatusUpdateEvent, event, 'TaskStatusUpdateEvent', context)
-  const report = createValidationReport(result, 'TaskStatusUpdateEvent')
-  return withValidationReport(event, report)
-}
 
 // Log-only validation (no stamping)
 export function validateTaskStatusUpdateEvent(
@@ -256,19 +187,4 @@ function mapToA2ATaskState(state: string | undefined): TaskState {
 }
 
 
-// Helper to create a new object with validation report attached
-export function withValidationReport<T extends { metadata?: any }>(
-  obj: T,
-  report: ValidationReport
-): T {
-  return {
-    ...obj,
-    metadata: {
-      ...obj.metadata,
-      [A2A_EXT_URL]: {
-        ...(obj.metadata?.[A2A_EXT_URL] || {}),
-        validation: report
-      }
-    }
-  }
-}
+// Note: stamping validation reports into metadata has been removed.

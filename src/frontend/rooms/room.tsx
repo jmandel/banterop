@@ -344,7 +344,7 @@ function App() {
           className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact"
         >
           <Settings size={18} strokeWidth={1.75} />
-          <span className="text-sm">Config</span>
+          <span className="hidden sm:inline text-sm">Config</span>
         </button>
       )}
     >

@@ -108,8 +108,10 @@ function App() {
           const apiKey = provider === 'client-openai' ? (existingApiKey || '') : undefined;
           const a2aCardUrl = String(j.agentCardUrl || '');
           const mcpUrl = String(j.mcpUrl || '');
-          // Infer transport from presence of URLs (prefer A2A when both present)
-          const transport = a2aCardUrl ? 'a2a' : (mcpUrl ? 'mcp' : 'a2a');
+          // Prefer explicit transport in hash; fallback to URL inference (prefer A2A when both present)
+          const tField = (typeof j.transport === 'string') ? j.transport.trim().toLowerCase() : '';
+          const transport: 'a2a'|'mcp' = (tField === 'a2a' || tField === 'mcp') ? (tField as any)
+            : (a2aCardUrl ? 'a2a' : (mcpUrl ? 'mcp' as const : 'a2a'));
           const boot = { transport, a2aCardUrl, mcpUrl, llm: { provider, model, baseUrl, apiKey } } as ClientSettings;
           // Persist immediately so controller picks it up
           try { window.sessionStorage.setItem('clientSettings', JSON.stringify(boot)); } catch {}
@@ -324,7 +326,7 @@ function App() {
       headerRight={(
         <button title="Settings" aria-label="Settings" onClick={()=>setShowSettings(true)} className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact">
           <Settings size={18} strokeWidth={1.75} />
-          <span className="text-sm">Config</span>
+          <span className="hidden sm:inline text-sm">Config</span>
         </button>
       )}
     >

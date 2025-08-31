@@ -8,10 +8,10 @@ class GoogleLLM extends LLMProvider {
   private client: GoogleGenAI | null = null;
   constructor(cfg: LLMProviderConfig) { super(cfg); if (cfg.apiKey) this.client = new GoogleGenAI({ apiKey: cfg.apiKey }) }
 
-  static getMetadata(): LLMProviderMetadata {
+  static override getMetadata(): LLMProviderMetadata {
     return { name: 'google', description: 'Google Gemini via @google/genai', models: ['gemini-2.5-flash-lite','gemini-2.5-flash','gemini-2.5-pro'], defaultModel: 'gemini-2.5-flash-lite' };
   }
-  getMetadata(): LLMProviderMetadata { return GoogleLLM.getMetadata() }
+  override getMetadata(): LLMProviderMetadata { return GoogleLLM.getMetadata() }
 
   private convert(msgs: LLMMessage[]) {
     const sys = msgs.find(m=>m.role==='system')?.content || '';
@@ -22,7 +22,7 @@ class GoogleLLM extends LLMProvider {
     return arr;
   }
 
-  async complete(req: LLMRequest): Promise<LLMResponse> {
+  override async complete(req: LLMRequest): Promise<LLMResponse> {
     if (!this.client) throw new Error('Google AI client not initialized - API key required');
     const model = req.model || this.config.model || GoogleLLM.getMetadata().defaultModel;
     const logger = getLLMDebugLogger(); const path = await logger.logRequest(req, req.loggingMetadata);

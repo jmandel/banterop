@@ -112,7 +112,7 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
     },
     async fetch(req, srv) {
       const url = new URL(req.url)
-      const staticPages: Record<string, string> = {
+      const staticPages: Record<string, any> = {
         '/': scenariosHtml,
         '/client/': clientHtml,
         '/rooms/': roomsHtml,

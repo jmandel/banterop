@@ -45,7 +45,7 @@ export function createRoomsRoutes() {
           try {
             if (leaseIdQuery) {
               const ok = (pairs as any).rebindLease(pairId, leaseIdQuery, connId)
-              if (ok) { leaseId = leaseIdQuery; write({ type:'backend-granted', leaseId, leaseGen:(pairs as any).getLease(pairId)?.leaseGen||0 }); granted = true }
+              if (ok) { leaseId = leaseIdQuery; write({ type:'backend-granted', leaseId, leaseGen:(pairs as any).getLeaseInfo(pairId)?.leaseGen||0 }); granted = true }
               else { write({ type:'backend-denied' }) }
             } else {
               const acq = (pairs as any).acquireBackend(pairId, connId, takeover)
@@ -58,7 +58,7 @@ export function createRoomsRoutes() {
           controller.enqueue(enc.encode(`event: ping\ndata: ${Date.now()}\n\n`))
           if (granted) {
             try { (pairs as any).renewBackend(pairId, connId) } catch {}
-            try { const l = (pairs as any).getLease(pairId); if (!l || l.connId !== connId) { write({ type:'backend-revoked', reason: l ? 'takeover' : 'stale' }); clearInterval(ping); controller.close(); } } catch {}
+            try { const l = (pairs as any).getLeaseInfo(pairId); if (!l || l.connId !== connId) { write({ type:'backend-revoked', reason: l ? 'takeover' : 'stale' }); clearInterval(ping); controller.close(); } } catch {}
           }
         } catch {} }, 15000)
         try {
@@ -94,7 +94,7 @@ export function createRoomsRoutes() {
     const leaseId = form ? String(form.get('leaseId') || '') : ''
     const pairs = c.get('pairs')
     try {
-      const l = (pairs as any).getLease(pairId)
+      const l = (pairs as any).getLeaseInfo(pairId)
       if (l && l.leaseId && leaseId && l.leaseId === leaseId) {
         ;(pairs as any).releaseBackend(pairId, l.connId)
       }

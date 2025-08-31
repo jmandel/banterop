@@ -9,12 +9,12 @@ class BrowsersideLLM extends LLMProvider {
     const base = cfg.apiBase || '';
     this.apiBase = base.endsWith('/api') ? base : (base ? base + '/api' : '');
   }
-  static getMetadata(): LLMProviderMetadata {
+  static override getMetadata(): LLMProviderMetadata {
     return { name:'browserside', description:'Browser proxy to server /api/llm', models:[], defaultModel:'' };
   }
-  getMetadata(): LLMProviderMetadata { return BrowsersideLLM.getMetadata() }
+  override getMetadata(): LLMProviderMetadata { return BrowsersideLLM.getMetadata() }
 
-  async complete(req: LLMRequest): Promise<LLMResponse> {
+  override async complete(req: LLMRequest): Promise<LLMResponse> {
     const res = await fetch(`${this.apiBase}/llm/complete`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(req) });
     if (!res.ok) {
       const e = await res.json().catch(()=>({}));
