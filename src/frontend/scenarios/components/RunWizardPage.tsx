@@ -160,7 +160,7 @@ export function RunWizardPage() {
       };
       const rid = (roomId || String(sid || 'room')).trim();
       const readable = {
-        planner: { id: 'scenario-v0.3', mode: 'approve' as const },
+        planner: { id: 'scenario-v0.3', mode: 'auto' as const },
         planners: { ['scenario-v0.3']: { seed } },
         llm: { provider: 'server', model: selectedModel || '' },
         roomTitle: roomTitle || scenarioTitle,
@@ -180,7 +180,7 @@ export function RunWizardPage() {
       const trimmed = serverUrl.trim();
       const readable = {
         ...(protocol === 'mcp' ? { mcpUrl: trimmed } : { agentCardUrl: trimmed }),
-        planner: { id: 'scenario-v0.3', mode: 'approve' as const },
+        planner: { id: 'scenario-v0.3', mode: 'auto' as const },
         planners: { ['scenario-v0.3']: { seed } },
         llm: { provider: 'server', model: selectedModel || '' },
       };
@@ -210,7 +210,7 @@ export function RunWizardPage() {
       const rid = (roomId || String(sid || 'room')).trim();
       const scenarioTitle = cfg?.metadata?.title || scenario?.name || String(sid);
       const readable: any = {
-        planner: { id: 'scenario-v0.3', mode: 'approve' as const },
+        planner: { id: 'scenario-v0.3', mode: 'auto' as const },
         planners: { ['scenario-v0.3']: { seed } },
         llm: { provider: 'server', model: selectedModel || '' },
         roomTitle: (roomTitle || scenarioTitle),
@@ -240,7 +240,7 @@ export function RunWizardPage() {
       };
       const readable: any = {
         ...(protocol === 'mcp' ? { mcpUrl: trimmed } : { agentCardUrl: trimmed }),
-        planner: { id: 'scenario-v0.3', mode: 'approve' as const },
+        planner: { id: 'scenario-v0.3', mode: 'auto' as const },
         planners: { ['scenario-v0.3']: { seed } },
         llm: { provider: 'server', model: selectedModel || '' },
       };

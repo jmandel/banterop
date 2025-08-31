@@ -167,6 +167,8 @@ function App() {
   const plannerReady = useAppStore(s => !!s.readyByPlanner[s.plannerId])
   const plannerConfig = useAppStore(s => s.configByPlanner[s.plannerId])
   const approved = useAppStore(s => s.composeApproved)
+  const hasPublic = React.useMemo(() => facts.some(f => f.type === 'remote_sent' || f.type === 'remote_received'), [facts])
+  const waitingForClient = (!taskId) || ((uiStatus === 'submitted' || uiStatus === 'initializing') && !hasPublic)
   const sentComposeIds = React.useMemo(() => {
     const s = new Set<string>();
     for (const f of facts) if (f.type === 'remote_sent' && (f as any).composeId) s.add((f as any).composeId as string);
@@ -247,7 +249,7 @@ function App() {
         const payload: any = {
           agentCardUrl: agentCard,
           llm: { provider: 'server', model: defaultModel },
-          planner: { id: plannerId, mode: plannerMode },
+          planner: { id: plannerId, mode: 'approve' as const },
           ...(seed ? { planners: { [plannerId]: { seed } } } : {}),
         }
         return `${base}#${JSON.stringify(payload)}`
@@ -284,13 +286,14 @@ function App() {
   }, [facts]);
   const turnChip = (() => {
     if (!taskId) return { text: 'Waiting for client', tone: 'gray' as const };
+    const hasPublic = facts.some(f => f.type === 'remote_sent' || f.type === 'remote_received');
     if (uiStatus === 'completed') return { text: 'Completed', tone: 'green' as const };
     if (uiStatus === 'failed' || uiStatus === 'rejected') return { text: 'Failed', tone: 'amber' as const };
     if (uiStatus === 'canceled') return { text: 'Canceled', tone: 'amber' as const };
     if (pendingReview && useAppStore.getState().plannerMode === 'approve') return { text:'Waiting for review', tone: 'amber' as const };
     if (uiStatus === 'input-required') return { text:'Our turn', tone:'amber' as const };
     if (uiStatus === 'working') return { text:'Other side working', tone:'blue' as const };
-    if (uiStatus === 'submitted' || uiStatus==='initializing') return { text:'Setting up…', tone:'gray' as const };
+    if (uiStatus === 'submitted' || uiStatus==='initializing') return { text: hasPublic ? 'Setting up…' : 'Waiting for client', tone:'gray' as const };
     return { text: uiStatus || 'Unknown', tone:'gray' as const };
   })();
   // Graceful release on unload
@@ -517,6 +520,7 @@ function App() {
               copiedAgent={copiedCard}
               copiedMcp={copiedMcp}
               clientHref={clientHref}
+              ctaPrimary={waitingForClient}
             />
 
             <AutomationCard

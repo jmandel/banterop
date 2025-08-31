@@ -2,6 +2,12 @@
 
 This project provides a transparent, extensible environment for testing and developing autonomous AI agents. Its core purpose is to make it easy to create a high-fidelity, interactive, and inspectable **simulated agent** to act as a conversational partner for your **real agent**.
 
+Hosted service: https://banterop.fhir.me
+
+- Connect your MCP or A2A clients (Banterop hosts the room/server endpoint).
+- Connect your MCP or A2A servers (Banterop provides a reference client UI).
+- Pick from many built-in scenarios — or add and configure your own directly in the UI.
+
 ## The Vision: Language-First Interoperability in Healthcare
 
 Traditional healthcare interoperability is powerful but often requires a lengthy pre-coordination phase where stakeholders negotiate common data formats, draft implementation guides, and stand up dedicated endpoints. This can be a barrier for resource-limited organizations and for workflows where requirements are dynamic and context is critical.
