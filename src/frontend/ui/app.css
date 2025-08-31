@@ -68,8 +68,9 @@
   /* Transcript + bubbles */
   .transcript { @apply flex flex-col gap-2.5; }
   .bubble { @apply max-w-[88%] p-2.5 rounded-xl; }
-  .me { @apply self-start bg-primary-50; }
-  .them { @apply self-end bg-white border border-gray-200; }
+  /* DM-style alignment: our messages on the right, other side on the left */
+  .me { @apply self-end bg-primary-50; }
+  .them { @apply self-start bg-white border border-gray-200; }
   .private { @apply bg-white border border-dashed border-gray-300 rounded-md p-2.5; }
   .stripe { @apply border-l-4 pl-2.5 border-gray-300; }
   .stripe.draft { @apply border-indigo-300; }

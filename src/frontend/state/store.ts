@@ -737,8 +737,11 @@ function stampAndAppend(set: any, get: any, proposed: ProposedFact[]) {
       if (mid) known.add(mid);
     }
     if (p.type === 'attachment_added') {
-      // Do not rename; allow duplicates. Track names only for consistency.
-      existingNames.add((p as any).name);
+      const nm = String((p as any).name || '').trim();
+      if (!nm) continue; // defensive: skip malformed
+      // Enforce uniqueness by name: skip if already present in journal or earlier in this batch
+      if (existingNames.has(nm)) continue;
+      existingNames.add(nm);
     }
     if (p.type === 'status_changed') {
       const st = (p as any).a2a as string;

@@ -28,6 +28,7 @@ import { MetaBar } from '../components/MetaBar';
 import { Settings } from 'lucide-react';
 import { Copy } from 'lucide-react';
 import { AppLayout as SharedAppLayout } from '../ui';
+import { deriveChatLabels } from '../components/chat-labels';
 
 function pickA2AEndpointFromCard(card: any, cardUrl: string): string {
   const candidates = [
@@ -219,6 +220,8 @@ function App() {
     return () => { window.removeEventListener('scroll', onScroll); };
   }, [autoScroll]);
   const plannerId = useAppStore(s => s.plannerId);
+  const plannerConfig = useAppStore(s => s.configByPlanner[s.plannerId]);
+  const { usLabel, otherLabel } = React.useMemo(() => deriveChatLabels(plannerId, plannerConfig), [plannerId, plannerConfig]);
 
   // Actions
   async function handleManualSend(text: string, nextState: A2ANextState) {
@@ -362,7 +365,7 @@ function App() {
                 const isMe = f.type === 'remote_sent';
                 return (
                   <div key={f.id} className={'bubble ' + (isMe ? 'me' : 'them')}>
-                    <div className="small muted">{isMe ? 'Our side' : 'Other side'}</div>
+                    <div className="small muted">{isMe ? usLabel : otherLabel}</div>
                     <Markdown text={f.text} />
                     {Array.isArray(f.attachments) && f.attachments.length > 0 && (
                       <div className="attachments small">

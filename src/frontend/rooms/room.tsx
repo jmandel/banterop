@@ -21,6 +21,7 @@ import { TopBar } from '../components/TopBar'
 import { MetaBar } from '../components/MetaBar'
 import { ClientSettingsModal } from '../client/ClientSettingsModal'
 import { LinksCard } from './components/LinksCard'
+import { deriveChatLabels } from '../components/chat-labels'
 import { AutomationCard } from '../components/AutomationCard'
 import { LogCard } from '../components/LogCard'
 import { Settings, Copy } from 'lucide-react'
@@ -143,26 +144,7 @@ function App() {
   const facts = useAppStore(s => s.facts)
   const plannerId = useAppStore(s => s.plannerId)
   const scenarioCfg = useAppStore(s => s.configByPlanner['scenario-v0.3'] as any)
-  const { usLabel, otherLabel } = React.useMemo(() => {
-    const defaults = { usLabel: 'Us', otherLabel: 'Other Side' };
-    if (!scenarioCfg || plannerId !== 'scenario-v0.3') return defaults;
-    const scen = (scenarioCfg && typeof scenarioCfg === 'object') ? (scenarioCfg as any).scenario : undefined;
-    const agents = Array.isArray((scen as any)?.agents) ? (scen as any).agents : [];
-    if (!agents.length) return defaults;
-    const myId = typeof (scenarioCfg as any).myAgentId === 'string' ? String((scenarioCfg as any).myAgentId) : '';
-    const me = agents.find((a:any) => String(a?.agentId || '') === myId) || agents[0];
-    const other = agents.find((a:any) => String(a?.agentId || '') !== String(me?.agentId || '')) || agents[1];
-    const nameOf = (a:any) => {
-      const nm = (a && a.principal && typeof a.principal.name === 'string') ? a.principal.name.trim() : '';
-      return nm || (typeof a?.agentId === 'string' ? a.agentId : '');
-    };
-    const uBase = nameOf(me);
-    const oBase = nameOf(other);
-    return {
-      usLabel: (uBase ? uBase : defaults.usLabel) + ' (Us)',
-      otherLabel: (oBase ? oBase : defaults.otherLabel) + ' (Remote Agent)',
-    };
-  }, [scenarioCfg, plannerId])
+  const { usLabel, otherLabel } = React.useMemo(() => deriveChatLabels(plannerId, scenarioCfg), [plannerId, scenarioCfg])
   const plannerMode = useAppStore(s => s.plannerMode)
   const plannerReady = useAppStore(s => !!s.readyByPlanner[s.plannerId])
   const plannerConfig = useAppStore(s => s.configByPlanner[s.plannerId])
