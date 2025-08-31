@@ -737,7 +737,7 @@ async function runToolOracle(opts: {
     ];
     const parsed = await chatWithValidationRetry(opts.llm, req as any, (text) => parseOracleResponseAligned(text), { attempts: 3, retryMessages });
     const { output } = parsed;
-    const attachments = extractAttachmentsFromOutput(output);
+    const attachments = await extractAttachmentsFromOutput(output, opts.tool.toolName, opts.args);
     return { ok: true, result: output, attachments };
   } catch (e:any) {
     return { ok: false, error: String(e?.message || 'oracle failed'), attachments: [] };
@@ -1015,7 +1015,7 @@ function heuristicParseAligned(content: string): { reasoning: string; output: un
   return { reasoning, output };
 }
 
-function extractAttachmentsFromOutput(output: unknown): Array<{ name: string; mimeType: string; bytesBase64: string }> {
+async function extractAttachmentsFromOutput(output: unknown, toolName?: string, toolArgs?: Record<string, unknown>): Promise<Array<{ name: string; mimeType: string; bytesBase64: string }>> {
   const results: Array<{ name: string; mimeType: string; bytesBase64: string }> = [];
   const maybePushDoc = (d: any) => {
     const name = String(d?.name || '').trim();
@@ -1034,12 +1034,70 @@ function extractAttachmentsFromOutput(output: unknown): Array<{ name: string; mi
       // Legacy documents array
       const docs = (output as any).documents;
       if (Array.isArray(docs)) for (const d of docs) maybePushDoc(d);
+
+      // Fallback: if no explicit docs were found, attach the entire JSON output
+      if (!results.length) {
+        const json = stableJson(output);
+        const hash = await sha256Base64Url(json);
+        const base = buildJsonAttachmentBase(toolName, toolArgs, 64);
+        const name = `${base}-${hash}.json`;
+        results.push({ name, mimeType: 'application/json', bytesBase64: toBase64(json) });
+      }
     }
   } catch {}
   return results;
 }
 
 function safeStringify(v: unknown): string { try { return JSON.stringify(v, null, 2); } catch { return String(v); } }
+function stableJson(v: unknown): string {
+  try {
+    const seen = new WeakSet();
+    const replacer = (_key: string, value: any) => {
+      if (value && typeof value === 'object') {
+        if (seen.has(value)) return undefined;
+        seen.add(value);
+        if (!Array.isArray(value)) {
+          // sort object keys for stable output
+          const obj: Record<string, any> = {};
+          for (const k of Object.keys(value).sort()) obj[k] = value[k];
+          return obj;
+        }
+      }
+      return value;
+    };
+    return JSON.stringify(v, replacer, 2);
+  } catch { return safeStringify(v); }
+}
+async function sha256Base64Url(s: string): Promise<string> {
+  try {
+    const enc = new TextEncoder().encode(s);
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    const digest = await (globalThis.crypto?.subtle?.digest?.('SHA-256', enc));
+    if (digest) {
+      const bytes = new Uint8Array(digest);
+      let b64 = '';
+      for (let i = 0; i < bytes.length; i++) b64 += String.fromCharCode(bytes[i]);
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      const raw = btoa(b64);
+      return raw.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/,'');
+    }
+  } catch {}
+  // Fallback: base64 of input (not cryptographic) if SubtleCrypto unavailable
+  return toBase64(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/,'');
+}
+function buildJsonAttachmentBase(toolName?: string, toolArgs?: Record<string, unknown>, maxLen = 64): string {
+  const tn = String(toolName || 'tool');
+  let argsStr = '';
+  try { argsStr = stableJson(toolArgs || {}); } catch {}
+  const mashed = `${tn}-${argsStr}`
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  return mashed.length <= maxLen ? mashed : mashed.slice(0, maxLen);
+}
 function truncateText(s: string, max: number, suffix = '...'): string {
   if (!s) return s;
   if (s.length <= max) return s;

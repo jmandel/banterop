@@ -10,8 +10,8 @@ export function AutomationCard({ mode, onModeChange, plannerSelect }:{
     <div className="card">
       <div className="small font-semibold mb-2">Automation</div>
       <div className="row items-center mb-2">
-        <div className="small flex-1">Require review before sending</div>
-        <Switch checked={mode==='approve'} onChange={(v)=>onModeChange(v ? 'approve' : 'auto')} />
+        <div className="small flex-1">Send without review</div>
+        <Switch checked={mode==='auto'} onChange={(v)=>onModeChange(v ? 'auto' : 'approve')} />
       </div>
       <div>
         {plannerSelect}
@@ -19,4 +19,3 @@ export function AutomationCard({ mode, onModeChange, plannerSelect }:{
     </div>
   );
 }
-
