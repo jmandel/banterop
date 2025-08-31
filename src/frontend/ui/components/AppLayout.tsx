@@ -23,8 +23,26 @@ export function AppLayout({
   const closeMenu = () => setMenuOpen(false);
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
-      {/* Header */}
-      <header className="sticky top-0 z-30 border-b bg-white/90 backdrop-blur">
+      {/* Header with Migration Banner */}
+      <header className="sticky top-0 z-30 border-b bg-amber-50/95 backdrop-blur">
+        <div className="bg-amber-100 border-b-2 border-amber-300">
+          <div className="container mx-auto px-4 py-3">
+            <p className="text-lg font-bold text-amber-900 text-center">
+              <span className="text-xl">📢 TIME TO SWITCH!</span> chitchat.fhir.me is retiring September 5th.
+            </p>
+            <p className="text-base font-semibold text-amber-900 text-center mt-1">
+              Your new home is ready at{' '}
+              <a 
+                href="https://banterop.fhir.me" 
+                className="text-amber-700 underline hover:text-amber-800 font-bold text-lg"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                banterop.fhir.me
+              </a>
+            </p>
+          </div>
+        </div>
         <div className="container mx-auto px-4 py-2 flex items-center justify-between">
           <div className="flex items-center gap-3 text-gray-900">
             {logo || <img src={logoImage} alt="Logo" className="w-10 h-10 object-contain" />}

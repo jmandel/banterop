@@ -2,7 +2,7 @@ name: Build and Publish Docker image to GHCR
 
 on:
   push:
-    branches: [ main ]
+    branches: [ v3 ]
     tags: [ 'v*' ]
   workflow_dispatch: {}
 
@@ -32,14 +32,14 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ghcr.io/${{ github.repository }}
+            ghcr.io/jmandel/conversational-interop
           tags: |
-            type=ref,event=branch
+            type=raw,value=main
             type=ref,event=tag
             type=sha
           labels: |
-            org.opencontainers.image.title=${{ github.event.repository.name }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.title=jmandel/conversational-interop
+            org.opencontainers.image.source=${{ github.server_url }}/jmandel/conversational-interop
 
       - name: Build and push
         uses: docker/build-push-action@v6
