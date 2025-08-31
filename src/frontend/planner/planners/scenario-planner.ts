@@ -227,7 +227,22 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       const existingNames = new Set<string>();
       for (const f of workingFacts as any[]) { if (f?.type === 'attachment_added' && f.name) existingNames.add(String(f.name)); }
       for (const f of facts as any[]) { if (f?.type === 'attachment_added' && f.name) existingNames.add(String(f.name)); }
-      const newAttachments = exec.attachments.filter(a => a?.name && !existingNames.has(String(a.name)));
+      // Check if the tool result is a JSON object with no docId and add it as an attachment
+      const allAttachments = [...exec.attachments];
+      if (exec.result && typeof exec.result === 'object' && !(exec.result as any).docId) {
+        const jsonAttachmentName = `${tdef.toolName}_${callId}.json`;
+        if (!existingNames.has(jsonAttachmentName)) {
+          const prettyJson = JSON.stringify(exec.result, null, 2);
+          const jsonAttachment = {
+            name: jsonAttachmentName,
+            mimeType: 'text/json',
+            bytesBase64: toBase64(prettyJson)
+          };
+          allAttachments.push(jsonAttachment);
+        }
+      }
+      
+      const newAttachments = allAttachments.filter(a => a?.name && !existingNames.has(String(a.name)));
       for (const doc of newAttachments) {
         out.push(({ type:'attachment_added', name: doc.name, mimeType: doc.mimeType, bytes: doc.bytesBase64, origin:'synthesized', producedBy:{ callId, name: tdef.toolName, args: decision.args || {} }, ...(includeWhy ? { why:'Synthesized by scenario tool.' } : {}) } as ProposedFact));
         existingNames.add(String(doc.name));
