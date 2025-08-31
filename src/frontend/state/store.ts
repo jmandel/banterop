@@ -6,10 +6,31 @@ import { a2aToFacts } from '../../shared/a2a-translator';
 import { validateParts } from '../../shared/parts-validator';
 import { nowIso, rid } from '../../shared/core';
 import { resolvePlanner } from '../planner/registry';
+import Ajv from 'ajv';
+import { getMcpRequestSchema } from '../wire/schemas';
+import { getA2ASchema } from '../wire/a2a-schemas';
 import { fetchJsonCapped } from '../../shared/net';
 import { validateScenarioConfig } from '../../shared/scenario-validator';
 
 type Role = 'initiator'|'responder';
+
+export type WireProtocol = 'a2a'|'mcp';
+export type WireDirection = 'inbound'|'outbound';
+export type WireValidation = { valid: boolean; schema?: string; errors?: Array<{ path: string; message: string }> };
+export type WireLogEntry = {
+  id: string;
+  ts: string;
+  protocol: WireProtocol;
+  dir: WireDirection;
+  roomId?: string;
+  taskId?: string;
+  messageId?: string;
+  method?: string;
+  kind?: string;
+  payload: unknown;
+  raw?: unknown;
+  validation?: WireValidation;
+};
 
 // ---- runaway-guard (tiny inline helper) ----
 const JOURNAL_HARD_CAP: number = (() => {
@@ -138,7 +159,14 @@ export type Store = {
     takeover(roomId: string): void; // explicit takeover
     release(roomId: string): void; // best-effort release via beacon
   };
+  // Wire log (protocol-level)
+  wire: {
+    entries: Array<WireLogEntry>;
+    add(entry: Partial<WireLogEntry> & Pick<WireLogEntry,'protocol'|'dir'|'payload'> & { method?: string; roomId?: string; taskId?: string; messageId?: string; kind?: string }): void;
+    clear(): void;
+  };
 };
+
 
 export const useAppStore = create<Store>((set, get) => ({
   role: 'initiator',
@@ -340,9 +368,19 @@ export const useAppStore = create<Store>((set, get) => ({
     const prev = get().taskId;
     set({ taskId });
     if (taskId && taskId !== prev) {
-      // New task → clear local journal state so histories don't mix
+      // New task → clear local state so histories don't mix (journal + wire)
       try { console.debug('[store] switching taskId', { prev, next: taskId }); } catch {}
-      set({ facts: [], seq: 0, knownMsg: new Set(), attachmentsIndex: new Map(), composing: undefined, composeApproved: new Set(), inFlightSends: new Map(), sendErrorByCompose: new Map() });
+      set((s:any) => ({
+        facts: [],
+        seq: 0,
+        knownMsg: new Set(),
+        attachmentsIndex: new Map(),
+        composing: undefined,
+        composeApproved: new Set(),
+        inFlightSends: new Map(),
+        sendErrorByCompose: new Map(),
+        wire: { ...s.wire, entries: [] },
+      }));
       try { get().startTicks(); } catch {}
       void get().fetchAndIngest();
     }
@@ -493,7 +531,7 @@ export const useAppStore = create<Store>((set, get) => ({
     try { if (adapter && taskId) await adapter.cancel(taskId); } catch {}
     try { (window as any).__ticksAbort?.abort?.(); } catch {}
     try { get().detachBackchannel(); } catch {}
-    set({
+    set((s:any) => ({
       taskId: undefined,
       currentEpoch: undefined,
       seq: 0,
@@ -507,7 +545,8 @@ export const useAppStore = create<Store>((set, get) => ({
       fetching: false,
       needsRefresh: false,
       composing: undefined,
-    });
+      wire: { ...s.wire, entries: [] },
+    }));
   },
 
   // --- backchannel management (responder) ---
@@ -706,6 +745,69 @@ export const useAppStore = create<Store>((set, get) => ({
       const byId = { ...(get().rooms.byId) } as any; byId[roomId] = { ...byId[roomId], leaseId: undefined, connState:'observing', es: undefined };
       set((st:any)=>({ rooms: { ...st.rooms, byId } }));
     }
+  },
+
+  // --- wire log slice (browser-only; validate MCP outbound requests) ---
+  wire: {
+    entries: [],
+    add(entry) {
+      const id = rid('w');
+      const ts = nowIso();
+      const base: WireLogEntry = { id, ts, protocol: entry.protocol as any, dir: entry.dir as any, roomId: entry.roomId, taskId: entry.taskId, messageId: entry.messageId, method: entry.method, kind: entry.kind, payload: entry.payload, raw: entry.raw };
+      // Simple dedupe: only one entry per messageId
+      try {
+        if (base.messageId) {
+          const exists = (get().wire.entries || []).some(e => e.messageId === base.messageId);
+          if (exists) return;
+        }
+      } catch {}
+      let validation: WireValidation | undefined = undefined;
+      // Infer missing kind for A2A entries so validation can run
+      try {
+        if (base.protocol === 'a2a' && !base.kind) {
+          const p: any = base.payload as any;
+          if (p && typeof p === 'object') {
+            if (Array.isArray(p.parts) && (p.role === 'user' || p.role === 'agent')) base.kind = 'message';
+            else if (p.kind === 'status-update') base.kind = 'status-update';
+            else if (p.status && Array.isArray(p.history)) base.kind = 'task';
+          }
+        }
+      } catch {}
+      try {
+        // Validate MCP requests (both directions, depending on context)
+        if (base.protocol === 'mcp') {
+          const sch = getMcpRequestSchema(String(base.method || ''));
+          if (sch) {
+            const ajv = new Ajv({ strict: false, allErrors: true });
+            const validate = ajv.compile(sch as any);
+            const ok = validate(base.payload);
+            validation = ok ? { valid: true, schema: sch.$id || sch.title } : {
+              valid: false,
+              schema: sch.$id || sch.title,
+              errors: (validate.errors || []).map(e => ({ path: (e.instancePath || e.schemaPath || ''), message: e.message || 'invalid' }))
+            };
+          }
+        }
+        // Validate A2A messages/tasks when kind is known
+        if (!validation && base.protocol === 'a2a') {
+          const kind = (String(base.kind || '').toLowerCase() as any);
+          const sch = (kind === 'message' || kind === 'task' || kind === 'status-update') ? getA2ASchema(kind) : null;
+          if (sch) {
+            const ajv = new Ajv({ strict: false, allErrors: true });
+            const validate = ajv.compile(sch as any);
+            const ok = validate(base.payload);
+            validation = ok ? { valid: true, schema: sch.$id || sch.title } : {
+              valid: false,
+              schema: sch.$id || sch.title,
+              errors: (validate.errors || []).map(e => ({ path: (e.instancePath || e.schemaPath || ''), message: e.message || 'invalid' }))
+            };
+          }
+        }
+      } catch {}
+      const next: WireLogEntry = validation ? { ...base, validation } : base;
+      set(s => ({ wire: { ...s.wire, entries: [...s.wire.entries, next].slice(-1000) } }));
+    },
+    clear() { set(s => ({ wire: { ...s.wire, entries: [] } })); },
   },
 }));
 

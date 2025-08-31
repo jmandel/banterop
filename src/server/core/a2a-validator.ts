@@ -65,7 +65,8 @@ function logValidationError(
 ) {
   const timestamp = new Date().toISOString()
   const contextStr = context ? JSON.stringify(context) : ''
-  
+  const stack = (() => { try { return (new Error()).stack } catch { return undefined } })()
+
   console.warn(`[A2A Validation Warning] ${timestamp}`, {
     type,
     context: contextStr,
@@ -76,7 +77,8 @@ function logValidationError(
       params: e.params
     })),
     // Include a sample of the data for debugging (truncated for large objects)
-    dataSample: JSON.stringify(data).slice(0, 500)
+    dataSample: JSON.stringify(data).slice(0, 500),
+    stack
   })
 }
 
@@ -179,6 +181,14 @@ export function validateTaskStatusUpdateEventWithReport<T extends { metadata?: a
   const result = validateWithLogging(validators.taskStatusUpdateEvent, event, 'TaskStatusUpdateEvent', context)
   const report = createValidationReport(result, 'TaskStatusUpdateEvent')
   return withValidationReport(event, report)
+}
+
+// Log-only validation (no stamping)
+export function validateTaskStatusUpdateEvent(
+  event: any,
+  context?: { pairId?: string; taskId?: string; roomId?: string }
+): ValidationResult {
+  return validateWithLogging(validators.taskStatusUpdateEvent, event, 'TaskStatusUpdateEvent', context)
 }
 
 export function validatePart(part: any, context?: any): ValidationResult {

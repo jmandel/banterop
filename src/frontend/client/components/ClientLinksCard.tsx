@@ -1,9 +1,9 @@
 import React from 'react';
 
-export function ClientLinksCard() {
+export function ClientLinksCard({ hideTitle }:{ hideTitle?: boolean }) {
   return (
     <div className="card">
-      <div className="small font-semibold mb-2">Helpful Links</div>
+      {!hideTitle && <div className="small font-semibold mb-2">Helpful Links</div>}
       <div className="row items-center justify-between">
         <div className="small">Scenario Editor</div>
         <a className="btn secondary" href="/scenarios/" target="_blank" rel="noreferrer">Open</a>
@@ -15,4 +15,3 @@ export function ClientLinksCard() {
     </div>
   );
 }
-

@@ -24,8 +24,10 @@ import { LinksCard } from './components/LinksCard'
 import { deriveChatLabels } from '../components/chat-labels'
 import { AutomationCard } from '../components/AutomationCard'
 import { LogCard } from '../components/LogCard'
+import { WireLogCard } from '../components/WireLogCard'
 import { Settings, Copy } from 'lucide-react'
 import { AppLayout as SharedAppLayout } from '../ui'
+import { CollapsibleCard } from '../components/CollapsibleCard'
 
 // EXPERIMENTAL: WebRTC datachannel keepalive to avoid Chrome Energy Saver freezing
 // See: https://developer.chrome.com/blog/freezing-on-energy-saver
@@ -124,7 +126,8 @@ function App() {
 
   // Initialize responder adapter
   useEffect(() => {
-    const adapter = new A2AAdapter(a2a)
+    const wireSink = (e:any) => { try { useAppStore.getState().wire.add({ ...e, roomId }) } catch {} };
+    const adapter = new A2AAdapter(a2a, { onWire: wireSink, roomId })
     store.init('responder' as any, adapter, undefined)
     // Store adapter on window for debug and lease updates
     ;(window as any).__a2aAdapter = adapter
@@ -266,17 +269,17 @@ function App() {
     }
     return false;
   }, [facts]);
-  const turnChip = (() => {
-    if (!taskId) return { text: 'Waiting for client', tone: 'gray' as const };
+  const turnText = (() => {
+    if (!taskId) return 'Waiting for client';
     const hasPublic = facts.some(f => f.type === 'remote_sent' || f.type === 'remote_received');
-    if (uiStatus === 'completed') return { text: 'Completed', tone: 'green' as const };
-    if (uiStatus === 'failed' || uiStatus === 'rejected') return { text: 'Failed', tone: 'amber' as const };
-    if (uiStatus === 'canceled') return { text: 'Canceled', tone: 'amber' as const };
-    if (pendingReview && useAppStore.getState().plannerMode === 'approve') return { text:'Waiting for review', tone: 'amber' as const };
-    if (uiStatus === 'input-required') return { text:'Our turn', tone:'amber' as const };
-    if (uiStatus === 'working') return { text:'Other side working', tone:'blue' as const };
-    if (uiStatus === 'submitted' || uiStatus==='initializing') return { text: hasPublic ? 'Setting up…' : 'Waiting for client', tone:'gray' as const };
-    return { text: uiStatus || 'Unknown', tone:'gray' as const };
+    if (uiStatus === 'completed') return 'Completed';
+    if (uiStatus === 'failed' || uiStatus === 'rejected') return 'Failed';
+    if (uiStatus === 'canceled') return 'Canceled';
+    if (pendingReview && useAppStore.getState().plannerMode === 'approve') return 'Waiting for review';
+    if (uiStatus === 'input-required') return 'Our turn';
+    if (uiStatus === 'working') return 'Other side working';
+    if (uiStatus === 'submitted' || uiStatus==='initializing') return hasPublic ? 'Setting up…' : 'Waiting for client';
+    return uiStatus || 'Unknown';
   })();
   // Graceful release on unload
   useEffect(() => {
@@ -362,7 +365,7 @@ function App() {
         left={(
           <div className="row compact">
             <span className="small muted">Task</span>
-            <span className="pill">{summarizeTaskId(taskId)}</span>
+            <span className="small font-mono text-gray-800">{summarizeTaskId(taskId)}</span>
             {!!taskId && (
               <button
                 className="p-1 rounded hover:bg-gray-100 text-gray-600"
@@ -373,12 +376,10 @@ function App() {
                 <Copy size={16} strokeWidth={1.75} />
               </button>
             )}
+            <span className="small muted ml-2">{turnText}</span>
           </div>
         )}
-        chips={(() => {
-          const chips:any[] = [turnChip];
-          return chips;
-        })()}
+        chips={[]}
       />
     );
   })()}
@@ -494,24 +495,35 @@ function App() {
           }}
         >
           <div className="flex flex-col gap-3 min-h-0">
-            <LinksCard
-              agentCard={agentCard}
-              mcpUrl={mcp}
-              onCopyAgent={copyCard}
-              onCopyMcp={copyMcp}
-              copiedAgent={copiedCard}
-              copiedMcp={copiedMcp}
-              clientHref={clientHref}
-              ctaPrimary={waitingForClient}
-            />
+            <CollapsibleCard title="Helpful Links" initialOpen>
+              <LinksCard
+                agentCard={agentCard}
+                mcpUrl={mcp}
+                onCopyAgent={copyCard}
+                onCopyMcp={copyMcp}
+                copiedAgent={copiedCard}
+                copiedMcp={copiedMcp}
+                clientHref={clientHref}
+                ctaPrimary={waitingForClient}
+                hideTitle
+              />
+            </CollapsibleCard>
 
-            <AutomationCard
-              mode={plannerMode as any}
-              onModeChange={(m)=>useAppStore.getState().setPlannerMode(m)}
-              plannerSelect={<PlannerSelector />}
-            />
+            <CollapsibleCard title="Automation" initialOpen>
+              <AutomationCard bare hideTitle
+                mode={plannerMode as any}
+                onModeChange={(m)=>useAppStore.getState().setPlannerMode(m)}
+                plannerSelect={<PlannerSelector />}
+              />
+            </CollapsibleCard>
 
-            <LogCard rows={facts.slice(-100) as any} all={facts as any} fill={fixedSide} />
+            <CollapsibleCard title="Wire Messages" initialOpen>
+              <WireLogCard bare max={30} />
+            </CollapsibleCard>
+
+            <CollapsibleCard title="Planner Journal" initialOpen>
+              <LogCard bare rows={facts.slice(-100) as any} all={facts as any} fill={fixedSide} />
+            </CollapsibleCard>
           </div>
         </div>
       </div>
@@ -528,7 +540,17 @@ function App() {
           try { const raw = window.sessionStorage.getItem('clientSettings'); return raw ? JSON.parse(raw) : { transport:'a2a', a2aCardUrl:'', mcpUrl:'', llm:{ provider:'server', model:'' } } } catch { return { transport:'a2a', a2aCardUrl:'', mcpUrl:'', llm:{ provider:'server', model:'' } } }
         })()}
         onCancel={()=>setShowSettings(false)}
-        onSave={(next)=>{ try { window.sessionStorage.setItem('clientSettings', JSON.stringify(next)); } catch {}; setShowSettings(false); }}
+        onSave={(next)=>{
+          // Mirror non-secret settings in sessionStorage for legacy readers
+          try { window.sessionStorage.setItem('clientSettings', JSON.stringify(next)); } catch {}
+          // Persist API key to localStorage (if provided)
+          try {
+            const key = (next.llm?.provider === 'client-openai') ? (next.llm?.apiKey || '') : '';
+            if (key) localStorage.setItem('client.llm.apiKey', key);
+            else localStorage.removeItem('client.llm.apiKey');
+          } catch {}
+          setShowSettings(false);
+        }}
         serverModels={useAppStore.getState().catalogs.llmModels}
         variant="rooms"
       />

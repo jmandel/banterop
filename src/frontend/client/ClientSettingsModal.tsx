@@ -82,7 +82,11 @@ export function ClientSettingsModal({
           <label className="small" style={{ alignSelf: 'center' }}>Provider</label>
           <select className="input" value={draft.llm.provider} onChange={e=>{
             const provider = e.target.value as ClientSettings['llm']['provider'];
-            const nextModel = (provider === 'server' ? (serverModels[0] || draft.llm.model) : (draft.llm.model || 'qwen/qwen3-235b-a22b-2507'));
+            // Server-hosted: default to first server model if available
+            // Client-owned key: leave model blank by default; do not set any preset
+            const nextModel = (provider === 'server')
+              ? (serverModels[0] || draft.llm.model)
+              : (draft.llm.model || '');
             const nextBase = provider === 'client-openai' ? (draft.llm.baseUrl || 'https://openrouter.ai/api/v1') : draft.llm.baseUrl;
             setDraft({ ...draft, llm: { provider, model: nextModel, baseUrl: nextBase, apiKey: draft.llm.apiKey } });
           }}>

@@ -4,7 +4,7 @@ import { extractNextState, computeStatesForNext } from './finality'
 import { validateParts } from './validators'
 import { initTaskId, respTaskId, parseTaskId } from './ids'
 import { createEventStore } from './events'
-import { validateMessageSendParams, validateMessageWithReport, validateTaskWithReport, validateTaskStatusUpdateEventWithReport, toA2AMessage, toA2ATask } from './a2a-validator'
+import { validateMessageSendParams, validateMessage, validateTask, validateTaskStatusUpdateEvent, toA2AMessage, toA2ATask } from './a2a-validator'
 
 type Deps = { db: Persistence; events: ReturnType<typeof createEventStore>; baseUrl: string }
 
@@ -44,8 +44,9 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
       },
       final: isFinal
     }
-    // Validate and attach report (returns new object)
-    return validateTaskStatusUpdateEventWithReport(statusUpdate, { pairId, taskId, roomId: pairId })
+    // Validate (log-only)
+    try { validateTaskStatusUpdateEvent(statusUpdate, { pairId, taskId, roomId: pairId }) } catch {}
+    return statusUpdate
   }
 
   function hasActiveBackend(roomId: string): boolean {
@@ -124,9 +125,9 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
     }
     let snapshot = { id: row.task_id, contextId: row.pair_id, kind:'task', status:{ state, message: statusMessage }, history: hist }
     
-    // Validate and attach report to outbound task (returns new object)
-    snapshot = validateTaskWithReport(snapshot, { pairId: row.pair_id, taskId: row.task_id, roomId: row.pair_id })
-    
+    // Validate outbound task (log-only)
+    try { validateTask(snapshot, { pairId: row.pair_id, taskId: row.task_id, roomId: row.pair_id }) } catch {}
+
     return snapshot
   }
 
@@ -277,9 +278,15 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
         kind: 'message',
         metadata: m?.metadata,
       }
-
-      // Validate message and attach report (returns new object)
-      msg = validateMessageWithReport(msg, { pairId, messageId: msg.messageId, roomId: pairId })
+      // Stamp raw wireMessage for Rooms wire log (client-submitted A2A)
+      try {
+        const ext = (msg.metadata && (msg.metadata as any)[A2A_EXT_URL]) ? { ...(msg.metadata as any)[A2A_EXT_URL] } : {};
+        const rawA2A = { role: msg.role, parts: msg.parts, messageId: msg.messageId, kind: 'message' } as any;
+        const b64 = Buffer.from(JSON.stringify(rawA2A), 'utf-8').toString('base64');
+        (msg.metadata as any) = { ...(msg.metadata || {}), [A2A_EXT_URL]: { ...ext, wireMessage: { raw: b64 } } };
+      } catch {}
+      // Validate message (log-only)
+      try { validateMessage(msg, { pairId, messageId: msg.messageId, roomId: pairId }) } catch {}
       
       // Existing parts validation (throws on errors)
       validateParts(msg.parts)

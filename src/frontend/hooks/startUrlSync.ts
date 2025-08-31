@@ -22,36 +22,16 @@ function tryParseReadableHash(hash: string): any | null {
   return null;
 }
 
-function writeClientSettingsFromPayload(p: any) {
-  if (!p || typeof window === 'undefined') return;
-  try {
-    const curRaw = window.sessionStorage.getItem('clientSettings');
-    let cur = curRaw ? JSON.parse(curRaw) : {};
-    const llm = p.llm && typeof p.llm === 'object' ? p.llm : {};
-    const a2aCardUrl = typeof p.agentCardUrl === 'string' ? p.agentCardUrl : (cur.a2aCardUrl || '');
-    const mcpUrl = typeof p.mcpUrl === 'string' ? p.mcpUrl : (cur.mcpUrl || '');
-    // Infer transport from URLs; default to prior or 'a2a'
-    const transport = a2aCardUrl ? 'a2a' : (mcpUrl ? 'mcp' : (cur.transport || 'a2a'));
-    const provider = (llm.provider === 'client-openai') ? 'client-openai' : 'server';
-    const model = typeof llm.model === 'string' && llm.model.trim() ? llm.model.trim() : (cur?.llm?.model || undefined);
-    const baseUrl = provider === 'client-openai' ? (typeof llm.baseUrl === 'string' ? llm.baseUrl : (cur?.llm?.baseUrl || 'https://openrouter.ai/api/v1')) : undefined;
-    // Do NOT pull apiKey from the hash; preserve existing value only
-    const apiKey = provider === 'client-openai' ? (cur?.llm?.apiKey || '') : undefined;
-    const next = {
-      transport,
-      a2aCardUrl,
-      mcpUrl,
-      llm: { provider, model: model || cur?.llm?.model || undefined, baseUrl, apiKey }
-    } as any;
-    window.sessionStorage.setItem('clientSettings', JSON.stringify(next));
-  } catch {}
-}
+function writeClientSettingsFromPayload(_p: any) { /* no-op: hash is the source */ }
 
-function buildReadableHashFromStore(): string {
+export function buildReadableHashFromStore(): string {
   const s = useAppStore.getState();
-  // Read client settings (sessionStorage) for transport and llm
+  // Read client settings from session (most recent edits), fallback to current hash
   let client: any = {};
-  try { const raw = window.sessionStorage.getItem('clientSettings'); client = raw ? JSON.parse(raw) : {}; } catch {}
+  try { const raw = window.sessionStorage.getItem('clientSettings'); if (raw) client = JSON.parse(raw); } catch {}
+  if (!client || typeof client !== 'object') {
+    try { const cur = tryParseReadableHash(window.location.hash); client = cur || {}; } catch {}
+  }
   // Preserve optional roomTitle across rewrites when present
   let roomTitle: string | undefined;
   let seedFromHash: any | undefined;
@@ -85,10 +65,9 @@ function buildReadableHashFromStore(): string {
     else seed = dehydrated || seedFromHash || undefined;
   } catch { seed = seedFromHash || undefined; }
   const payload: any = {
-    // transport omitted; infer from URLs
-    // include only the active URL based on inferred transport
+    // transport omitted; both URLs are included when present
     ...(client.a2aCardUrl ? { agentCardUrl: client.a2aCardUrl } : {}),
-    ...(!client.a2aCardUrl && client.mcpUrl ? { mcpUrl: client.mcpUrl } : {}),
+    ...(client.mcpUrl ? { mcpUrl: client.mcpUrl } : {}),
     llm: {
       provider: (client.llm?.provider || 'server'),
       model: client.llm?.model,
@@ -179,6 +158,15 @@ export function startUrlSync() {
     } catch {}
     finally { setTimeout(() => { suppress = false; }, 0); }
   });
+}
+
+// Imperative helper to update the readable JSON hash from current store + session client settings
+export function updateReadableHashFromStore() {
+  try {
+    const core = buildReadableHashFromStore();
+    const cur = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+    if (core !== cur) window.location.hash = core;
+  } catch {}
 }
 
 function summarizeConfigForLog(pid: string | undefined, cfg: any): any {

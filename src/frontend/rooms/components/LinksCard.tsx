@@ -1,6 +1,6 @@
 import React from 'react';
 
-export function LinksCard({ agentCard, mcpUrl, onCopyAgent, onCopyMcp, copiedAgent, copiedMcp, clientHref, ctaPrimary }:{
+export function LinksCard({ agentCard, mcpUrl, onCopyAgent, onCopyMcp, copiedAgent, copiedMcp, clientHref, ctaPrimary, hideTitle }:{
   agentCard: string;
   mcpUrl: string;
   onCopyAgent: () => void;
@@ -9,12 +9,15 @@ export function LinksCard({ agentCard, mcpUrl, onCopyAgent, onCopyMcp, copiedAge
   copiedMcp: boolean;
   clientHref: string;
   ctaPrimary?: boolean;
+  hideTitle?: boolean;
 }) {
   return (
     <div className="card">
-      <div className="row justify-between items-center">
-        <div className="small font-semibold">Links</div>
-      </div>
+      {!hideTitle && (
+        <div className="row justify-between items-center">
+          <div className="small font-semibold">Links</div>
+        </div>
+      )}
       <div className="row items-center mt-1.5 justify-between">
         <div className="small">Agent Card URL</div>
         <button className="btn secondary" onClick={onCopyAgent} title={agentCard}>{copiedAgent ? 'Copied' : 'Copy'}</button>

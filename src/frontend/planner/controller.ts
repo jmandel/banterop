@@ -56,10 +56,12 @@ export function startPlannerController() {
       if (raw) {
         const j = JSON.parse(raw);
         const prov = j?.llm?.provider;
-        const apiKey = (j?.llm?.apiKey || '').trim();
         const baseUrl = (j?.llm?.baseUrl || '').trim();
         const m = (j?.llm?.model || '').trim();
         modelFromSession = m || undefined;
+        // API key comes from localStorage only (never from hash/session)
+        let apiKey = '';
+        try { apiKey = (typeof window !== 'undefined') ? (localStorage.getItem('client.llm.apiKey') || '') : ''; } catch {}
         if (prov === 'client-openai' && apiKey && baseUrl) {
           provider = makeOpenAICompatibleProvider({ baseUrl, apiKey });
         }

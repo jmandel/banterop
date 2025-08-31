@@ -12,6 +12,8 @@ function pickJsonOrParseText(result: any): any {
 }
 
 /** MCPAdapter implemented using the official MCP SDK (Streamable HTTP client). */
+type WireEntry = { protocol:'a2a'|'mcp'; dir:'inbound'|'outbound'; method?:string; kind?:string; roomId?:string; taskId?:string; messageId?:string; payload:any };
+
 export class MCPAdapter implements TransportAdapter {
   private conversationId: string | undefined;
   private messages: A2AMessage[] = [];
@@ -21,8 +23,13 @@ export class MCPAdapter implements TransportAdapter {
   private connecting = false;
   private resumeAfterSend: (() => void) | null = null;
   private lastAgentSig: string | null = null;
+  private onWire?: (e: WireEntry) => void;
+  private roomId?: string;
 
-  constructor(private endpoint: string) {}
+  constructor(private endpoint: string, opts?: { onWire?: (e: WireEntry)=>void; roomId?: string }) {
+    this.onWire = opts?.onWire;
+    this.roomId = opts?.roomId;
+  }
 
   kind(): 'a2a'|'mcp' { return 'mcp'; }
 
@@ -67,15 +74,21 @@ export class MCPAdapter implements TransportAdapter {
 
   private async callTool(name: string, args?: any): Promise<any> {
     await this.ensureConnected();
+    // Log outbound call strictly before sending
+    try { this.onWire && this.onWire({ protocol:'mcp', dir:'outbound', method:name, roomId:this.roomId, payload: args || {} }); } catch {}
     const result: any = await this.client!.callTool({ name, arguments: args || {} } as any);
-    return pickJsonOrParseText(result);
+    const parsed = pickJsonOrParseText(result);
+    // Log inbound result immediately after
+    try { this.onWire && this.onWire({ protocol:'mcp', dir:'inbound', method:name, roomId:this.roomId, payload: parsed }); } catch {}
+    return parsed;
   }
 
   async *ticks(taskId: string, signal?: AbortSignal): AsyncGenerator<void> {
     while (!signal?.aborted) {
       try {
         await this.ensureConnected();
-        const out = await this.callTool('check_replies', { conversationId: this.conversationId, waitMs: 10000 });
+        const params = { conversationId: this.conversationId, waitMs: 10000 };
+        const out = await this.callTool('check_replies', params);
         const msgs = Array.isArray(out?.messages) ? out.messages : [];
         let any = false;
         for (const m of msgs) {
@@ -102,7 +115,7 @@ export class MCPAdapter implements TransportAdapter {
         if (any) yield;
         if (out?.conversation_ended) { this.status = 'completed'; yield; break; }
         // Pause polling while it's our turn to speak to avoid duplicate deliveries
-        if (!any && this.status === 'input-required') {
+        if (this.status === 'input-required') {
           // Yield once so UI can render the new status
           yield;
           await this.waitForNextSendOrAbort(signal);
@@ -121,7 +134,8 @@ export class MCPAdapter implements TransportAdapter {
   async send(parts: A2APart[], opts: SendOptions): Promise<{ taskId: string; snapshot: TransportSnapshot }> {
     await this.ensureConnected();
     if (!this.conversationId) {
-      const res = await this.callTool('begin_chat_thread', {});
+      const req0 = {};
+      const res = await this.callTool('begin_chat_thread', req0);
       this.conversationId = res?.conversationId || `conv-${crypto.randomUUID()}`;
       this.status = 'submitted';
     }
@@ -142,11 +156,12 @@ export class MCPAdapter implements TransportAdapter {
       }
       return { name, contentType: mimeType, content };
     });
-    await this.callTool('send_message_to_chat_thread', {
+    const req = {
       conversationId: this.conversationId,
       message: text,
       attachments
-    });
+    };
+    const res2 = await this.callTool('send_message_to_chat_thread', req);
     const id = opts.messageId || `m-${crypto.randomUUID()}`;
     this.messages.push({ role:'user', parts, messageId: id, kind:'message', contextId: this.conversationId, taskId: this.conversationId });
     this.status = 'working';
@@ -191,4 +206,23 @@ export class MCPAdapter implements TransportAdapter {
       }
     });
   }
+}
+
+function stableJson(v: unknown): string {
+  try {
+    const seen = new WeakSet();
+    const replacer = (_k: string, val: any) => {
+      if (val && typeof val === 'object') {
+        if (seen.has(val)) return undefined;
+        seen.add(val);
+        if (!Array.isArray(val)) {
+          const obj: Record<string, any> = {};
+          for (const k of Object.keys(val).sort()) obj[k] = val[k];
+          return obj;
+        }
+      }
+      return val;
+    };
+    return JSON.stringify(v, replacer, 2);
+  } catch { try { return JSON.stringify(v); } catch { return String(v); } }
 }

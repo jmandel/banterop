@@ -1,4 +1,5 @@
 import React from 'react';
+import { ChevronUp, ChevronDown } from 'lucide-react';
 import { useAppStore } from '../state/store';
 import { resolvePlanner } from '../planner/registry';
 
@@ -88,13 +89,14 @@ export function PlannerSetupCard() {
     <form onSubmit={handleSubmit} onKeyDown={handleKeyDown} className="card" style={{ marginTop: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button
-          className="btn ghost"
+          className="p-1 rounded hover:bg-gray-100 text-gray-600 bg-transparent border-0"
           type="button"
           onClick={() => { const { openSetup, collapseSetup } = useAppStore.getState(); collapsed ? openSetup() : collapseSetup(); }}
           aria-label={collapsed ? 'Expand planner setup' : 'Collapse planner setup'}
-          style={{ fontSize: 18, width: 34, height: 34, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+          title={collapsed ? 'Expand' : 'Collapse'}
+          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          {collapsed ? '▸' : '▾'}
+          {collapsed ? <ChevronDown size={16} strokeWidth={1.75} /> : <ChevronUp size={16} strokeWidth={1.75} />}
         </button>
         <div className="row" style={{ gap: 8, alignItems: 'center' }}>
           {ready && ((hud && hud.phase && hud.phase !== 'idle') ? <span className="working-dot" aria-label="Working" title="Working" /> : <span className="idle-dot" aria-label="Ready" title="Ready" />)}

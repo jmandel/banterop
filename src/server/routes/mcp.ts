@@ -78,7 +78,10 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
       parts.push({ kind:'file', file:{ bytes: toBase64(String(a.content ?? '')), name: String(a.name ?? ''), mimeType: String(a.contentType ?? 'application/octet-stream') }, ...(a.summary ? { metadata:{ summary: String(a.summary) } } : {}) })
     }
     const messageId = `m:${crypto.randomUUID()}`
-    await pairs.messageSend(pairId, { parts, taskId: ensured.initiatorTaskId, messageId })
+    const raw = { conversationId, message, attachments };
+    const b64 = Buffer.from(JSON.stringify(raw), 'utf-8').toString('base64');
+    const m = { parts, taskId: ensured.initiatorTaskId, messageId, metadata: { [A2A_EXT_URL]: { wireMessage: { adapter:'mcp', raw: b64 } } } } as any
+    await pairs.messageSend(pairId, m)
     const obj = { guidance: 'Message sent. Call check_replies to fetch replies.', status: 'working' as const }
     return { content: [{ type:'text', text: JSON.stringify(obj) }], structuredContent: obj } as any
   })
@@ -88,7 +91,11 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
     description: 'Poll for replies since your last initiator message.'
   }, async (params:any) => {
     const conversationId = String(params?.conversationId ?? '')
-    const waitMs = Number(params?.waitMs ?? 10000)
+    // Sanitize waitMs: finite, non-negative, and capped
+    const MAX_WAIT = 120000; // 2 minutes hard cap
+    let waitMs = Number(params?.waitMs)
+    if (!Number.isFinite(waitMs) || waitMs < 0) waitMs = 10000
+    waitMs = Math.min(Math.max(0, waitMs), MAX_WAIT)
     if (!conversationId) return jsonContent({ ok:false, error:'conversationId is required' })
     const ensured = await pairs.ensureEpochTasksForPair(pairId)
     const isCurrent = (conversationId === ensured.initiatorTaskId) || (conversationId === String(ensured.epoch))
@@ -99,22 +106,32 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
     async function collect() {
       const initId = ensured.initiatorTaskId
       const snap = await pairs.tasksGet(pairId, initId)
+      // Build window: all messages since the last initiator message (role:'user'), projected for initiator
+      const hist: any[] = Array.isArray((snap as any)?.history) ? (snap as any).history : []
+      const last: any = (snap as any)?.status?.message
+      const arr: any[] = [...hist]
+      if (last) arr.push(last)
+
+      // Find the most recent initiator message (role:'user')
+      let lastUserIdx = -1
+      for (let i = arr.length - 1; i >= 0; --i) {
+        if (arr[i] && arr[i].role === 'user') { lastUserIdx = i; break }
+      }
+      const windowMsgs = arr.slice(Math.max(lastUserIdx + 1, 0))
       const messages: any[] = []
-      try {
-        const m = (snap as any)?.status?.message
-        // Projected for initiator view: inbound responder messages have role==='agent'
-        if (m && m.role === 'agent') {
-          const parts = Array.isArray(m.parts) ? m.parts : []
-          const text = parts.filter((p:any)=>p?.kind==='text').map((p:any)=>String(p.text||''))?.join('\n') || ''
-          const attachments: any[] = []
-          for (const p of parts) {
-            if (p?.kind==='file' && p.file && typeof p.file==='object' && typeof p.file.bytes==='string') {
-              attachments.push({ name: String(p.file.name||'file.bin'), contentType: String(p.file.mimeType||'application/octet-stream'), content: fromBase64(String(p.file.bytes||'')), ...(p.metadata?.summary?{summary:String(p.metadata.summary)}:{}) })
-            }
+      for (const m of windowMsgs) {
+        if (!m || m.role !== 'agent') continue
+        const parts = Array.isArray(m.parts) ? m.parts : []
+        const text = parts.filter((p:any)=>p?.kind==='text').map((p:any)=>String(p.text||''))?.join('\n') || ''
+        const attachments: any[] = []
+        for (const p of parts) {
+          if (p?.kind==='file' && p.file && typeof p.file==='object' && typeof p.file.bytes==='string') {
+            attachments.push({ name: String(p.file.name||'file.bin'), contentType: String(p.file.mimeType||'application/octet-stream'), content: fromBase64(String(p.file.bytes||'')), ...(p.metadata?.summary?{summary:String(p.metadata.summary)}:{}) })
           }
-          messages.push({ from:'administrator', at: new Date().toISOString(), ...(text?{text}:{ }), ...(attachments.length?{attachments}:{}) })
         }
-      } catch {}
+        messages.push({ from:'administrator', at: new Date().toISOString(), ...(text?{text}:{ }), ...(attachments.length?{attachments}:{}) })
+      }
+
       const st: string = String((snap as any)?.status?.state || 'submitted')
       const completed = ['completed','canceled','failed','rejected'].includes(st)
       const status = completed ? 'completed' : (st === 'input-required' || st === 'submitted' ? 'input-required' : 'working')
@@ -123,32 +140,45 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
         : (status==='input-required'
             ? 'It’s your turn to respond as initiator. You can send a message now.'
             : 'Waiting for the responder to finish or reply. Call check_replies again.')
-      return { messages, guidance, status, ended: completed }
+      const out = { messages, guidance, status, ended: completed }
+      try {
+        console.debug('[mcp] check_replies.collect', {
+          pairId,
+          conversationId,
+          status,
+          ended: completed,
+          msgCount: messages.length,
+          lastUserIdx,
+          windowCount: windowMsgs.length,
+        })
+      } catch {}
+      return out
     }
 
     // Anchor our wait at the current tip so we only wait for future events
-    let since = (() => {
+    const since = (() => {
       try {
         const existing = (events as any).listSince(pairId, 0)
         return Array.isArray(existing) && existing.length ? Number(existing[existing.length - 1].seq || 0) : 0
       } catch { return 0 }
     })()
-    const deadline = Date.now() + Math.max(0, waitMs)
-    while (true) {
-      let { messages, guidance, status, ended } = await collect()
-      // Return immediately if ended, if there are messages to deliver,
-      // or if it's the initiator's turn (input-required)
-      if (ended || (Array.isArray(messages) && messages.length > 0) || status === 'input-required') {
+    // First snapshot
+    {
+      const { messages, guidance, status, ended } = await collect()
+      // Return immediately only if terminal or it's the initiator's turn
+      if (ended || status === 'input-required') {
         const obj = { messages, guidance, status, conversation_ended: ended }
+        try { console.debug('[mcp] check_replies.immediate', { pairId, conversationId, status, ended, msgCount: messages.length }) } catch {}
         return { content: [{ type:'text', text: JSON.stringify(obj) }], structuredContent: obj } as any
       }
-      const remaining = deadline - Date.now()
-      if (remaining <= 0) {
-        const obj = { messages, guidance, status, conversation_ended: ended }
-        return { content: [{ type:'text', text: JSON.stringify(obj) }], structuredContent: obj } as any
-      }
-      since = await waitForNextState(events, pairId, since, remaining)
-      // Loop and re-collect
+    }
+    // Wait once (bounded by waitMs), then re-collect and return
+    await waitForNextState(events, pairId, since, waitMs)
+    {
+      const { messages, guidance, status, ended } = await collect()
+      const obj = { messages, guidance, status, conversation_ended: ended }
+      try { console.debug('[mcp] check_replies.timeoutOrEvent', { pairId, conversationId, status, ended, msgCount: messages.length }) } catch {}
+      return { content: [{ type:'text', text: JSON.stringify(obj) }], structuredContent: obj } as any
     }
   })
 
@@ -159,21 +189,10 @@ function toBase64(s:string): string { return Buffer.from(s, 'utf-8').toString('b
 function fromBase64(b64:string): string { return Buffer.from(b64, 'base64').toString('utf-8') }
 
 async function waitForNextState(events:any, pairId:string, since:number, waitMs:number): Promise<number> {
-  const stream = events.stream(pairId, since) as AsyncGenerator<any>
-  let observed = since
-  let done = false
-  const p1 = (async () => {
-    for await (const chunk of stream) {
-      const seq = Number((chunk as any)?.result?.seq || 0)
-      if (seq > observed) observed = seq
-      done = true
-      break
-    }
-  })()
-  const p2 = new Promise<void>(res => setTimeout(()=>res(), Math.max(0, waitMs)))
-  await Promise.race([p1, p2])
-  try { await (stream as any)?.return?.() } catch {}
-  return observed
+  try { if (typeof events.waitUntil === 'function') return await events.waitUntil(pairId, since, waitMs) } catch {}
+  // Fallback (shouldn't normally hit): simple timeout return
+  await new Promise(res => setTimeout(res, Math.max(0, waitMs)))
+  return since
 }
 
 function createNodeIncomingMessageFromFetch(req: Request) {

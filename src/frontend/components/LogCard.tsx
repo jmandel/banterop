@@ -67,25 +67,24 @@ function openJsonInNewTab(obj: unknown) {
   } catch {}
 }
 
-export function LogCard({ rows, all, fill }:{ rows: Array<Fact>; all?: Array<Fact>; fill?: boolean }) {
-  const outerClass = fill
-    ? 'card flex-1 min-h-0 flex flex-col overflow-hidden'
-    : 'card max-h-72 overflow-y-auto overflow-x-hidden';
+export function LogCard({ rows, all, fill, bare }:{ rows: Array<Fact>; all?: Array<Fact>; fill?: boolean; bare?: boolean }) {
   const listClass = fill ? 'small flex-1 overflow-y-auto overflow-x-hidden' : 'small';
   function openAll() { openJsonInNewTab(all && all.length ? all : rows); }
-  return (
-    <div className={outerClass}>
-      <div className="small row items-center justify-between" style={{ fontWeight:600, marginBottom: 8 }}>
-        <span>Log</span>
-        <button
-          className="p-1 rounded hover:bg-gray-100 text-gray-600"
-          title="Open full journal JSON in new tab"
-          aria-label="Open full journal JSON in new tab"
-          onClick={openAll}
-        >
-          <ExternalLink size={16} strokeWidth={1.75} />
-        </button>
-      </div>
+  const Body = (
+    <>
+      {!bare && (
+        <div className="small row items-center justify-between" style={{ fontWeight:600, marginBottom: 8 }}>
+          <span>Planner Journal</span>
+          <button
+            className="p-1 rounded hover:bg-gray-100 text-gray-600"
+            title="Open full journal JSON in new tab"
+            aria-label="Open full journal JSON in new tab"
+            onClick={openAll}
+          >
+            <ExternalLink size={16} strokeWidth={1.75} />
+          </button>
+        </div>
+      )}
       <div className={listClass}>
         {rows.map((f) => {
           const tag = tagFor(f.type);
@@ -110,6 +109,9 @@ export function LogCard({ rows, all, fill }:{ rows: Array<Fact>; all?: Array<Fac
           );
         })}
       </div>
-    </div>
+    </>
   );
+  if (bare) return Body as any;
+  const outerClass = fill ? 'card flex-1 min-h-0 flex flex-col overflow-hidden' : 'card max-h-72 overflow-y-auto overflow-x-hidden';
+  return (<div className={outerClass}>{Body}</div>);
 }

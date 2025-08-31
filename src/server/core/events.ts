@@ -52,6 +52,50 @@ export function createEventStore(opts?: { maxPerPair?: number }) {
     }
   }
 
+  // Subscribe to next event for a pair. Returns an unsubscribe function.
+  function subscribe(pairId: string, fn: () => void): () => void {
+    const ws = waiters.get(pairId) ?? []
+    ws.push(fn)
+    waiters.set(pairId, ws)
+    return () => {
+      try {
+        const cur = waiters.get(pairId) ?? []
+        const i = cur.indexOf(fn)
+        if (i >= 0) { cur.splice(i, 1); waiters.set(pairId, cur) }
+      } catch {}
+    }
+  }
+
+  // Efficient one-shot wait: resolve with latest seq if a new event arrives within waitMs; otherwise resolve with 'since'.
+  function waitUntil(pairId: string, since: number, waitMs: number): Promise<number> {
+    // Fast path: deliver immediately if we already have events beyond 'since'
+    try {
+      const arr = listSince(pairId, since)
+      if (arr.length) return Promise.resolve(arr[arr.length - 1]!.seq)
+    } catch {}
+    let unsubscribe: (() => void) | null = null
+    // Promise that resolves on next push for this pairId
+    const onEvent = new Promise<number>((resolve) => {
+      const cb = () => {
+        try {
+          const arr = listSince(pairId, since)
+          resolve(arr.length ? arr[arr.length - 1]!.seq : since)
+        } catch { resolve(since) }
+      }
+      unsubscribe = subscribe(pairId, cb)
+    })
+    // Promise that resolves after waitMs
+    let timer: any = null
+    const onTimeout = new Promise<number>((resolve) => {
+      timer = setTimeout(() => resolve(since), Math.max(0, waitMs))
+    })
+    // Race event vs timeout
+    return Promise.race([onEvent, onTimeout]).finally(() => {
+      try { if (unsubscribe) unsubscribe() } catch {}
+      try { if (timer) clearTimeout(timer) } catch {}
+    })
+  }
+
   function listMessagesForEpoch(pairId: string, epoch: number): Array<{ messageId: string; message: any }> {
     const arr = store.get(pairId) ?? []
     const out: Array<{ messageId: string; message: any }> = []
@@ -61,5 +105,5 @@ export function createEventStore(opts?: { maxPerPair?: number }) {
     return out
   }
 
-  return { push, stream, listSince, listMessagesForEpoch }
+  return { push, stream, listSince, listMessagesForEpoch, waitUntil, subscribe }
 }

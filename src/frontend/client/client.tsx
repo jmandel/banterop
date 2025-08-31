@@ -10,7 +10,7 @@ import { startPlannerController } from '../planner/controller';
 import { resolvePlanner } from '../planner/registry';
 import { makeBanteropProvider, DEFAULT_BANTEROP_ENDPOINT, DEFAULT_BANTEROP_MODEL } from '../../shared/llm-provider';
 import { b64ToUtf8, normalizeB64 } from '../../shared/codec';
-import { startUrlSync } from '../hooks/startUrlSync';
+import { startUrlSync, updateReadableHashFromStore } from '../hooks/startUrlSync';
 import { PlannerSetupCard } from './PlannerSetupCard';
 import { DebugPanel } from './DebugPanel';
 import { TaskRibbon } from '../components/TaskRibbon';
@@ -23,6 +23,8 @@ import { attachmentHrefFromBase64 } from '../components/attachments';
 import { ClientSettingsModal } from './ClientSettingsModal';
 import { AutomationCard } from '../components/AutomationCard';
 import { LogCard } from '../components/LogCard';
+import { WireLogCard } from '../components/WireLogCard';
+import { CollapsibleCard } from '../components/CollapsibleCard';
 import { ClientLinksCard } from './components/ClientLinksCard';
 import { MetaBar } from '../components/MetaBar';
 import { Settings } from 'lucide-react';
@@ -79,11 +81,7 @@ function App() {
     // Preserve any existing API key in session when reading from hash
     let existingApiKey: string | undefined = undefined;
     try {
-      const prevRaw = window.sessionStorage.getItem('clientSettings');
-      if (prevRaw) {
-        const prev = JSON.parse(prevRaw);
-        existingApiKey = prev?.llm?.apiKey || '';
-      }
+      existingApiKey = localStorage.getItem('client.llm.apiKey') || '';
     } catch {}
 
     try {
@@ -102,7 +100,9 @@ function App() {
         if (j && typeof j === 'object') {
           const llm = j.llm || {};
           const provider = (llm.provider === 'client-openai') ? 'client-openai' : 'server';
-          const model = typeof llm.model === 'string' && llm.model.trim() ? llm.model.trim() : DEFAULT_BANTEROP_MODEL;
+          const model = (provider === 'client-openai')
+            ? (typeof llm.model === 'string' ? llm.model.trim() : '')
+            : (typeof llm.model === 'string' && llm.model.trim() ? llm.model.trim() : DEFAULT_BANTEROP_MODEL);
           const baseUrl = provider === 'client-openai' ? (llm.baseUrl || 'https://openrouter.ai/api/v1') : undefined;
           // Do NOT read apiKey from the hash; keep any existing value
           const apiKey = provider === 'client-openai' ? (existingApiKey || '') : undefined;
@@ -127,8 +127,18 @@ function App() {
   }
   const [clientSettings, setClientSettings] = useState<ClientSettings>(loadClientSettings);
   function saveClientSettings(next: ClientSettings) {
-    setClientSettings(next);
-    try { window.sessionStorage.setItem('clientSettings', JSON.stringify(next)); } catch {}
+    // Keep both URLs if provided; transport selects which to use right now
+    const normalized: ClientSettings = { ...next } as ClientSettings;
+    setClientSettings(normalized);
+    // Persist API key to localStorage only (never to hash)
+    try {
+      const key = (normalized.llm.provider === 'client-openai') ? (normalized.llm.apiKey || '') : '';
+      if (key) localStorage.setItem('client.llm.apiKey', key);
+      else localStorage.removeItem('client.llm.apiKey');
+    } catch {}
+    // Keep non-secret settings mirrored in sessionStorage for legacy readers (planner controller, rooms modal)
+    try { window.sessionStorage.setItem('clientSettings', JSON.stringify(normalized)); } catch {}
+    try { updateReadableHashFromStore(); } catch {}
   }
 
   // Start centralized URL sync
@@ -187,7 +197,10 @@ function App() {
     if (transport === 'a2a' && !endpointA2A) return;
     if (transport === 'mcp' && !endpointMcp) return;
     try { console.debug('[client] Adapter ready', { transport, endpoint: transport==='mcp' ? endpointMcp : endpointA2A }); } catch {}
-    const adapter = transport === 'mcp' ? new MCPAdapter(endpointMcp) : new A2AAdapter(endpointA2A);
+    const wireSink = (e:any) => { try { useAppStore.getState().wire.add(e); } catch {} };
+    const adapter = transport === 'mcp'
+      ? new MCPAdapter(endpointMcp, { onWire: wireSink })
+      : new A2AAdapter(endpointA2A, { onWire: wireSink, suppressOwnFromSnapshots: true });
     store.init('initiator' as any, adapter, undefined);
     startPlannerController();
   }, [transport, resolvedA2A, resolvedMcp, mcpUrl]);
@@ -305,7 +318,7 @@ function App() {
       breadcrumbs={(
         <>
           <span className="truncate font-semibold text-gray-900">Client</span>
-          <span className="pill">{transport === 'mcp' ? 'MCP' : 'A2A'}</span>
+          <span className="small muted">{transport === 'mcp' ? 'MCP' : 'A2A'}</span>
         </>
       )}
       headerRight={(
@@ -322,7 +335,7 @@ function App() {
         left={(
           <div className="row compact">
             <span className="small muted">Task</span>
-            <span className="pill">{taskId ? taskId : 'No task'}</span>
+            <span className="small font-mono text-gray-800">{taskId ? taskId : 'No task'}</span>
             {!!taskId && (
               <button
                 className="p-1 rounded hover:bg-gray-100 text-gray-600"
@@ -333,23 +346,23 @@ function App() {
                 <Copy size={16} strokeWidth={1.75} />
               </button>
             )}
+            <span className="small muted ml-2">
+              {(() => {
+                if (!taskId) return 'Send a message to begin a new task';
+                if (['completed','canceled','failed','rejected'].includes(uiStatus)) return uiStatus;
+                const dismissed = new Set<string>(facts.filter((f:any)=>f.type==='compose_dismissed').map((f:any)=>String(f.composeId||'')));
+                let pendingReview = false;
+                for (let i = facts.length - 1; i >= 0; --i) { const f:any = facts[i]; if (f.type==='remote_sent') break; if (f.type==='compose_intent' && !dismissed.has(String(f.composeId||''))) { pendingReview = true; break; } }
+                if (pendingReview && useAppStore.getState().plannerMode==='approve') return 'Waiting for review';
+                if (uiStatus==='input-required') return 'Our turn';
+                if (uiStatus==='working') return 'Other side working';
+                if (uiStatus==='submitted' || uiStatus==='initializing') return 'Setting up…';
+                return uiStatus || 'Unknown';
+              })()}
+            </span>
           </div>
         )}
-        chips={(() => {
-          const chips:any[] = [];
-          const dismissed = new Set<string>(facts.filter((f:any)=>f.type==='compose_dismissed').map((f:any)=>String(f.composeId||'')));
-          let pendingReview = false;
-          for (let i = facts.length - 1; i >= 0; --i) { const f:any = facts[i]; if (f.type==='remote_sent') break; if (f.type==='compose_intent' && !dismissed.has(String(f.composeId||''))) { pendingReview = true; break; } }
-          if (!taskId) {
-            chips.push({ text: 'Send a message to begin a new task', tone: 'gray' });
-          } else if (['completed','canceled','failed','rejected'].includes(uiStatus)) chips.push({ text: uiStatus, tone:'blue' });
-          else if (pendingReview && useAppStore.getState().plannerMode==='approve') chips.push({ text:'Waiting for review', tone:'amber' });
-          else if (uiStatus==='input-required') chips.push({ text:'Our turn', tone:'amber' });
-          else if (uiStatus==='working') chips.push({ text:'Other side working', tone:'blue' });
-          else if (uiStatus==='submitted' || uiStatus==='initializing') chips.push({ text:'Setting up…', tone:'blue' });
-          else chips.push({ text: uiStatus || 'Unknown', tone:'gray' });
-          return chips;
-        })()}
+        chips={[]}
         right={<button className="btn secondary" onClick={clearTask} disabled={!taskId}>Clear task</button>}
       />
 
@@ -463,13 +476,25 @@ function App() {
           }}
         >
           <div className="flex flex-col gap-3 min-h-0">
-            <AutomationCard
-              mode={useAppStore.getState().plannerMode as any}
-              onModeChange={(m)=>useAppStore.getState().setPlannerMode(m)}
-              plannerSelect={<PlannerSelector />}
-            />
-            <ClientLinksCard />
-            <LogCard rows={facts.slice(-100) as any} all={facts as any} fill={fixedSide} />
+            <CollapsibleCard title="Helpful Links" initialOpen>
+              <ClientLinksCard hideTitle />
+            </CollapsibleCard>
+
+            <CollapsibleCard title="Automation" initialOpen>
+              <AutomationCard bare hideTitle
+                mode={useAppStore.getState().plannerMode as any}
+                onModeChange={(m)=>useAppStore.getState().setPlannerMode(m)}
+                plannerSelect={<PlannerSelector />}
+              />
+            </CollapsibleCard>
+
+            <CollapsibleCard title="Wire Messages" initialOpen>
+              <WireLogCard bare max={30} />
+            </CollapsibleCard>
+
+            <CollapsibleCard title="Planner Journal" initialOpen>
+              <LogCard bare rows={facts.slice(-100) as any} all={facts as any} fill={fixedSide} />
+            </CollapsibleCard>
           </div>
         </div>
       </div>

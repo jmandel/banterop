@@ -3,7 +3,7 @@ import type { Context } from 'hono'
 import type { AppBindings } from '../index'
 import { parseRpc, rpcError, e } from '../core/jsonrpc'
 import { sse } from '../core/sse'
-import { validateAgentCardWithReport } from '../core/a2a-validator'
+import { validateAgentCard } from '../core/a2a-validator'
 import { A2A_EXT_URL } from '../../shared/core'
 
 async function a2aHandler(c: Context<AppBindings>) {
@@ -107,8 +107,8 @@ async function agentCardHandler(c: Context<AppBindings>) {
     if (agentCard && typeof agentCard === 'object') merged = deepMerge(merged, agentCard)
   } catch {}
 
-  // Validate the agent card and attach report (returns new object)
-  merged = validateAgentCardWithReport(merged, { roomId })
+  // Validate the agent card (log-only)
+  try { validateAgentCard(merged, { roomId }) } catch {}
   
   return c.json(merged)
 }
