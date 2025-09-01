@@ -9,7 +9,13 @@ function Dot({ ok }:{ ok:boolean|undefined }) {
 
 export function WireLogCard({ max=30, bare=false }:{ max?: number; bare?: boolean }) {
   const entries = useAppStore(s => s.wire.entries);
-  const shown = entries.slice(-max);
+  const role = useAppStore(s => s.role);
+  const mode = useAppStore(s => s.wire.mode) || 'a2a';
+  const filtered = React.useMemo(() => {
+    if (mode === 'mcp') return entries.filter(e => e.protocol === 'mcp');
+    return entries.filter(e => e.protocol === 'a2a');
+  }, [entries, mode]);
+  const shown = filtered.slice(-max);
 
   function openJson(e:any, idx:number) {
     try {
@@ -44,13 +50,26 @@ export function WireLogCard({ max=30, bare=false }:{ max?: number; bare?: boolea
               <span className="mr-1" title={w.dir}>{w.dir === 'outbound' ? '→' : '←'}</span>
               {(() => {
                 const proto = String(w.protocol || '').toUpperCase();
-                if (w.protocol === 'a2a') {
-                  return <span>{w.dir === 'outbound' ? 'send A2A' : 'receive A2A'}</span>;
+                if (mode === 'a2a') {
+                  // Status updates: show explicit source (User/Agent) based on direction
+                  if (String(w.kind || '').toLowerCase() === 'status-update') {
+                    const label = (w.dir === 'inbound') ? 'A2A Status Update from User' : 'A2A Status Update from Agent';
+                    return <span>{label}</span>;
+                  }
+                  // Messages: label as User/Agent Message based on page role and direction
+                  const isInitiator = role === 'initiator';
+                  const label = isInitiator
+                    ? (w.dir === 'outbound' ? 'A2A User Message' : 'A2A Agent Message')
+                    : (w.dir === 'inbound' ? 'A2A User Message' : 'A2A Agent Message');
+                  return <span>{label}</span>;
                 }
-                if (w.protocol === 'mcp') {
+                if (mode === 'mcp') {
                   const tool = String(w.method || '').trim();
-                  const name = tool ? ` [${tool}]` : '';
-                  return <span>{w.dir === 'outbound' ? `call MCP${name}` : `result MCP${name}`}</span>;
+                  const suffix = tool ? ` [${tool}]` : '';
+                  const isInitiator = role === 'initiator';
+                  const isCall = isInitiator ? (w.dir === 'outbound') : (w.dir === 'inbound');
+                  const label = isCall ? 'MCP Tool Call' : 'MCP Tool Result';
+                  return <span>{`${label}${suffix}`}</span>;
                 }
                 return <span>{proto}</span>;
               })()}

@@ -62,7 +62,7 @@ export class A2AAdapter implements TransportAdapter {
               const looksA2AMsg = rawPayload && typeof rawPayload === 'object' && Array.isArray(rawPayload.parts) && (rawPayload.role === 'user' || rawPayload.role === 'agent');
               const looksMcpSend = rawPayload && typeof rawPayload === 'object' && typeof rawPayload.conversationId === 'string';
               if (wm.adapter === 'mcp' || looksMcpSend) {
-                this.onWire && this.onWire({ protocol:'mcp', dir:'inbound', method:'send_message_to_chat_thread', kind:'request', roomId:this.roomId, taskId:t.id, payload: rawPayload });
+                // Let server backchannel SSE provide MCP wire events; skip duplicating here.
               } else if (looksA2AMsg) {
                 const rawMid = String(rawPayload.messageId || mid || '');
                 this.onWire && this.onWire({ protocol:'a2a', dir:'inbound', method:'message/send', kind:'message', roomId:this.roomId, taskId:t.id, messageId: rawMid, payload: rawPayload });

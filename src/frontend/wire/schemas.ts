@@ -10,6 +10,16 @@ export function getMcpRequestSchema(method: string): any | null {
   return null;
 }
 
+// Response schemas for MCP tools (validate parsed JSON returned by MCP content[0].text/json)
+export function getMcpResponseSchema(method: string): any | null {
+  const m = String(method || '').trim();
+  if (!m) return null;
+  if (m === 'begin_chat_thread') return MCP_BEGIN_CHAT_THREAD_RES;
+  if (m === 'send_message_to_chat_thread') return MCP_SEND_MESSAGE_RES;
+  if (m === 'check_replies') return MCP_CHECK_REPLIES_RES;
+  return null;
+}
+
 const MCP_BEGIN_CHAT_THREAD_REQ = {
   $id: 'mcp.begin_chat_thread.request',
   title: 'MCP: begin_chat_thread (request)',
@@ -55,3 +65,65 @@ const MCP_CHECK_REPLIES_REQ = {
   required: ['conversationId'],
 };
 
+// --- Responses ---
+
+const MCP_BEGIN_CHAT_THREAD_RES = {
+  $id: 'mcp.begin_chat_thread.response',
+  title: 'MCP: begin_chat_thread (response)',
+  type: 'object',
+  additionalProperties: true,
+  properties: {
+    conversationId: { type: 'string', minLength: 1 },
+  },
+  required: ['conversationId'],
+};
+
+const MCP_SEND_MESSAGE_RES = {
+  $id: 'mcp.send_message_to_chat_thread.response',
+  title: 'MCP: send_message_to_chat_thread (response)',
+  type: 'object',
+  additionalProperties: true,
+  properties: {
+    guidance: { type: 'string' },
+    status: { type: 'string', enum: ['working'] },
+  },
+  required: ['guidance', 'status'],
+};
+
+const MCP_REPLY_ATTACHMENT = {
+  type: 'object',
+  additionalProperties: true,
+  properties: {
+    name: { type: 'string', minLength: 1 },
+    contentType: { type: 'string', minLength: 1 },
+    content: { type: 'string' },
+    summary: { type: 'string' },
+  },
+  required: ['name', 'contentType', 'content'],
+};
+
+const MCP_REPLY_MESSAGE = {
+  type: 'object',
+  additionalProperties: true,
+  properties: {
+    from: { type: 'string', minLength: 1 },
+    at: { type: 'string', minLength: 1 },
+    text: { type: 'string' },
+    attachments: { type: 'array', items: MCP_REPLY_ATTACHMENT },
+  },
+  required: ['from', 'at'],
+};
+
+const MCP_CHECK_REPLIES_RES = {
+  $id: 'mcp.check_replies.response',
+  title: 'MCP: check_replies (response)',
+  type: 'object',
+  additionalProperties: true,
+  properties: {
+    messages: { type: 'array', items: MCP_REPLY_MESSAGE },
+    guidance: { type: 'string' },
+    status: { type: 'string', enum: ['working','input-required','completed'] },
+    conversation_ended: { type: 'boolean' },
+  },
+  required: ['messages', 'status'],
+};

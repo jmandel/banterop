@@ -68,10 +68,13 @@ export function createRoomsRoutes() {
           const lastSeq = Array.isArray(lastSeqArr) && lastSeqArr.length ? Number(lastSeqArr[lastSeqArr.length - 1].seq || 0) : 0
           for await (const ev of (events as any).stream(pairId, lastSeq)) {
             const e = ev.result
+            // Maintain subscribe notifications on epoch boundaries for room app
             if (e?.type === 'epoch-begin' && typeof e.epoch === 'number') {
               const taskId = `resp:${pairId}#${e.epoch}`
               write({ type:'subscribe', pairId, epoch: e.epoch, taskId, turn: 'initiator' })
             }
+            // Broadcast all events, including client-wire-event, state, message, etc.
+            write(e)
           }
         } catch {}
         finally {

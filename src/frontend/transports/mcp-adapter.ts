@@ -75,11 +75,11 @@ export class MCPAdapter implements TransportAdapter {
   private async callTool(name: string, args?: any): Promise<any> {
     await this.ensureConnected();
     // Log outbound call strictly before sending
-    try { this.onWire && this.onWire({ protocol:'mcp', dir:'outbound', method:name, roomId:this.roomId, payload: args || {} }); } catch {}
+    try { this.onWire && this.onWire({ protocol:'mcp', dir:'outbound', method:name, kind:'request', roomId:this.roomId, payload: { name, arguments: args || {} } }); } catch {}
     const result: any = await this.client!.callTool({ name, arguments: args || {} } as any);
     const parsed = pickJsonOrParseText(result);
     // Log inbound result immediately after
-    try { this.onWire && this.onWire({ protocol:'mcp', dir:'inbound', method:name, roomId:this.roomId, payload: parsed }); } catch {}
+    try { this.onWire && this.onWire({ protocol:'mcp', dir:'inbound', method:name, kind:'response', roomId:this.roomId, payload: { name, result: parsed } }); } catch {}
     return parsed;
   }
 

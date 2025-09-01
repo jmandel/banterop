@@ -31,7 +31,7 @@ export interface ScenarioPlannerConfig {
   enabledTools?: string[];
   /** Which agent we are playing as (agentId). Defaults to first agent. */
   myAgentId?: string;
-  /** Core tools allow-list (send/read/sleep/done/principal). Omit → all enabled. */
+  /** Core tools allow-list (send/read/done/principal/sleep). If omitted, defaults to ['sendMessageToRemoteAgent','readAttachment','done']. */
   enabledCoreTools?: string[];
   /** Max planner steps within one pass (reserved; defaults handled by planner). */
   maxInlineSteps?: number;
@@ -51,7 +51,8 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
     scenarioUrl: String(cfg?.scenarioUrl || ''),
     myAgentId: String(cfg?.myAgentId || ''),
     enabledTools: Array.isArray(cfg?.enabledTools) ? cfg.enabledTools : [],
-    enabledCoreTools: Array.isArray(cfg?.enabledCoreTools) ? cfg.enabledCoreTools : ['sendMessageToRemoteAgent','sendMessageToMyPrincipal','readAttachment','sleep','done'],
+    // Default: omit 'sleep' and 'sendMessageToMyPrincipal' unless explicitly enabled
+    enabledCoreTools: Array.isArray(cfg?.enabledCoreTools) ? cfg.enabledCoreTools : ['sendMessageToRemoteAgent','readAttachment','done'],
     maxInlineSteps: Number(cfg?.maxInlineSteps ?? 20),
     instructions: (typeof cfg?.instructions === 'string' && cfg.instructions.trim()) ? String(cfg.instructions) : undefined,
   }),
@@ -104,7 +105,10 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
     const counterpartId = (scenario?.agents?.find(a => a.agentId !== myId)?.agentId) || (scenario?.agents?.[1]?.agentId) || 'counterpart';
     const allowSendToRemote = (status === 'input-required') || bootstrap;
     const enabledScenarioTools = Array.isArray((ctx.config as any)?.enabledTools) ? (ctx.config as any).enabledTools as string[] : undefined;
-    const coreAllowed = new Set<string>(Array.isArray(cfg.enabledCoreTools) && cfg.enabledCoreTools.length ? cfg.enabledCoreTools : ['sendMessageToRemoteAgent','sendMessageToMyPrincipal','readAttachment','sleep','done']);
+    // Default core tools omit sleep and principal messaging unless explicitly enabled
+    const coreAllowed = new Set<string>(Array.isArray(cfg.enabledCoreTools) && cfg.enabledCoreTools.length
+      ? cfg.enabledCoreTools
+      : ['sendMessageToRemoteAgent','readAttachment','done']);
     const model = ctx.model;
     const maxSteps = Math.max(1, Math.min(50, Number(cfg.maxInlineSteps ?? 20)));
 
@@ -140,6 +144,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
 
       // Dispatch
       if (decision.tool === 'sleep') {
+        if (!coreAllowed.has('sleep')) { out.push(sleepFact('Core tool disabled: sleep', includeWhy)); break; }
         out.push(sleepFact('LLM chose to sleep.', includeWhy, reasoning));
         break;
       }
@@ -597,7 +602,10 @@ function buildToolsCatalog(
   lines.push('Schema: { reasoning: string, action: { tool: string, args: object } }');
   lines.push('');
 
-  const coreAllowed = new Set<string>(Array.isArray(enabledCoreTools) && enabledCoreTools.length ? enabledCoreTools : ['sendMessageToRemoteAgent','sendMessageToMyPrincipal','readAttachment','sleep','done']);
+  // Default core tools omit sleep and principal messaging unless explicitly enabled
+  const coreAllowed = new Set<string>(Array.isArray(enabledCoreTools) && enabledCoreTools.length
+    ? enabledCoreTools
+    : ['sendMessageToRemoteAgent','readAttachment','done']);
   // Core: sendMessageToRemoteAgent
   if (coreAllowed.has('sendMessageToRemoteAgent')) {
     lines.push("// Send a message to the remote agent. Attachments by 'name'.");

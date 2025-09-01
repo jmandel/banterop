@@ -48,6 +48,26 @@ export function textPart(text: string, nextState: 'working'|'input-required'|'co
   return { kind: 'text', text, metadata: { [A2A_EXT_URL]: { nextState } } } as any;
 }
 
+// Helper to create a properly formatted A2A message object
+export function createMessage(opts: {
+  role?: 'user' | 'agent';
+  parts: any[];
+  messageId: string;
+  taskId?: string;
+  contextId?: string;
+  metadata?: any;
+}) {
+  return {
+    kind: 'message' as const,
+    role: opts.role || 'user',
+    parts: opts.parts,
+    messageId: opts.messageId,
+    ...(opts.taskId && { taskId: opts.taskId }),
+    ...(opts.contextId && { contextId: opts.contextId }),
+    ...(opts.metadata && { metadata: opts.metadata })
+  };
+}
+
 export function tmpDbPath(): string {
   const name = `db-${Math.random().toString(36).slice(2,9)}.sqlite`;
   // Prefer OS tmpdir to avoid cluttering repo root

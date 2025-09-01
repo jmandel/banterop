@@ -7,7 +7,7 @@ import { validateParts } from '../../shared/parts-validator';
 import { nowIso, rid } from '../../shared/core';
 import { resolvePlanner } from '../planner/registry';
 import Ajv from 'ajv';
-import { getMcpRequestSchema } from '../wire/schemas';
+import { getMcpRequestSchema, getMcpResponseSchema } from '../wire/schemas';
 import { getA2ASchema } from '../wire/a2a-schemas';
 import { fetchJsonCapped } from '../../shared/net';
 import { validateScenarioConfig } from '../../shared/scenario-validator';
@@ -22,6 +22,7 @@ export type WireLogEntry = {
   ts: string;
   protocol: WireProtocol;
   dir: WireDirection;
+  context?: 'a2a'|'mcp';
   roomId?: string;
   taskId?: string;
   messageId?: string;
@@ -161,8 +162,10 @@ export type Store = {
   };
   // Wire log (protocol-level)
   wire: {
+    mode?: 'a2a'|'mcp';
     entries: Array<WireLogEntry>;
-    add(entry: Partial<WireLogEntry> & Pick<WireLogEntry,'protocol'|'dir'|'payload'> & { method?: string; roomId?: string; taskId?: string; messageId?: string; kind?: string }): void;
+    setMode(mode: 'a2a'|'mcp'): void;
+    add(entry: Partial<WireLogEntry> & Pick<WireLogEntry,'protocol'|'dir'|'payload'> & { context?: 'a2a'|'mcp'; method?: string; roomId?: string; taskId?: string; messageId?: string; kind?: string }): void;
     clear(): void;
   };
 };
@@ -686,6 +689,44 @@ export const useAppStore = create<Store>((set, get) => ({
             set((st:any)=>({ rooms: { ...st.rooms, byId: byId2 } }));
           } else if (msg?.type === 'subscribe' && msg.taskId) {
             try { get().setTaskId(String(msg.taskId)) } catch {}
+            // Track epoch and clear wire log on epoch change
+            try {
+              const epoch = Number(msg.epoch ?? NaN);
+              const prev = get().currentEpoch;
+              if (Number.isFinite(epoch) && epoch !== prev) {
+                set({ currentEpoch: epoch });
+                set(s => ({ wire: { ...s.wire, entries: [] } }));
+              }
+            } catch {}
+          } else if (msg?.type === 'client-wire-event' && msg.protocol === 'mcp') {
+            // Server backchannel MCP wire event (base64 payload)
+            try {
+              const dir = (String(msg.dir || '').toLowerCase() === 'outbound') ? 'outbound' : 'inbound';
+              const b64 = String(msg.payload || '');
+              let decoded: any = {};
+              try { decoded = JSON.parse(atob(b64)); } catch {}
+              const toolName = String(msg.tool || (decoded?.params?.name || '') || '');
+              const kind = dir === 'inbound' ? 'request' : 'response';
+              const wirePayload = (kind === 'request')
+                ? { name: toolName, arguments: (decoded?.params?.arguments ?? {}) }
+                : { name: toolName, result: decoded };
+              // Flip Rooms wire mode to MCP
+              try { get().wire.setMode('mcp'); } catch {}
+              get().wire.add({ protocol:'mcp', dir: dir as any, method: toolName, kind, payload: wirePayload });
+            } catch {}
+          } else if (msg?.type === 'client-wire-event' && msg.protocol === 'a2a') {
+            // Server backchannel A2A wire: client‑oriented status updates
+            try {
+              const dir = (String(msg.dir || '').toLowerCase() === 'outbound') ? 'outbound' : 'inbound';
+              const b64 = String(msg.payload || '');
+              let decoded: any = {};
+              try { decoded = JSON.parse(atob(b64)); } catch {}
+              // We expect a TaskStatusUpdate; ensure kind for validator
+              const kind = 'status-update';
+              // Flip Rooms wire mode to A2A
+              try { get().wire.setMode('a2a'); } catch {}
+              get().wire.add({ protocol:'a2a', dir: dir as any, kind, payload: decoded });
+            } catch {}
           }
         } catch {}
       };
@@ -749,16 +790,39 @@ export const useAppStore = create<Store>((set, get) => ({
 
   // --- wire log slice (browser-only; validate MCP outbound requests) ---
   wire: {
+    mode: undefined,
     entries: [],
+    setMode(mode) { set(s => ({ wire: { ...s.wire, mode } })); },
     add(entry) {
       const id = rid('w');
       const ts = nowIso();
-      const base: WireLogEntry = { id, ts, protocol: entry.protocol as any, dir: entry.dir as any, roomId: entry.roomId, taskId: entry.taskId, messageId: entry.messageId, method: entry.method, kind: entry.kind, payload: entry.payload, raw: entry.raw };
-      // Simple dedupe: only one entry per messageId
+      // Establish/propagate context mode
+      try {
+        const cur = get().wire.mode;
+        const suggested = (entry.context as any) || (entry.protocol === 'mcp' ? 'mcp' : undefined);
+        if (suggested && cur !== suggested) set(s => ({ wire: { ...s.wire, mode: suggested } }));
+        else if (!cur && entry.protocol === 'a2a') set(s => ({ wire: { ...s.wire, mode: 'a2a' } }));
+      } catch {}
+      const base: WireLogEntry = { id, ts, protocol: entry.protocol as any, dir: entry.dir as any, context: entry.context as any, roomId: entry.roomId, taskId: entry.taskId, messageId: entry.messageId, method: entry.method, kind: entry.kind, payload: entry.payload, raw: entry.raw };
+      // Dedupe by messageId, preferring outbound entries over inbound when both exist
       try {
         if (base.messageId) {
-          const exists = (get().wire.entries || []).some(e => e.messageId === base.messageId);
-          if (exists) return;
+          const entries = (get().wire.entries || []);
+          const idx = entries.findIndex(e => e.messageId === base.messageId);
+          if (idx >= 0) {
+            const prev = entries[idx];
+            const prevDir = String(prev.dir || '').toLowerCase();
+            const nextDir = String(base.dir || '').toLowerCase();
+            if (prevDir === 'inbound' && nextDir === 'outbound') {
+              // Replace inbound with outbound for the same messageId
+              const updated = entries.slice();
+              updated[idx] = base;
+              set(s => ({ wire: { ...s.wire, entries: updated } }));
+              return;
+            }
+            // Otherwise keep existing
+            return;
+          }
         }
       } catch {}
       let validation: WireValidation | undefined = undefined;
@@ -774,13 +838,42 @@ export const useAppStore = create<Store>((set, get) => ({
         }
       } catch {}
       try {
-        // Validate MCP requests (both directions, depending on context)
-        if (base.protocol === 'mcp') {
-          const sch = getMcpRequestSchema(String(base.method || ''));
+      // Validate MCP: request vs response; unwrap { name, arguments|result } wrappers
+      if (base.protocol === 'mcp') {
+        const method = String(base.method || '');
+        const kindLower = String(base.kind || '').toLowerCase();
+        let sch: any | null = null;
+        if (kindLower === 'request') sch = getMcpRequestSchema(method);
+        else if (kindLower === 'response' || kindLower === 'result') sch = (getMcpResponseSchema as any)(method);
+        else sch = base.dir === 'outbound' ? getMcpRequestSchema(method) : (base.dir === 'inbound' ? (getMcpResponseSchema as any)(method) : null);
           if (sch) {
             const ajv = new Ajv({ strict: false, allErrors: true });
             const validate = ajv.compile(sch as any);
-            const ok = validate(base.payload);
+            const toValidate = (() => {
+              const p: any = base.payload as any;
+              if (!p || typeof p !== 'object') return p;
+              // Requests validate arguments
+              if (kindLower === 'request' || (kindLower === '' && base.dir === 'outbound')) {
+                return (p.arguments != null ? p.arguments : (p.params?.arguments ?? p));
+              }
+              // Responses validate structuredContent when present; else try parsing content[0].text; else result as-is
+              if (kindLower === 'response' || kindLower === 'result' || (kindLower === '' && base.dir === 'inbound')) {
+                const r = (p.result != null ? p.result : p);
+                if (r && typeof r === 'object') {
+                  if (r.structuredContent != null) return r.structuredContent;
+                  try {
+                    const c = Array.isArray(r.content) ? r.content : [];
+                    const t = c.find((x:any)=>x && x.type==='text' && typeof x.text==='string');
+                    if (t && typeof t.text === 'string') {
+                      try { return JSON.parse(t.text); } catch {}
+                    }
+                  } catch {}
+                }
+                return r;
+              }
+              return p;
+            })();
+            const ok = validate(toValidate);
             validation = ok ? { valid: true, schema: sch.$id || sch.title } : {
               valid: false,
               schema: sch.$id || sch.title,

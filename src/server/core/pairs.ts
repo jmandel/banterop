@@ -1,5 +1,6 @@
 import type { Persistence, TaskRow, TaskState } from './persistence'
 import { A2A_EXT_URL } from '../../shared/core'
+import { utf8ToB64 } from '../../shared/codec'
 import { extractNextState, computeStatesForNext } from './finality'
 import { validateParts } from './validators'
 import { initTaskId, respTaskId, parseTaskId } from './ids'
@@ -37,7 +38,7 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
     let statusUpdate = {
       kind: 'status-update' as const,
       taskId,
-      contextId: pairId,
+      contextId: taskId,
       status: {
         state,
         message
@@ -123,7 +124,7 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
       state = (viewerRole === 'init' ? (both as any).init : (both as any).resp) as TaskState
       statusMessage = projectForViewer(obj, viewerTaskId, viewerRole, last.author)
     }
-    const snapshot: TaskSnapshot = { id: row.task_id, contextId: row.pair_id, kind:'task', status:{ state, message: statusMessage }, history: hist }
+    const snapshot: TaskSnapshot = { id: row.task_id, contextId: row.task_id, kind:'task', status:{ state, message: statusMessage }, history: hist }
     
     // Validate outbound task (log-only)
     try { validateTask(snapshot, { pairId: row.pair_id, taskId: row.task_id }) } catch {}
@@ -154,7 +155,7 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
       const parsedRole: 'init'|'resp' | null = senderTaskId.startsWith('init:') ? 'init' : (senderTaskId.startsWith('resp:') ? 'resp' : null)
       const authorRole: 'init'|'resp' = authorRoleHint ?? (parsedRole ?? viewerRole)
       const relRole = (authorRole === viewerRole) ? 'user' : 'agent'
-      return { ...base, role: relRole, taskId: viewerTaskId, contextId: viewerPairId }
+      return { ...base, role: relRole, taskId: viewerTaskId, contextId: viewerTaskId }
     } catch {
       return message
     }
@@ -212,6 +213,24 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
 
   async function upsertStates(pairId:string, epoch:number, states:{ init:TaskState; resp:TaskState }, sender:'init'|'resp', msg:any | undefined) {
     events.push(pairId, { type:'state', epoch, states: { initiator: states.init, responder: states.resp }, status: { message: msg && { ...msg } } } as any)
+    // Best‑effort backchannel: push client‑oriented A2A TaskStatusUpdate as a wire event
+    try {
+      const initId = initTaskId(pairId, epoch);
+      const row = db.getTask(initId);
+      const snap = row ? toSnapshot(row) : null;
+      const state = (snap?.status?.state || states.init) as TaskState;
+      const statusMessage = snap?.status?.message;
+      const isFinal = isTerminal(state) || state === 'input-required';
+      const statusUpdate = createStatusUpdateEvent({ taskId: initId, pairId, state, message: statusMessage, isFinal });
+      // For client-wire-event, express contextId in client terms (valid task id)
+      try { (statusUpdate as any).contextId = initId; } catch {}
+      // Direction aligns to who authored the status.message
+      // user → inbound (client→server), agent → outbound (server→client)
+      let dir: 'inbound'|'outbound' = 'outbound';
+      try { const r = String(statusMessage?.role || '').toLowerCase(); if (r === 'user') dir = 'inbound'; else if (r === 'agent') dir = 'outbound'; } catch {}
+      const b64 = utf8ToB64(JSON.stringify(statusUpdate));
+      events.push(pairId, { type: 'client-wire-event', protocol:'a2a', dir, payload: b64, epoch } as any);
+    } catch {}
   }
 
   return {
@@ -278,12 +297,19 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
         kind: 'message',
         metadata: m?.metadata,
       }
-      // Stamp raw wireMessage for Rooms wire log (client-submitted A2A)
+      // Stamp raw wireMessage for Rooms wire log (client-submitted A2A).
+      // Respect pre-existing wireMessage (e.g., set by MCP proxy) and do not overwrite it.
       try {
         const ext = (msg.metadata && (msg.metadata as any)[A2A_EXT_URL]) ? { ...(msg.metadata as any)[A2A_EXT_URL] } : {};
-        const rawA2A = { role: msg.role, parts: msg.parts, messageId: msg.messageId, kind: 'message' } as any;
-        const b64 = Buffer.from(JSON.stringify(rawA2A), 'utf-8').toString('base64');
-        (msg.metadata as any) = { ...(msg.metadata || {}), [A2A_EXT_URL]: { ...ext, wireMessage: { raw: b64 } } };
+        const hasWire = ext && typeof (ext as any).wireMessage === 'object' && (ext as any).wireMessage !== null;
+        if (!hasWire) {
+          const rawA2A = { role: msg.role, parts: msg.parts, messageId: msg.messageId, kind: 'message' } as any;
+          const b64 = utf8ToB64(JSON.stringify(rawA2A));
+          (msg.metadata as any) = { ...(msg.metadata || {}), [A2A_EXT_URL]: { ...ext, wireMessage: { raw: b64 } } };
+        } else {
+          // Preserve existing wireMessage as-is
+          (msg.metadata as any) = { ...(msg.metadata || {}), [A2A_EXT_URL]: ext };
+        }
       } catch {}
       // Validate message (log-only)
       try { validateMessage(msg, { pairId, messageId: msg.messageId }) } catch {}

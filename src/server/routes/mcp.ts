@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { AppBindings } from '../index'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { A2A_EXT_URL } from '../../shared/core'
+import { utf8ToB64, b64ToUtf8 } from '../../shared/codec'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { z } from 'zod'
 
@@ -46,9 +47,21 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
   // Restore explicit schemas (zod) for tools
   s.registerTool('begin_chat_thread', { inputSchema: {}, description: `Begin chat thread for existing pair ${pairId}` }, async () => {
     const ensured = await pairs.beginNewEpochTasksForPair(pairId)
+    // Broadcast inbound client wire event (MCP request)
+    try {
+      const payload = { method: 'tools/call', params: { name: 'begin_chat_thread', arguments: {} } };
+      const b64 = utf8ToB64(JSON.stringify(payload));
+      events.push(pairId, { type: 'client-wire-event', protocol:'mcp', dir:'inbound', tool:'begin_chat_thread', payload: b64, conversationId: String(ensured.epoch), epoch: ensured.epoch } as any)
+    } catch {}
     // Use short conversation id (epoch only) since pair/room is implicit in URL
     const obj = { conversationId: String(ensured.epoch) }
-    return { content: [{ type:'text', text: JSON.stringify(obj) }], structuredContent: obj } as any
+    const res = { content: [{ type:'text', text: JSON.stringify(obj) }], structuredContent: obj } as any
+    // Broadcast outbound client wire event (MCP response)
+    try {
+      const b64 = utf8ToB64(JSON.stringify(res));
+      events.push(pairId, { type: 'client-wire-event', protocol:'mcp', dir:'outbound', tool:'begin_chat_thread', payload: b64, conversationId: String(ensured.epoch), epoch: ensured.epoch } as any)
+    } catch {}
+    return res
   })
 
   s.registerTool('send_message_to_chat_thread', {
@@ -74,17 +87,28 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
     if (!isCurrent) return jsonContent({ ok:false, error:`conversationId does not match current epoch (expected ${ensured.epoch})` })
 
     const parts: any[] = []
+    // Broadcast inbound client wire event (MCP request)
+    try {
+      const payload = { method: 'tools/call', params: { name: 'send_message_to_chat_thread', arguments: { conversationId, message, attachments } } };
+      const b64 = utf8ToB64(JSON.stringify(payload));
+      events.push(pairId, { type: 'client-wire-event', protocol:'mcp', dir:'inbound', tool:'send_message_to_chat_thread', payload: b64, conversationId, epoch: ensured.epoch } as any)
+    } catch {}
     if (message) parts.push({ kind:'text', text: message, metadata: { [A2A_EXT_URL]: { nextState: 'working' } } })
     for (const a of attachments) {
-      parts.push({ kind:'file', file:{ bytes: toBase64(String(a.content ?? '')), name: String(a.name ?? ''), mimeType: String(a.contentType ?? 'application/octet-stream') }, ...(a.summary ? { metadata:{ summary: String(a.summary) } } : {}) })
+      parts.push({ kind:'file', file:{ bytes: utf8ToB64(String(a.content ?? '')), name: String(a.name ?? ''), mimeType: String(a.contentType ?? 'application/octet-stream') }, ...(a.summary ? { metadata:{ summary: String(a.summary) } } : {}) })
     }
     const messageId = `m:${crypto.randomUUID()}`
     const raw = { conversationId, message, attachments };
-    const b64 = Buffer.from(JSON.stringify(raw), 'utf-8').toString('base64');
+    const b64 = utf8ToB64(JSON.stringify(raw));
     const m = { parts, taskId: ensured.initiatorTaskId, messageId, metadata: { [A2A_EXT_URL]: { wireMessage: { adapter:'mcp', raw: b64 } } } } as any
     await pairs.messageSend(pairId, m)
     const obj = { guidance: 'Message sent. Call check_replies to fetch replies.', status: 'working' as const }
-    return { content: [{ type:'text', text: JSON.stringify(obj) }], structuredContent: obj } as any
+    const res = { content: [{ type:'text', text: JSON.stringify(obj) }], structuredContent: obj } as any
+    try {
+      const b64 = utf8ToB64(JSON.stringify(res));
+      events.push(pairId, { type: 'client-wire-event', protocol:'mcp', dir:'outbound', tool:'send_message_to_chat_thread', payload: b64, conversationId, epoch: ensured.epoch } as any)
+    } catch {}
+    return res
   })
 
   s.registerTool('check_replies', {
@@ -99,6 +123,12 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
     waitMs = Math.min(Math.max(0, waitMs), MAX_WAIT)
     if (!conversationId) return jsonContent({ ok:false, error:'conversationId is required' })
     const ensured = await pairs.ensureEpochTasksForPair(pairId)
+    // Broadcast inbound client wire event (MCP request)
+    try {
+      const payload = { method: 'tools/call', params: { name: 'check_replies', arguments: { conversationId, waitMs } } };
+      const b64 = utf8ToB64(JSON.stringify(payload));
+      events.push(pairId, { type: 'client-wire-event', protocol:'mcp', dir:'inbound', tool:'check_replies', payload: b64, conversationId, epoch: ensured.epoch } as any)
+    } catch {}
     const isCurrent = (conversationId === ensured.initiatorTaskId) || (conversationId === String(ensured.epoch))
     if (!isCurrent) {
       return jsonContent({ messages: [], guidance: 'Conversation id refers to a previous epoch.', status: 'completed', conversation_ended: true })
@@ -127,7 +157,7 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
         const attachments: any[] = []
         for (const p of parts) {
           if (p?.kind==='file' && p.file && typeof p.file==='object' && typeof p.file.bytes==='string') {
-            attachments.push({ name: String(p.file.name||'file.bin'), contentType: String(p.file.mimeType||'application/octet-stream'), content: fromBase64(String(p.file.bytes||'')), ...(p.metadata?.summary?{summary:String(p.metadata.summary)}:{}) })
+            attachments.push({ name: String(p.file.name||'file.bin'), contentType: String(p.file.mimeType||'application/octet-stream'), content: b64ToUtf8(String(p.file.bytes||'')), ...(p.metadata?.summary?{summary:String(p.metadata.summary)}:{}) })
           }
         }
         messages.push({ from:'administrator', at: new Date().toISOString(), ...(text?{text}:{ }), ...(attachments.length?{attachments}:{}) })
@@ -170,7 +200,9 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
       if (ended || status === 'input-required') {
         const obj = { messages, guidance, status, conversation_ended: ended }
         try { console.debug('[mcp] check_replies.immediate', { pairId, conversationId, status, ended, msgCount: messages.length }) } catch {}
-        return { content: [{ type:'text', text: JSON.stringify(obj) }], structuredContent: obj } as any
+        const res = { content: [{ type:'text', text: JSON.stringify(obj) }], structuredContent: obj } as any
+        try { const b64 = utf8ToB64(JSON.stringify(res)); events.push(pairId, { type: 'client-wire-event', protocol:'mcp', dir:'outbound', tool:'check_replies', payload: b64, conversationId, epoch: ensured.epoch } as any) } catch {}
+        return res
       }
     }
     // Wait once (bounded by waitMs), then re-collect and return
@@ -179,15 +211,15 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
       const { messages, guidance, status, ended } = await collect()
       const obj = { messages, guidance, status, conversation_ended: ended }
       try { console.debug('[mcp] check_replies.timeoutOrEvent', { pairId, conversationId, status, ended, msgCount: messages.length }) } catch {}
-      return { content: [{ type:'text', text: JSON.stringify(obj) }], structuredContent: obj } as any
+      const res = { content: [{ type:'text', text: JSON.stringify(obj) }], structuredContent: obj } as any
+      try { const b64 = utf8ToB64(JSON.stringify(res)); events.push(pairId, { type: 'client-wire-event', protocol:'mcp', dir:'outbound', tool:'check_replies', payload: b64, conversationId, epoch: ensured.epoch } as any) } catch {}
+      return res
     }
   })
 
   return s
 }
-
-function toBase64(s:string): string { return Buffer.from(s, 'utf-8').toString('base64') }
-function fromBase64(b64:string): string { return Buffer.from(b64, 'base64').toString('utf-8') }
+ 
 
 async function waitForNextState(events:any, pairId:string, since:number, waitMs:number): Promise<number> {
   try { if (typeof events.waitUntil === 'function') return await events.waitUntil(pairId, since, waitMs) } catch {}

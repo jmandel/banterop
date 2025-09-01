@@ -47,6 +47,6 @@ afterAll(async () => {
     const rget = await fetch(a2a2, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ jsonrpc:'2.0', id:'g', method:'tasks/get', params:{ id: initTaskId } }) });
     const jg = await rget.json();
     expect(jg.result.id).toBe(initTaskId);
-    expect(jg.result.contextId).toBe(pairId);
+    expect(jg.result.contextId).toBe(initTaskId);
   });
 });

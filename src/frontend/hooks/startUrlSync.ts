@@ -46,7 +46,8 @@ export function buildReadableHashFromStore(): string {
   const pid = s.plannerId;
   const planner: any = resolvePlanner(pid);
   const row = (s as any).plannerSetup?.byPlanner?.[pid];
-  const cfg = row?.draft || (s as any).configByPlanner?.[pid];
+  // Only reflect applied config in URL (avoid leaking draft edits before Save)
+  const cfg = row?.lastApplied || (s as any).configByPlanner?.[pid];
   // Prefer dehydrate(cfg) when complete; if incomplete, fill missing fields from the hash seed
   function isEmpty(val: any): boolean { return val == null || (typeof val === 'string' && val.trim() === ''); }
   function fillMissing(base: any, fallback: any): any {
@@ -143,8 +144,9 @@ export function startUrlSync() {
     const cfgChanged   = (s as any).configByPlanner !== (prev as any).configByPlanner;
     const rowNow = (s as any).plannerSetup?.byPlanner?.[s.plannerId];
     const rowPrev = (prev as any).plannerSetup?.byPlanner?.[prev.plannerId];
-    const seedChanged = JSON.stringify(rowNow?.seed) !== JSON.stringify(rowPrev?.seed);
-    if (!(pidChanged || modeChanged || cfgChanged || seedChanged)) return;
+    const appliedChanged = JSON.stringify(rowNow?.lastApplied) !== JSON.stringify(rowPrev?.lastApplied);
+    // Only update URL when applied config changes or planner/mode changes
+    if (!(pidChanged || modeChanged || cfgChanged || appliedChanged)) return;
 
     const core = buildReadableHashFromStore();
     if (core === lastCore) return;

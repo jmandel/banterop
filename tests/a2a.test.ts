@@ -35,7 +35,7 @@ describe("A2A JSON-RPC", () => {
     }
     expect(frames[0].result.kind).toBe('status-update');
     expect(frames[0].result.taskId).toContain('init:');
-    expect(frames[0].result.contextId).toBe(pairId);
+    expect(frames[0].result.contextId).toBe(frames[0].result.taskId);
 
     // Verify responder sees mirrored message and is input-required
     const respTaskId = `resp:${pairId}#1`;

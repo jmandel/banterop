@@ -25,7 +25,6 @@ import { AutomationCard } from '../components/AutomationCard';
 import { LogCard } from '../components/LogCard';
 import { WireLogCard } from '../components/WireLogCard';
 import { CollapsibleCard } from '../components/CollapsibleCard';
-import { ClientLinksCard } from './components/ClientLinksCard';
 import { MetaBar } from '../components/MetaBar';
 import { Settings } from 'lucide-react';
 import { Copy } from 'lucide-react';
@@ -199,7 +198,8 @@ function App() {
     if (transport === 'a2a' && !endpointA2A) return;
     if (transport === 'mcp' && !endpointMcp) return;
     try { console.debug('[client] Adapter ready', { transport, endpoint: transport==='mcp' ? endpointMcp : endpointA2A }); } catch {}
-    const wireSink = (e:any) => { try { useAppStore.getState().wire.add(e); } catch {} };
+    const wireSink = (e:any) => { try { useAppStore.getState().wire.add({ ...e, context: transport }); } catch {} };
+    try { useAppStore.getState().wire.setMode(transport); } catch {}
     const adapter = transport === 'mcp'
       ? new MCPAdapter(endpointMcp, { onWire: wireSink })
       : new A2AAdapter(endpointA2A, { onWire: wireSink, suppressOwnFromSnapshots: true });
@@ -478,10 +478,6 @@ function App() {
           }}
         >
           <div className="flex flex-col gap-3 min-h-0">
-            <CollapsibleCard title="Helpful Links" initialOpen>
-              <ClientLinksCard hideTitle />
-            </CollapsibleCard>
-
             <CollapsibleCard title="Automation" initialOpen>
               <AutomationCard bare hideTitle
                 mode={useAppStore.getState().plannerMode as any}

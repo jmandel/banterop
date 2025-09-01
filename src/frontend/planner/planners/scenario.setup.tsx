@@ -17,7 +17,8 @@ export type ScenarioDraft = {
 
 const SCENARIO_DEFAULT_DRAFT: ScenarioDraft = {
   enabledTools: [],
-  enabledCoreTools: [...CORE_TOOLS],
+  // Default: omit 'sleep' and 'sendMessageToMyPrincipal' unless explicitly enabled
+  enabledCoreTools: (Array.from(CORE_TOOLS).filter(t => !['sleep','sendMessageToMyPrincipal'].includes(t)) as string[]),
   maxInlineSteps: 20,
 };
 
@@ -56,7 +57,11 @@ export async function hydrateScenario(seed: any, ctx: { fetchJson: (u: string) =
   const toolUniverse = (me?.tools || []).map((t: any) => String(t.toolName || ''));
   const disabledScenario = new Set<string>(Array.isArray(seed?.disabledScenarioTools) ? seed!.disabledScenarioTools.map(String) : []);
   const enabledTools = toolUniverse.filter(t => !disabledScenario.has(t));
-  const disabledCore = new Set<string>(Array.isArray(seed?.disabledCoreTools) ? seed!.disabledCoreTools.map(String) : []);
+  // Default omission for core tools when unspecified: omit 'sleep' and 'sendMessageToMyPrincipal'
+  const defaultDisabledCore = ['sleep','sendMessageToMyPrincipal'];
+  const disabledCore = new Set<string>(Array.isArray(seed?.disabledCoreTools)
+    ? seed!.disabledCoreTools.map(String)
+    : defaultDisabledCore);
   const enabledCoreTools = CORE_TOOLS.filter(t => !disabledCore.has(t));
   const maxInlineSteps = (() => {
     const n = Number(seed?.maxInlineSteps ?? 20);
@@ -119,13 +124,24 @@ export function ScenarioPlannerSetup() {
     }
   }
 
+  // Keep input in sync with applied/loaded draft URL (e.g., after hydrateFromSeed)
+  React.useEffect(() => {
+    const cur = String(draft.scenarioUrl || '');
+    // Only update local input when it differs (avoid resetting while typing)
+    if (String(scenarioUrlInput || '') !== cur) setScenarioUrlInput(cur);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.scenarioUrl]);
+
   // Debounce-load on URL changes to validate while typing
   React.useEffect(() => {
     const u = String(scenarioUrlInput || '').trim();
+    const cur = String(draft.scenarioUrl || '').trim();
+    // Skip if unchanged vs current draft
+    if (u === cur) return;
     let canceled = false;
     const handle = setTimeout(() => { if (!canceled) void tryLoadScenario(u); }, 500);
     return () => { canceled = true; clearTimeout(handle); };
-  }, [scenarioUrlInput, loadScenario]);
+  }, [scenarioUrlInput, draft.scenarioUrl, loadScenario]);
 
   function toggleList(sel: string[], v: string) {
     const s = new Set<string>(sel);

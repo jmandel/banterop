@@ -126,8 +126,10 @@ function App() {
 
   // Initialize responder adapter
   useEffect(() => {
-    const wireSink = (e:any) => { try { useAppStore.getState().wire.add({ ...e, roomId }) } catch {} };
-    const adapter = new A2AAdapter(a2a, { onWire: wireSink, roomId })
+    // Wire logging for the room now comes from server backchannel SSE (client-wire-event),
+    // so skip local A2A adapter wire logs to avoid duplicates.
+    try { useAppStore.getState().wire.setMode('a2a'); } catch {}
+    const adapter = new A2AAdapter(a2a, { roomId, suppressOwnFromSnapshots: false })
     store.init('responder' as any, adapter, undefined)
     // Store adapter on window for debug and lease updates
     ;(window as any).__a2aAdapter = adapter
