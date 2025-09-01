@@ -85,16 +85,16 @@ export function AppLayout({
           <p className="text-xs text-gray-600">Banterop © {year}</p>
           <div className="flex gap-x-4 gap-y-1 flex-wrap text-xs">
             <a 
-              href="https://github.com/banterop"
+              href="https://github.com/jmandel/banterop"
               className="text-primary hover:opacity-80 no-underline"
               target="_blank"
               rel="noopener noreferrer"
             >
-              github.com/banterop
+              github.com/jmandel/banterop
             </a>
             <span className="text-gray-400">•</span>
             <a
-              href="https://github.com/banterop/banterop/issues/new"
+              href="https://github.com/jmandel/banterop/issues/new"
               className="text-primary hover:opacity-80 no-underline"
               target="_blank"
               rel="noopener noreferrer"
