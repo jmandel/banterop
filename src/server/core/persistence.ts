@@ -32,32 +32,9 @@ export type Persistence = {
 }
 
 export function createPersistenceFromDb(db: Database): Persistence {
-  db.exec(`
-    PRAGMA journal_mode = WAL;
-    CREATE TABLE IF NOT EXISTS pairs (
-      pair_id TEXT PRIMARY KEY,
-      epoch INTEGER NOT NULL,
-      metadata TEXT
-    );
-    CREATE TABLE IF NOT EXISTS tasks (
-      task_id TEXT PRIMARY KEY,
-      pair_id TEXT NOT NULL,
-      epoch INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS messages (
-      pair_id  TEXT    NOT NULL,
-      epoch    INTEGER NOT NULL,
-      author   TEXT    NOT NULL CHECK(author IN ('init','resp')),
-      json     TEXT    NOT NULL,
-      created_at INTEGER DEFAULT (strftime('%s','now')*1000),
-      CHECK (json_valid(json)),
-      CHECK (json_extract(json,'$.messageId') IS NOT NULL)
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_id ON messages((json_extract(json,'$.messageId')));
-    CREATE INDEX IF NOT EXISTS idx_messages_pair_epoch ON messages(pair_id, epoch);
-    CREATE INDEX IF NOT EXISTS idx_messages_pair_time ON messages(pair_id, created_at);
-  `)
-  // Ensure schema version and run forward migrations
+  // Ensure schema is created and migrated before preparing statements.
+  // This avoids referencing columns (e.g., created_at) that may not exist yet
+  // in older deployments.
   ensureSchema(db);
 
   const createPairStmt = db.query(`INSERT INTO pairs (pair_id, epoch, metadata) VALUES (?, 0, NULL)`) as any
