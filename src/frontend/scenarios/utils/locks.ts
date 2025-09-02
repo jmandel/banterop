@@ -1,4 +1,5 @@
 export const PUBLISHED_TAG = 'published';
+export const DELETED_TAG = 'deleted';
 const UNLOCK_KEY = 'scenario.edit.unlock';
 const TOKEN_KEY = 'scenario.edit.token';
 const SHOW_MODE_KEY = 'scenario.showMode';
@@ -12,6 +13,11 @@ type UnlockMap = Record<string, UnlockRecord | undefined>;
 export function isPublished(cfg: any): boolean {
   const tags: string[] = cfg?.metadata?.tags || [];
   return tags.includes(PUBLISHED_TAG);
+}
+
+export function isDeleted(cfg: any): boolean {
+  const tags: string[] = cfg?.metadata?.tags || [];
+  return tags.includes(DELETED_TAG);
 }
 
 export function isUnlockedFor(id?: string, now: number = Date.now()): boolean {
@@ -57,11 +63,13 @@ export function clearEditToken() {
   try { localStorage.removeItem(TOKEN_KEY); } catch {}
 }
 
-export function getShowMode(): 'published' | 'all' {
-  try { return (localStorage.getItem(SHOW_MODE_KEY) as any) || 'published'; } catch { return 'published'; }
+export function getShowMode(): 'published' | 'all' | 'deleted' {
+  try {
+    const v = (localStorage.getItem(SHOW_MODE_KEY) as any) || 'published';
+    return (v === 'published' || v === 'all' || v === 'deleted') ? v : 'published';
+  } catch { return 'published'; }
 }
 
-export function setShowMode(mode: 'published' | 'all') {
+export function setShowMode(mode: 'published' | 'all' | 'deleted') {
   try { localStorage.setItem(SHOW_MODE_KEY, mode); } catch {}
 }
-

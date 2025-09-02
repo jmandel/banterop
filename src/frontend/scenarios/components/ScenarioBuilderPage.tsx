@@ -13,7 +13,7 @@ import { createBlankScenario } from '../utils/defaults';
 import { buildScenarioBuilderPrompt } from '../utils/prompt-builder';
 import { parseBuilderLLMResponse } from '../utils/response-parser';
 import { getCuratedSchemaText, getExampleScenarioText } from '../utils/schema-loader';
-import { isPublished, isUnlockedFor, setUnlocked, getEditToken, setEditToken, clearEditToken, clearUnlocked } from '../utils/locks';
+import { isPublished, isUnlockedFor, setUnlocked, getEditToken, setEditToken, clearEditToken, clearUnlocked, isDeleted } from '../utils/locks';
 
 interface ChatMessage {
   id: string;
@@ -42,6 +42,7 @@ interface BuilderState {
   lastUserMessage: string;
   availableProviders: Array<{ name: string; models: string[] }>;
   wascanceled: boolean;
+  configRevision: number; // bump to force editor sync to programmatic changes
 }
 
 export function ScenarioBuilderPage() {
@@ -90,7 +91,8 @@ export function ScenarioBuilderPage() {
     isWaitingForLLM: false,
     lastUserMessage: '',
     availableProviders: [],
-    wascanceled: false
+    wascanceled: false,
+    configRevision: 0
   });
   
   // Store the abort controller outside of state
@@ -242,7 +244,9 @@ export function ScenarioBuilderPage() {
         ...prev,
         activeScenarioId: id,
         chatHistory: scenario.history || [],
-        pendingConfig: scenario.config || null,
+        // No pending edits upon load; pendingConfig is only set when user makes a change
+        pendingConfig: null,
+        configRevision: prev.configRevision + 1,
         isLoading: false
       }));
     } catch (error) {
@@ -261,20 +265,16 @@ export function ScenarioBuilderPage() {
   // Immediate-persist create flow removed; creation happens via blank scenario route
 
   const deleteScenario = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this scenario?')) return;
+    const name = state.scenarios.find(s => s.config?.metadata?.id === id)?.config?.metadata?.title || id;
+    if (!confirm(`Move scenario "${name}" to Deleted? You can restore it later from the Deleted view.`)) return;
 
     try {
       const response = await api.deleteScenario(id);
       if (response.success) {
+        // Clear local state and navigate back to list (Deleted view)
+        setState(prev => ({ ...prev, activeScenarioId: null, chatHistory: [], pendingConfig: null }));
         await loadScenarios();
-        if (state.activeScenarioId === id) {
-          setState(prev => ({
-            ...prev,
-            activeScenarioId: null,
-            chatHistory: [],
-            pendingConfig: null
-          }));
-        }
+        navigate('/scenarios?view=deleted');
       } else {
         throw new Error('Failed to delete scenario');
       }
@@ -282,6 +282,27 @@ export function ScenarioBuilderPage() {
       setState(prev => ({
         ...prev,
         error: error instanceof Error ? error.message : 'Failed to delete scenario'
+      }));
+    }
+  };
+
+  const restoreScenario = async (id: string) => {
+    const name = state.scenarios.find(s => s.config?.metadata?.id === id)?.config?.metadata?.title || id;
+    if (!confirm(`Restore scenario "${name}" from Deleted?`)) return;
+    try {
+      const response = await api.restoreScenario(id);
+      if (response.success) {
+        await loadScenarios();
+        // remain on the same editor view
+        setState(prev => ({ ...prev, pendingConfig: null }));
+        navigate(`/scenarios/${id}/edit`);
+      } else {
+        throw new Error('Failed to restore scenario');
+      }
+    } catch (error) {
+      setState(prev => ({
+        ...prev,
+        error: error instanceof Error ? error.message : 'Failed to restore scenario'
       }));
     }
   };
@@ -461,6 +482,7 @@ export function ScenarioBuilderPage() {
         ...prev,
         chatHistory: [...prev.chatHistory, assistantMsg],
         pendingConfig: nextScenario, // Already a new object from cloning above
+        configRevision: prev.configRevision + 1,
         isWaitingForLLM: false
       }));
     } catch (error) {
@@ -512,6 +534,7 @@ export function ScenarioBuilderPage() {
             ...prev,
             activeScenarioId: newId,
             pendingConfig: null,
+            configRevision: prev.configRevision + 1,
             isSaving: false
           }));
         }
@@ -532,6 +555,7 @@ export function ScenarioBuilderPage() {
                 : s
             ),
             pendingConfig: null,
+            configRevision: prev.configRevision + 1,
             isSaving: false
           }));
         }
@@ -550,7 +574,7 @@ export function ScenarioBuilderPage() {
   };
 
   const discardChanges = () => {
-    setState(prev => ({ ...prev, pendingConfig: null }));
+    setState(prev => ({ ...prev, pendingConfig: null, configRevision: prev.configRevision + 1 }));
   };
 
   const updateConfigFromEditor = (newConfig: ScenarioConfiguration) => {
@@ -568,6 +592,7 @@ export function ScenarioBuilderPage() {
   }, [state.pendingConfig, activeScenario?.config]);
   const currentScenarioId = currentConfig?.metadata?.id as string | undefined;
   const isLocked = !!(currentConfig && isPublished(currentConfig) && !isUnlockedFor(currentScenarioId));
+  const deleted = !!(currentConfig && isDeleted(currentConfig));
   // Show unsaved changes when there's pending config with meaningful content
   const hasUnsavedChanges = state.pendingConfig !== null && (
     // Has a metadata.id (even if empty string initially)
@@ -595,6 +620,16 @@ export function ScenarioBuilderPage() {
                   scenarioId={isCreateMode ? undefined : (state.activeScenarioId || undefined)}
                   isViewMode={isViewMode || isLocked}
                   isEditMode={isEditMode}
+                  isLocked={isLocked}
+                  isDeleted={deleted}
+                  onDelete={(!deleted && !isCreateMode && state.activeScenarioId) ? () => deleteScenario(state.activeScenarioId!) : undefined}
+                  onRestore={(deleted && !isCreateMode && state.activeScenarioId) ? () => restoreScenario(state.activeScenarioId!) : undefined}
+                  onSave={(!isLocked && hasUnsavedChanges) ? saveChanges : undefined}
+                  onDiscard={(!isLocked && hasUnsavedChanges) ? discardChanges : undefined}
+                  canSave={hasUnsavedChanges}
+                  isSaving={state.isSaving}
+                  saveLabel={isCreateMode ? 'Create' : 'Save'}
+                  configRevision={state.configRevision}
                 />
                 {isLocked && (
                   <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">
@@ -610,8 +645,8 @@ export function ScenarioBuilderPage() {
                 )}
               </main>
               {(isEditMode || isCreateMode) && (
-                <aside className="lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)]">
-                  <div className={`h-full ${hasUnsavedChanges ? 'pb-20' : ''}`}>
+                <aside className="sticky top-16 h-[calc(100vh-4rem)]">
+                  <div className="h-full">
                     <ChatPanel
                       messages={state.chatHistory}
                       onSendMessage={sendMessage}
@@ -647,18 +682,8 @@ export function ScenarioBuilderPage() {
         </div>
       )}
 
-      {hasUnsavedChanges && !isLocked && (
-        <div className="fixed bottom-0 left-0 lg:w-[66%] right-0 lg:right-auto bg-amber-50 border-t border-amber-200 p-3 flex justify-between items-center shadow-lg z-20">
-          <div className="text-sm text-amber-800">
-            You have unsaved changes
-          </div>
-          <div className="flex gap-2">
-            <Button variant="secondary" size="sm" onClick={discardChanges} disabled={state.isSaving}>Discard Changes</Button>
-            <Button variant="primary" size="sm" onClick={saveChanges} disabled={state.isSaving}>
-              {state.isSaving ? 'Saving...' : (isCreateMode ? 'Create Scenario' : 'Save to Backend')}
-            </Button>
-          </div>
-        </div>
+      {false && hasUnsavedChanges && !isLocked && (
+        <div />
       )}
 
       {state.error && (

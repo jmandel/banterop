@@ -1,5 +1,6 @@
 import React from 'react';
 import { Card, Button } from '../../ui';
+import { Trash2 } from 'lucide-react';
 import { RawJsonEditor } from './RawJsonEditor';
 import { StructuredView } from './StructuredView';
 import { DropdownButton } from './DropdownButton';
@@ -14,7 +15,17 @@ export function ScenarioEditor({
   scenarioName,
   scenarioId,
   isViewMode,
-  isEditMode
+  isEditMode,
+  onDelete,
+  onRestore,
+  isLocked,
+  isDeleted,
+  onSave,
+  onDiscard,
+  canSave,
+  isSaving,
+  saveLabel,
+  configRevision
 }: {
   config: any;
   viewMode: 'structured' | 'rawJson';
@@ -24,6 +35,16 @@ export function ScenarioEditor({
   scenarioId?: string;
   isViewMode?: boolean;
   isEditMode?: boolean;
+  onDelete?: () => void;
+  onRestore?: () => void;
+  isLocked?: boolean;
+  isDeleted?: boolean;
+  onSave?: () => void;
+  onDiscard?: () => void;
+  canSave?: boolean;
+  isSaving?: boolean;
+  saveLabel?: string;
+  configRevision?: number;
 }) {
   const navigate = useNavigate();
   
@@ -37,7 +58,37 @@ export function ScenarioEditor({
         {scenarioId && (
           <div className="flex gap-2">
             {isEditMode ? (
-              <Button as="a" href={`#/scenarios/${scenarioId}`} size="sm" variant="secondary">View</Button>
+              <>
+                {/* Inline save/discard controls when editing */}
+                {onSave && (
+                  <Button size="sm" variant="primary" onClick={onSave} disabled={isLocked || !canSave || isSaving}>
+                    {isSaving ? 'Saving…' : (saveLabel || 'Save')}
+                  </Button>
+                )}
+                {onDiscard && (
+                  <Button size="sm" variant="secondary" onClick={onDiscard} disabled={isLocked || !canSave}>
+                    Discard
+                  </Button>
+                )}
+                <Button as="a" href={`#/scenarios/${scenarioId}`} size="sm" variant="secondary">View</Button>
+                {isDeleted ? (
+                  onRestore && <Button size="sm" variant="primary" onClick={onRestore} disabled={isLocked}>Restore</Button>
+                ) : (
+                  onDelete && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-danger"
+                      onClick={onDelete}
+                      disabled={isLocked}
+                      aria-label="Delete scenario"
+                      title="Delete scenario"
+                    >
+                      <Trash2 size={16} />
+                    </Button>
+                  )
+                )}
+              </>
             ) : (
               <>
                 <Button as="a" href={`#/scenarios/${scenarioId}/edit`} size="sm" variant="secondary">Edit</Button>
@@ -53,7 +104,7 @@ export function ScenarioEditor({
         {viewMode === 'structured' ? (
           <StructuredView config={config} onConfigChange={onConfigChange} isReadOnly={isViewMode} scenarioId={scenarioId} isEditMode={isEditMode} />
         ) : (
-          <RawJsonEditor config={config} onChange={onConfigChange} isReadOnly={isViewMode} />
+          <RawJsonEditor config={config} onChange={onConfigChange} isReadOnly={isViewMode} revision={configRevision} />
         )}
       </div>
     </Card>

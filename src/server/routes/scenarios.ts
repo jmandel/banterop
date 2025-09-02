@@ -43,7 +43,18 @@ export function createScenariosRoutes(store: any) {
     const id = c.req.param('id'); const existing = store.get(id);
     if (!existing) { c.status(404); return c.json({ error: `Scenario '${id}' not found` }); }
     const g = guard(c, existing); if (!g.ok) { c.status((g.code ?? 423) as any); return c.json({ error: g.msg }); }
-    store.delete(id); return c.json({ success:true, deleted:id });
+    const ok = store.softDelete?.(id);
+    if (!ok) { c.status(500); return c.json({ error: 'Soft delete failed' }); }
+    return c.json({ success:true, deleted:id, soft:true });
+  });
+
+  app.post('/scenarios/:id/restore', (c) => {
+    const id = c.req.param('id'); const existing = store.get(id);
+    if (!existing) { c.status(404); return c.json({ error: `Scenario '${id}' not found` }); }
+    const g = guard(c, existing); if (!g.ok) { c.status((g.code ?? 423) as any); return c.json({ error: g.msg }); }
+    const ok = store.restore?.(id);
+    if (!ok) { c.status(500); return c.json({ error: 'Restore failed' }); }
+    return c.json(store.get(id));
   });
 
   return app;

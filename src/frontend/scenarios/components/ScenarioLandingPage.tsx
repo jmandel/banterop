@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { DropdownButton } from './DropdownButton';
 import { RUN_MODES } from '../constants/runModes';
-import { getShowMode, setShowMode, isPublished } from '../utils/locks';
+import { getShowMode, setShowMode, isPublished, isDeleted } from '../utils/locks';
 
 const SCENARIO_IDEAS = [
   "Primary‑care agent ↔ Rheumatology intake agent: confirm referral eligibility for suspected RA by reconciling recent labs/symptoms with clinic’s referral criteria and capacity.",
@@ -67,7 +67,7 @@ export function ScenarioLandingPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [newScenarioIdea, setNewScenarioIdea] = useState('');
   const [isWiggling, setIsWiggling] = useState(false);
-  const [showMode, _setShowMode] = useState<'published' | 'all'>(getShowMode());
+  const [showMode, _setShowMode] = useState<'published' | 'all' | 'deleted'>(getShowMode());
   const [showingFallbackNote, setShowingFallbackNote] = useState(false);
   
   const getRandomIdea = () => {
@@ -79,6 +79,16 @@ export function ScenarioLandingPage() {
   }, []);
 
   useEffect(() => {
+    // Respect ?view= query if set in hash
+    try {
+      const qs = window.location.hash.split('?')[1] || '';
+      const params = new URLSearchParams(qs);
+      const view = params.get('view') as any;
+      if (view && (view === 'published' || view === 'all' || view === 'deleted')) {
+        _setShowMode(view);
+        setShowMode(view);
+      }
+    } catch {}
     loadScenarios();
   }, []);
 
@@ -115,7 +125,7 @@ export function ScenarioLandingPage() {
 
   const deleteScenario = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Are you sure you want to delete this scenario?')) return;
+    if (!confirm('Move this scenario to Deleted? You can restore it later from the Deleted view.')) return;
 
     try {
       const response = await api.deleteScenario(id);
@@ -126,7 +136,13 @@ export function ScenarioLandingPage() {
     }
   };
 
-  const byMode = showMode === 'published' ? scenarios.filter(s => isPublished(s.config)) : scenarios;
+  const byMode = (
+    showMode === 'published'
+      ? scenarios.filter(s => isPublished(s.config) && !isDeleted(s.config))
+      : showMode === 'deleted'
+        ? scenarios.filter(s => isDeleted(s.config))
+        : scenarios.filter(s => !isDeleted(s.config))
+  );
   const filteredScenarios = byMode.filter(scenario =>
     scenario.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     scenario.config.metadata.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -172,12 +188,16 @@ export function ScenarioLandingPage() {
           <div className="flex gap-2">
             <button
               className={`px-3 py-1 text-xs rounded ${showMode === 'published' ? 'bg-primary text-primary-foreground' : 'border border-gray-300 text-gray-700'}`}
-              onClick={() => { _setShowMode('published'); setShowMode('published'); setShowingFallbackNote(false); }}
+              onClick={() => { _setShowMode('published'); setShowMode('published'); setShowingFallbackNote(false); navigate('/scenarios?view=published'); }}
             >Published</button>
             <button
               className={`px-3 py-1 text-xs rounded ${showMode === 'all' ? 'bg-primary text-primary-foreground' : 'border border-gray-300 text-gray-700'}`}
-              onClick={() => { _setShowMode('all'); setShowMode('all'); setShowingFallbackNote(false); }}
+              onClick={() => { _setShowMode('all'); setShowMode('all'); setShowingFallbackNote(false); navigate('/scenarios?view=all'); }}
             >All</button>
+            <button
+              className={`px-3 py-1 text-xs rounded ${showMode === 'deleted' ? 'bg-danger text-white' : 'border border-gray-300 text-gray-700'}`}
+              onClick={() => { _setShowMode('deleted'); setShowMode('deleted'); setShowingFallbackNote(false); navigate('/scenarios?view=deleted'); }}
+            >Deleted</button>
           </div>
         </div>
         <input
@@ -199,7 +219,7 @@ export function ScenarioLandingPage() {
           </div>
         )}
 
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredScenarios.length === 0 ? (
             <div className="col-span-full text-center py-8">
               <p className="text-gray-500">
@@ -208,33 +228,34 @@ export function ScenarioLandingPage() {
             </div>
           ) : (
             filteredScenarios.map((scenario: any) => (
-              <Card key={scenario.config.metadata.id} className="hover:shadow-sm transition">
-                <div className="mb-3">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-1">
-                    {scenario.config.metadata.title || scenario.name}
-                  </h3>
-                  {isPublished(scenario.config) && (
-                    <div className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200 mb-1">
-                      <span>🔒</span>
-                      <span>Published</span>
-                    </div>
-                  )}
+              <Card key={scenario.config.metadata.id} className="hover:shadow-md transition-all duration-200 flex flex-col relative">
+                <a href={`#/scenarios/${scenario.config.metadata.id}/edit`} className="absolute top-3 right-3 text-xs text-muted hover:text-text transition-colors">Edit</a>
+                <div className="flex gap-1.5 items-center mb-3">
+                  <a href={`#/scenarios/${scenario.config.metadata.id}`} className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-medium border border-border rounded-lg bg-panel text-muted hover:text-text hover:border-gray-300 transition-colors">View</a>
+                  <Button as="a" size="sm" variant="primary" className="px-3 py-1.5 text-xs font-medium" href={`#/scenarios/${scenario.config.metadata.id}/run`}>
+                    Run
+                  </Button>
+                </div>
+
+                <div className="flex-1 space-y-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-text leading-tight">
+                      {scenario.config.metadata.title || scenario.name}
+                    </h3>
+                    {isPublished(scenario.config) && (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 mt-1 rounded bg-gray-100 text-gray-600 font-medium">
+                        🔒 Published
+                      </span>
+                    )}
+                  </div>
                   
-                  <div className="text-xs text-primary mb-2">
+                  <div className="text-xs font-medium text-primary">
                     {getAgentNames(scenario)}
                   </div>
                   
-                  <p className="text-xs text-gray-600 line-clamp-2">
+                  <p className="text-xs text-muted line-clamp-3 leading-relaxed">
                     {scenario.config.metadata.description || 'Configure and test interoperability conversations'}
                   </p>
-                </div>
-
-                <div className="flex gap-2 items-center">
-                  <a href={`#/scenarios/${scenario.config.metadata.id}`} className="inline-flex items-center justify-center gap-2 px-2 py-1 text-xs border border-border rounded-2xl bg-panel min-h-[28px]">View</a>
-                  <a href={`#/scenarios/${scenario.config.metadata.id}/edit`} className="inline-flex items-center justify-center gap-2 px-2 py-1 text-xs border border-border rounded-2xl bg-panel min-h-[28px]">Edit</a>
-                  <Button as="a" size="sm" variant="primary" href={`#/scenarios/${scenario.config.metadata.id}/run`}>
-                    Run
-                  </Button>
                 </div>
               </Card>
             ))

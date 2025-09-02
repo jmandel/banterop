@@ -37,7 +37,7 @@ export function createPersistenceFromDb(db: Database): Persistence {
   // in older deployments.
   ensureSchema(db);
 
-  const createPairStmt = db.query(`INSERT INTO pairs (pair_id, epoch, metadata) VALUES (?, 0, NULL)`) as any
+  const createPairStmt = db.query(`INSERT OR IGNORE INTO pairs (pair_id, epoch, metadata) VALUES (?, 0, NULL)`) as any
   const getPairStmt   = db.query<PairRow, [string]>(`SELECT pair_id, epoch, metadata FROM pairs WHERE pair_id = ?`)
   const setEpochStmt  = db.query(`UPDATE pairs SET epoch = ? WHERE pair_id = ?`) as any
 
@@ -45,7 +45,8 @@ export function createPersistenceFromDb(db: Database): Persistence {
   const upTaskStmt    = db.query(`INSERT INTO tasks (task_id, pair_id, epoch) VALUES (?, ?, ?)
                                   ON CONFLICT(task_id) DO NOTHING`) as any
   const createTaskStmt= db.query(`INSERT INTO tasks (task_id, pair_id, epoch) VALUES (?, ?, ?)`) as any
-  const insMsg        = db.query(`INSERT INTO messages (pair_id, epoch, author, json) VALUES (?, ?, ?, json(?))`) as any
+  const insMsg        = db.query(`INSERT INTO messages (pair_id, epoch, author, json)
+                                  VALUES (?, ?, ?, json(?))`) as any
   const selLastMsg    = db.query<{ author:string; json:string }, [string, number]>(
     `SELECT author, json FROM messages WHERE pair_id = ? AND epoch = ? ORDER BY rowid DESC LIMIT 1`
   )
@@ -63,7 +64,7 @@ export function createPersistenceFromDb(db: Database): Persistence {
   )
   const listPairsStmt = db.query<PairRow, []>(`SELECT pair_id, epoch, metadata FROM pairs`)
 
-  function createPair(pairId:string) { try { createPairStmt.run(pairId) } catch {} }
+  function createPair(pairId:string) { createPairStmt.run(pairId) }
   function getPair(pairId:string): PairRow | null { const row = getPairStmt.get(pairId); return row || null }
   function setPairEpoch(pairId:string, epoch:number) { setEpochStmt.run(epoch, pairId) }
 
@@ -109,36 +110,30 @@ export function createPersistence(env: Env): Persistence {
 function ensureSchema(db: Database): void {
   // Helper: read PRAGMA user_version
   function getUserVersion(): number {
-    try {
-      const row: any = (db.query('PRAGMA user_version') as any).get();
-      const v = (row && (row.user_version ?? row.USER_VERSION ?? row[Object.keys(row)[0]])) as number | undefined;
-      return (typeof v === 'number' && Number.isFinite(v)) ? v : 0;
-    } catch { return 0; }
+    const row: any = (db.query('PRAGMA user_version') as any).get();
+    const v = (row && (row.user_version ?? row.USER_VERSION ?? row[Object.keys(row)[0]])) as number | undefined;
+    return (typeof v === 'number' && Number.isFinite(v)) ? v : 0;
   }
-  function setUserVersion(v: number) { try { db.exec(`PRAGMA user_version = ${Math.max(0, Math.floor(v))}`) } catch {} }
+  function setUserVersion(v: number) { db.exec(`PRAGMA user_version = ${Math.max(0, Math.floor(v))}`) }
   function hasColumn(table: string, col: string): boolean {
-    try {
-      const q = db.query(`PRAGMA table_info(${table})`) as any;
-      const rows = q.all();
-      return Array.isArray(rows) && rows.some((r: any) => String(r?.name || '').toLowerCase() === col.toLowerCase());
-    } catch { return false; }
+    const q = db.query(`PRAGMA table_info(${table})`) as any;
+    const rows = q.all();
+    return Array.isArray(rows) && rows.some((r: any) => String(r?.name || '').toLowerCase() === col.toLowerCase());
   }
   function hasIndex(table: string, idxName: string): boolean {
-    try {
-      const q = db.query(`PRAGMA index_list(${table})`) as any;
-      const rows = q.all();
-      return Array.isArray(rows) && rows.some((r: any) => String(r?.name || '').toLowerCase() === idxName.toLowerCase());
-    } catch { return false; }
+    const q = db.query(`PRAGMA index_list(${table})`) as any;
+    const rows = q.all();
+    return Array.isArray(rows) && rows.some((r: any) => String(r?.name || '').toLowerCase() === idxName.toLowerCase());
   }
 
   let v = getUserVersion();
   // v0: legacy (no user_version set). v1: baseline tables created. v2+: explicit migrations
-  try { console.info(`[db] schema user_version=${v}`) } catch {}
+  console.info(`[db] schema user_version=${v}`)
   db.exec('BEGIN');
 
   try {
     if (v < 1) {
-      try { console.info('[db] migrating v0 → v1 (baseline tables)') } catch {}
+      console.info('[db] migrating v0 → v1 (baseline tables)')
       // If tables are missing, ensure they exist (no-ops if present). Baseline.
       db.exec(`
         CREATE TABLE IF NOT EXISTS pairs (
@@ -163,25 +158,25 @@ function ensureSchema(db: Database): void {
         CREATE INDEX IF NOT EXISTS idx_messages_pair_epoch ON messages(pair_id, epoch);
       `);
       v = 1; setUserVersion(1);
-      try { console.info('[db] migration v1 applied') } catch {}
+      console.info('[db] migration v1 applied')
     }
     if (v < 2) {
-      try { console.info('[db] migrating v1 → v2 (messages.created_at + idx)') } catch {}
+      console.info('[db] migrating v1 → v2 (messages.created_at + idx)')
       // Add created_at column and index; backfill nulls to current time
       if (!hasColumn('messages', 'created_at')) {
-        try { db.exec(`ALTER TABLE messages ADD COLUMN created_at INTEGER`); } catch {}
-        try { db.exec(`UPDATE messages SET created_at = CAST(strftime('%s','now') AS INTEGER)*1000 WHERE created_at IS NULL`); } catch {}
+        db.exec(`ALTER TABLE messages ADD COLUMN created_at INTEGER DEFAULT (strftime('%s','now')*1000)`);
+        db.exec(`UPDATE messages SET created_at = CAST(strftime('%s','now') AS INTEGER)*1000 WHERE created_at IS NULL`);
       }
       if (!hasIndex('messages', 'idx_messages_pair_time')) {
-        try { db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_pair_time ON messages(pair_id, created_at)`); } catch {}
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_pair_time ON messages(pair_id, created_at)`);
       }
       v = 2; setUserVersion(2);
-      try { console.info('[db] migration v2 applied') } catch {}
+      console.info('[db] migration v2 applied')
     }
   } catch (e:any) {
-    try { db.exec('ROLLBACK') } catch {}
+    db.exec('ROLLBACK')
     throw new Error(`Database migration failed: ${String(e?.message || e)}`);
   }
   db.exec('COMMIT');
-  try { console.info(`[db] schema ready at user_version=${v}`) } catch {}
+  console.info(`[db] schema ready at user_version=${v}`)
 }

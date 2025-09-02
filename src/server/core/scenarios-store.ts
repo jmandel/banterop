@@ -22,12 +22,34 @@ export function createScenariosStore(db: Database) {
   const selectOne = db.query<{ config: string }, [string]>(`SELECT config FROM scenarios WHERE json_extract(config, '$.metadata.id') = ?`);
   const update = db.query("UPDATE scenarios SET config = json(?) WHERE json_extract(config, '$.metadata.id') = ?") as any;
   const del = db.query("DELETE FROM scenarios WHERE json_extract(config, '$.metadata.id') = ?") as any;
+  const softDel = db.query("UPDATE scenarios SET config = json(?) WHERE json_extract(config, '$.metadata.id') = ?") as any;
+  const restoreUpd = db.query("UPDATE scenarios SET config = json(?) WHERE json_extract(config, '$.metadata.id') = ?") as any;
 
   return {
     list() { return selectAll.all().map(r => JSON.parse(r.config)) },
     get(id: string) { const r = selectOne.get(id); return r ? JSON.parse(r.config) : null },
     insert(cfg: any) { insert.run(JSON.stringify(cfg)) },
     update(id: string, cfg: any) { update.run(JSON.stringify(cfg), id); return true },
-    delete(id: string) { del.run(id) }
+    delete(id: string) { del.run(id) },
+    softDelete(id: string) {
+      const cur = selectOne.get(id);
+      if (!cur) return false;
+      const cfg = JSON.parse(cur.config);
+      const tags: string[] = Array.isArray(cfg?.metadata?.tags) ? cfg.metadata.tags.slice() : [];
+      if (!tags.includes('deleted')) tags.push('deleted');
+      const next = { ...cfg, metadata: { ...(cfg.metadata || {}), tags } };
+      softDel.run(JSON.stringify(next), id);
+      return true;
+    },
+    restore(id: string) {
+      const cur = selectOne.get(id);
+      if (!cur) return false;
+      const cfg = JSON.parse(cur.config);
+      const tags: string[] = Array.isArray(cfg?.metadata?.tags) ? cfg.metadata.tags.slice() : [];
+      const nextTags = tags.filter((t: string) => t !== 'deleted');
+      const next = { ...cfg, metadata: { ...(cfg.metadata || {}), tags: nextTags } };
+      restoreUpd.run(JSON.stringify(next), id);
+      return true;
+    }
   }
 }

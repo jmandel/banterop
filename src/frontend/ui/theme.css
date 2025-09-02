@@ -5,17 +5,20 @@
   --muted: #64748b;
   --border: #e2e8f0;
 
-  /* Banterop brand (teal + warm accent) */
-  --primary: #0d9488; /* teal-600 */
+  /* Banterop brand - exact logo colors */
+  --primary: #00a8a0; /* exact teal from logo */
   --primary-foreground: #ffffff;
-  --primary-50: #f0fdfa; /* teal-50 */
-  --primary-100: #ccfbf1; /* teal-100 */
-  --primary-700: #0f766e; /* teal-700 */
-  --primary-800: #115e59; /* teal-800 */
+  --primary-50: #e6f7f6; /* very light teal */
+  --primary-100: #b3e8e5; /* light teal */
+  --primary-600: #008b84; /* darker teal */
+  --primary-700: #006b66; /* deeper teal */
+  --primary-800: #004d49; /* deepest teal */
 
-  --accent: #f59e0b; /* amber-500 (from logo) */
-  --accent-50: #fffbeb; /* amber-50 */
-  --accent-800: #92400e; /* amber-800 */
+  --accent: #ff9f40; /* exact orange from logo */
+  --accent-50: #fff5eb; /* very light orange */
+  --accent-600: #e68a2e; /* darker orange */
+  --accent-700: #cc7a29; /* deeper orange */
+  --accent-800: #b36a24; /* deepest orange */
 
   --success: #059669;
   --warning: #d97706;
@@ -35,11 +38,14 @@
 
   --primary: #2dd4bf; /* teal-400 */
   --primary-foreground: #0b1220;
-  --primary-50: #064e3b; /* darker surface hint */
-  --primary-100: #0f766e;
+  --primary-50: #042f2e; /* darker teal surface */
+  --primary-100: #064e3b;
+  --primary-600: #14b8a6;
   --primary-700: #0f766e;
   --primary-800: #115e59;
-  --accent: #fbbf24;
-  --accent-50: #78350f;
-  --accent-800: #fde68a;
+  --accent: #fdba74; /* orange-300 */
+  --accent-50: #431407; /* dark orange surface */
+  --accent-600: #fb923c;
+  --accent-700: #f97316;
+  --accent-800: #fed7aa; /* lighter for dark mode */
 }

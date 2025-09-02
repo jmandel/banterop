@@ -91,6 +91,17 @@ export const api = {
     return { success: true, data: res };
   },
 
+  async restoreScenario(id: string) {
+    const cfg = await http<any>(`/scenarios/${encodeURIComponent(id)}/restore`, { method: 'POST' });
+    const wrapped = {
+      id: String(cfg?.metadata?.id || id),
+      name: String(cfg?.metadata?.title || cfg?.metadata?.id || id),
+      config: cfg,
+      history: [],
+    };
+    return { success: true, data: wrapped };
+  },
+
   async generateLLM(request: any, signal?: AbortSignal, scenarioId?: string) {
     // Add logging metadata for scenario editor calls
     const requestWithMetadata = {
