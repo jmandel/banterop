@@ -156,10 +156,12 @@ function ensureSchema(db: Database): void {
 
   let v = getUserVersion();
   // v0: legacy (no user_version set). v1: baseline tables created. v2+: explicit migrations
+  try { console.info(`[db] schema user_version=${v}`) } catch {}
   db.exec('BEGIN');
 
   try {
     if (v < 1) {
+      try { console.info('[db] migrating v0 → v1 (baseline tables)') } catch {}
       // If tables are missing, ensure they exist (no-ops if present). Baseline.
       db.exec(`
         CREATE TABLE IF NOT EXISTS pairs (
@@ -184,8 +186,10 @@ function ensureSchema(db: Database): void {
         CREATE INDEX IF NOT EXISTS idx_messages_pair_epoch ON messages(pair_id, epoch);
       `);
       v = 1; setUserVersion(1);
+      try { console.info('[db] migration v1 applied') } catch {}
     }
     if (v < 2) {
+      try { console.info('[db] migrating v1 → v2 (messages.created_at + idx)') } catch {}
       // Add created_at column and index; backfill nulls to current time
       if (!hasColumn('messages', 'created_at')) {
         try { db.exec(`ALTER TABLE messages ADD COLUMN created_at INTEGER`); } catch {}
@@ -195,10 +199,12 @@ function ensureSchema(db: Database): void {
         try { db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_pair_time ON messages(pair_id, created_at)`); } catch {}
       }
       v = 2; setUserVersion(2);
+      try { console.info('[db] migration v2 applied') } catch {}
     }
   } catch (e:any) {
     try { db.exec('ROLLBACK') } catch {}
     throw new Error(`Database migration failed: ${String(e?.message || e)}`);
   }
   db.exec('COMMIT');
+  try { console.info(`[db] schema ready at user_version=${v}`) } catch {}
 }

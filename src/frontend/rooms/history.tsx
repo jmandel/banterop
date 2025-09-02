@@ -1,6 +1,7 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { AppLayout as SharedAppLayout } from '../ui'
+import { MetaBar } from '../components/MetaBar'
 import { ArrowLeft } from 'lucide-react'
 import { Markdown } from '../components/Markdown'
 import { attachmentHrefFromBase64 } from '../components/attachments'
@@ -144,28 +145,38 @@ function HistoryApp() {
   }, [snap])
 
   return (
-    <SharedAppLayout
-      title="Banterop"
-      fullWidth
-      breadcrumbs={(
-        <>
-          <a className="muted" href={roomHref}>Room</a>
-          <span className="truncate font-semibold text-gray-900">History: {roomId || '—'}</span>
-        </>
-      )}
-      headerRight={(
-        <a
-          className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact"
-          href={roomHref}
-          title="Back to Room"
-          aria-label="Back to Room"
-        >
-          <ArrowLeft size={18} strokeWidth={1.75} />
-          <span className="hidden sm:inline text-sm">Back to Room</span>
-        </a>
-      )}
-    >
+    <SharedAppLayout title="Banterop" fullWidth>
+      {(() => (
+        <div>
+          {React.createElement(require('../ui/components/PageHeader').PageHeader as any, {
+            title: (
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="truncate">Room History</span>
+                <span className="small text-gray-500 truncate">{roomId || '—'}</span>
+              </div>
+            ),
+            right: (
+              <a className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact" href={roomHref} title="Back to Room" aria-label="Back to Room">
+                <ArrowLeft size={18} strokeWidth={1.75} />
+                <span className="hidden sm:inline text-sm">Back to Room</span>
+              </a>
+            ),
+            offset: 48,
+            fullWidth: true,
+          })}
+        </div>
+      ))()}
       <div className="wrap">
+        {/* Consistent chips row under header */}
+        <div className="mb-2">
+          {(() => {
+            const chips: Array<{ text:string; tone?:'neutral'|'green'|'amber'|'blue'|'gray' }> = [];
+            const total = Array.isArray(list) ? list.length : 0;
+            chips.push({ text: `Tasks ${total}`, tone:'gray' });
+            if (selected != null) chips.push({ text: `Viewing #${selected} (${viewer==='init'?'Initiator':'Responder'})`, tone:'gray' });
+            return <MetaBar left={<span />} chips={chips} />
+          })()}
+        </div>
         {error && (
           <div className="card">
             <div className="small text-red-700">{error}</div>

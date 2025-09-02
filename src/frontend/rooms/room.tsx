@@ -332,27 +332,28 @@ function App() {
   }, [])
 
   return (
-    <SharedAppLayout
-      title="Banterop"
-      fullWidth
-      breadcrumbs={(
-        <>
-          <span className="truncate font-semibold text-gray-900">Room: {roomTitleFromHash || roomId || '—'}</span>
-          <span className={`pill ${isOwner ? 'ok' : (observing ? 'warn' : 'info')}`}>{isOwner ? 'Connected' : (observing ? 'Observing only' : 'Connecting…')}</span>
-        </>
-      )}
-      headerRight={(
-        <button
-          title="Settings"
-          aria-label="Settings"
-          onClick={()=>setShowSettings(true)}
-          className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact"
-        >
-          <Settings size={18} strokeWidth={1.75} />
-          <span className="hidden sm:inline text-sm">Config</span>
-        </button>
-      )}
-    >
+    <SharedAppLayout title="Banterop" fullWidth>
+      {/* Subheader */}
+      {(() => (
+        <div className="">
+          {React.createElement(require('../ui/components/PageHeader').PageHeader as any, {
+            title: (
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="truncate">Room: {roomTitleFromHash || roomId || '—'}</span>
+                <span className={`pill ${isOwner ? 'bg-green-50 text-green-800' : (observing ? 'bg-amber-50 text-amber-800' : 'bg-gray-100 text-gray-800')}`}>{isOwner ? 'Connected' : (observing ? 'Observing' : 'Connecting…')}</span>
+              </div>
+            ),
+            right: (
+              <button title="Settings" aria-label="Settings" onClick={()=>setShowSettings(true)} className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact">
+                <Settings size={18} strokeWidth={1.75} />
+                <span className="hidden sm:inline text-sm">Config</span>
+              </button>
+            ),
+            offset: 48,
+            fullWidth: true,
+          })}
+        </div>
+      ))()}
       <div className={`wrap ${showDebug ? 'with-debug' : ''}`}>
 
   {(() => {
@@ -363,29 +364,15 @@ function App() {
       if (hashIdx >= 0) return `…${t.slice(hashIdx)}`;
       return t.length > 12 ? `…${t.slice(-12)}` : t;
     }
+    const chips: Array<{ text:string; tone?:'neutral'|'green'|'amber'|'blue'|'gray' }> = [];
+    chips.push({ text:'A2A', tone:'gray' });
+    if (taskId) {
+      chips.push({ text: `Task ${summarizeTaskId(taskId)}`, tone:'gray' });
+      const statusChip = (turnText === 'Our turn') ? 'Our Turn' : (turnText || '');
+      if (statusChip) chips.push({ text: statusChip, tone: statusChip === 'Our Turn' ? 'blue' : 'gray' });
+    }
     return (
-      <MetaBar
-        elRef={metaRef}
-        offset={48}
-        left={(
-          <div className="row compact">
-            <span className="small muted">Task</span>
-            <span className="small font-mono text-gray-800">{summarizeTaskId(taskId)}</span>
-            {!!taskId && (
-              <button
-                className="p-1 rounded hover:bg-gray-100 text-gray-600"
-                title="Copy Task ID"
-                aria-label="Copy Task ID"
-                onClick={() => { try { navigator.clipboard.writeText(taskId) } catch {} }}
-              >
-                <Copy size={16} strokeWidth={1.75} />
-              </button>
-            )}
-            <span className="small muted ml-2">{turnText}</span>
-          </div>
-        )}
-        chips={[]}
-      />
+      <MetaBar elRef={metaRef} offset={92} left={<span />} chips={chips} />
     );
   })()}
 

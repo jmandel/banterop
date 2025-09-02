@@ -314,59 +314,48 @@ function App() {
   }, []);
 
   return (
-    <SharedAppLayout
-      title="Banterop"
-      fullWidth
-      breadcrumbs={(
-        <>
-          <span className="truncate font-semibold text-gray-900">Client</span>
-          <span className="small muted">{transport === 'mcp' ? 'MCP' : 'A2A'}</span>
-        </>
-      )}
-      headerRight={(
-        <button title="Settings" aria-label="Settings" onClick={()=>setShowSettings(true)} className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact">
-          <Settings size={18} strokeWidth={1.75} />
-          <span className="hidden sm:inline text-sm">Config</span>
-        </button>
-      )}
-    >
-      <div className={`wrap ${showDebug ? 'with-debug' : ''}`}>
-      <MetaBar
-        elRef={metaRef}
-        offset={48}
-        left={(
-          <div className="row compact">
-            <span className="small muted">Task</span>
-            <span className="small font-mono text-gray-800">{taskId ? taskId : 'No task'}</span>
-            {!!taskId && (
-              <button
-                className="p-1 rounded hover:bg-gray-100 text-gray-600"
-                title="Copy Task ID"
-                aria-label="Copy Task ID"
-                onClick={() => { try { navigator.clipboard.writeText(taskId) } catch {} }}
-              >
-                <Copy size={16} strokeWidth={1.75} />
+    <SharedAppLayout title="Banterop" fullWidth>
+      {(() => (
+        <div>
+          {React.createElement(require('../ui/components/PageHeader').PageHeader as any, {
+            title: (<span>Client</span>),
+            right: (
+              <button title="Settings" aria-label="Settings" onClick={()=>setShowSettings(true)} className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact">
+                <Settings size={18} strokeWidth={1.75} />
+                <span className="hidden sm:inline text-sm">Config</span>
               </button>
+            ),
+            offset: 48,
+            fullWidth: true,
+          })}
+        </div>
+      ))()}
+      <div className={`wrap ${showDebug ? 'with-debug' : ''}`}>
+      {(() => {
+        const chips: Array<{ text:string; tone?:'neutral'|'green'|'amber'|'blue'|'gray' }> = [];
+        chips.push({ text: transport === 'mcp' ? 'MCP' : 'A2A', tone:'gray' });
+        if (taskId) {
+          chips.push({ text: `Task ${taskId}`, tone:'gray' });
+          const dismissed = new Set<string>(facts.filter((f:any)=>f.type==='compose_dismissed').map((f:any)=>String(f.composeId||'')));
+          let pendingReview = false;
+          for (let i = facts.length - 1; i >= 0; --i) { const f:any = facts[i]; if (f.type==='message_sent') break; if (f.type==='compose_intent' && !dismissed.has(String(f.composeId||''))) { pendingReview = true; break; } }
+          let statusText = '';
+          if (['completed','canceled','failed','rejected'].includes(uiStatus)) statusText = uiStatus;
+          else if (pendingReview && useAppStore.getState().plannerMode==='approve') statusText = 'Waiting for review';
+          else if (uiStatus==='input-required') statusText = 'Our Turn';
+          else if (uiStatus==='working') statusText = 'Other side working';
+          else if (uiStatus==='submitted' || uiStatus==='initializing') statusText = 'Setting up…';
+          if (statusText) chips.push({ text: statusText, tone: statusText === 'Our Turn' ? 'blue' : 'gray' });
+        }
+        return (
+          <>
+            <MetaBar elRef={metaRef} offset={92} left={<span />} chips={chips} right={<button className="btn secondary" onClick={clearTask} disabled={!taskId}>Clear task</button>} />
+            {!taskId && (
+              <div className="text-sm text-gray-500 mt-2">Send a message to begin a new task</div>
             )}
-            <span className="small muted ml-2">
-              {(() => {
-                if (!taskId) return 'Send a message to begin a new task';
-                if (['completed','canceled','failed','rejected'].includes(uiStatus)) return uiStatus;
-                const dismissed = new Set<string>(facts.filter((f:any)=>f.type==='compose_dismissed').map((f:any)=>String(f.composeId||'')));
-                let pendingReview = false;
-                for (let i = facts.length - 1; i >= 0; --i) { const f:any = facts[i]; if (f.type==='message_sent') break; if (f.type==='compose_intent' && !dismissed.has(String(f.composeId||''))) { pendingReview = true; break; } }
-                if (pendingReview && useAppStore.getState().plannerMode==='approve') return 'Waiting for review';
-                if (uiStatus==='input-required') return 'Our turn';
-                if (uiStatus==='working') return 'Other side working';
-                if (uiStatus==='submitted' || uiStatus==='initializing') return 'Setting up…';
-                return uiStatus || 'Unknown';
-              })()}
-            </span>
-          </div>
-        )}
-        chips={[]}
-        right={<button className="btn secondary" onClick={clearTask} disabled={!taskId}>Clear task</button>}
-      />
+          </>
+        );
+      })()}
 
       {showDebug && <DebugPanel />}
 

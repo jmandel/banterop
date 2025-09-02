@@ -53,9 +53,41 @@ function RoomsPage() {
   const rooms = (index?.rooms || []).filter(r => !query || r.roomId.includes(query))
 
   return (
-    <AppLayout title="Banterop" breadcrumbs={<span className="font-semibold">Room Activity</span>}>
+    <AppLayout title="Banterop">
+      {(() => (
+        <div>
+          {React.createElement(require('../ui/components/PageHeader').PageHeader as any, {
+            title: (<span>Room Activity</span>),
+            offset: 48,
+            fullWidth: false,
+          })}
+        </div>
+      ))()}
       <div className="container mx-auto p-4">
-        <div className="row gap-2 mb-4">
+        {/* Consistent chips row */}
+        <div className="card compact mb-4">
+          <div className="row compact">
+            <span className="pill bg-gray-100 text-gray-800">Rooms {overview?.counts?.roomsActive ?? '—'}</span>
+            <span className="pill bg-gray-100 text-gray-800">Messages ({windowSel}) {overview?.counts?.messages ?? '—'}</span>
+            <span className="pill bg-gray-100 text-gray-800">Backends Active {overview?.counts?.backendActive ?? '—'}</span>
+            <div className="ml-auto row compact">
+              <select value={windowSel} onChange={e=>setWindowSel(e.target.value as any)} className="border rounded px-2 py-1 text-sm">
+                <option value="1h">Last 1h</option>
+                <option value="24h">Last 24h</option>
+                <option value="7d">Last 7d</option>
+              </select>
+              <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search Room ID" className="border rounded px-2 py-1 text-sm" />
+              <select value={sort} onChange={e=>setSort(e.target.value as any)} className="border rounded px-2 py-1 text-sm">
+                <option value="last">Sort: Last Activity</option>
+                <option value="msgs">Sort: Total Messages</option>
+                <option value="window">Sort: Messages ({windowSel})</option>
+              </select>
+              <button onClick={load} className="border rounded px-3 py-1 text-sm">{loading ? 'Refreshing…' : 'Refresh'}</button>
+            </div>
+          </div>
+        </div>
+
+        <div className="row gap-2 mb-4 hidden">
           <div className="col">
             <div className="p-3 rounded border">
               <div className="text-xs text-muted">Rooms</div>
@@ -74,22 +106,7 @@ function RoomsPage() {
               <div className="text-2xl">{overview?.counts?.backendActive ?? '—'}</div>
             </div>
           </div>
-          <div className="col ml-auto">
-            <div className="flex items-center gap-2 justify-end">
-              <select value={windowSel} onChange={e=>setWindowSel(e.target.value as any)} className="border rounded px-2 py-1 text-sm">
-                <option value="1h">Last 1h</option>
-                <option value="24h">Last 24h</option>
-                <option value="7d">Last 7d</option>
-              </select>
-              <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search Room ID" className="border rounded px-2 py-1 text-sm" />
-              <select value={sort} onChange={e=>setSort(e.target.value as any)} className="border rounded px-2 py-1 text-sm">
-                <option value="last">Sort: Last Activity</option>
-                <option value="msgs">Sort: Total Messages</option>
-                <option value="window">Sort: Messages ({windowSel})</option>
-              </select>
-              <button onClick={load} className="border rounded px-3 py-1 text-sm">{loading ? 'Refreshing…' : 'Refresh'}</button>
-            </div>
-          </div>
+          <div className="col ml-auto" />
         </div>
 
         <div className="overflow-auto border rounded">
