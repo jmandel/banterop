@@ -16,10 +16,11 @@ import { Database } from 'bun:sqlite'
 import { createScenariosStore } from './core/scenarios-store'
 import { createScenariosRoutes } from './routes/scenarios'
 import { createLLMRoutes } from './routes/llm'
-import { extractNextState, computeStatesForNext } from './core/finality'
+// import { extractNextState, computeStatesForNext } from './core/finality'
 // controlHtml removed as default landing; scenarios becomes the main page
 import clientHtml from '../frontend/client/index.html'
 import roomsHtml from '../frontend/rooms/index.html'
+import roomsHistoryHtml from '../frontend/rooms/history.html'
 import scenariosHtml from '../frontend/scenarios/index.html'
 
 export type AppBindings = {
@@ -43,36 +44,13 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
   const sqlite = new Database(env.BANTEROP_DB || ':memory:')
   sqlite.exec('PRAGMA journal_mode = WAL;')
   const db = createPersistenceFromDb(sqlite)
-  const eventsMax = Number(((opts?.env as any)?.BANTEROP_EVENTS_MAX ?? process.env.BANTEROP_EVENTS_MAX ?? 5000))
-  const events = createEventStore({ maxPerPair: eventsMax })
+  const eventsMax = Number(((opts?.env as any)?.BANTEROP_EVENTS_MAX ?? process.env.BANTEROP_EVENTS_MAX ?? 1000))
+  const roomsMax = Number(((opts?.env as any)?.BANTEROP_ROOMS_MAX ?? process.env.BANTEROP_ROOMS_MAX ?? 100))
+  const events = createEventStore({ maxPerPair: eventsMax, maxRooms: roomsMax })
   const pairs = createPairsService({ db, events, baseUrl: env.BASE_URL })
 
-  // Seed SSE ring from DB for current epochs
-  try {
-    const all = db.listPairs()
-    for (const p of all) {
-      const pairId = p.pair_id
-      const epoch = p.epoch || 0
-      if (epoch <= 0) continue
-      events.push(pairId, { type:'epoch-begin', epoch } as any)
-      // replay messages (bounded by ring max per pair)
-      const rows = db.listMessages(pairId, epoch, { order:'ASC', limit: eventsMax })
-      let last: { author:'init'|'resp'; msg:any } | null = null
-      for (const r of rows) {
-        const msg = (()=>{ try { return JSON.parse(r.json) } catch { return null } })()
-        if (!msg) continue
-        events.push(pairId, { type:'message', epoch, messageId: String(msg.messageId||''), message: msg } as any)
-        last = { author: r.author, msg }
-      }
-      if (last) {
-        const desired = extractNextState(last.msg) ?? 'working'  // Default: turn-ending (it's your turn)
-        const states = computeStatesForNext(last.author, desired)
-        events.push(pairId, { type:'state', epoch, states, status:{ message:last.msg } } as any)
-      } else {
-        events.push(pairId, { type:'state', epoch, states:{ initiator:'submitted', responder:'submitted' } } as any)
-      }
-    }
-  } catch {}
+  // Lazy startup: do not seed the in-memory event store from DB.
+  // Rooms will appear in the event store upon first activity or subscription.
 
   app.use('*', async (c, next) => { c.set('db', db); c.set('events', events); c.set('pairs', pairs); await next() })
 
@@ -109,6 +87,7 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
       '/scenarios/': scenariosHtml,
       // Serve dynamic room page directly (same bundled HTML)
       '/rooms/:roomId': roomsHtml,
+      '/rooms/:roomId/history': roomsHistoryHtml as any,
     },
     async fetch(req, srv) {
       const url = new URL(req.url)
@@ -119,7 +98,7 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
         '/scenarios/': scenariosHtml,
       }
       const html = staticPages[url.pathname]
-      if (html) return new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } })
+      if (html) return new Response(html as any, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } })
       return app.fetch(req, srv)
     },
   })

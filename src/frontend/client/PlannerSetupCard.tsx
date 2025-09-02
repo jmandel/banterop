@@ -37,7 +37,7 @@ export function PlannerSetupCard() {
         const cid = String((f as any).composeId||'');
         if (cid && !dismissed.has(cid)) {
           let sentAfter = false;
-          for (let j = i + 1; j < facts.length; j++) { if (facts[j].type === 'remote_sent') { sentAfter = true; break; } }
+          for (let j = i + 1; j < facts.length; j++) { if (facts[j].type === 'message_sent') { sentAfter = true; break; } }
           if (!sentAfter) return true;
         }
       }

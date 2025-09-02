@@ -21,7 +21,7 @@ This document explains how the planner harness runs, what wakes it up, and how i
 The harness wakes a planning pass in response to these journal changes:
 
 - Status trigger: last `status_changed` became `input-required` (plan once per such status).
-- Inbound trigger: a new public inbound message (`remote_received`), only if the latest public is inbound (we haven’t already responded).
+- Inbound trigger: a new public inbound message (`message_received`), only if the latest public is inbound (we haven’t already responded).
 - Whisper trigger: a new `user_guidance` fact.
 
 No explicit tool triggers — tools are planner-internal; harness doesn’t need to watch `tool_result`.
@@ -29,7 +29,7 @@ No explicit tool triggers — tools are planner-internal; harness doesn’t need
 ## Guards (harness-owned)
 
 - Status gate: Only plan when the latest status is `input-required`.
-- Unsent compose gate: If any `compose_intent` exists with no `remote_sent` after it, don’t plan (park until approval or dismissal).
+- Unsent compose gate: If any `compose_intent` exists with no `message_sent` after it, don’t plan (park until approval or dismissal).
 - Outstanding question: Surface it if present, but do not block planning if a new trigger arrives (e.g., inbound or whisper).
 - Duplicate sleep gate: If planner output is exactly one `sleep` and the last fact is `sleep`, skip committing it.
 - Optional duplicate compose gate: If planner proposes a `compose_intent` identical to the most recent unsent compose (same text + attachment names), skip committing it.

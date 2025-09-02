@@ -25,10 +25,10 @@ export async function startServer(opts?: { dbPath?: string; env?: Record<string,
   if (opts?.env) { for (const [k,v] of Object.entries(opts.env)) { try { (process as any).env[k] = v } catch {} } }
   const server = createServer({ port: 0, env: { BANTEROP_DB: opts?.dbPath ?? ':memory:', ...(opts?.env || {}) } });
   const base = String(server.url);
-  // Probe readiness
+  // Probe readiness with shorter interval for faster startup detection
   const ok = await waitUntil(async () => {
     try { const r = await fetch(base + "/.well-known/healthz"); return r.ok; } catch { return false; }
-  }, 15000, 100);
+  }, 15000, 10);
   if (!ok) throw new Error("Server did not start");
   const port = Number(new URL(base).port || '0');
   return { server, port, base, dbPath: opts?.dbPath };

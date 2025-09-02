@@ -18,6 +18,7 @@ import { chatWithValidationRetry } from '../../../shared/llm-retry';
 import { ScenarioPlannerSetup, dehydrateScenario, hydrateScenario } from './scenario.setup';
 import { b64ToUtf8 } from '../../../shared/codec';
 import type { ScenarioConfiguration, Tool as ScenarioTool } from '../../../types/scenario-configuration.types'; // ← adjust
+import { uniqueName } from '../../../shared/a2a-helpers';
 
 // ---------------------u--------
 // Public export
@@ -90,12 +91,13 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
         }) as ProposedFact;
         return [q];
       }
-      return [sleepFact('Completed; nothing left to do.', includeWhy)];
+      // Planning invoked post-terminal; log quietly, do not announce
+      return ([{ type:'planner_error', code:'POST_TERMINAL_PLANNING', message:'Planner invoked after terminal status', stage:'decision', attempts:0, announce:false } as any] as ProposedFact[]);
     }
 
     // Past this point: status is typically 'input-required' or 'canceled'/'failed'
     if (status === 'failed' || status === 'canceled') {
-      return [sleepFact(`No actions: status=${status}`, includeWhy)];
+      return ([{ type:'planner_error', code:'POST_TERMINAL_PLANNING', message:`Planner invoked with status=${status}`, stage:'decision', attempts:0, announce:false } as any] as ProposedFact[]);
     }
 
     // 4) Multi-step loop with single-batch output
@@ -133,10 +135,35 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
     } catch {}
       let decision: ParsedDecision;
       try {
-        decision = await chatForDecisionWithRetry(ctx, { model, sys, prompt });
+        // Build allowed tools for semantic validation
+        const allowedCore = Array.from(coreAllowed);
+        const me = (scenario?.agents || []).find(a => a.agentId === myId) || scenario?.agents?.[0];
+        const scenTools = ((me?.tools || []) as any[]).map(t=>String(t.toolName||''));
+        const allowed = new Set<string>([...allowedCore, ...scenTools]);
+        decision = await chatForDecisionWithRetry(ctx, { model, sys, prompt, validate: (d) => {
+          const tool = String(d.tool||'').trim();
+          if (!allowed.has(tool)) throw new Error(`DISALLOWED_ACTION:${tool}`);
+          if ((tool === 'askUser' || tool === 'ask_user') && !String(d.args?.prompt||'').trim()) throw new Error('INVALID_ARGS:askUser.prompt');
+          if (tool === 'sendMessageToMyPrincipal' && !String(d.args?.text||'').trim()) throw new Error('INVALID_ARGS:sendMessageToMyPrincipal.text');
+          if (tool === 'readAttachment' || tool === 'read_attachment') {
+            if (!String(d.args?.name||'').trim()) throw new Error('INVALID_ARGS:readAttachment.name');
+          }
+          if (tool === 'sendMessageToRemoteAgent') {
+            const attList = Array.isArray(d.args?.attachments) ? d.args.attachments : [];
+            const filesNow = listAttachmentMetasAtCut(workingFacts as any);
+            const known = new Set(filesNow.map(a => a.name));
+            const missing = attList.map((a:any)=>String(a?.name||'').trim()).filter((n:string)=>!!n && !known.has(n));
+            if (missing.length) throw new Error(`MISSING_ATTACHMENT:${missing.join(',')}`);
+          }
+        }});
       } catch (e:any) {
-        const errMsg = String(e?.message || e || 'planner error');
-        const msg = `We hit a temporary error while drafting (details: ${errMsg}). If you want us to continue, please reply or try again.`;
+        const emsg = String(e?.message || 'planner error');
+        let code: any = 'LLM_PARSE_FAILED';
+        if (/^DISALLOWED_ACTION/.test(emsg)) code = 'DISALLOWED_ACTION';
+        else if (/^INVALID_ARGS/.test(emsg)) code = 'INVALID_ARGS';
+        else if (/^MISSING_ATTACHMENT/.test(emsg)) code = 'MISSING_ATTACHMENT';
+        out.push(({ type:'planner_error', code, message:'Planner could not produce a valid action after retries', stage:'decision', attempts:3, announce:true, detail: emsg } as any));
+        const msg = `We encountered a drafting error and couldn’t proceed. Please respond so we can continue.`;
         out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text: msg, nextStateHint: 'input-required', ...(includeWhy ? { why:'Planner error after 3 attempts.' } : {}) } as ProposedFact));
         break;
       }
@@ -144,22 +171,22 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
 
       // Dispatch
       if (decision.tool === 'sleep') {
-        if (!coreAllowed.has('sleep')) { out.push(sleepFact('Core tool disabled: sleep', includeWhy)); break; }
-        out.push(sleepFact('LLM chose to sleep.', includeWhy, reasoning));
+        out.push(({ type:'planner_error', code:'DISALLOWED_ACTION', message:'Model chose disallowed action: sleep', stage:'decision', attempts:3, announce:true } as any));
+        out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text: 'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'input-required' } as ProposedFact));
         break;
       }
 
       if (decision.tool === 'sendMessageToMyPrincipal') {
-        if (!coreAllowed.has('sendMessageToMyPrincipal')) { out.push(sleepFact('Core tool disabled: sendMessageToMyPrincipal', includeWhy)); break; }
+        if (!coreAllowed.has('sendMessageToMyPrincipal')) { out.push(({ type:'planner_error', code:'TOOL_DISABLED', message:'Tool disabled: sendMessageToMyPrincipal', stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'input-required' } as ProposedFact)); break; }
         const promptText = String(decision.args?.text || '').trim();
-        if (!promptText) { out.push(sleepFact('sendMessageToMyPrincipal: empty text → sleep', includeWhy, reasoning)); break; }
+        if (!promptText) { out.push(({ type:'planner_error', code:'INVALID_ARGS', message:'Empty text for sendMessageToMyPrincipal', stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'input-required' } as ProposedFact)); break; }
         out.push(({ type:'agent_question', qid: ctx.newId('q:'), prompt: promptText, required:false, ...(includeWhy ? { why: reasoning } : {}) } as ProposedFact));
         break;
       }
 
       if (decision.tool === 'askUser' || decision.tool === 'ask_user') {
         const promptText = String(decision.args?.prompt || '').trim();
-        if (!promptText) { out.push(sleepFact('askUser: empty prompt → sleep', includeWhy, reasoning)); break; }
+        if (!promptText) { out.push(({ type:'planner_error', code:'INVALID_ARGS', message:'Empty prompt for askUser', stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'input-required' } as ProposedFact)); break; }
         out.push(({ type:'agent_question', qid: ctx.newId('q:'), prompt: promptText, required: !!decision.args?.required, placeholder: typeof decision.args?.placeholder === 'string' ? decision.args.placeholder : undefined, ...(includeWhy ? { why: reasoning } : {}) } as ProposedFact));
         break;
       }
@@ -194,7 +221,11 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       }
 
       if (decision.tool === 'done') {
-        if (!coreAllowed.has('done')) { out.push(sleepFact('Core tool disabled: done', includeWhy)); } else { out.push(sleepFact('Planner declared done.', includeWhy, reasoning)); }
+        if (!coreAllowed.has('done')) { out.push(({ type:'planner_error', code:'TOOL_DISABLED', message:'Tool disabled: done', stage:'decision', attempts:3, announce:false } as any)); }
+        else {
+          const text = 'We have completed this request.';
+          out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text, nextStateHint: 'completed', ...(includeWhy ? { why: reasoning } : {}) } as ProposedFact));
+        }
         break;
       }
 
@@ -204,7 +235,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
         const filesNow = listAttachmentMetasAtCut(workingFacts as any);
         const known = new Set(filesNow.map(a => a.name));
         const missing = attList.map((a:any)=>String(a?.name||'').trim()).filter((n:string)=>!!n && !known.has(n));
-        if (missing.length) { out.push(sleepFact(`Attachments missing: ${missing.join(', ')}.`, includeWhy, reasoning)); break; }
+        if (missing.length) { out.push(({ type:'planner_error', code:'MISSING_ATTACHMENT', message:`Attachments missing: ${missing.join(', ')}`, detail:{ missing }, stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:`We need the following attachment(s) to proceed: ${missing.join(', ')}.`, nextStateHint:'input-required' } as ProposedFact)); break; }
         const composeId = ctx.newId('c:');
         const text = String(decision.args?.text || '').trim() || defaultComposeFromScenario(scenario, myId);
         const metaList: AttachmentMeta[] = attList.map((a:any)=>String(a?.name||'')).filter(Boolean).map((name:string)=>({ name, mimeType: filesNow.find(x=>x.name===name)?.mimeType || 'application/octet-stream' }));
@@ -214,17 +245,24 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       }
 
       // Scenario tool name
-      if (enabledScenarioTools && !enabledScenarioTools.includes(decision.tool)) { out.push(sleepFact(`Tool '${decision.tool}' disabled`, includeWhy, reasoning)); break; }
+      if (enabledScenarioTools && !enabledScenarioTools.includes(decision.tool)) { out.push(({ type:'planner_error', code:'TOOL_DISABLED', message:`Tool disabled: ${decision.tool}`, stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'input-required' } as ProposedFact)); break; }
       const tdef = findScenarioTool(scenario, myId, decision.tool);
-      if (!tdef) { out.push(sleepFact(`Unknown tool '${decision.tool}' → sleep.`, includeWhy, reasoning)); break; }
+      if (!tdef) { out.push(({ type:'planner_error', code:'TOOL_UNKNOWN', message:`Unknown tool: ${decision.tool}`, stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'input-required' } as ProposedFact)); break; }
 
       const callId = ctx.newId(`call:${decision.tool}:`);
       try { ctx.hud('tool', `Tool: ${decision.tool}(${shortArgs(decision.args || {})})`, 0.7); } catch {}
       out.push(({ type:'tool_call', callId, name: decision.tool, args: decision.args || {}, ...(includeWhy ? { why: reasoning } : {}) } as ProposedFact));
-      const exec = await runToolOracle({ tool: tdef, args: decision.args || {}, scenario, myAgentId: myId, conversationHistory: xmlHistory, leadingThought: reasoning, llm: ctx.llm, model });
+      const existingNamesAtCallStart = (() => {
+        const s = new Set<string>();
+        for (const f of workingFacts as any[]) { if (f?.type === 'attachment_added' && f.name) s.add(String(f.name)); }
+        for (const f of facts as any[]) { if (f?.type === 'attachment_added' && f.name) s.add(String(f.name)); }
+        return Array.from(s);
+      })();
+      const exec = await runToolOracle({ tool: tdef, args: decision.args || {}, scenario, myAgentId: myId, conversationHistory: xmlHistory, leadingThought: reasoning, llm: ctx.llm, model, existingNames: existingNamesAtCallStart });
       if (!exec.ok) {
         out.push(({ type:'tool_result', callId, ok:false, error: exec.error || 'Tool failed', ...(includeWhy ? { why:'Tool execution error.' } : {}) } as ProposedFact));
-        out.push(sleepFact('Tool error → sleeping.', includeWhy));
+        out.push(({ type:'planner_error', code:'TOOL_EXEC_FAILED', message:'Tool execution failed after retries', stage:'tool', attempts:3, announce:true, relatesTo:{ callId, tool: tdef.toolName } } as any));
+        out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered an error while running a tool. Please respond so we can continue.', nextStateHint:'input-required' } as ProposedFact));
         break;
       }
       out.push(({ type:'tool_result', callId, ok:true, result: exec.result ?? null, ...(includeWhy ? { why:'Tool execution succeeded.' } : {}) } as ProposedFact));
@@ -268,7 +306,7 @@ function shortArgs(a: any): string {
 }
 
 // Centralized wrapper: retry up to 3x until a valid decision JSON is parsed
-async function chatForDecisionWithRetry(ctx: PlanContext<any>, opts: { model?: string; sys: LlmMessage; prompt: string }): Promise<ParsedDecision> {
+async function chatForDecisionWithRetry(ctx: PlanContext<any>, opts: { model?: string; sys: LlmMessage; prompt: string; validate?: (d: ParsedDecision) => void }): Promise<ParsedDecision> {
   const req: { model?: string; messages: LlmMessage[]; temperature?: number; signal?: AbortSignal } = {
     model: opts.model,
     messages: [opts.sys, { role: 'user', content: opts.prompt }],
@@ -278,7 +316,7 @@ async function chatForDecisionWithRetry(ctx: PlanContext<any>, opts: { model?: s
   const retryMessages: LlmMessage[] = [
     { role: 'system', content: 'Return exactly one JSON object with keys "reasoning" and "action". No extra text.' }
   ];
-  return chatWithValidationRetry(ctx.llm, req, (text) => parseActionStrict(text), { attempts: 3, retryMessages });
+  return chatWithValidationRetry(ctx.llm, req, (text) => { const d = parseActionStrict(text); try { opts.validate && opts.validate(d); } catch (e:any) { throw e; } return d; }, { attempts: 3, retryMessages });
 }
 
 function parseActionStrict(text: string): ParsedDecision {
@@ -349,13 +387,13 @@ function listAttachmentMetasAtCut(facts: ReadonlyArray<Fact>): AttachmentMeta[] 
 function buildXmlHistory(facts: ReadonlyArray<Fact>, me: string, other: string): string {
   const lines: string[] = [];
   for (const f of facts) {
-    if (f.type === 'remote_sent') {
+    if (f.type === 'message_sent') {
       // Planner → counterpart
       lines.push(`<message from="${me}" to="${other}">`);
       if (f.text) lines.push(escapeXml(f.text));
       for (const a of f.attachments || []) lines.push(`<attachment name="${a.name}" mimeType="${a.mimeType}" />`);
       lines.push(`</message>`);
-    } else if (f.type === 'remote_received') {
+    } else if (f.type === 'message_received') {
       // Counterpart → planner
       lines.push(`<message from="${other}" to="${me}">`);
       if (f.text) lines.push(escapeXml(f.text));
@@ -539,10 +577,10 @@ function buildFinalizationReminder(facts: ReadonlyArray<Fact>, scenario: Scenari
   }
   if (lastIdx < 0 || !lastCallId) return null;
 
-  // If any remote_sent happened after this call, no reminder needed
+  // If any message_sent happened after this call, no reminder needed
   for (let i = facts.length - 1; i > lastIdx; i--) {
     const f = facts[i];
-    if (f.type === 'remote_sent') return null;
+    if (f.type === 'message_sent') return null;
   }
 
   // Collect attachments produced by this call
@@ -736,6 +774,7 @@ async function runToolOracle(opts: {
   leadingThought?: string;
   llm: PlanContext['llm'];
   model?: string;
+  existingNames?: ReadonlyArray<string>;
 }): Promise<OracleExec> {
   const prompt = buildOraclePromptAligned(opts);
   try {
@@ -745,8 +784,8 @@ async function runToolOracle(opts: {
     ];
     const parsed = await chatWithValidationRetry(opts.llm, req as any, (text) => parseOracleResponseAligned(text), { attempts: 3, retryMessages });
     const { output } = parsed;
-    const attachments = await extractAttachmentsFromOutput(output, opts.tool.toolName, opts.args);
-    return { ok: true, result: output, attachments };
+    const { attachments, result } = await extractAttachmentsFromOutput(output, opts.tool.toolName, opts.args, new Set(opts.existingNames || []));
+    return { ok: true, result, attachments };
   } catch (e:any) {
     return { ok: false, error: String(e?.message || 'oracle failed'), attachments: [] };
   }
@@ -1023,37 +1062,60 @@ function heuristicParseAligned(content: string): { reasoning: string; output: un
   return { reasoning, output };
 }
 
-async function extractAttachmentsFromOutput(output: unknown, toolName?: string, toolArgs?: Record<string, unknown>): Promise<Array<{ name: string; mimeType: string; bytesBase64: string }>> {
-  const results: Array<{ name: string; mimeType: string; bytesBase64: string }> = [];
-  const maybePushDoc = (d: any) => {
+async function extractAttachmentsFromOutput(
+  output: unknown,
+  toolName?: string,
+  toolArgs?: Record<string, unknown>,
+  existingNamesInput?: ReadonlySet<string>
+): Promise<{ attachments: Array<{ name: string; mimeType: string; bytesBase64: string }>; result: unknown }>
+{
+  const attachments: Array<{ name: string; mimeType: string; bytesBase64: string }> = [];
+  const assigned = new Set<string>(Array.from(existingNamesInput || []));
+
+  // Collect candidate document objects (by reference) so we can rewrite names.
+  const candidates: Array<{ ref: any; name: string; mimeType: string; content: string }> = [];
+  const collectDoc = (d: any) => {
+    if (!d || typeof d !== 'object') return;
     const name = String(d?.name || '').trim();
     const contentType = String(d?.contentType || 'text/markdown');
-    const content = typeof d?.content === 'string' ? d.content : (d?.document && typeof d.document.content === 'string' ? d.document.content : undefined);
+    const content = typeof d?.content === 'string'
+      ? d.content
+      : (d?.document && typeof d.document.content === 'string' ? d.document.content : undefined);
     if (name && typeof content === 'string' && content) {
-      results.push({ name, mimeType: contentType, bytesBase64: toBase64(content) });
+      candidates.push({ ref: d, name, mimeType: contentType, content });
     }
   };
   try {
     if (output && typeof output === 'object') {
       // Direct document output
-      if ((output as any).docId || (output as any).name) maybePushDoc(output);
+      if ((output as any).docId || (output as any).name) collectDoc(output);
       // Nested document field
-      if ((output as any).document) maybePushDoc((output as any).document);
+      if ((output as any).document) collectDoc((output as any).document);
       // Legacy documents array
       const docs = (output as any).documents;
-      if (Array.isArray(docs)) for (const d of docs) maybePushDoc(d);
+      if (Array.isArray(docs)) for (const d of docs) collectDoc(d);
+
+      // If we found explicit docs, uniquify names and build attachments
+      for (const c of candidates) {
+        const finalName = uniqueName(c.name, assigned);
+        assigned.add(finalName);
+        try { if (c.ref && typeof c.ref === 'object') c.ref.name = finalName; } catch {}
+        attachments.push({ name: finalName, mimeType: c.mimeType, bytesBase64: toBase64(c.content) });
+      }
 
       // Fallback: if no explicit docs were found, attach the entire JSON output
-      if (!results.length) {
+      if (!attachments.length) {
         const json = stableJson(output);
-        const hash = await sha256Base64Url(json);
         const base = buildJsonAttachmentBase(toolName, toolArgs, 64);
-        const name = `${base}-${hash}.json`;
-        results.push({ name, mimeType: 'application/json', bytesBase64: toBase64(json) });
+        const short = await shortHash6(json);
+        const desired = `${base}-${short}.json`;
+        const finalName = uniqueName(desired, assigned);
+        assigned.add(finalName);
+        attachments.push({ name: finalName, mimeType: 'application/json', bytesBase64: toBase64(json) });
       }
     }
   } catch {}
-  return results;
+  return { attachments, result: output };
 }
 
 function safeStringify(v: unknown): string { try { return JSON.stringify(v, null, 2); } catch { return String(v); } }
@@ -1094,6 +1156,15 @@ async function sha256Base64Url(s: string): Promise<string> {
   } catch {}
   // Fallback: base64 of input (not cryptographic) if SubtleCrypto unavailable
   return toBase64(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/,'');
+}
+async function shortHash6(s: string): Promise<string> {
+  try {
+    const full = await sha256Base64Url(s);
+    const alnum = full.replace(/[^A-Za-z0-9]/g, '');
+    const six = alnum.slice(0, 6);
+    if (six.length === 6) return six;
+    return (alnum + '000000').slice(0, 6);
+  } catch { return '000000'; }
 }
 function buildJsonAttachmentBase(toolName?: string, toolArgs?: Record<string, unknown>, maxLen = 64): string {
   const tn = String(toolName || 'tool');
@@ -1186,7 +1257,7 @@ function lastReasoning(facts: ReadonlyArray<Fact>): string | null {
 function lastMessageLine(facts: ReadonlyArray<Fact>): string | null {
   for (let i = facts.length - 1; i >= 0; i--) {
     const f = facts[i] as any;
-    if (f.type === 'remote_received' || f.type === 'remote_sent') {
+    if (f.type === 'message_received' || f.type === 'message_sent') {
       const t = String(f.text || '').trim();
       if (t) return firstLine(t);
     }

@@ -22,7 +22,7 @@ function latestStatus(facts: ReadonlyArray<Fact>): string {
 
 function logLine(f: Fact, myId?: string, otherId?: string): string | null {
   switch (f.type) {
-    case 'remote_received': {
+    case 'message_received': {
       const who = otherId || 'other';
       const parts: string[] = [];
       parts.push(`INBOUND (${who}): ${f.text}`);
@@ -31,7 +31,7 @@ function logLine(f: Fact, myId?: string, otherId?: string): string | null {
       }
       return parts.join('\n');
     }
-    case 'remote_sent': {
+    case 'message_sent': {
       const who = myId || 'me';
       const parts: string[] = [];
       parts.push(`OUTBOUND (${who}): ${f.text}`);
@@ -56,6 +56,8 @@ function logLine(f: Fact, myId?: string, otherId?: string): string | null {
       return `PRIVATE tool_call: ${f.name}`;
     case 'tool_result':
       return `PRIVATE tool_result: ${f.ok ? 'ok' : 'error'}`;
+    case 'planner_error':
+      return `PRIVATE planner_error: ${(f as any).code || 'error'}`;
     case 'sleep':
       return `SLEEP: ${f.reason || ''}`;
     // no dismissal fact for drafts (UI hides on approval)
@@ -78,7 +80,7 @@ function buildPrompt(input: PlanInput, ctx: PlanContext<Cfg>): { system: string;
   lines.push('');
   lines.push('Conversation history (public, newest last):');
   for (const f of input.facts) {
-    if (f.type !== 'remote_received' && f.type !== 'remote_sent') continue;
+    if (f.type !== 'message_received' && f.type !== 'message_sent') continue;
     const line = logLine(f, who, other);
     if (line) lines.push(line);
   }
@@ -127,7 +129,9 @@ export const LLMDrafterPlanner: Planner<Cfg> = {
     }
     if (!text) {
       ctx.hud('waiting', 'LLM empty/error');
-      return [{ type:'sleep', reason:'LLM empty/error' } as ProposedFact];
+      const err: ProposedFact = ({ type:'planner_error', code:'LLM_EMPTY', message:'LLM returned empty/error while drafting', stage:'drafter', attempts:3, announce:true }) as any;
+      const msg: ProposedFact = ({ type:'compose_intent', composeId: ctx.newId('c'), text: 'We encountered a drafting error and could not proceed. Please respond so we can continue.', nextStateHint: 'input-required' } as ProposedFact);
+      return [err, msg];
     }
     ctx.hud('drafting', `Draft ${text.length} chars`);
     return [{ type:'compose_intent', composeId: ctx.newId('c'), text } as ProposedFact];

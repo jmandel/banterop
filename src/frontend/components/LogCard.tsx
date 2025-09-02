@@ -10,8 +10,8 @@ function tagFor(type: string): { label:string; cls:string } {
     case 'compose_intent': return { label: typeLabel(type), cls:'bg-accent-50 text-accent-800' };
     case 'tool_call':
     case 'tool_result': return { label: typeLabel(type), cls:'bg-amber-50 text-amber-700' };
-    case 'remote_received': return { label: typeLabel(type), cls:'bg-purple-50 text-purple-700' };
-    case 'remote_sent': return { label: typeLabel(type), cls:'bg-green-50 text-green-700' };
+    case 'message_received': return { label: typeLabel(type), cls:'bg-purple-50 text-purple-700' };
+    case 'message_sent': return { label: typeLabel(type), cls:'bg-green-50 text-green-700' };
     case 'attachment_added': return { label: typeLabel(type), cls:'bg-teal-50 text-teal-700' };
     case 'agent_question': return { label: typeLabel(type), cls:'bg-rose-50 text-rose-700' };
     case 'user_answer': return { label: typeLabel(type), cls:'bg-emerald-50 text-emerald-700' };
@@ -36,8 +36,8 @@ function shortId(id?: string, tail = 6): string {
 function summarize(f: Fact): string {
   switch (f.type) {
     case 'status_changed': return `${f.a2a}`;
-    case 'remote_received': return `${preview(f.text)}${(f.attachments && f.attachments.length) ? ` (+${f.attachments.length} att)` : ''}`;
-    case 'remote_sent': return `${preview(f.text)}${(f.attachments && f.attachments.length) ? ` (+${f.attachments.length} att)` : ''}`;
+    case 'message_received': return `${preview(f.text)}${(f.attachments && f.attachments.length) ? ` (+${f.attachments.length} att)` : ''}`;
+    case 'message_sent': return `${preview(f.text)}${(f.attachments && f.attachments.length) ? ` (+${f.attachments.length} att)` : ''}`;
     case 'attachment_added': return `${f.name} (${f.mimeType || 'application/octet-stream'})`;
     case 'tool_call': {
       const keys = Object.keys(f.args || {}).slice(0, 3);

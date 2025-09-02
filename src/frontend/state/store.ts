@@ -317,11 +317,11 @@ export const useAppStore = create<Store>((set, get) => ({
       set({ facts: [], seq: 0, composing: undefined, composeApproved: new Set(), inFlightSends: new Map(), sendErrorByCompose: new Map(), attachmentsIndex: new Map(), hud: null });
       return;
     }
-    // Find last public event (remote_sent, remote_received, or status_changed)
+    // Find last public event (message_sent, message_received, or status_changed)
     let cutIdx = -1;
     for (let i = facts.length - 1; i >= 0; --i) {
       const t = facts[i].type;
-      if (t === 'remote_sent' || t === 'remote_received' || t === 'status_changed') { cutIdx = i; break; }
+      if (t === 'message_sent' || t === 'message_received' || t === 'status_changed') { cutIdx = i; break; }
     }
     if (cutIdx < 0) {
       set({ facts: [], seq: 0, composing: undefined, composeApproved: new Set(), inFlightSends: new Map(), sendErrorByCompose: new Map(), attachmentsIndex: new Map(), hud: null });
@@ -696,6 +696,66 @@ export const useAppStore = create<Store>((set, get) => ({
               if (Number.isFinite(epoch) && epoch !== prev) {
                 set({ currentEpoch: epoch });
                 set(s => ({ wire: { ...s.wire, entries: [] } }));
+                // Backfill wire log for current epoch from server ring buffer
+                (async () => {
+                  try {
+                    const base = (get().rooms.byId[roomId]?.eventsBase || eventsBase || '').replace(/server-events$/, 'events.log');
+                    if (!base) return;
+                    const res = await fetch(`${base}?backlogOnly=1`, { headers: { accept: 'text/event-stream' } });
+                    if (!res.ok || !res.body) return;
+                    const reader = res.body.getReader();
+                    const td = new TextDecoder('utf-8');
+                    let buf = '';
+                    function handleLine(line: string) {
+                      if (!line.startsWith('data:')) return;
+                      const json = line.slice('data:'.length).trim();
+                      if (!json) return;
+                      try {
+                        const payload = JSON.parse(json);
+                        const e = payload?.result;
+                        if (!e || typeof e !== 'object') return;
+                        if (Number(e.epoch || 0) !== epoch) return;
+                        if (e.type === 'client-wire-event') {
+                          const dir = (String(e.dir || '').toLowerCase() === 'outbound') ? 'outbound' : 'inbound';
+                          const b64 = String(e.payload || '');
+                          if (e.protocol === 'mcp') {
+                            let decoded: any = {};
+                            try { decoded = JSON.parse(atob(b64)); } catch {}
+                            const toolName = String(e.tool || (decoded?.params?.name || '') || '');
+                            const kind = dir === 'inbound' ? 'request' : 'response';
+                            const wirePayload = (kind === 'request')
+                              ? { name: toolName, arguments: (decoded?.params?.arguments ?? {}) }
+                              : { name: toolName, result: decoded };
+                            try { get().wire.setMode('mcp'); } catch {}
+                            get().wire.add({ protocol:'mcp', dir: dir as any, method: toolName, kind, payload: wirePayload });
+                          } else if (e.protocol === 'a2a') {
+                            let decoded: any = {};
+                            try { decoded = JSON.parse(atob(b64)); } catch {}
+                            const looksMsg = decoded && typeof decoded === 'object' && Array.isArray(decoded.parts);
+                            try { get().wire.setMode('a2a'); } catch {}
+                            get().wire.add({ protocol:'a2a', dir: dir as any, method: looksMsg ? 'message/send' : undefined, messageId: decoded?.messageId, payload: decoded });
+                          }
+                        }
+                      } catch {}
+                    }
+                    for (;;) {
+                      const { value, done } = await reader.read();
+                      if (done) break;
+                      buf += td.decode(value, { stream: true });
+                      let idx;
+                      while ((idx = buf.indexOf('\n\n')) >= 0) {
+                        const chunk = buf.slice(0, idx);
+                        buf = buf.slice(idx + 2);
+                        const lines = chunk.split(/\r?\n/);
+                        for (const line of lines) handleLine(line);
+                      }
+                    }
+                    if (buf.trim()) {
+                      const lines = buf.split(/\r?\n/);
+                      for (const line of lines) handleLine(line);
+                    }
+                  } catch {}
+                })();
               }
             } catch {}
           } else if (msg?.type === 'client-wire-event' && msg.protocol === 'mcp') {
@@ -715,17 +775,16 @@ export const useAppStore = create<Store>((set, get) => ({
               get().wire.add({ protocol:'mcp', dir: dir as any, method: toolName, kind, payload: wirePayload });
             } catch {}
           } else if (msg?.type === 'client-wire-event' && msg.protocol === 'a2a') {
-            // Server backchannel A2A wire: client‑oriented status updates
+            // Server backchannel A2A wire: emit entries for new messages/status from server
             try {
               const dir = (String(msg.dir || '').toLowerCase() === 'outbound') ? 'outbound' : 'inbound';
               const b64 = String(msg.payload || '');
               let decoded: any = {};
               try { decoded = JSON.parse(atob(b64)); } catch {}
-              // We expect a TaskStatusUpdate; ensure kind for validator
-              const kind = 'status-update';
+              const looksMsg = decoded && typeof decoded === 'object' && Array.isArray(decoded.parts);
               // Flip Rooms wire mode to A2A
               try { get().wire.setMode('a2a'); } catch {}
-              get().wire.add({ protocol:'a2a', dir: dir as any, kind, payload: decoded });
+              get().wire.add({ protocol:'a2a', dir: dir as any, method: looksMsg ? 'message/send' : undefined, messageId: decoded?.messageId, payload: decoded });
             } catch {}
           }
         } catch {}
@@ -926,7 +985,7 @@ function stampAndAppend(set: any, get: any, proposed: ProposedFact[]) {
   })();
   const filtered: ProposedFact[] = [];
   for (const p of proposed) {
-    if (p.type === 'remote_received' || p.type === 'remote_sent') {
+    if (p.type === 'message_received' || p.type === 'message_sent') {
       const mid = (p as any).messageId;
       if (mid && known.has(mid)) continue;
       if (mid) known.add(mid);
@@ -961,7 +1020,7 @@ function stampAndAppend(set: any, get: any, proposed: ProposedFact[]) {
       const nm = (f as any).name as string;
       if (!attachmentsIndex.has(nm)) attachmentsIndex.set(nm, { mimeType: (f as any).mimeType, bytesBase64: (f as any).bytes });
     }
-    if (f.type === 'remote_sent') {
+    if (f.type === 'message_sent') {
       const link = inflight.get((f as any).messageId);
       if (link) {
         (f as any).composeId = link.composeId;
@@ -974,12 +1033,12 @@ function stampAndAppend(set: any, get: any, proposed: ProposedFact[]) {
 
 // Helper functions
 function findUnsentComposes(facts: Fact[]): Array<{ composeId: string; nextStateHint?: A2ANextState }> {
-  // consider compose 'unsent' only if not dismissed and no remote_sent after it
+  // consider compose 'unsent' only if not dismissed and no message_sent after it
   const dismissed = new Set<string>(facts.filter(f=>f.type==='compose_dismissed').map((f:any)=>f.composeId));
   const out: Array<{ composeId: string; nextStateHint?: A2ANextState }> = [];
   for (let i = facts.length - 1; i >= 0; --i) {
     const f = facts[i];
-    if (f.type === 'remote_sent') break;
+    if (f.type === 'message_sent') break;
     if (f.type === 'compose_intent') {
       const ci = f as any;
       if (!dismissed.has(ci.composeId)) out.unshift({ composeId: ci.composeId, nextStateHint: ci.nextStateHint });

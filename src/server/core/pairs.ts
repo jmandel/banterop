@@ -213,24 +213,7 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
 
   async function upsertStates(pairId:string, epoch:number, states:{ init:TaskState; resp:TaskState }, sender:'init'|'resp', msg:any | undefined) {
     events.push(pairId, { type:'state', epoch, states: { initiator: states.init, responder: states.resp }, status: { message: msg && { ...msg } } } as any)
-    // Best‑effort backchannel: push client‑oriented A2A TaskStatusUpdate as a wire event
-    try {
-      const initId = initTaskId(pairId, epoch);
-      const row = db.getTask(initId);
-      const snap = row ? toSnapshot(row) : null;
-      const state = (snap?.status?.state || states.init) as TaskState;
-      const statusMessage = snap?.status?.message;
-      const isFinal = isTerminal(state) || state === 'input-required';
-      const statusUpdate = createStatusUpdateEvent({ taskId: initId, pairId, state, message: statusMessage, isFinal });
-      // For client-wire-event, express contextId in client terms (valid task id)
-      try { (statusUpdate as any).contextId = initId; } catch {}
-      // Direction aligns to who authored the status.message
-      // user → inbound (client→server), agent → outbound (server→client)
-      let dir: 'inbound'|'outbound' = 'outbound';
-      try { const r = String(statusMessage?.role || '').toLowerCase(); if (r === 'user') dir = 'inbound'; else if (r === 'agent') dir = 'outbound'; } catch {}
-      const b64 = utf8ToB64(JSON.stringify(statusUpdate));
-      events.push(pairId, { type: 'client-wire-event', protocol:'a2a', dir, payload: b64, epoch } as any);
-    } catch {}
+    // No longer emit A2A status-update client-wire-events here; limit wire log to new messages only
   }
 
   return {
@@ -297,20 +280,7 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
         kind: 'message',
         metadata: m?.metadata,
       }
-      // Stamp raw wireMessage for Rooms wire log (client-submitted A2A).
-      // Respect pre-existing wireMessage (e.g., set by MCP proxy) and do not overwrite it.
-      try {
-        const ext = (msg.metadata && (msg.metadata as any)[A2A_EXT_URL]) ? { ...(msg.metadata as any)[A2A_EXT_URL] } : {};
-        const hasWire = ext && typeof (ext as any).wireMessage === 'object' && (ext as any).wireMessage !== null;
-        if (!hasWire) {
-          const rawA2A = { role: msg.role, parts: msg.parts, messageId: msg.messageId, kind: 'message' } as any;
-          const b64 = utf8ToB64(JSON.stringify(rawA2A));
-          (msg.metadata as any) = { ...(msg.metadata || {}), [A2A_EXT_URL]: { ...ext, wireMessage: { raw: b64 } } };
-        } else {
-          // Preserve existing wireMessage as-is
-          (msg.metadata as any) = { ...(msg.metadata || {}), [A2A_EXT_URL]: ext };
-        }
-      } catch {}
+      // Stop stamping wireMessage; client-wire-event will carry normalized payloads
       // Validate message (log-only)
       try { validateMessage(msg, { pairId, messageId: msg.messageId }) } catch {}
       
@@ -353,6 +323,20 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
         events.push(pairId, { type: 'state', epoch, states: { initiator:'failed', responder:'failed' }, status: { message: errorMsg } } as any)
         events.push(pairId, { type: 'message', epoch, messageId: msg.messageId, message: msg } as any)
         events.push(pairId, { type: 'message', epoch, messageId: errorMsg.messageId, message: errorMsg } as any)
+        // Wire log: emit client-wire-event entries for the user-submitted message and server-authored error
+        try {
+          const initId = initTaskId(pairId, epoch);
+          const projUser = projectForViewer(msg, initId, 'init', senderRole);
+          const dirUser: 'inbound'|'outbound' = (String((projUser as any)?.role || '').toLowerCase() === 'user') ? 'inbound' : 'outbound';
+          events.push(pairId, { type: 'client-wire-event', protocol:'a2a', dir: dirUser, method:'message/send', messageId: msg.messageId, payload: utf8ToB64(JSON.stringify(projUser)), epoch } as any);
+        } catch {}
+        try {
+          const initId = initTaskId(pairId, epoch);
+          const otherRole = senderRole === 'init' ? 'resp' : 'init';
+          const projErr = projectForViewer(errorMsg, initId, 'init', otherRole);
+          const dirErr: 'inbound'|'outbound' = (String((projErr as any)?.role || '').toLowerCase() === 'user') ? 'inbound' : 'outbound';
+          events.push(pairId, { type: 'client-wire-event', protocol:'a2a', dir: dirErr, method:'message/send', messageId: errorMsg.messageId, payload: utf8ToB64(JSON.stringify(projErr)), epoch } as any);
+        } catch {}
       const snapRow = db.getTask(senderId)!
       const limit = sanitizeHistoryLength(configuration?.historyLength)
       return toSnapshot(snapRow, limit)
@@ -384,6 +368,14 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
       // Normal path: emit state then message
       await upsertStates(pairId, epoch, states, senderRole, msg)
       events.push(pairId, { type: 'message', epoch, messageId: msg.messageId, message: msg } as any)
+      // Wire log: emit a client-wire-event for the new message (projected to initiator's perspective)
+      try {
+        const initId = initTaskId(pairId, epoch);
+        const proj = projectForViewer(msg, initId, 'init', senderRole);
+        const dir: 'inbound'|'outbound' = (String((proj as any)?.role || '').toLowerCase() === 'user') ? 'inbound' : 'outbound';
+        const b64 = utf8ToB64(JSON.stringify(proj));
+        events.push(pairId, { type: 'client-wire-event', protocol:'a2a', dir, method:'message/send', messageId: msg.messageId, payload: b64, epoch } as any);
+      } catch {}
       const snapRow = db.getTask(senderId)!
       const limit = sanitizeHistoryLength(configuration?.historyLength)
       return toSnapshot(snapRow, limit)

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
-import { startServer, stopServer, Spawned, decodeA2AUrl, textPart } from "./utils";
+import { startServer, stopServer, Spawned, decodeA2AUrl, textPart, createMessage } from "./utils";
 
 let S: Spawned;
 
@@ -18,7 +18,7 @@ describe("Rooms SAB and protocol errors", () => {
 
     // A normal send should not be failed when backend is open
     const send = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({
-      jsonrpc:'2.0', id:'m', method:'message/send', params:{ message:{ parts:[textPart('ok','working')], messageId: crypto.randomUUID() } }
+      jsonrpc:'2.0', id:'m', method:'message/send', params:{ message: createMessage({ parts:[textPart('ok','working')], messageId: crypto.randomUUID() }) }
     }) });
     expect(send.ok).toBeTrue();
     const js = await send.json();
@@ -35,7 +35,7 @@ describe("Rooms SAB and protocol errors", () => {
 
     // Send should not fail when backend is active
     const send = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({
-      jsonrpc:'2.0', id:'m', method:'message/send', params:{ message:{ parts:[textPart('go','working')], messageId: crypto.randomUUID() } }
+      jsonrpc:'2.0', id:'m', method:'message/send', params:{ message: createMessage({ parts:[textPart('go','working')], messageId: crypto.randomUUID() }) }
     }) });
     expect(send.ok).toBeTrue();
     const js = await send.json();
@@ -50,7 +50,7 @@ describe("Rooms SAB and protocol errors", () => {
 
     // Send without backend
     const send = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({
-      jsonrpc:'2.0', id:'m', method:'message/send', params:{ message:{ parts:[textPart('hello','working')], messageId: crypto.randomUUID() } }
+      jsonrpc:'2.0', id:'m', method:'message/send', params:{ message: createMessage({ parts:[textPart('hello','working')], messageId: crypto.randomUUID() }) }
     }) });
     expect(send.ok).toBeTrue();
     const js = await send.json();

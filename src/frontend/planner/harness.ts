@@ -91,11 +91,11 @@ export class PlannerHarness<Cfg = unknown> {
       if (f.type === 'status_changed') { lastStatusSeq = f.seq; lastStatus = (f as any).a2a; break; }
     }
     // Latest public + inbound/outbound
-    let lastPublic: 'remote_received'|'remote_sent'|null = null; let lastInboundSeq = 0; let lastOutboundSeq = 0;
+    let lastPublic: 'message_received'|'message_sent'|null = null; let lastInboundSeq = 0; let lastOutboundSeq = 0;
     for (let i = facts.length - 1; i >= 0; --i) {
       const f = facts[i];
-      if (f.type === 'remote_received') { lastPublic = 'remote_received'; lastInboundSeq = f.seq; break; }
-      if (f.type === 'remote_sent') { lastPublic = 'remote_sent'; lastOutboundSeq = f.seq; break; }
+      if (f.type === 'message_received') { lastPublic = 'message_received'; lastInboundSeq = f.seq; break; }
+      if (f.type === 'message_sent') { lastPublic = 'message_sent'; lastOutboundSeq = f.seq; break; }
     }
     // Latest whisper / user answer
     let lastWhisperSeq = 0;
@@ -111,8 +111,8 @@ export class PlannerHarness<Cfg = unknown> {
     // no agent_answer trigger; UI emits user_answer directly
 
     const statusTriggered = (lastStatus === 'input-required') && (lastStatusSeq > this.lastStatusPlannedSeq);
-    const inboundTriggered = (lastPublic === 'remote_received') && (lastInboundSeq > this.lastInboundPlannedSeq);
-    const outboundTriggered = (lastPublic === 'remote_sent') && (lastOutboundSeq > this.lastOutboundPlannedSeq);
+    const inboundTriggered = (lastPublic === 'message_received') && (lastInboundSeq > this.lastInboundPlannedSeq);
+    const outboundTriggered = (lastPublic === 'message_sent') && (lastOutboundSeq > this.lastOutboundPlannedSeq);
     const whisperTriggered = lastWhisperSeq > this.lastWhisperPlannedSeq;
     const userAnswerTriggered = lastUserAnswerSeq > this.lastUserAnswerPlannedSeq;
 
@@ -128,7 +128,7 @@ export class PlannerHarness<Cfg = unknown> {
       try { console.debug('[planner/harness] gate: status blocked', { status:lastStatus, allowKickoffOnSubmitted }); } catch {}
       return;
     }
-    // Unsent compose gate (ignore dismissed): if there's a compose with no remote_sent after it, park
+    // Unsent compose gate (ignore dismissed): if there's a compose with no message_sent after it, park
     // For normal passes, compute unsent compose gate again (dismissed set already computed)
     const hasUnsentCompose = (() => {
       for (let i = facts.length - 1; i >= 0; --i) {
@@ -136,7 +136,7 @@ export class PlannerHarness<Cfg = unknown> {
         if (f.type === 'compose_intent') {
           const ci = f as any;
           if (dismissed.has(ci.composeId)) continue;
-          for (let j = i + 1; j < facts.length; j++) { if (facts[j].type === 'remote_sent') return false; }
+          for (let j = i + 1; j < facts.length; j++) { if (facts[j].type === 'message_sent') return false; }
           return true;
         }
       }
@@ -151,9 +151,9 @@ export class PlannerHarness<Cfg = unknown> {
           if (f.type === 'compose_intent') {
             const ci = f as any;
             if (dismissed2.has(ci.composeId)) continue;
-            // ensure no remote_sent after it
+            // ensure no message_sent after it
             let sentAfter = false;
-            for (let j = i + 1; j < facts.length; j++) { if (facts[j].type === 'remote_sent') { sentAfter = true; break; } }
+            for (let j = i + 1; j < facts.length; j++) { if (facts[j].type === 'message_sent') { sentAfter = true; break; } }
             if (!sentAfter) return String(ci.composeId || '');
           }
         }
@@ -179,7 +179,7 @@ export class PlannerHarness<Cfg = unknown> {
       for (let i = facts.length - 1; i >= 0; --i) {
         const f = facts[i] as any; if (f.seq <= lastQSeq) break;
         if (f.type === 'user_answer') { hasAnswer = true; break; }
-        if (f.type === 'remote_sent' || f.type === 'remote_received') { hasPublicAfterQ = true; break; }
+        if (f.type === 'message_sent' || f.type === 'message_received') { hasPublicAfterQ = true; break; }
       }
     }
     const blockingOpenQ = lastQSeq && !hasAnswer && !whisperTriggered && !userAnswerTriggered && !inboundTriggered && !outboundTriggered && !bootstrap;

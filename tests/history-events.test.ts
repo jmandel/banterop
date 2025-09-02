@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
-import { startServer, stopServer, Spawned, decodeA2AUrl, textPart, openBackend } from "./utils";
+import { startServer, stopServer, Spawned, decodeA2AUrl, textPart, openBackend, createMessage } from "./utils";
 
 let S: Spawned;
 
@@ -19,7 +19,7 @@ describe("Message events and history", () => {
 
     // Start epoch #1 with a no-op stream to ensure tasks exist
     {
-      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start', method:'message/stream', params:{ message:{ role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
+      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start', method:'message/stream', params:{ message: createMessage({ role:'user', parts:[], messageId: crypto.randomUUID() }) } }) });
       for await (const _ of parseSse<any>(res.body!)) break; // snapshot only
     }
 
@@ -28,7 +28,7 @@ describe("Message events and history", () => {
     // Send first message
     const m1 = crypto.randomUUID();
     {
-      const send = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m1', method:'message/send', params:{ configuration:{ historyLength: 0 }, message:{ parts:[textPart('hello-1','turn')], taskId: initId, messageId: m1 } } }) });
+      const send = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m1', method:'message/send', params:{ configuration:{ historyLength: 0 }, message: createMessage({ parts:[textPart('hello-1','turn')], taskId: initId, messageId: m1 }) } }) });
       expect(send.ok).toBeTrue();
     }
 
@@ -61,7 +61,7 @@ describe("Message events and history", () => {
     // Send second message in same epoch
     const m2 = crypto.randomUUID();
     {
-      const send2 = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m2', method:'message/send', params:{ configuration:{ historyLength: 0 }, message:{ parts:[textPart('hello-2','turn')], taskId: initId, messageId: m2 } } }) });
+      const send2 = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m2', method:'message/send', params:{ configuration:{ historyLength: 0 }, message: createMessage({ parts:[textPart('hello-2','turn')], taskId: initId, messageId: m2 }) } }) });
       expect(send2.ok).toBeTrue();
     }
 
@@ -82,17 +82,17 @@ describe("Message events and history", () => {
 
     // Start epoch #1
     {
-      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params:{ message:{ role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
+      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params:{ message: createMessage({ role:'user', parts:[], messageId: crypto.randomUUID() }) } }) });
       for await (const _ of parseSse<any>(res.body!)) break;
     }
 
     const init1 = `init:${pairId}#1`;
     const m1 = crypto.randomUUID();
-    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m1', method:'message/send', params:{ configuration:{ historyLength: 0 }, message:{ parts:[textPart('e1','turn')], taskId: init1, messageId: m1 } } }) });
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m1', method:'message/send', params:{ configuration:{ historyLength: 0 }, message: createMessage({ parts:[textPart('e1','turn')], taskId: init1, messageId: m1 }) } }) });
 
     // Send without taskId to start epoch #2
     const m2 = crypto.randomUUID();
-    const send2 = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m2', method:'message/send', params:{ configuration:{ historyLength: 0 }, message:{ parts:[textPart('e2-first','turn')], messageId: m2 } } }) });
+    const send2 = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m2', method:'message/send', params:{ configuration:{ historyLength: 0 }, message: createMessage({ parts:[textPart('e2-first','turn')], messageId: m2 }) } }) });
     expect(send2.ok).toBeTrue();
     const jr = await send2.json();
     const init2 = `init:${pairId}#2`;

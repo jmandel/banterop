@@ -47,34 +47,11 @@ export class A2AAdapter implements TransportAdapter {
           if (!m || typeof m !== 'object') return;
           const mid = String((m as any).messageId || '');
           if (!mid || seen.has(mid)) return;
-          // If raw stamp exists, log raw first so it's visible before the projected entry
-          try {
-            const ext = (m as any)?.metadata?.[A2A_EXT_URL];
-            const wm = ext?.wireMessage;
-            if (wm && typeof wm === 'object' && wm.raw) {
-              let rawPayload: any = wm.raw;
-              try {
-                const bin = atob(String(wm.raw));
-                const arr = new Uint8Array(bin.length);
-                for (let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
-                rawPayload = JSON.parse(new TextDecoder('utf-8').decode(arr));
-              } catch {}
-              const looksA2AMsg = rawPayload && typeof rawPayload === 'object' && Array.isArray(rawPayload.parts) && (rawPayload.role === 'user' || rawPayload.role === 'agent');
-              const looksMcpSend = rawPayload && typeof rawPayload === 'object' && typeof rawPayload.conversationId === 'string';
-              if (wm.adapter === 'mcp' || looksMcpSend) {
-                // Let server backchannel SSE provide MCP wire events; skip duplicating here.
-              } else if (looksA2AMsg) {
-                const rawMid = String(rawPayload.messageId || mid || '');
-                this.onWire && this.onWire({ protocol:'a2a', dir:'inbound', method:'message/send', kind:'message', roomId:this.roomId, taskId:t.id, messageId: rawMid, payload: rawPayload });
-              } else {
-                this.onWire && this.onWire({ protocol:'a2a', dir:'inbound', method:'raw', kind:'raw', roomId:this.roomId, taskId:t.id, messageId:mid, payload: rawPayload });
-              }
-            }
-          } catch {}
+          // No raw stamp handling; log projected messages only
           // Optionally skip our own projected messages from snapshots (client context)
           if (this.suppressOwnFromSnapshots && (m as any).role === 'user') return;
           seen.add(mid);
-          this.onWire && this.onWire({ protocol:'a2a', dir:'inbound', method:'tasks/get', kind:'message', roomId:this.roomId, taskId:t.id, messageId:mid, payload:m });
+          this.onWire && this.onWire({ protocol:'a2a', dir:'inbound', method:'message/send', kind:'message', roomId:this.roomId, taskId:t.id, messageId:mid, payload:m });
         };
         for (const m of (Array.isArray(t.history) ? t.history : [])) maybeLog(m);
         if (t.status && (t.status as any).message) maybeLog((t.status as any).message);

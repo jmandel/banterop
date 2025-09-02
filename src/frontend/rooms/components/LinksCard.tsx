@@ -1,6 +1,6 @@
 import React from 'react';
 
-export function LinksCard({ agentCard, mcpUrl, onCopyAgent, onCopyMcp, copiedAgent, copiedMcp, clientHref, ctaPrimary, hideTitle }:{
+export function LinksCard({ agentCard, mcpUrl, onCopyAgent, onCopyMcp, copiedAgent, copiedMcp, clientHref, historyHref, ctaPrimary, hideTitle }:{
   agentCard: string;
   mcpUrl: string;
   onCopyAgent: () => void;
@@ -8,6 +8,7 @@ export function LinksCard({ agentCard, mcpUrl, onCopyAgent, onCopyMcp, copiedAge
   copiedAgent: boolean;
   copiedMcp: boolean;
   clientHref: string;
+  historyHref?: string;
   ctaPrimary?: boolean;
   hideTitle?: boolean;
 }) {
@@ -30,6 +31,12 @@ export function LinksCard({ agentCard, mcpUrl, onCopyAgent, onCopyMcp, copiedAge
         <div className="small">Sample Client</div>
         <a className={`btn ${ctaPrimary ? '' : 'secondary'}`} href={clientHref} target="_blank" rel="noreferrer">Launch</a>
       </div>
+      {historyHref && (
+        <div className="row items-center mt-2 justify-between">
+          <div className="small">Room History</div>
+          <a className="btn secondary" href={historyHref} rel="noreferrer">View</a>
+        </div>
+      )}
     </div>
   );
 }

@@ -154,16 +154,16 @@ function App() {
   const plannerReady = useAppStore(s => !!s.readyByPlanner[s.plannerId])
   const plannerConfig = useAppStore(s => s.configByPlanner[s.plannerId])
   const approved = useAppStore(s => s.composeApproved)
-  const hasPublic = React.useMemo(() => facts.some(f => f.type === 'remote_sent' || f.type === 'remote_received'), [facts])
+  const hasPublic = React.useMemo(() => facts.some(f => f.type === 'message_sent' || f.type === 'message_received'), [facts])
   const waitingForClient = (!taskId) || ((uiStatus === 'submitted' || uiStatus === 'initializing') && !hasPublic)
   const sentComposeIds = React.useMemo(() => {
     const s = new Set<string>();
-    for (const f of facts) if (f.type === 'remote_sent' && (f as any).composeId) s.add((f as any).composeId as string);
+    for (const f of facts) if (f.type === 'message_sent' && (f as any).composeId) s.add((f as any).composeId as string);
     return s;
   }, [facts])
   const hasTranscript = React.useMemo(() => {
     for (const f of facts) {
-      if (f.type === 'remote_received' || f.type === 'remote_sent') return true;
+      if (f.type === 'message_received' || f.type === 'message_sent') return true;
       if (f.type === 'agent_question' || f.type === 'user_answer') return true;
       if (f.type === 'user_guidance') {
         const t = String((f as any).text || '')
@@ -234,7 +234,10 @@ function App() {
         // Choose a default LLM model for the client: prefer seed.model when present, else banterop preset
         const defaultModel = (seed && typeof seed.model === 'string' && seed.model.trim()) ? seed.model : DEFAULT_BANTEROP_MODEL
         const payload: any = {
+          // Default to A2A, but include MCP URL for easy switching in client
+          transport: 'a2a',
           agentCardUrl: agentCard,
+          mcpUrl: mcp,
           llm: { provider: 'server', model: defaultModel },
           planner: { id: plannerId, mode: 'approve' as const },
           ...(seed ? { planners: { [plannerId]: { seed } } } : {}),
@@ -264,7 +267,7 @@ function App() {
     const dismissed = new Set<string>(facts.filter((f:any)=>f.type==='compose_dismissed').map((f:any)=>String(f.composeId||'')));
     for (let i = facts.length - 1; i >= 0; --i) {
       const f = facts[i] as any;
-      if (f.type === 'remote_sent') break;
+      if (f.type === 'message_sent') break;
       if (f.type === 'compose_intent') {
         if (!dismissed.has(String(f.composeId||''))) return true;
       }
@@ -273,7 +276,7 @@ function App() {
   }, [facts]);
   const turnText = (() => {
     if (!taskId) return 'Waiting for client';
-    const hasPublic = facts.some(f => f.type === 'remote_sent' || f.type === 'remote_received');
+    const hasPublic = facts.some(f => f.type === 'message_sent' || f.type === 'message_received');
     if (uiStatus === 'completed') return 'Completed';
     if (uiStatus === 'failed' || uiStatus === 'rejected') return 'Failed';
     if (uiStatus === 'canceled') return 'Canceled';
@@ -404,8 +407,8 @@ function App() {
             <div className="small muted mb-1.5">Conversation</div>
             <div className={`transcript ${(observing || isFinal) ? 'faded' : ''}`} aria-live="polite" ref={transcriptRef}>
             {facts.map((f:any) => {
-            if (f.type === 'remote_received' || f.type === 'remote_sent') {
-              const isMe = f.type === 'remote_sent'
+            if (f.type === 'message_received' || f.type === 'message_sent') {
+              const isMe = f.type === 'message_sent'
               const who = isMe ? usLabel : otherLabel
               const ts = (f as any).ts;
               const d = typeof ts === 'string' ? new Date(ts) : null;
@@ -433,7 +436,7 @@ function App() {
                 </div>
               )
             }
-            if (f.type === 'agent_question' || f.type === 'user_answer' || f.type === 'compose_intent' || f.type === 'user_guidance') {
+            if (f.type === 'agent_question' || f.type === 'user_answer' || f.type === 'compose_intent' || f.type === 'user_guidance' || f.type === 'planner_error') {
               // Hide agent whispers like "Answer <qid>:" in journal view
               if (f.type === 'user_guidance') {
                 const t = String((f as any).text || '')
@@ -444,7 +447,9 @@ function App() {
               const stripeClass =
                 f.type === 'user_guidance' ? 'stripe whisper' :
                 f.type === 'agent_question' ? 'stripe question' :
-                f.type === 'user_answer' ? 'stripe answer' : 'stripe draft'
+                f.type === 'user_answer' ? 'stripe answer' :
+                f.type === 'planner_error' ? 'stripe whisper' :
+                'stripe draft'
               const isDismissed = (f.type === 'compose_intent') && [...facts].some((x:any) => x.type === 'compose_dismissed' && (x as any).composeId === f.composeId)
               return (
                 <div key={f.id} className={'private ' + stripeClass + (isDismissed ? ' opacity-50' : '')}>
@@ -453,10 +458,17 @@ function App() {
                     {f.type === 'agent_question' && 'Private • Agent Question'}
                     {f.type === 'user_answer' && 'Private • Answer'}
                     {f.type === 'compose_intent' && (isDismissed ? 'Private • Draft (dismissed)' : 'Private • Draft')}
+                    {f.type === 'planner_error' && 'Private • Error'}
                   </div>
                   <div className="stripe-body">
                     {f.type === 'user_guidance' && <Markdown text={f.text} />}
                     {f.type === 'user_answer' && <Markdown text={(f as any).text} />}
+                    {f.type === 'planner_error' && (
+                      <div className="text small">
+                        <span className="pill bg-red-100 text-red-800 mr-2">{(f as any).code}</span>
+                        <span>{(f as any).message}</span>
+                      </div>
+                    )}
                     {f.type === 'compose_intent' && (
                       observing || isDismissed
                         ? <Markdown text={f.text} />
@@ -506,6 +518,7 @@ function App() {
                 copiedAgent={copiedCard}
                 copiedMcp={copiedMcp}
                 clientHref={clientHref}
+                historyHref={`/rooms/${encodeURIComponent(roomId)}/history`}
                 ctaPrimary={waitingForClient}
                 hideTitle
               />

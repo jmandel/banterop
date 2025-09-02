@@ -22,7 +22,7 @@ function dismissLatestUnsentDraft(): void {
   const dismissed = new Set<string>(facts.filter(f => f.type === 'compose_dismissed').map((f:any) => String(f.composeId||'')));
   for (let i = facts.length - 1; i >= 0; --i) {
     const f = facts[i];
-    if (f.type === 'remote_sent') break;
+    if (f.type === 'message_sent') break;
     if (f.type === 'compose_intent') {
       const cid = String((f as any).composeId || '');
       if (!cid || dismissed.has(cid)) continue;

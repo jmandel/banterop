@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
-import { startServer, stopServer, Spawned, decodeA2AUrl, textPart } from "./utils";
+import { startServer, stopServer, Spawned, decodeA2AUrl, textPart, createMessage } from "./utils";
 
 let S: Spawned;
 
@@ -15,7 +15,7 @@ describe("Event ring buffer trims old events", () => {
 
     // Start epoch (adds epoch-begin)
     {
-      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params:{ message:{ role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
+      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params:{ message: createMessage({ role:'user', parts:[], messageId: crypto.randomUUID() }) } }) });
       for await (const _ of parseSse<any>(res.body!)) break;
     }
 
@@ -23,7 +23,7 @@ describe("Event ring buffer trims old events", () => {
     // Generate many events: each send produces a state + message event
     for (let i = 0; i < 60; i++) {
       const msgId = crypto.randomUUID();
-      const rsend = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:`m${i}`, method:'message/send', params:{ configuration:{ historyLength: 0 }, message:{ parts:[textPart(`m${i}`,'turn')], taskId: initId, messageId: msgId } } }) });
+      const rsend = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:`m${i}`, method:'message/send', params:{ configuration:{ historyLength: 0 }, message: createMessage({ parts:[textPart(`m${i}`,'turn')], taskId: initId, messageId: msgId }) } }) });
       expect(rsend.ok).toBeTrue();
     }
 

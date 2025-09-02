@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
-import { startServer, stopServer, Spawned, decodeA2AUrl, openBackend } from "./utils";
+import { startServer, stopServer, Spawned, decodeA2AUrl, openBackend, createMessage } from "./utils";
 
 let S: Spawned;
 
@@ -32,7 +32,7 @@ describe("Control-plane event log", () => {
     // Start epoch by streaming a no-op message
     const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
     {
-      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start', method:'message/stream', params:{ message:{ role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
+      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start', method:'message/stream', params:{ message: createMessage({ role:'user', parts:[], messageId: crypto.randomUUID() }) } }) });
       for await (const _ of parseSse<any>(res.body!)) break;
     }
 
@@ -67,7 +67,7 @@ describe("Control-plane event log", () => {
     }
     const initTaskId2 = `init:${pairId}#${resetEpoch + 1}`;
     {
-      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start2', method:'message/stream', params:{ message:{ role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
+      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start2', method:'message/stream', params:{ message: createMessage({ role:'user', parts:[], messageId: crypto.randomUUID() }) } }) });
       for await (const _ of parseSse<any>(res.body!)) break;
       const rget = await fetch(a2a, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ jsonrpc:'2.0', id:'g', method:'tasks/get', params:{ id: initTaskId2 } }) });
       const jg = await rget.json();

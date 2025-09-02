@@ -12,12 +12,12 @@ export type Fact =
   | ({ type:'status_changed'
      ; a2a:'initializing'|'submitted'|'working'|'input-required'|'completed'|'failed'|'canceled'|'rejected'|'auth-required'|'unknown'
      } & Stamp)
-  | ({ type:'remote_received'
+  | ({ type:'message_received'
      ; messageId:string
      ; text:string
      ; attachments?:AttachmentMeta[]
      } & Stamp)
-  | ({ type:'remote_sent'
+  | ({ type:'message_sent'
      ; messageId:string
      ; text:string
      ; attachments?:AttachmentMeta[]
@@ -70,7 +70,16 @@ export type Fact =
      } & Stamp)
   | ({ type:'sleep'
      ; reason?:string
-     } & PlannerWhy & Stamp);
+     } & PlannerWhy & Stamp)
+  | ({ type:'planner_error'
+     ; code:'DISALLOWED_ACTION'|'INVALID_ARGS'|'MISSING_ATTACHMENT'|'TOOL_UNKNOWN'|'TOOL_DISABLED'|'TOOL_EXEC_FAILED'|'LLM_EMPTY'|'LLM_PARSE_FAILED'|'POST_TERMINAL_PLANNING'
+     ; message:string
+     ; detail?: unknown
+     ; stage:'decision'|'tool'|'drafter'
+     ; attempts:number
+     ; announce?: boolean
+     ; relatesTo?: { callId?: string; tool?: string }
+     } & Stamp);
 
 export type ProposedFact = Omit<Fact, keyof Stamp>;
 

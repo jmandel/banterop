@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
-import { startServer, stopServer, Spawned, decodeA2AUrl, textPart, openBackend } from "./utils";
+import { startServer, stopServer, Spawned, decodeA2AUrl, textPart, openBackend, createMessage } from "./utils";
 
 let S: Spawned;
 
@@ -15,13 +15,13 @@ describe('Backchannel emits only latest subscribe on connect', () => {
 
     // Create epoch #1
     {
-      const res = await fetch(a2a, { method:'POST', headers:{'content-type':'application/json','accept':'text/event-stream'}, body: JSON.stringify({ jsonrpc:'2.0', id:'s1', method:'message/stream', params:{ message:{ role:'user', parts:[], messageId: crypto.randomUUID() } } }) });
+      const res = await fetch(a2a, { method:'POST', headers:{'content-type':'application/json','accept':'text/event-stream'}, body: JSON.stringify({ jsonrpc:'2.0', id:'s1', method:'message/stream', params:{ message: createMessage({ role:'user', parts:[], messageId: crypto.randomUUID() }) } }) });
       for await (const _ of parseSse<any>(res.body!)) break;
     }
     // Bump to epoch #2 via send without taskId
-    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m1', method:'message/send', params:{ message:{ parts:[textPart('ep2','turn')], messageId: crypto.randomUUID() } } }) });
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m1', method:'message/send', params:{ message: createMessage({ parts:[textPart('ep2','turn')], messageId: crypto.randomUUID() }) } }) });
     // Bump to epoch #3 via send without taskId
-    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m2', method:'message/send', params:{ message:{ parts:[textPart('ep3','turn')], messageId: crypto.randomUUID() } } }) });
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m2', method:'message/send', params:{ message: createMessage({ parts:[textPart('ep3','turn')], messageId: crypto.randomUUID() }) } }) });
 
     // Connect backchannel server-events
     const ac = new AbortController();

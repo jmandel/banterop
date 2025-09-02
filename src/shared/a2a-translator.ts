@@ -63,9 +63,9 @@ function messageToFacts(m: A2AMessage): ProposedFact[] {
   }
 
   if (m.role === 'agent') {
-    proposed.push({ type:'remote_received', messageId, text, attachments: atts.length ? atts : undefined } as ProposedFact);
+    proposed.push({ type:'message_received', messageId, text, attachments: atts.length ? atts : undefined } as ProposedFact);
   } else {
-    proposed.push({ type:'remote_sent', messageId, text, attachments: atts.length ? atts : undefined } as ProposedFact);
+    proposed.push({ type:'message_sent', messageId, text, attachments: atts.length ? atts : undefined } as ProposedFact);
   }
   return proposed;
 }

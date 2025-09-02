@@ -1,6 +1,8 @@
 import { Hono } from 'hono'
 import type { AppBindings } from '../index'
 import { sse } from '../core/sse'
+import { initTaskId, respTaskId } from '../core/ids'
+import { extractNextState, computeStatesForNext } from '../core/finality'
 
 export function createRoomsRoutes() {
   const app = new Hono<AppBindings>()
@@ -110,6 +112,60 @@ export function createRoomsRoutes() {
     const body = await c.req.json().catch(() => ({}))
     await c.get('pairs').reset(pairId, body?.type === 'soft' ? 'soft' : 'hard')
     return c.json({ ok: true })
+  })
+
+  // ---- Task history (epochs) listing for a room ----
+  app.get('/rooms/:pairId/epochs', async (c) => {
+    const { pairId } = c.req.param()
+    const order = (c.req.query('order') || 'desc').toLowerCase()
+    const limit = Math.max(0, Math.floor(Number(c.req.query('limit') || '0') || 0))
+
+    const db = c.get('db')
+    const p = db.getPair(pairId)
+    if (!p) return c.json({ pairId, currentEpoch: 0, epochs: [] })
+    const currentEpoch = p.epoch || 0
+    const epochs: Array<{ epoch:number; initiatorTaskId:string; responderTaskId:string; state:string; messageCount:number }> = []
+    const start = 1
+    const end = currentEpoch
+    const seq: number[] = []
+    for (let i = start; i <= end; i++) seq.push(i)
+    const ordered = order === 'asc' ? seq : seq.reverse()
+    const capped = limit > 0 ? ordered.slice(0, limit) : ordered
+    for (const epoch of capped) {
+      // Count messages for this epoch (bounded)
+      const rows = db.listMessages(pairId, epoch, { order:'ASC', limit: 10000 })
+      const last = db.lastMessage(pairId, epoch)
+      let state: string = 'submitted'
+      if (last) {
+        let obj: any = {}
+        try { obj = JSON.parse(last.json) } catch {}
+        const desired = extractNextState(obj) ?? 'working'
+        const both = computeStatesForNext(last.author, desired)
+        state = (both as any).init || 'submitted'
+      }
+      epochs.push({
+        epoch,
+        initiatorTaskId: initTaskId(pairId, epoch),
+        responderTaskId: respTaskId(pairId, epoch),
+        state,
+        messageCount: rows.length,
+      })
+    }
+    return c.json({ pairId, currentEpoch, epochs })
+  })
+
+  // Per-epoch snapshot (A2A Task) for transcript viewing
+  app.get('/rooms/:pairId/epochs/:epoch', async (c) => {
+    const { pairId, epoch: epochStr } = c.req.param()
+    const viewer = (c.req.query('viewer') || 'init').toLowerCase() === 'resp' ? 'resp' : 'init'
+    const epoch = Math.max(1, Math.floor(Number(epochStr) || 1))
+    const id = viewer === 'resp' ? respTaskId(pairId, epoch) : initTaskId(pairId, epoch)
+    try {
+      const snap = await c.get('pairs').tasksGet(pairId, id)
+      return c.json(snap)
+    } catch (e) {
+      return c.json({ error: { message: String((e as any)?.message || 'failed') } }, 400)
+    }
   })
 
   return app

@@ -257,12 +257,12 @@ function App() {
   const approved = useAppStore(s => s.composeApproved);
   const sentComposeIds = React.useMemo(() => {
     const s = new Set<string>();
-    for (const f of facts) if (f.type === 'remote_sent' && (f as any).composeId) s.add((f as any).composeId as string);
+    for (const f of facts) if (f.type === 'message_sent' && (f as any).composeId) s.add((f as any).composeId as string);
     return s;
   }, [facts]);
   const hasTranscript = React.useMemo(() => {
     for (const f of facts) {
-      if (f.type === 'remote_received' || f.type === 'remote_sent') return true;
+      if (f.type === 'message_received' || f.type === 'message_sent') return true;
       if (f.type === 'agent_question' || f.type === 'user_answer') return true;
       if (f.type === 'user_guidance') {
         const t = String((f as any).text || '');
@@ -354,7 +354,7 @@ function App() {
                 if (['completed','canceled','failed','rejected'].includes(uiStatus)) return uiStatus;
                 const dismissed = new Set<string>(facts.filter((f:any)=>f.type==='compose_dismissed').map((f:any)=>String(f.composeId||'')));
                 let pendingReview = false;
-                for (let i = facts.length - 1; i >= 0; --i) { const f:any = facts[i]; if (f.type==='remote_sent') break; if (f.type==='compose_intent' && !dismissed.has(String(f.composeId||''))) { pendingReview = true; break; } }
+                for (let i = facts.length - 1; i >= 0; --i) { const f:any = facts[i]; if (f.type==='message_sent') break; if (f.type==='compose_intent' && !dismissed.has(String(f.composeId||''))) { pendingReview = true; break; } }
                 if (pendingReview && useAppStore.getState().plannerMode==='approve') return 'Waiting for review';
                 if (uiStatus==='input-required') return 'Our turn';
                 if (uiStatus==='working') return 'Other side working';
@@ -376,8 +376,8 @@ function App() {
             <div className="card">
               <div className={`transcript ${['completed','canceled','failed','rejected'].includes(uiStatus) ? 'faded' : ''}`} aria-live="polite" ref={transcriptRef}>
                 {facts.map((f) => {
-              if (f.type === 'remote_received' || f.type === 'remote_sent') {
-                const isMe = f.type === 'remote_sent';
+              if (f.type === 'message_received' || f.type === 'message_sent') {
+                const isMe = f.type === 'message_sent';
                 return (
                   <div key={f.id} className={'bubble ' + (isMe ? 'me' : 'them')}>
                     <div className="small muted">{isMe ? usLabel : otherLabel}</div>
@@ -398,7 +398,7 @@ function App() {
                   </div>
                 );
               }
-              if (f.type === 'agent_question' || f.type === 'user_answer' || f.type === 'compose_intent' || f.type === 'user_guidance') {
+              if (f.type === 'agent_question' || f.type === 'user_answer' || f.type === 'compose_intent' || f.type === 'user_guidance' || (f as any).type === 'planner_error') {
                 // Hide Q&A whispers like: "Answer <qid>: <text>"
                 if (f.type === 'user_guidance') {
                   const t = String((f as any).text || '');
@@ -409,7 +409,8 @@ function App() {
                 const stripeClass =
                   f.type === 'user_guidance' ? 'stripe whisper' :
                   f.type === 'agent_question' ? 'stripe question' :
-                  f.type === 'user_answer' ? 'stripe answer' : 'stripe draft';
+                  f.type === 'user_answer' ? 'stripe answer' :
+                  (f as any).type === 'planner_error' ? 'stripe whisper' : 'stripe draft';
                 const isDismissed = (f.type === 'compose_intent') && [...facts].some(x => x.type === 'compose_dismissed' && (x as any).composeId === f.composeId);
                 // If a newer compose_intent exists, hide this dismissed one entirely
                 if (f.type === 'compose_intent' && isDismissed) {
@@ -423,10 +424,17 @@ function App() {
                       {f.type === 'agent_question' && 'Private • Agent Question'}
                       {f.type === 'user_answer' && 'Private • Answer'}
                       {f.type === 'compose_intent' && (isDismissed ? 'Private • Draft (dismissed)' : 'Private • Draft')}
+                      {(f as any).type === 'planner_error' && 'Private • Error'}
                     </div>
                     <div className="stripe-body">
                       {f.type === 'user_guidance' && <Markdown text={f.text} />}
                       {f.type === 'user_answer' && <Markdown text={(f as any).text} />}
+                      {(f as any).type === 'planner_error' && (
+                        <div className="text small">
+                          <span className="pill bg-red-100 text-red-800 mr-2">{(f as any).code}</span>
+                          <span>{(f as any).message}</span>
+                        </div>
+                      )}
                       {f.type === 'agent_question' && (()=>{
                         const answered = facts.some(x => x.type === 'user_answer' && (x as any).qid === (f as any).qid && x.seq > f.seq);
                         return <QuestionInline q={f as any} answered={answered} />;

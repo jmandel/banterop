@@ -3,22 +3,22 @@ import type { Planner, PlanInput, PlanContext, ProposedFact, AttachmentMeta } fr
 function lastRemoteReceived(input: PlanInput): { text:string; attachments?:AttachmentMeta[] } | null {
   for (let i = input.facts.length - 1; i >= 0; --i) {
     const f = input.facts[i];
-    if (f.type === 'remote_received') return { text: f.text, attachments: f.attachments };
+    if (f.type === 'message_received') return { text: f.text, attachments: f.attachments };
   }
   return null;
 }
 
 function hasUnsentCompose(input:PlanInput): boolean {
-  // If there is a compose_intent that hasn't resulted in any remote_sent AFTER it
+  // If there is a compose_intent that hasn't resulted in any message_sent AFTER it
   for (let i = input.facts.length - 1; i >= 0; --i) {
     const f = input.facts[i];
     if (f.type === 'compose_intent') {
       const composeSeq = f.seq;
       for (let j = i + 1; j < input.facts.length; j++) {
         const g = input.facts[j];
-        if (g.type === 'remote_sent') return false; // remote_sent after compose → not unsent
+        if (g.type === 'message_sent') return false; // message_sent after compose → not unsent
       }
-      return true; // no remote_sent after compose
+      return true; // no message_sent after compose
     }
   }
   return false;
@@ -38,11 +38,11 @@ export const SimpleDemoPlanner: Planner<{ mode:'off'|'suggest'|'auto' }> = {
     const lastPublic = (() => {
       for (let i = input.facts.length - 1; i >= 0; --i) {
         const f = input.facts[i];
-        if (f.type === 'remote_received' || f.type === 'remote_sent') return f.type;
+        if (f.type === 'message_received' || f.type === 'message_sent') return f.type;
       }
-      return null as ("remote_received" | "remote_sent" | null);
+      return null as ("message_received" | "message_sent" | null);
     })();
-    if (lastPublic === 'remote_sent') {
+    if (lastPublic === 'message_sent') {
       ctx.hud('waiting', 'Already responded');
       return [{ type:'sleep', reason:'Already responded' }];
     }

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
-import { startServer, stopServer, Spawned, decodeA2AUrl, textPart, openBackend } from "./utils";
+import { startServer, stopServer, Spawned, decodeA2AUrl, textPart, openBackend, createMessage } from "./utils";
 
 let S: Spawned;
 
@@ -19,7 +19,7 @@ describe("Recipient role projection", () => {
 
     // ensure epoch exists
     {
-      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params:{ message:{ role:'user', parts: [], messageId: crypto.randomUUID() } } }) });
+      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params:{ message: createMessage({ role:'user', parts:[], messageId: crypto.randomUUID() }) } }) });
       for await (const _ of parseSse<any>(res.body!)) break;
     }
 
@@ -27,8 +27,8 @@ describe("Recipient role projection", () => {
     const respId = `resp:${pairId}#1`;
 
     // init sends, then resp sends
-    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m1', method:'message/send', params:{ message:{ parts:[textPart('from-init','turn')], taskId: initId, messageId: crypto.randomUUID() }, configuration:{ historyLength:10000 } } }) });
-    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m2', method:'message/send', params:{ message:{ parts:[textPart('from-resp','turn')], taskId: respId, messageId: crypto.randomUUID() }, configuration:{ historyLength:10000 } } }) });
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m1', method:'message/send', params:{ message: createMessage({ parts:[textPart('from-init','turn')], taskId: initId, messageId: crypto.randomUUID() }), configuration:{ historyLength:10000 } } }) });
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m2', method:'message/send', params:{ message: createMessage({ parts:[textPart('from-resp','turn')], taskId: respId, messageId: crypto.randomUUID() }), configuration:{ historyLength:10000 } } }) });
 
     const rget = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'g', method:'tasks/get', params:{ id: respId } }) });
     const j = await rget.json();

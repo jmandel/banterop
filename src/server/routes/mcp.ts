@@ -100,7 +100,7 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
     const messageId = `m:${crypto.randomUUID()}`
     const raw = { conversationId, message, attachments };
     const b64 = utf8ToB64(JSON.stringify(raw));
-    const m = { parts, taskId: ensured.initiatorTaskId, messageId, metadata: { [A2A_EXT_URL]: { wireMessage: { adapter:'mcp', raw: b64 } } } } as any
+    const m = { parts, taskId: ensured.initiatorTaskId, messageId } as any
     await pairs.messageSend(pairId, m)
     const obj = { guidance: 'Message sent. Call check_replies to fetch replies.', status: 'working' as const }
     const res = { content: [{ type:'text', text: JSON.stringify(obj) }], structuredContent: obj } as any

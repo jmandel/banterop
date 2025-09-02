@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
-import { startServer, stopServer, Spawned, decodeA2AUrl, tmpDbPath, textPart, openBackend, leaseHeaders } from "./utils";
+import { startServer, stopServer, Spawned, decodeA2AUrl, tmpDbPath, textPart, openBackend, leaseHeaders, createMessage } from "./utils";
 
 let S: Spawned;
 let DB: string;
@@ -101,21 +101,7 @@ describe("Persistence — messages and state across restart", () => {
     expect(gRespAfter.result.history[0].messageId).toBe(m1);
     expect(gRespAfter.result.history[0].role).toBe('agent');
 
-    // Verify SSE ring was seeded on startup: epoch-begin, two messages, then a state
-    {
-      const ac = new AbortController();
-      const es = await fetch(S.base + `/api/rooms/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
-      expect(es.ok).toBeTrue();
-      let sawEpoch = false, sawM1 = false, sawM2 = false, sawState = false;
-      for await (const ev of parseSse<any>(es.body!)) {
-        if (ev.type === 'epoch-begin') sawEpoch = true;
-        if (ev.type === 'message' && ev.messageId === m1) sawM1 = true;
-        if (ev.type === 'message' && ev.messageId === m2) sawM2 = true;
-        if (ev.type === 'state') sawState = true;
-        if (sawEpoch && sawM1 && sawM2 && sawState) { ac.abort(); break; }
-      }
-      expect(sawEpoch && sawM1 && sawM2 && sawState).toBeTrue();
-    }
+    // With lazy startup, no SSE backlog is seeded on restart.
   });
 
   it("persists multi-epoch history and isolates per-epoch after restart", async () => {
@@ -202,22 +188,6 @@ describe("Persistence — messages and state across restart", () => {
     expect(s2iA.result.history.map((m:any)=>m.messageId)).toEqual([m3]);
     expect(s2rA.result.history.map((m:any)=>m.messageId)).toEqual([m3]);
 
-    // SSE seeding only for latest epoch (#2): should see m3 and m4, not m1/m2
-    {
-      const ac = new AbortController();
-      const es = await fetch(S.base + `/api/rooms/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
-      expect(es.ok).toBeTrue();
-      let gotEpoch2 = false, gotM3 = false, gotM4 = false, sawE1 = false, sawState = false;
-      for await (const ev of parseSse<any>(es.body!)) {
-        if (ev.type === 'epoch-begin' && ev.epoch === 2) gotEpoch2 = true;
-        if (ev.type === 'message' && ev.epoch === 1) sawE1 = true;
-        if (ev.type === 'message' && ev.messageId === m3) gotM3 = true;
-        if (ev.type === 'message' && ev.messageId === m4) gotM4 = true;
-        if (ev.type === 'state') sawState = true;
-        if (gotEpoch2 && gotM3 && gotM4 && sawState) { ac.abort(); break; }
-      }
-      expect(sawE1).toBeFalse();
-      expect(gotEpoch2 && gotM3 && gotM4 && sawState).toBeTrue();
-    }
+    // With lazy startup, SSE backlog is not seeded after restart; only new activity will appear.
   });
 });

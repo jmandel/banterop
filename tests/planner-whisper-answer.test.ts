@@ -6,7 +6,16 @@ function stamp<F extends Omit<Fact, 'seq'|'ts'|'id'>>(base: F, seq: number): Fac
   return { ...(base as any), seq, ts: '2025-01-01T00:00:00.000Z', id: `f${seq}` } as Fact
 }
 
-const dummyLLM: LlmProvider = { async chat() { return { text: '' } } }
+const dummyLLM: LlmProvider = { 
+  async chat() { 
+    return { 
+      text: JSON.stringify({
+        reasoning: "User has already answered the question, proceeding with workflow",
+        action: { tool: "sendMessageToRemoteAgent", args: { text: "Proceeding with the information provided" } }
+      })
+    }
+  }
+}
 
 const minimalScenario = {
   metadata: { id: 'x', title: 'X', description: 'x' },

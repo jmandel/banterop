@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { parseSse } from "../src/shared/sse";
-import { startServer, stopServer, Spawned, decodeA2AUrl, textPart, openBackend } from "./utils";
+import { startServer, stopServer, Spawned, decodeA2AUrl, textPart, openBackend, createMessage } from "./utils";
 
 let S: Spawned;
 
@@ -25,7 +25,7 @@ describe('Resubscribe reconnect', () => {
     expect(gotSnap1).toBeTrue();
 
     // Send another message from responder (turn back), then reopen and expect frames
-    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json', ...require('./utils').leaseHeaders(pairId) }, body: JSON.stringify({ jsonrpc:'2.0', id:'s2', method:'message/send', params:{ message:{ parts:[textPart('pong','turn')], taskId: respId, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json', ...require('./utils').leaseHeaders(pairId) }, body: JSON.stringify({ jsonrpc:'2.0', id:'s2', method:'message/send', params:{ message: createMessage({ parts:[textPart('pong','turn')], taskId: respId, messageId: crypto.randomUUID() }), configuration:{ historyLength: 0 } } }) });
 
     const ac2 = new AbortController();
     const sub2 = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, signal: ac2.signal, body: JSON.stringify({ jsonrpc:'2.0', id:'sub2', method:'tasks/resubscribe', params:{ id: respId } }) });

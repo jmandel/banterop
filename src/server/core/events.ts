@@ -7,13 +7,29 @@ type MessageEvent = { seq: number; pairId: string; type: 'message'; epoch: numbe
 
 type Event = PairCreatedEvent | EpochBeginEvent | BackchannelEvent | StateEvent | ResetCompleteEvent | MessageEvent;
 
-export function createEventStore(opts?: { maxPerPair?: number }) {
+export function createEventStore(opts?: { maxPerPair?: number; maxRooms?: number }) {
   const store = new Map<string, Event[]>()
   let seq = 0
-  const maxPerPair = Math.max(100, Math.floor(opts?.maxPerPair ?? 5000))
+  const maxPerPair = Math.max(100, Math.floor(opts?.maxPerPair ?? 1000))
+  const maxRooms = Math.max(1, Math.floor(opts?.maxRooms ?? 100))
   const waiters = new Map<string, Array<() => void>>()
+  // Simple LRU tracking of rooms: least-recently-used at index 0
+  const lru: string[] = []
+
+  function touchRoom(pairId: string) {
+    const idx = lru.indexOf(pairId)
+    if (idx >= 0) lru.splice(idx, 1)
+    lru.push(pairId)
+    // Evict if exceeding maxRooms
+    while (lru.length > maxRooms) {
+      const evictId = lru.shift()!
+      try { store.delete(evictId) } catch {}
+      try { waiters.delete(evictId) } catch {}
+    }
+  }
 
   function push(pairId: string, ev: Omit<Event, 'seq'|'pairId'>) {
+    touchRoom(pairId)
     const arr = store.get(pairId) ?? []
     const full = { ...(ev as any), pairId, seq: ++seq } as Event
     arr.push(full)
@@ -29,6 +45,7 @@ export function createEventStore(opts?: { maxPerPair?: number }) {
   }
 
   function listSince(pairId: string, since: number) {
+    touchRoom(pairId)
     const arr = store.get(pairId) ?? []
     return arr.filter(e => e.seq > since)
   }
@@ -68,6 +85,7 @@ export function createEventStore(opts?: { maxPerPair?: number }) {
 
   // Efficient one-shot wait: resolve with latest seq if a new event arrives within waitMs; otherwise resolve with 'since'.
   function waitUntil(pairId: string, since: number, waitMs: number): Promise<number> {
+    touchRoom(pairId)
     // Fast path: deliver immediately if we already have events beyond 'since'
     try {
       const arr = listSince(pairId, since)
