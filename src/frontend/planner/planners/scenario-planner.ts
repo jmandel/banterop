@@ -14,7 +14,7 @@ import type {
   Planner, PlanInput, PlanContext, ProposedFact, LlmMessage,
   Fact, AttachmentMeta
 } from '../../../shared/journal-types'; // ← adjust path if needed
-import { chatWithValidationRetry } from '../../../shared/llm-retry';
+import { chatWithValidationRetry, cleanModelText } from '../../../shared/llm-retry';
 import { ScenarioPlannerSetup, dehydrateScenario, hydrateScenario } from './scenario.setup';
 import { b64ToUtf8 } from '../../../shared/codec';
 import type { ScenarioConfiguration, Tool as ScenarioTool } from '../../../types/scenario-configuration.types'; // ← adjust
@@ -172,7 +172,29 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
         if (/^DISALLOWED_ACTION/.test(emsg)) code = 'DISALLOWED_ACTION';
         else if (/^INVALID_ARGS/.test(emsg)) code = 'INVALID_ARGS';
         else if (/^MISSING_ATTACHMENT/.test(emsg)) code = 'MISSING_ATTACHMENT';
-        out.push(({ type:'planner_error', code, message:'Planner could not produce a valid action after retries', stage:'decision', attempts:3, announce:true, detail: emsg } as any));
+        const attemptsRaw = Array.isArray((e as any)?.attempts) ? (e as any).attempts as Array<any> : [];
+        const trunc = (s: string, n = 300) => {
+          try { const t = String(s || ''); return t.length > n ? t.slice(0, n) + '…' : t; } catch { return ''; }
+        };
+        const allowedCore = Array.from(coreAllowed);
+        const me = (scenario?.agents || []).find(a => a.agentId === myId) || scenario?.agents?.[0];
+        const scenTools = ((me?.tools || []) as any[]).map(t=>String(t.toolName||''));
+        const allowed = Array.from(new Set<string>([...allowedCore, ...scenTools]));
+        const detail = {
+          error: emsg,
+          model,
+          promptChars: (prompt || '').length,
+          allowedActions: allowed,
+          attempts: attemptsRaw.map((r:any) => ({
+            attempt: Number(r?.attempt || 0),
+            error: String(r?.error || ''),
+            rawLen: (typeof r?.raw === 'string') ? r.raw.length : 0,
+            cleanedLen: (typeof r?.cleaned === 'string') ? r.cleaned.length : 0,
+            rawSnippet: trunc(String(r?.raw || '')),
+            cleanedSnippet: trunc(String(r?.cleaned || '')),
+          })),
+        };
+        out.push(({ type:'planner_error', code, message:'Planner could not produce a valid action after retries', stage:'decision', attempts:3, announce:true, detail } as any));
         const msg = `We encountered a drafting error and couldn’t proceed. Please respond so we can continue.`;
         out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text: msg, nextStateHint: 'working', ...(includeWhy ? { why:'Planner error after 3 attempts.' } : {}) } as ProposedFact));
         break;
@@ -302,7 +324,9 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
 // -----------------------------
 
 const SYSTEM_PREAMBLE = `
-You are a turn-based agent planner. Respond with JSON only.
+You are a turn-based agent planner.
+Always respond with exactly one JSON object containing keys "reasoning" and "action".
+No extra commentary, prose, or code fences.
 `;
 
 type ParsedDecision = { reasoning: string; tool: string; args: any };
@@ -315,18 +339,40 @@ function shortArgs(a: any): string {
   } catch { return ''; }
 }
 
-// Centralized wrapper: retry up to 3x until a valid decision JSON is parsed
+// Centralized wrapper: retry up to 3x until a valid decision JSON is parsed.
+// Captures per-attempt raw output and validation errors for diagnostics.
 async function chatForDecisionWithRetry(ctx: PlanContext<any>, opts: { model?: string; sys: LlmMessage; prompt: string; validate?: (d: ParsedDecision) => void }): Promise<ParsedDecision> {
-  const req: { model?: string; messages: LlmMessage[]; temperature?: number; signal?: AbortSignal } = {
-    model: opts.model,
-    messages: [opts.sys, { role: 'user', content: opts.prompt }],
-    temperature: 0.5,
-    signal: ctx.signal,
-  };
-  const retryMessages: LlmMessage[] = [
-    { role: 'system', content: 'Return exactly one JSON object with keys "reasoning" and "action". No extra text.' }
-  ];
-  return chatWithValidationRetry(ctx.llm, req, (text) => { const d = parseActionStrict(text); try { opts.validate && opts.validate(d); } catch (e:any) { throw e; } return d; }, { attempts: 3, retryMessages });
+  const attempts = 3;
+  const attemptLog: Array<{ attempt: number; raw: string; cleaned: string; error?: string }> = [];
+  let lastErr: any = null;
+  for (let i = 1; i <= attempts; i++) {
+    const req: { model?: string; messages: LlmMessage[]; temperature?: number; signal?: AbortSignal } = {
+      model: opts.model,
+      messages: [opts.sys, { role: 'user', content: opts.prompt }],
+      temperature: 0.5,
+      signal: ctx.signal,
+    };
+    try {
+      const { text } = await ctx.llm.chat(req);
+      const cleaned = cleanModelText(text);
+      const d = parseActionStrict(cleaned);
+      try { opts.validate && opts.validate(d); } catch (e:any) { throw e; }
+      return d;
+    } catch (e:any) {
+      const raw = (() => {
+        try { return String((e && e.text) ? e.text : ''); } catch { return ''; }
+      })();
+      const cleaned = (() => { try { return cleanModelText(raw); } catch { return ''; } })();
+      attemptLog.push({ attempt: i, raw, cleaned, error: String(e?.message || e) });
+      lastErr = e instanceof Error ? e : new Error(String(e));
+      if (i < attempts) {
+        const delay = 150 * Math.pow(2, i - 1) + Math.floor(Math.random() * 30);
+        await new Promise(res => setTimeout(res, delay));
+      }
+    }
+  }
+  (lastErr as any).attempts = attemptLog;
+  throw lastErr;
 }
 
 function parseActionStrict(text: string): ParsedDecision {
@@ -473,6 +519,14 @@ function buildAvailableFilesXml(files: AttachmentMeta[]): string {
 
 function escapeXml(s: string): string {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function indentBlock(s: string, spaces = 2): string {
+  const pad = ' '.repeat(Math.max(0, spaces));
+  return String(s || '')
+    .split('\n')
+    .map(line => (line ? pad + line : ''))
+    .join('\n');
 }
 
 function defaultComposeFromScenario(scenario: ScenarioConfiguration, myId: string): string {
@@ -799,10 +853,7 @@ async function runToolOracle(opts: {
   const prompt = buildOraclePromptAligned(opts);
   try {
     const req = { model: opts.model, messages: [{ role: 'user', content: prompt }], temperature: 0.6 } as const;
-    const retryMessages: LlmMessage[] = [
-      { role: 'system', content: 'Return exactly one JSON code block with keys "reasoning" (string) and "output" (JSON). No extra text.' }
-    ];
-    const parsed = await chatWithValidationRetry(opts.llm, req as any, (text) => parseOracleResponseAligned(text), { attempts: 3, retryMessages });
+    const parsed = await chatWithValidationRetry(opts.llm, req as any, (text) => parseOracleResponseAligned(text), { attempts: 3 });
     const { output } = parsed;
     const { attachments, result } = await extractAttachmentsFromOutput(output, opts.tool.toolName, opts.args, new Set(opts.existingNames || []));
     return { ok: true, result, attachments };
@@ -962,10 +1013,7 @@ function buildOraclePromptAligned(opts: {
   lines.push(`- arguments: ${safeStringify(args)}`);
   lines.push('</TOOL_INVOCATION>');
   lines.push('');
-  lines.push('<DIRECTORS_NOTE>');
-  lines.push(directorsNote);
-  lines.push('</DIRECTORS_NOTE>');
-  lines.push('');
+  // directors note is included only in RESULT_FORMAT below to avoid duplication
   // Explicit synthesis guidance
   lines.push('<SYNTHESIS_GUIDANCE>');
   lines.push('- Action focus: Use the tool name and the provided arguments as the primary source of truth. Produce the best possible result that this tool would return for those arguments.');
@@ -988,11 +1036,16 @@ function buildOraclePromptAligned(opts: {
     lines.push('');
   }
   lines.push(outputContract);
-  lines.push('<RESPONSE>');
-  lines.push(`Produce your response to "${tool.toolName}" using the provided arguments:`);
-  lines.push(safeStringify(args));
-  lines.push('Follow SYNTHESIS_GUIDANCE and OUTPUT_SCHEMA exactly.');
-  lines.push('</RESPONSE>');
+  lines.push('<RESULT_FORMAT>');
+  lines.push(`Produce your response to the "${tool.toolName}" tool call with the args shown above.`);
+  lines.push('');
+  lines.push('<DIRECTORS_NOTE_GUIDING_RESULTS>');
+  lines.push(indentBlock(directorsNote));
+  lines.push('</DIRECTORS_NOTE_GUIDING_RESULTS>');
+  lines.push('');
+  lines.push('</RESULT_FORMAT>');
+  lines.push('');
+  lines.push('Follow SYNTHESIS_GUIDANCE and DIRECTORS_NOTE_GUIDING_RESULTS, and OUTPUT_CONTRACT exactly.');
   return lines.join('\n');
 }
 

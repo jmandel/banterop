@@ -341,7 +341,11 @@ function App() {
           else if (uiStatus==='input-required') statusText = 'Our Turn';
           else if (uiStatus==='working') statusText = 'Other side working';
           else if (uiStatus==='submitted' || uiStatus==='initializing') statusText = 'Setting up…';
-          if (statusText) chips.push({ text: statusText, tone: statusText === 'Our Turn' ? 'blue' : 'gray', icon: React.createElement(ArrowLeftRight, { size:14, strokeWidth:1.75 }) });
+          if (statusText) {
+            const key = statusText.toLowerCase();
+            const tone = key === 'our turn' ? 'blue' : (key === 'waiting for client' ? 'amber' : (key === 'completed' ? 'green' : 'gray'));
+            chips.push({ text: statusText, tone: tone as any, icon: React.createElement(ArrowLeftRight, { size:14, strokeWidth:1.75 }) });
+          }
         }
         return (
           <>

@@ -55,21 +55,24 @@ export function ScenarioEditor({
           <button className={`px-3 py-1 text-xs rounded transition ${viewMode === 'structured' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`} onClick={() => onViewModeChange('structured')}>Structured View</button>
           <button className={`px-3 py-1 text-xs rounded transition ${viewMode === 'rawJson' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`} onClick={() => onViewModeChange('rawJson')}>Raw JSON</button>
         </div>
-        {scenarioId && (
-          <div className="flex gap-2">
-            {isEditMode ? (
+        <div className="flex gap-2">
+          {isEditMode && (
+            <>
+              {onSave && (
+                <Button size="sm" variant="primary" onClick={onSave} disabled={isLocked || !canSave || isSaving}>
+                  {isSaving ? 'Saving…' : (saveLabel || 'Save')}
+                </Button>
+              )}
+              {onDiscard && (
+                <Button size="sm" variant="secondary" onClick={onDiscard} disabled={isLocked || !canSave}>
+                  Discard
+                </Button>
+              )}
+            </>
+          )}
+          {scenarioId && (
+            isEditMode ? (
               <>
-                {/* Inline save/discard controls when editing */}
-                {onSave && (
-                  <Button size="sm" variant="primary" onClick={onSave} disabled={isLocked || !canSave || isSaving}>
-                    {isSaving ? 'Saving…' : (saveLabel || 'Save')}
-                  </Button>
-                )}
-                {onDiscard && (
-                  <Button size="sm" variant="secondary" onClick={onDiscard} disabled={isLocked || !canSave}>
-                    Discard
-                  </Button>
-                )}
                 <Button as="a" href={`#/scenarios/${scenarioId}`} size="sm" variant="secondary">View</Button>
                 {isDeleted ? (
                   onRestore && <Button size="sm" variant="primary" onClick={onRestore} disabled={isLocked}>Restore</Button>
@@ -96,9 +99,9 @@ export function ScenarioEditor({
                   Run
                 </Button>
               </>
-            )}
-          </div>
-        )}
+            )
+          )}
+        </div>
       </div>
       <div className="p-3 lg:p-4">
         {viewMode === 'structured' ? (

@@ -41,15 +41,22 @@
  *    knowledgeBase: Contains the actual data, detailed enough to sketch out a realistic rich scenario
  *    synthesisGuidance: Describes HOW to format/present that data
  *
+ * 6. **Progressive disclosure over upfront dumps**
+ *    Start small: introduce intent, negotiate requirements, then fetch/share only what's needed.
+ *    Avoid large initial messages packed with case details; use tools to retrieve specifics on demand.
+ *
  * --- AUTHORING CHECKLIST (POSITIVE BEHAVIORS) ---
  *
  * 1) Initiation message: be brief and purposeful
  *    - Identify representation and objective: "I am an agent representing [principal], seeking to [goal]."
  *    - Defer details to the conversation and tools; do not include a full clinical narrative.
+ *    - Signal collaboration: ask to confirm requirements and preferred artifacts before sharing details.
  *
  * 2) System prompt: minimal entry point + use tools for details
  *    - Include only tiny entry info when needed (e.g., patient name/DOB/MRN).
  *    - Explicitly rely on tools to retrieve all clinical/policy data; do not embed those details in the system prompt.
+ *    - Encourage progressive disclosure: start by introducing yourself and the objective, then negotiate what is needed.
+ *      Avoid large upfront data dumps; fetch and share only what is relevant to the current step.
  *
  * 3) Tool design: flexible inputs and clear synthesis outputs
  *    - Prefer natural-language inputs over rigid parameter lists; invite free-text queries.
@@ -57,6 +64,15 @@
  *        a) a human-readable document (e.g., markdown), or
  *        b) a rich, well-structured JSON object.
  *      Be explicit about the top-level choice; avoid mixing formats at the top level.
+ *
+ * 4) Responder behavior (other agent): confirm identity and context first
+ *    - In the responding agent's system prompt, instruct it to verify key identifiers
+ *      before retrieving or sharing sensitive details. Examples to confirm:
+ *        • Patient/member identity (full name + DOB + MRN/memberId)
+ *        • Requesting organization/provider identity and role/authority
+ *        • Case specifics (e.g., CPT/service, plan type, state, time frame)
+ *    - If any identifiers are missing or ambiguous, ask for them before proceeding.
+ *    - Only then use tools to fetch targeted information; avoid broad queries.
  *
  * Remember: Agents don't know they're in a simulation. Design tools as plausible
  * interfaces to real systems they would actually use.
@@ -105,6 +121,15 @@ export interface ScenarioConfigAgentDetails {
    * Frame as an agent representing the principal, not as the principal themselves.
    * ✅ "You are an agent representing Dr. Chen..."
    * ❌ "You are Dr. Chen..."
+   *
+   * Keep this lean: do not preload the entire case background here.
+   * Instruct the agent to confirm needs, negotiate requirements, and use tools to
+   * retrieve specifics on demand. Favor progressive disclosure over big upfront dumps.
+   *
+   * For responding agents, explicitly include verification steps:
+   * - Confirm counterpart-supplied identifiers (patient/member identity, provider identity/authority).
+   * - Clarify the requested service or decision scope (e.g., CPT, policy, dates).
+   * - If identifiers are missing/ambiguous, request them before tool use or disclosure.
    */
   systemPrompt: string;
 
@@ -130,11 +155,15 @@ export interface ScenarioConfigAgentDetails {
    * MUST include:
    * - Introduction as agent representing principal
    * - Purpose for initiating contact
+   * - A small, collaborative ask to align on requirements before sharing lots of data
    * 
-   * ✅ "Hello, I'm an agent representing Dr. Chen from City Orthopedics. I'm reaching out 
-   *     regarding prior authorization for an MRI for our mutual patient."
+   * Pattern:
+   *   "Hello, I'm [agent] representing [principal]. I'm reaching out about [objective].
+   *    Could we confirm what information or artifacts you need and preferred format?"
    * 
-   * ❌ "I need to get an MRI approved"
+   * ✅ Good: Brief intro + objective + invitation to confirm requirements
+   * ✅ Good: Signals what I aim to do without dumping all details
+   * ❌ Bad: Long clinical narrative or full record dump in the first message
    */
   messageToUseWhenInitiatingConversation: string;
 }
@@ -169,6 +198,8 @@ export interface Tool {
    * 
    * Guide the Oracle's style and format, but give it creative freedom.
    * Don't use rigid templates - let the Oracle craft contextually appropriate responses.
+   * Prefer guidance that supports iterative, requirement-driven disclosure
+   * (fetch what's needed now; avoid "dump everything" behaviors).
    *
    * Examples:
    * - "Return clinical findings in professional medical language"
@@ -285,13 +316,20 @@ export interface Tool {
  *       },
  *       messageToUseWhenInitiatingConversation: 
  *         "Hello, I'm an agent representing Dr. Sarah Chen from Regional Orthopedics. " +
- *         "I'm contacting you regarding prior authorization for a knee MRI for our mutual " +
- *         "patient Jordan Lee, DOB 1985-03-14. The patient has completed conservative therapy " + 
- *         "but continues to have significant instability."
+ *         "I'm reaching out regarding prior authorization for a knee MRI for our mutual patient, " +
+ *         "Jordan Lee. Could we confirm what documentation you need and the preferred format? " +
+ *         "I can provide therapy notes and exam findings as needed."
  *     },
  *     {
  *       agentId: "insurer",
- *       // <... principal, systemPrompt, goals, situation snipped ...>
+ *       principal: {
+ *         type: "organization",
+ *         name: "Acme Health Plan",
+ *         description: "Regional insurer"
+ *       },
+ *       systemPrompt: "You are an agent representing Acme Health Plan. First, verify the member's identity (full name, DOB, member ID) and the requesting provider's identity and role. Confirm the requested service (e.g., CPT) and plan context. If any identifiers are missing or ambiguous, ask for clarification before retrieving policy criteria or making determinations. Use tools to fetch only what is needed for the current step.",
+ *       goals: ["Verify member and request context", "Apply policy criteria", "Issue decision with rationale"],
+ *       situation: "Handles incoming prior auth requests for imaging services",
  *       tools: [
  *         {
  *           toolName: "lookup_medical_policy",

@@ -25,7 +25,7 @@ import { deriveChatLabels } from '../components/chat-labels'
 import { AutomationCard } from '../components/AutomationCard'
 import { LogCard } from '../components/LogCard'
 import { WireLogCard } from '../components/WireLogCard'
-import { Settings, Copy } from 'lucide-react'
+import { Settings, Copy, Eye } from 'lucide-react'
 import { AppLayout as SharedAppLayout } from '../ui'
 import { CollapsibleCard } from '../components/CollapsibleCard'
 
@@ -342,10 +342,23 @@ function App() {
         </div>
       )}
       headerRight={(
-        <button title="Settings" aria-label="Settings" onClick={()=>setShowSettings(true)} className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact">
-          <Settings size={18} strokeWidth={1.75} />
-          <span className="hidden sm:inline text-sm">Config</span>
-        </button>
+        <div className="row compact">
+          <a
+            href={`/rooms/${encodeURIComponent(roomId)}/history`}
+            target="_blank"
+            rel="noreferrer"
+            title="Open room history"
+            aria-label="Open room history"
+            className="p-1 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact"
+          >
+            <Eye size={18} strokeWidth={1.75} />
+            <span className="hidden sm:inline text-sm">History</span>
+          </a>
+          <button title="Settings" aria-label="Settings" onClick={()=>setShowSettings(true)} className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact">
+            <Settings size={18} strokeWidth={1.75} />
+            <span className="hidden sm:inline text-sm">Config</span>
+          </button>
+        </div>
       )}
     >
       <div className={`wrap ${showDebug ? 'with-debug' : ''}`}>
@@ -364,7 +377,11 @@ function App() {
     if (taskId) {
       chips.push({ text: `Task ${summarizeTaskId(taskId)}`, tone:'gray', icon: React.createElement(ClipboardList, { size:14, strokeWidth:1.75 }) });
       const statusChip = (turnText === 'Our turn') ? 'Our Turn' : (turnText || '');
-      if (statusChip) chips.push({ text: statusChip, tone: statusChip === 'Our Turn' ? 'blue' : 'gray', icon: React.createElement(ArrowLeftRight, { size:14, strokeWidth:1.75 }) });
+      if (statusChip) {
+        const key = statusChip.toLowerCase();
+        const tone = key === 'our turn' ? 'blue' : (key === 'waiting for client' ? 'amber' : (key === 'completed' ? 'green' : 'gray'));
+        chips.push({ text: statusChip, tone: tone as any, icon: React.createElement(ArrowLeftRight, { size:14, strokeWidth:1.75 }) });
+      }
     }
     return (
       <MetaBar elRef={metaRef} offset={48} left={<span />} chips={chips} />
@@ -500,7 +517,6 @@ function App() {
                 copiedAgent={copiedCard}
                 copiedMcp={copiedMcp}
                 clientHref={clientHref}
-                historyHref={`/rooms/${encodeURIComponent(roomId)}/history`}
                 ctaPrimary={waitingForClient}
                 hideTitle
               />

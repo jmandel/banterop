@@ -206,7 +206,17 @@ export const useAppStore = create<Store>((set, get) => ({
 
   setPlanner(id) { set({ plannerId: id }); },
   setPlannerMode(mode) {
+    const prev = get().plannerMode;
     set({ plannerMode: mode });
+    if (mode === 'auto' && prev !== 'auto') {
+      try {
+        const unsent = findUnsentComposes(get().facts || []);
+        if (unsent.length > 0) {
+          const last = unsent[unsent.length - 1];
+          queueMicrotask(() => { try { void get().sendCompose(last.composeId, (last.nextStateHint || 'working') as A2ANextState); } catch {} });
+        }
+      } catch {}
+    }
   },
 
   setPlannerConfig(config, ready) {

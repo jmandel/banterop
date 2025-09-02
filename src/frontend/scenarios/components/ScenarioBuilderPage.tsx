@@ -603,6 +603,8 @@ export function ScenarioBuilderPage() {
      state.pendingConfig.metadata?.description?.trim())
   );
   
+  // In create mode, allow saving as long as we have a pending config
+  const canSaveNow = isCreateMode ? !!state.pendingConfig : hasUnsavedChanges;
 
   return (
     <div className="min-h-screen">
@@ -624,9 +626,9 @@ export function ScenarioBuilderPage() {
                   isDeleted={deleted}
                   onDelete={(!deleted && !isCreateMode && state.activeScenarioId) ? () => deleteScenario(state.activeScenarioId!) : undefined}
                   onRestore={(deleted && !isCreateMode && state.activeScenarioId) ? () => restoreScenario(state.activeScenarioId!) : undefined}
-                  onSave={(!isLocked && hasUnsavedChanges) ? saveChanges : undefined}
+                  onSave={(!isLocked && canSaveNow) ? saveChanges : undefined}
                   onDiscard={(!isLocked && hasUnsavedChanges) ? discardChanges : undefined}
-                  canSave={hasUnsavedChanges}
+                  canSave={canSaveNow}
                   isSaving={state.isSaving}
                   saveLabel={isCreateMode ? 'Create' : 'Save'}
                   configRevision={state.configRevision}
