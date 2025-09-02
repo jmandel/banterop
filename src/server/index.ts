@@ -20,6 +20,7 @@ import { createLLMRoutes } from './routes/llm'
 // controlHtml removed as default landing; scenarios becomes the main page
 import clientHtml from '../frontend/client/index.html'
 import roomsHtml from '../frontend/rooms/index.html'
+import roomsListHtml from '../frontend/rooms/list.html'
 import roomsHistoryHtml from '../frontend/rooms/history.html'
 import scenariosHtml from '../frontend/scenarios/index.html'
 
@@ -83,7 +84,7 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
     routes: {
       '/': scenariosHtml,
       '/client/': clientHtml,
-      '/rooms/': roomsHtml,
+      '/rooms/': roomsListHtml,
       '/scenarios/': scenariosHtml,
       // Serve dynamic room page directly (same bundled HTML)
       '/rooms/:roomId': roomsHtml,
@@ -94,7 +95,7 @@ export function createServer(opts?: { port?: number; env?: Partial<Env>; develop
       const staticPages: Record<string, any> = {
         '/': scenariosHtml,
         '/client/': clientHtml,
-        '/rooms/': roomsHtml,
+        '/rooms/': roomsListHtml,
         '/scenarios/': scenariosHtml,
       }
       const html = staticPages[url.pathname]

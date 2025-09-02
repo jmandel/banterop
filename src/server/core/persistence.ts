@@ -21,6 +21,11 @@ export type Persistence = {
   insertMessage(row: MessageRow): void
   listMessages(pairId: string, epoch: number, opts?: { order?: 'ASC'|'DESC'; limit?: number }): Array<MessageRow>
   lastMessage(pairId: string, epoch: number): MessageRow | null
+  // Cross-epoch helpers
+  lastMessageAny(pairId: string): { author:'init'|'resp'; json:string; epoch:number; created_at:number|null } | null
+  countMessages(pairId: string): number
+  countMessagesSince(pairId: string, sinceMs: number): number
+  lastActivityTs(pairId: string): number | null
   listPairs(): PairRow[]
 
   close(): void
@@ -44,12 +49,16 @@ export function createPersistenceFromDb(db: Database): Persistence {
       epoch    INTEGER NOT NULL,
       author   TEXT    NOT NULL CHECK(author IN ('init','resp')),
       json     TEXT    NOT NULL,
+      created_at INTEGER DEFAULT (strftime('%s','now')*1000),
       CHECK (json_valid(json)),
       CHECK (json_extract(json,'$.messageId') IS NOT NULL)
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_id ON messages((json_extract(json,'$.messageId')));
     CREATE INDEX IF NOT EXISTS idx_messages_pair_epoch ON messages(pair_id, epoch);
+    CREATE INDEX IF NOT EXISTS idx_messages_pair_time ON messages(pair_id, created_at);
   `)
+  // Ensure schema version and run forward migrations
+  ensureSchema(db);
 
   const createPairStmt = db.query(`INSERT INTO pairs (pair_id, epoch, metadata) VALUES (?, 0, NULL)`) as any
   const getPairStmt   = db.query<PairRow, [string]>(`SELECT pair_id, epoch, metadata FROM pairs WHERE pair_id = ?`)
@@ -63,6 +72,12 @@ export function createPersistenceFromDb(db: Database): Persistence {
   const selLastMsg    = db.query<{ author:string; json:string }, [string, number]>(
     `SELECT author, json FROM messages WHERE pair_id = ? AND epoch = ? ORDER BY rowid DESC LIMIT 1`
   )
+  const selLastAny    = db.query<{ author:string; json:string; epoch:number; created_at:number|null }, [string]>(
+    `SELECT author, json, epoch, created_at FROM messages WHERE pair_id = ? ORDER BY rowid DESC LIMIT 1`
+  )
+  const cntAllByPair  = db.query<{ n:number }, [string]>(`SELECT COUNT(*) as n FROM messages WHERE pair_id = ?`)
+  const cntSinceByPair= db.query<{ n:number }, [string, number]>(`SELECT COUNT(*) as n FROM messages WHERE pair_id = ? AND COALESCE(created_at, 0) >= ?`)
+  const lastTsByPair  = db.query<{ ts:number|null }, [string]>(`SELECT MAX(created_at) as ts FROM messages WHERE pair_id = ?`)
   const selListAsc    = db.query<{ author:string; json:string }, [string, number, number]>(
     `SELECT author, json FROM messages WHERE pair_id = ? AND epoch = ? ORDER BY rowid ASC LIMIT ?`
   )
@@ -93,15 +108,97 @@ export function createPersistenceFromDb(db: Database): Persistence {
     const r = selLastMsg.get(pairId, epoch);
     return r ? ({ pair_id: pairId, epoch, author: (r.author === 'resp' ? 'resp' : 'init') as any, json: r.json }) : null;
   }
+  function lastMessageAny(pairId: string) {
+    const r = selLastAny.get(pairId);
+    return r ? ({ author: (r.author === 'resp' ? 'resp' : 'init') as any, json: r.json, epoch: r.epoch, created_at: (typeof r.created_at === 'number' ? r.created_at : null) }) : null;
+  }
+  function countMessages(pairId: string): number { const r = cntAllByPair.get(pairId) as any; return (r?.n ?? 0) as number }
+  function countMessagesSince(pairId: string, sinceMs: number): number { const r = cntSinceByPair.get(pairId, sinceMs) as any; return (r?.n ?? 0) as number }
+  function lastActivityTs(pairId: string): number | null { const r = lastTsByPair.get(pairId) as any; return (typeof r?.ts === 'number' ? r.ts : null) }
   function listPairs(): PairRow[] { return listPairsStmt.all() }
 
   function close() { try { db.close() } catch {} }
 
-  return { createPair, getPair, setPairEpoch, getTask, upsertTask, createEpochTasks, insertMessage, listMessages, lastMessage, listPairs, close }
+  return { createPair, getPair, setPairEpoch, getTask, upsertTask, createEpochTasks, insertMessage, listMessages, lastMessage, lastMessageAny, countMessages, countMessagesSince, lastActivityTs, listPairs, close }
 }
 
 export function createPersistence(env: Env): Persistence {
   const db = new Database(env.BANTEROP_DB || ':memory:')
   db.exec('PRAGMA journal_mode = WAL;')
   return createPersistenceFromDb(db)
+}
+
+// --- Schema management: versioned, idempotent migrations ---
+function ensureSchema(db: Database): void {
+  // Helper: read PRAGMA user_version
+  function getUserVersion(): number {
+    try {
+      const row: any = (db.query('PRAGMA user_version') as any).get();
+      const v = (row && (row.user_version ?? row.USER_VERSION ?? row[Object.keys(row)[0]])) as number | undefined;
+      return (typeof v === 'number' && Number.isFinite(v)) ? v : 0;
+    } catch { return 0; }
+  }
+  function setUserVersion(v: number) { try { db.exec(`PRAGMA user_version = ${Math.max(0, Math.floor(v))}`) } catch {} }
+  function hasColumn(table: string, col: string): boolean {
+    try {
+      const q = db.query(`PRAGMA table_info(${table})`) as any;
+      const rows = q.all();
+      return Array.isArray(rows) && rows.some((r: any) => String(r?.name || '').toLowerCase() === col.toLowerCase());
+    } catch { return false; }
+  }
+  function hasIndex(table: string, idxName: string): boolean {
+    try {
+      const q = db.query(`PRAGMA index_list(${table})`) as any;
+      const rows = q.all();
+      return Array.isArray(rows) && rows.some((r: any) => String(r?.name || '').toLowerCase() === idxName.toLowerCase());
+    } catch { return false; }
+  }
+
+  let v = getUserVersion();
+  // v0: legacy (no user_version set). v1: baseline tables created. v2+: explicit migrations
+  db.exec('BEGIN');
+
+  try {
+    if (v < 1) {
+      // If tables are missing, ensure they exist (no-ops if present). Baseline.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS pairs (
+          pair_id TEXT PRIMARY KEY,
+          epoch INTEGER NOT NULL,
+          metadata TEXT
+        );
+        CREATE TABLE IF NOT EXISTS tasks (
+          task_id TEXT PRIMARY KEY,
+          pair_id TEXT NOT NULL,
+          epoch INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS messages (
+          pair_id  TEXT    NOT NULL,
+          epoch    INTEGER NOT NULL,
+          author   TEXT    NOT NULL CHECK(author IN ('init','resp')),
+          json     TEXT    NOT NULL,
+          CHECK (json_valid(json)),
+          CHECK (json_extract(json,'$.messageId') IS NOT NULL)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_id ON messages((json_extract(json,'$.messageId')));
+        CREATE INDEX IF NOT EXISTS idx_messages_pair_epoch ON messages(pair_id, epoch);
+      `);
+      v = 1; setUserVersion(1);
+    }
+    if (v < 2) {
+      // Add created_at column and index; backfill nulls to current time
+      if (!hasColumn('messages', 'created_at')) {
+        try { db.exec(`ALTER TABLE messages ADD COLUMN created_at INTEGER`); } catch {}
+        try { db.exec(`UPDATE messages SET created_at = CAST(strftime('%s','now') AS INTEGER)*1000 WHERE created_at IS NULL`); } catch {}
+      }
+      if (!hasIndex('messages', 'idx_messages_pair_time')) {
+        try { db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_pair_time ON messages(pair_id, created_at)`); } catch {}
+      }
+      v = 2; setUserVersion(2);
+    }
+  } catch (e:any) {
+    try { db.exec('ROLLBACK') } catch {}
+    throw new Error(`Database migration failed: ${String(e?.message || e)}`);
+  }
+  db.exec('COMMIT');
 }

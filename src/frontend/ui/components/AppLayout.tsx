@@ -57,7 +57,7 @@ export function AppLayout({
               {menuOpen && (
                 <div className="absolute right-0 mt-2 w-48 rounded-lg border border-gray-200 bg-white shadow-lg z-40">
                   <a href="/" onClick={closeMenu} className="block px-3 py-2 text-sm text-gray-800 hover:bg-gray-50">Scenarios</a>
-                  <a href="/watch/" onClick={closeMenu} className="block px-3 py-2 text-sm text-gray-800 hover:bg-gray-50">Watch</a>
+                  <a href="/rooms/" onClick={closeMenu} className="block px-3 py-2 text-sm text-gray-800 hover:bg-gray-50">Rooms</a>
                   <a href="/client/" onClick={closeMenu} className="block px-3 py-2 text-sm text-gray-800 hover:bg-gray-50">Client</a>
                 </div>
               )}

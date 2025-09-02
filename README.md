@@ -164,7 +164,8 @@ Configuration is managed through environment variables.
 | `BASE_URL` | Public base URL for generating absolute URLs. | `http://localhost:${PORT}` |
 | **Database** | | |
 | `BANTEROP_DB` | Path to the SQLite database file. | `:memory:` |
-| `BANTEROP_EVENTS_MAX`| Max SSE events to keep in memory per room. | `5000` |
+| `BANTEROP_EVENTS_MAX`| Max SSE events to keep in memory per room (ring buffer). | `1000` |
+| `BANTEROP_ROOMS_MAX`| Max rooms to keep in memory (LRU eviction of oldest). | `100` |
 | **LLM Providers** | | |
 | `DEFAULT_LLM_PROVIDER` | Fallback LLM provider if not specified. | `mock` |
 | `GOOGLE_API_KEY` | API key for Google Gemini. | |

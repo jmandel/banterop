@@ -130,7 +130,7 @@ export const LLMDrafterPlanner: Planner<Cfg> = {
     if (!text) {
       ctx.hud('waiting', 'LLM empty/error');
       const err: ProposedFact = ({ type:'planner_error', code:'LLM_EMPTY', message:'LLM returned empty/error while drafting', stage:'drafter', attempts:3, announce:true }) as any;
-      const msg: ProposedFact = ({ type:'compose_intent', composeId: ctx.newId('c'), text: 'We encountered a drafting error and could not proceed. Please respond so we can continue.', nextStateHint: 'input-required' } as ProposedFact);
+      const msg: ProposedFact = ({ type:'compose_intent', composeId: ctx.newId('c'), text: 'We encountered a drafting error and could not proceed. Please respond so we can continue.', nextStateHint: 'working' } as ProposedFact);
       return [err, msg];
     }
     ctx.hud('drafting', `Draft ${text.length} chars`);

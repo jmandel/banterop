@@ -7,6 +7,82 @@ import { extractNextState, computeStatesForNext } from '../core/finality'
 export function createRoomsRoutes() {
   const app = new Hono<AppBindings>()
 
+  // Rooms index: recent activity across rooms
+  app.get('/rooms/index', async (c) => {
+    function parseWindow(s?: string): number {
+      const v = (s || '').toLowerCase();
+      if (!v) return 24 * 3600_000;
+      if (v.endsWith('h')) { const n = Number(v.slice(0, -1)); if (Number.isFinite(n)) return Math.max(0, n) * 3600_000 }
+      if (v.endsWith('m')) { const n = Number(v.slice(0, -1)); if (Number.isFinite(n)) return Math.max(0, n) * 60_000 }
+      const n = Number(v); if (Number.isFinite(n)) return Math.max(0, Math.floor(n));
+      return 24 * 3600_000;
+    }
+    const windowMs = parseWindow(c.req.query('window') || '24h');
+    const limit = Math.max(0, Math.min(1000, Math.floor(Number(c.req.query('limit') || '100'))));
+    const offset = Math.max(0, Math.floor(Number(c.req.query('offset') || '0')));
+    const sort = (c.req.query('sort') || 'last').toLowerCase();
+    const db = c.get('db');
+    const pairs = c.get('pairs');
+    const list = db.listPairs();
+    const now = Date.now();
+    const since = now - windowMs;
+    const rows = list.map(p => {
+      const roomId = p.pair_id;
+      const currentEpoch = p.epoch || 0;
+      // last activity and state
+      const lastAny = db.lastMessageAny(roomId);
+      let state = 'submitted';
+      try {
+        // Derive latest state from latest message in any epoch (initiator perspective)
+        if (lastAny) {
+          const { extractNextState, computeStatesForNext } = require('../core/finality');
+          const msgObj = JSON.parse(lastAny.json);
+          const desired = extractNextState(msgObj) ?? 'working';
+          const both = computeStatesForNext(lastAny.author, desired);
+          state = (both as any).init || 'submitted';
+        }
+      } catch {}
+      const lastActivityTs = db.lastActivityTs(roomId) || (lastAny ? (lastAny.created_at || null) : null);
+      const totalMessages = db.countMessages(roomId);
+      const messagesInWindow = db.countMessagesSince(roomId, since);
+      const backendActive = !!pairs.hasActiveBackend(roomId);
+      return { roomId, currentEpoch, lastActivityTs, state, totalMessages, messagesInWindow, backendActive };
+    });
+    const sorted = rows.sort((a,b) => {
+      if (sort === 'msgs') return (b.totalMessages - a.totalMessages) || ((b.lastActivityTs||0)-(a.lastActivityTs||0));
+      if (sort === 'window') return (b.messagesInWindow - a.messagesInWindow) || ((b.lastActivityTs||0)-(a.lastActivityTs||0));
+      // default: last activity
+      return ((b.lastActivityTs||0) - (a.lastActivityTs||0));
+    });
+    const sliced = (limit > 0) ? sorted.slice(offset, offset + limit) : sorted;
+    return c.json({ windowMs, total: rows.length, rooms: sliced });
+  })
+
+  // Overview rollups (simple counts; timeseries optional later)
+  app.get('/rooms/overview', async (c) => {
+    function parseWindow(s?: string): number {
+      const v = (s || '').toLowerCase();
+      if (!v) return 24 * 3600_000;
+      if (v.endsWith('h')) { const n = Number(v.slice(0, -1)); if (Number.isFinite(n)) return Math.max(0, n) * 3600_000 }
+      if (v.endsWith('m')) { const n = Number(v.slice(0, -1)); if (Number.isFinite(n)) return Math.max(0, n) * 60_000 }
+      const n = Number(v); if (Number.isFinite(n)) return Math.max(0, Math.floor(n));
+      return 24 * 3600_000;
+    }
+    const windowMs = parseWindow(c.req.query('window') || '24h');
+    const db = c.get('db');
+    const pairs = c.get('pairs');
+    const list = db.listPairs();
+    const now = Date.now();
+    const since = now - windowMs;
+    let messages = 0;
+    let backendActive = 0;
+    for (const p of list) {
+      messages += db.countMessagesSince(p.pair_id, since);
+      if (pairs.hasActiveBackend(p.pair_id)) backendActive++;
+    }
+    return c.json({ windowMs, counts: { roomsActive: list.length, messages, backendActive } });
+  })
+
   // Room-wide event log (SSE); replaces /api/pairs/:pairId/events.log
   app.get('/rooms/:pairId/events.log', async (c) => {
     const { pairId } = c.req.param()

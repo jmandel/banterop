@@ -122,12 +122,22 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
     const sys: LlmMessage = { role: 'system', content: sysContent };
 
     for (let step = 0; step < maxSteps; step++) {
-      const filesAtCut = listAttachmentMetasAtCut(workingFacts as any);
-      const xmlHistory = buildXmlHistory(workingFacts as any, myId, counterpartId);
-      const availableFilesXml = buildAvailableFilesXml(filesAtCut);
-      const toolsCatalog = buildToolsCatalog(scenario, myId, { allowSendToRemote }, enabledScenarioTools, Array.from(coreAllowed));
-      const finalizationReminder = buildFinalizationReminder(workingFacts as any, scenario, myId) || undefined;
-      const prompt = buildPlannerPrompt(scenario, myId, counterpartId, xmlHistory, availableFilesXml, toolsCatalog, finalizationReminder);
+      let prompt: string;
+      let xmlHistory: string = '';
+      try {
+        const filesAtCut = listAttachmentMetasAtCut(workingFacts as any);
+        xmlHistory = buildXmlHistory(workingFacts as any, myId, counterpartId);
+        const availableFilesXml = buildAvailableFilesXml(filesAtCut);
+        const toolsCatalog = buildToolsCatalog(scenario, myId, { allowSendToRemote }, enabledScenarioTools, Array.from(coreAllowed));
+        const finalizationReminder = buildFinalizationReminder(workingFacts as any, scenario, myId) || undefined;
+        prompt = buildPlannerPrompt(scenario, myId, counterpartId, xmlHistory, availableFilesXml, toolsCatalog, finalizationReminder);
+      } catch (e:any) {
+        const errMsg = String(e?.message || e || 'prompt build error');
+        out.push(({ type:'planner_error', code:'PROMPT_BUILD_FAILED', message:'Prompt build failed', detail: errMsg, stage:'drafter', attempts:1, announce:true } as any));
+        const humanMsg = 'We hit a temporary error while preparing your next step. Please reply or try again.';
+        out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text: humanMsg, nextStateHint:'working' } as ProposedFact));
+        break;
+      }
 
     try {
       const label = buildThinkingHudLabel(workingFacts as any);
@@ -164,7 +174,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
         else if (/^MISSING_ATTACHMENT/.test(emsg)) code = 'MISSING_ATTACHMENT';
         out.push(({ type:'planner_error', code, message:'Planner could not produce a valid action after retries', stage:'decision', attempts:3, announce:true, detail: emsg } as any));
         const msg = `We encountered a drafting error and couldn’t proceed. Please respond so we can continue.`;
-        out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text: msg, nextStateHint: 'input-required', ...(includeWhy ? { why:'Planner error after 3 attempts.' } : {}) } as ProposedFact));
+        out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text: msg, nextStateHint: 'working', ...(includeWhy ? { why:'Planner error after 3 attempts.' } : {}) } as ProposedFact));
         break;
       }
       const reasoning = decision.reasoning || 'Planner step.';
@@ -172,21 +182,21 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       // Dispatch
       if (decision.tool === 'sleep') {
         out.push(({ type:'planner_error', code:'DISALLOWED_ACTION', message:'Model chose disallowed action: sleep', stage:'decision', attempts:3, announce:true } as any));
-        out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text: 'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'input-required' } as ProposedFact));
+        out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text: 'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'working' } as ProposedFact));
         break;
       }
 
       if (decision.tool === 'sendMessageToMyPrincipal') {
-        if (!coreAllowed.has('sendMessageToMyPrincipal')) { out.push(({ type:'planner_error', code:'TOOL_DISABLED', message:'Tool disabled: sendMessageToMyPrincipal', stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'input-required' } as ProposedFact)); break; }
+        if (!coreAllowed.has('sendMessageToMyPrincipal')) { out.push(({ type:'planner_error', code:'TOOL_DISABLED', message:'Tool disabled: sendMessageToMyPrincipal', stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'working' } as ProposedFact)); break; }
         const promptText = String(decision.args?.text || '').trim();
-        if (!promptText) { out.push(({ type:'planner_error', code:'INVALID_ARGS', message:'Empty text for sendMessageToMyPrincipal', stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'input-required' } as ProposedFact)); break; }
+        if (!promptText) { out.push(({ type:'planner_error', code:'INVALID_ARGS', message:'Empty text for sendMessageToMyPrincipal', stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'working' } as ProposedFact)); break; }
         out.push(({ type:'agent_question', qid: ctx.newId('q:'), prompt: promptText, required:false, ...(includeWhy ? { why: reasoning } : {}) } as ProposedFact));
         break;
       }
 
       if (decision.tool === 'askUser' || decision.tool === 'ask_user') {
         const promptText = String(decision.args?.prompt || '').trim();
-        if (!promptText) { out.push(({ type:'planner_error', code:'INVALID_ARGS', message:'Empty prompt for askUser', stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'input-required' } as ProposedFact)); break; }
+        if (!promptText) { out.push(({ type:'planner_error', code:'INVALID_ARGS', message:'Empty prompt for askUser', stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'working' } as ProposedFact)); break; }
         out.push(({ type:'agent_question', qid: ctx.newId('q:'), prompt: promptText, required: !!decision.args?.required, placeholder: typeof decision.args?.placeholder === 'string' ? decision.args.placeholder : undefined, ...(includeWhy ? { why: reasoning } : {}) } as ProposedFact));
         break;
       }
@@ -235,7 +245,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
         const filesNow = listAttachmentMetasAtCut(workingFacts as any);
         const known = new Set(filesNow.map(a => a.name));
         const missing = attList.map((a:any)=>String(a?.name||'').trim()).filter((n:string)=>!!n && !known.has(n));
-        if (missing.length) { out.push(({ type:'planner_error', code:'MISSING_ATTACHMENT', message:`Attachments missing: ${missing.join(', ')}`, detail:{ missing }, stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:`We need the following attachment(s) to proceed: ${missing.join(', ')}.`, nextStateHint:'input-required' } as ProposedFact)); break; }
+        if (missing.length) { out.push(({ type:'planner_error', code:'MISSING_ATTACHMENT', message:`Attachments missing: ${missing.join(', ')}`, detail:{ missing }, stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:`We need the following attachment(s) to proceed: ${missing.join(', ')}.`, nextStateHint:'working' } as ProposedFact)); break; }
         const composeId = ctx.newId('c:');
         const text = String(decision.args?.text || '').trim() || defaultComposeFromScenario(scenario, myId);
         const metaList: AttachmentMeta[] = attList.map((a:any)=>String(a?.name||'')).filter(Boolean).map((name:string)=>({ name, mimeType: filesNow.find(x=>x.name===name)?.mimeType || 'application/octet-stream' }));
@@ -245,9 +255,9 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       }
 
       // Scenario tool name
-      if (enabledScenarioTools && !enabledScenarioTools.includes(decision.tool)) { out.push(({ type:'planner_error', code:'TOOL_DISABLED', message:`Tool disabled: ${decision.tool}`, stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'input-required' } as ProposedFact)); break; }
+      if (enabledScenarioTools && !enabledScenarioTools.includes(decision.tool)) { out.push(({ type:'planner_error', code:'TOOL_DISABLED', message:`Tool disabled: ${decision.tool}`, stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'working' } as ProposedFact)); break; }
       const tdef = findScenarioTool(scenario, myId, decision.tool);
-      if (!tdef) { out.push(({ type:'planner_error', code:'TOOL_UNKNOWN', message:`Unknown tool: ${decision.tool}`, stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'input-required' } as ProposedFact)); break; }
+      if (!tdef) { out.push(({ type:'planner_error', code:'TOOL_UNKNOWN', message:`Unknown tool: ${decision.tool}`, stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'working' } as ProposedFact)); break; }
 
       const callId = ctx.newId(`call:${decision.tool}:`);
       try { ctx.hud('tool', `Tool: ${decision.tool}(${shortArgs(decision.args || {})})`, 0.7); } catch {}
@@ -262,7 +272,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       if (!exec.ok) {
         out.push(({ type:'tool_result', callId, ok:false, error: exec.error || 'Tool failed', ...(includeWhy ? { why:'Tool execution error.' } : {}) } as ProposedFact));
         out.push(({ type:'planner_error', code:'TOOL_EXEC_FAILED', message:'Tool execution failed after retries', stage:'tool', attempts:3, announce:true, relatesTo:{ callId, tool: tdef.toolName } } as any));
-        out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered an error while running a tool. Please respond so we can continue.', nextStateHint:'input-required' } as ProposedFact));
+        out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered an error while running a tool. Please respond so we can continue.', nextStateHint:'working' } as ProposedFact));
         break;
       }
       out.push(({ type:'tool_result', callId, ok:true, result: exec.result ?? null, ...(includeWhy ? { why:'Tool execution succeeded.' } : {}) } as ProposedFact));
@@ -413,10 +423,20 @@ function buildXmlHistory(facts: ReadonlyArray<Fact>, me: string, other: string):
         const all = (docs.length ? docs : single) as any[];
         for (const d of all) {
           const name = String(d?.name || d?.docId || 'result');
-          const body = typeof d?.content === 'string' ? d.content : (typeof d?.text === 'string' ? d.text : undefined);
-          if (name && typeof body === 'string' && body) {
+          // Support unified schema (contentString/contentJson) and legacy content/text
+          const bodyStr = (() => {
+            if (typeof d?.contentString === 'string') return d.contentString as string;
+            if (d && typeof d?.contentJson !== 'undefined') try { return JSON.stringify(d.contentJson, null, 2); } catch { return String(d.contentJson); }
+            if (typeof d?.content === 'string') return d.content as string;
+            if (d && typeof d?.content === 'object' && d?.contentType && String(d.contentType).includes('json')) {
+              try { return JSON.stringify(d.content, null, 2); } catch { return String(d.content); }
+            }
+            if (typeof d?.text === 'string') return d.text as string;
+            return undefined;
+          })();
+          if (name && typeof bodyStr === 'string' && bodyStr) {
             // Do not XML-escape: tags are used as simple delimiters only
-            lines.push(`<tool_result filename="${name}">\n${body}\n</tool_result>`);
+            lines.push(`<tool_result filename="${name}">\n${bodyStr}\n</tool_result>`);
             rendered = true;
           }
         }
@@ -739,14 +759,14 @@ function schemaToTs(schema: any, indent = 0): string {
   const t = schema?.type;
   if (t === 'string' || t === 'number' || t === 'boolean') return t;
   if (t === 'integer') return 'number';
-  if (t === 'array') return `Array<${schemaToTs(schema.items, indent + 1)}>`;
-  if (t === 'object' || schema.properties) {
-    const props = schema.properties || {};
-    const req: string[] = Array.isArray(schema.required) ? schema.required : [];
+  if (t === 'array') return `Array<${schemaToTs(schema?.items, indent + 1)}>`;
+  if (t === 'object' || (schema && (schema as any).properties)) {
+    const props = (schema && (schema as any).properties) || {};
+    const req: string[] = Array.isArray(schema?.required) ? (schema as any).required : [];
     const parts: string[] = ['{'];
     for (const k of Object.keys(props)) {
       const opt = req.includes(k) ? '' : '?';
-      parts.push(`${'  '.repeat(indent + 1)}${k}${opt}: ${schemaToTs(props[k], indent + 1)};`);
+      parts.push(`${'  '.repeat(indent + 1)}${k}${opt}: ${schemaToTs((props as any)[k], indent + 1)};`);
     }
     parts.push(`${'  '.repeat(indent)}}`);
     return parts.join('\n');
@@ -840,28 +860,48 @@ function buildOraclePromptAligned(opts: {
 
   const outputFormats = [
     '<OUTPUT_FORMATS>',
-    'Choose exactly one top-level style for the value of "output":',
-    '- Document style: use <DOCUMENT_OUTPUT> when the natural result is a narrative, letter, note, summary, or other document meant for humans to read.',
-    '- JSON style: use <JSON_OBJECT_OUTPUT> when the natural result is structured data (records, statuses, parameters, computed results).',
-    'Do not mix both at the top level. If you choose JSON style, you may include a nested field like "document".',
+    'Return exactly one JSON code block with keys:',
+    '- reasoning: string',
+    '- output: { documents: Document[] }',
     '',
-    '  <DOCUMENT_OUTPUT>',
-    '  {',
-    '    "docId": "unique-document-id",',
-    '    "name": "filename.md",',
-    '    "contentType": "text/markdown",',
-    '    "content": "The document content...",',
-    '    "summary": "Optional short summary"',
+    'Document shape:',
+    '{',
+    '  "docId"?: string,',
+    '  "name": string,',
+    '  "contentType": string,  // Allowed: application/json, text/plain, text/markdown, text/csv, application/xml, text/xml',
+    '  "contentString"?: string,  // for text-like types (e.g., text/plain, text/markdown)',
+    '  "contentJson"?: any,       // for application/json and other structured content',
+    '  "summary"?: string',
+    '}',
+    'Rules:',
+    '- Exactly one of contentString or contentJson must be present per document (never both).',
+    '- Use contentJson only when contentType is application/json. For all other allowed types, use contentString.',
+    '- Do NOT claim to produce binary formats (e.g., PDF, images, Word/Excel); this Oracle outputs text-only artifacts.',
+    '- If a binary-like artifact is implied, instead provide a faithful text/markdown or JSON representation.',
+    'Return multiple documents by including multiple entries in output.documents in the desired order.',
+    '',
+    'Example with two artifacts:',
+    '```',
+    '{',
+    '  "reasoning": "Brief rationale.",',
+    '  "output": {',
+    '    "documents": [',
+    '      {',
+    '        "docId": "contract_123",',
+    '        "name": "contract.json",',
+    '        "contentType": "application/json",',
+    '        "contentJson": { /* content here */ }',
+    '      },',
+    '      {',
+    '        "docId": "interfaces_456",',
+    '        "name": "interfaces.txt",',
+    '        "contentType": "text/plain",',
+    '        "contentString": "<content here>"',
+    '      }',
+    '    ]',
     '  }',
-    '  </DOCUMENT_OUTPUT>',
-    '',
-    '  <JSON_OBJECT_OUTPUT>',
-    '  {',
-    '    // Idiomatic fields for the tool\'s output',
-    '    // Rich and detailed, lifelike, structured cleanly',
-    '  }',
-    '  </JSON_OBJECT_OUTPUT>',
-    '',
+    '}',
+    '```',
     '</OUTPUT_FORMATS>'
   ].join('\n');
 
@@ -871,29 +911,15 @@ function buildOraclePromptAligned(opts: {
     '- Do NOT suggest portals, emails, fax, or separate submission flows.',
     '- Encourage sharing documents via conversation attachments (by docId) when appropriate.',
     '- Reveal only what the specific tool would plausibly know, even though you are omniscient.',
+    '- Text-only artifacts only: do NOT produce binary formats (e.g., PDF, images, Office documents).',
     '</CONSTRAINTS>'
   ].join('\n');
 
   const outputContract = [
     '<OUTPUT_CONTRACT>',
     '- Return exactly one framing JSON code block.',
-    '- The framing JSON MUST have keys: "reasoning" (string) and "output" (a DOCUMENT_OUTPUT or JSON_OUTPUT).',
+    '- The framing JSON MUST have keys: "reasoning" (string) and "output" (with a "documents" array as specified above).',
     '- No extra text outside the code block.',
-    '',
-    '  <EXAMPLE>',
-    '  ```json',
-    '  {',
-    '    "reasoning": "How you derived the output from context & tool intent.",',
-    '    "output": {',
-    '      "docId": "doc_policy_123",',
-    '      "name": "filename.md",',
-    '      "contentType": "text/markdown",',
-    '      "content": "# Policy ...",',
-    '      "summary": "Highlights the specific criteria and applicability to this case."',
-    '    }',
-    '  }',
-    '  ```',
-    '  </EXAMPLE>',
     '</OUTPUT_CONTRACT>'
   ].join('\n');
 
@@ -940,6 +966,15 @@ function buildOraclePromptAligned(opts: {
   lines.push(directorsNote);
   lines.push('</DIRECTORS_NOTE>');
   lines.push('');
+  // Explicit synthesis guidance
+  lines.push('<SYNTHESIS_GUIDANCE>');
+  lines.push('- Action focus: Use the tool name and the provided arguments as the primary source of truth. Produce the best possible result that this tool would return for those arguments.');
+  lines.push('- Context use: Conversation history and agent thought may inform realism and details, but do not invent unrelated outputs. Stay aligned with the tool’s role and its inputs.');
+  lines.push('- Move forward: If inputs are insufficient to progress, include concise next-step suggestions in the document "summary" field (e.g., needed fields and one concrete next action).');
+  lines.push('- Scope discipline: Do not switch tools or simulate other systems. Only return what this tool would produce.');
+  lines.push('- Clarity and brevity: Prefer concise, well-structured content. Avoid narrative filler beyond the requested artifacts.');
+  lines.push('</SYNTHESIS_GUIDANCE>');
+  lines.push('');
   lines.push('<TERMINAL_NOTE>');
   lines.push(terminalNote);
   lines.push('</TERMINAL_NOTE>');
@@ -953,7 +988,11 @@ function buildOraclePromptAligned(opts: {
     lines.push('');
   }
   lines.push(outputContract);
-  lines.push(`Now produce your response to "${tool.toolName}" and remember the synthesis guidance: ${directorsNote}`);
+  lines.push('<RESPONSE>');
+  lines.push(`Produce your response to "${tool.toolName}" using the provided arguments:`);
+  lines.push(safeStringify(args));
+  lines.push('Follow SYNTHESIS_GUIDANCE and OUTPUT_SCHEMA exactly.');
+  lines.push('</RESPONSE>');
   return lines.join('\n');
 }
 
@@ -1078,11 +1117,19 @@ async function extractAttachmentsFromOutput(
     if (!d || typeof d !== 'object') return;
     const name = String(d?.name || '').trim();
     const contentType = String(d?.contentType || 'text/markdown');
-    const content = typeof d?.content === 'string'
-      ? d.content
-      : (d?.document && typeof d.document.content === 'string' ? d.document.content : undefined);
-    if (name && typeof content === 'string' && content) {
-      candidates.push({ ref: d, name, mimeType: contentType, content });
+    const contentString: string | undefined = typeof d?.contentString === 'string' ? d.contentString
+      : (typeof d?.content === 'string' ? d.content : (d?.document && typeof d.document.content === 'string' ? d.document.content : undefined));
+    const contentJson: any = (d && typeof d === 'object' && 'contentJson' in d) ? (d as any).contentJson : undefined;
+    let materialized: string | undefined = undefined;
+    if (typeof contentString === 'string') {
+      materialized = contentString;
+    } else if (typeof contentJson !== 'undefined') {
+      try { materialized = JSON.stringify(contentJson, null, 2); } catch { materialized = String(contentJson); }
+    } else if (d && typeof d?.content === 'object' && contentType && String(contentType).includes('json')) {
+      try { materialized = JSON.stringify(d.content, null, 2); } catch { materialized = String(d.content); }
+    }
+    if (name && typeof materialized === 'string' && materialized) {
+      candidates.push({ ref: d, name, mimeType: contentType, content: materialized });
     }
   };
   try {
