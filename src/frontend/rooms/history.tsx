@@ -145,36 +145,32 @@ function HistoryApp() {
   }, [snap])
 
   return (
-    <SharedAppLayout title="Banterop" fullWidth>
-      {(() => (
-        <div>
-          {React.createElement(require('../ui/components/PageHeader').PageHeader as any, {
-            title: (
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="truncate">Room History</span>
-                <span className="small text-gray-500 truncate">{roomId || '—'}</span>
-              </div>
-            ),
-            right: (
-              <a className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact" href={roomHref} title="Back to Room" aria-label="Back to Room">
-                <ArrowLeft size={18} strokeWidth={1.75} />
-                <span className="hidden sm:inline text-sm">Back to Room</span>
-              </a>
-            ),
-            offset: 48,
-            fullWidth: true,
-          })}
+    <SharedAppLayout
+      title="Banterop"
+      fullWidth
+      breadcrumbs={(
+        <div className="flex items-baseline gap-3 min-w-0">
+          <span className="truncate text-xl font-semibold text-gray-900">Room History</span>
+          <span className="text-sm text-gray-500 truncate">{roomId || '—'}</span>
         </div>
-      ))()}
+      )}
+      headerRight={(
+        <a className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact" href={roomHref} title="Back to Room" aria-label="Back to Room">
+          <ArrowLeft size={18} strokeWidth={1.75} />
+          <span className="hidden sm:inline text-sm">Back to Room</span>
+        </a>
+      )}
+    >
       <div className="wrap">
         {/* Consistent chips row under header */}
         <div className="mb-2">
           {(() => {
-            const chips: Array<{ text:string; tone?:'neutral'|'green'|'amber'|'blue'|'gray' }> = [];
+            const chips: Array<{ text:string; tone?:'neutral'|'green'|'amber'|'blue'|'gray'; icon?: React.ReactNode }> = [];
+            const { List, Eye } = require('lucide-react');
             const total = Array.isArray(list) ? list.length : 0;
-            chips.push({ text: `Tasks ${total}`, tone:'gray' });
-            if (selected != null) chips.push({ text: `Viewing #${selected} (${viewer==='init'?'Initiator':'Responder'})`, tone:'gray' });
-            return <MetaBar left={<span />} chips={chips} />
+            chips.push({ text: `Tasks ${total}`, tone:'gray', icon: React.createElement(List, { size:14, strokeWidth:1.75 }) });
+            if (selected != null) chips.push({ text: `Viewing #${selected} (${viewer==='init'?'Initiator':'Responder'})`, tone:'gray', icon: React.createElement(Eye, { size:14, strokeWidth:1.75 }) });
+            return <MetaBar left={<span />} chips={chips} offset={48} />
           })()}
         </div>
         {error && (

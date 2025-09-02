@@ -29,19 +29,23 @@ export function AppLayout({
         <div className="container mx-auto px-3 h-12 flex items-center justify-between">
           <div className="flex items-center gap-3 text-gray-900 min-w-0">
             <a href="/" className="flex items-center gap-3 text-gray-900 hover:opacity-80 no-underline" aria-label="Go to home">
-              {logo || <img src={logoImage} alt="Banterop logo" className="w-10 h-10 -m-1 object-contain block" />}
-              <h1 className="text-2xl font-bold tracking-tight whitespace-nowrap">{title}</h1>
+              {logo || <img src={logoImage} alt="Banterop logo" className="w-10 h-10 object-contain" />}
             </a>
-            {breadcrumbs && (
-              <nav className="ml-3 flex items-center gap-2 text-sm text-muted truncate min-w-0">
-                {breadcrumbs}
-              </nav>
-            )}
+            <div className="flex items-baseline gap-3 min-w-0">
+              <a href="/" className="text-gray-900 hover:opacity-80 no-underline">
+                <h1 className="text-2xl font-bold tracking-tight whitespace-nowrap">{title}</h1>
+              </a>
+              {breadcrumbs && (
+                <nav className="flex items-baseline gap-2 truncate min-w-0">
+                  {breadcrumbs}
+                </nav>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
             {headerRight && (
-              <div className="flex items-center gap-4 shrink-0">
+              <div className="flex items-baseline gap-4 shrink-0">
                 {headerRight}
               </div>
             )}

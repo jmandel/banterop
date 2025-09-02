@@ -34,7 +34,9 @@
 
 /* Base + component aliases (migrate away from bespoke CSS by mapping to Tailwind) */
 @layer base {
-  body { @apply bg-bg text-text p-0 m-0 font-sans overflow-x-hidden; }
+  /* Reserve scrollbar gutter to avoid layout shift when content overflows */
+  html { scrollbar-gutter: stable both-edges; }
+  body { @apply bg-bg text-text p-0 m-0 font-sans overflow-x-hidden overflow-y-auto; }
 }
 
 @layer components {

@@ -1,6 +1,6 @@
 import React from 'react';
 
-type Chip = { text: string; tone?: 'neutral'|'green'|'amber'|'blue'|'gray' };
+type Chip = { text: string; tone?: 'neutral'|'green'|'amber'|'blue'|'gray'; icon?: React.ReactNode };
 
 function chipClass(tone?: Chip['tone']): string {
   switch (tone) {
@@ -23,7 +23,10 @@ export function MetaBar({ left, chips, right, elRef, offset = 48 }:{ left: React
               {left}
               {/* chips: left-justified next to the label */}
               {chips.map((c, i) => (
-                <span key={i} className={`pill ${chipClass(c.tone)}`}>{c.text}</span>
+                <span key={i} className={`pill ${chipClass(c.tone)} flex items-center gap-1.5`}>
+                  {c.icon && <span className="inline-block align-middle">{c.icon}</span>}
+                  <span>{c.text}</span>
+                </span>
               ))}
             </div>
             {right && <div className="row compact" style={{ marginLeft:'auto' }}>{right}</div>}

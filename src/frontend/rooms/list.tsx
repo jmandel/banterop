@@ -53,24 +53,17 @@ function RoomsPage() {
   const rooms = (index?.rooms || []).filter(r => !query || r.roomId.includes(query))
 
   return (
-    <AppLayout title="Banterop">
-      {(() => (
-        <div>
-          {React.createElement(require('../ui/components/PageHeader').PageHeader as any, {
-            title: (<span>Room Activity</span>),
-            offset: 48,
-            fullWidth: false,
-          })}
-        </div>
-      ))()}
+    <AppLayout title="Banterop" breadcrumbs={<span className="text-xl font-semibold">Room Activity</span>}>
       <div className="container mx-auto p-4">
         {/* Consistent chips row */}
-        <div className="card compact mb-4">
-          <div className="row compact">
-            <span className="pill bg-gray-100 text-gray-800">Rooms {overview?.counts?.roomsActive ?? '—'}</span>
-            <span className="pill bg-gray-100 text-gray-800">Messages ({windowSel}) {overview?.counts?.messages ?? '—'}</span>
-            <span className="pill bg-gray-100 text-gray-800">Backends Active {overview?.counts?.backendActive ?? '—'}</span>
-            <div className="ml-auto row compact">
+        {(() => {
+          const chips: Array<{ text:string; tone?:'neutral'|'green'|'amber'|'blue'|'gray'; icon?: React.ReactNode }> = [];
+          const { List, MessagesSquare, Plug } = require('lucide-react');
+          chips.push({ text:`Rooms ${overview?.counts?.roomsActive ?? '—'}`, tone:'gray', icon: React.createElement(List, { size:14, strokeWidth:1.75 }) });
+          chips.push({ text:`Messages (${windowSel}) ${overview?.counts?.messages ?? '—'}`, tone:'gray', icon: React.createElement(MessagesSquare, { size:14, strokeWidth:1.75 }) });
+          chips.push({ text:`Backends Active ${overview?.counts?.backendActive ?? '—'}`, tone:'gray', icon: React.createElement(Plug, { size:14, strokeWidth:1.75 }) });
+          const right = (
+            <div className="row compact">
               <select value={windowSel} onChange={e=>setWindowSel(e.target.value as any)} className="border rounded px-2 py-1 text-sm">
                 <option value="1h">Last 1h</option>
                 <option value="24h">Last 24h</option>
@@ -84,8 +77,10 @@ function RoomsPage() {
               </select>
               <button onClick={load} className="border rounded px-3 py-1 text-sm">{loading ? 'Refreshing…' : 'Refresh'}</button>
             </div>
-          </div>
-        </div>
+          );
+          const { MetaBar } = require('../components/MetaBar');
+          return React.createElement(MetaBar, { left:<span />, chips, right, offset:48 });
+        })()}
 
         <div className="row gap-2 mb-4 hidden">
           <div className="col">

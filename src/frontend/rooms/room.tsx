@@ -332,28 +332,22 @@ function App() {
   }, [])
 
   return (
-    <SharedAppLayout title="Banterop" fullWidth>
-      {/* Subheader */}
-      {(() => (
-        <div className="">
-          {React.createElement(require('../ui/components/PageHeader').PageHeader as any, {
-            title: (
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="truncate">Room: {roomTitleFromHash || roomId || '—'}</span>
-                <span className={`pill ${isOwner ? 'bg-green-50 text-green-800' : (observing ? 'bg-amber-50 text-amber-800' : 'bg-gray-100 text-gray-800')}`}>{isOwner ? 'Connected' : (observing ? 'Observing' : 'Connecting…')}</span>
-              </div>
-            ),
-            right: (
-              <button title="Settings" aria-label="Settings" onClick={()=>setShowSettings(true)} className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact">
-                <Settings size={18} strokeWidth={1.75} />
-                <span className="hidden sm:inline text-sm">Config</span>
-              </button>
-            ),
-            offset: 48,
-            fullWidth: true,
-          })}
+    <SharedAppLayout
+      title="Banterop"
+      fullWidth
+      breadcrumbs={(
+        <div className="flex items-baseline gap-2 min-w-0">
+          <span className="truncate text-xl font-semibold text-gray-900">Room: {roomTitleFromHash || roomId || '—'}</span>
+          <span className={`pill ${isOwner ? 'bg-green-50 text-green-800' : (observing ? 'bg-amber-50 text-amber-800' : 'bg-gray-100 text-gray-800')}`}>{isOwner ? 'Connected' : (observing ? 'Observing' : 'Connecting…')}</span>
         </div>
-      ))()}
+      )}
+      headerRight={(
+        <button title="Settings" aria-label="Settings" onClick={()=>setShowSettings(true)} className="p-1 ml-2 text-gray-600 hover:text-gray-900 bg-transparent border-0 row compact">
+          <Settings size={18} strokeWidth={1.75} />
+          <span className="hidden sm:inline text-sm">Config</span>
+        </button>
+      )}
+    >
       <div className={`wrap ${showDebug ? 'with-debug' : ''}`}>
 
   {(() => {
@@ -364,15 +358,16 @@ function App() {
       if (hashIdx >= 0) return `…${t.slice(hashIdx)}`;
       return t.length > 12 ? `…${t.slice(-12)}` : t;
     }
-    const chips: Array<{ text:string; tone?:'neutral'|'green'|'amber'|'blue'|'gray' }> = [];
-    chips.push({ text:'A2A', tone:'gray' });
+    const chips: Array<{ text:string; tone?:'neutral'|'green'|'amber'|'blue'|'gray'; icon?: React.ReactNode }> = [];
+    const { Network, ClipboardList, ArrowLeftRight } = require('lucide-react');
+    chips.push({ text:'A2A', tone:'gray', icon: React.createElement(Network, { size:14, strokeWidth:1.75 }) });
     if (taskId) {
-      chips.push({ text: `Task ${summarizeTaskId(taskId)}`, tone:'gray' });
+      chips.push({ text: `Task ${summarizeTaskId(taskId)}`, tone:'gray', icon: React.createElement(ClipboardList, { size:14, strokeWidth:1.75 }) });
       const statusChip = (turnText === 'Our turn') ? 'Our Turn' : (turnText || '');
-      if (statusChip) chips.push({ text: statusChip, tone: statusChip === 'Our Turn' ? 'blue' : 'gray' });
+      if (statusChip) chips.push({ text: statusChip, tone: statusChip === 'Our Turn' ? 'blue' : 'gray', icon: React.createElement(ArrowLeftRight, { size:14, strokeWidth:1.75 }) });
     }
     return (
-      <MetaBar elRef={metaRef} offset={92} left={<span />} chips={chips} />
+      <MetaBar elRef={metaRef} offset={48} left={<span />} chips={chips} />
     );
   })()}
 
