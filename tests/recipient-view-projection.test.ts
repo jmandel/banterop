@@ -17,11 +17,7 @@ describe("Recipient view projection", () => {
   it("preserves messageId, excludes current from history, and uses responder taskId in responder snapshot", async () => {
     const { pairId, a2a } = await createPairA2A();
 
-    // Ensure epoch exists via a no-op stream
-    {
-      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params:{ message: createMessage({ role:'user', parts:[], messageId: crypto.randomUUID() }) } }) });
-      for await (const _ of parseSse<any>(res.body!)) break; // snapshot only
-    }
+    // Epoch will be created on first send below
 
     const initId = `init:${pairId}#1`;
     const respId = `resp:${pairId}#1`;

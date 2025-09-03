@@ -13,11 +13,8 @@ describe("Event ring buffer trims old events", () => {
     const pairId = `t-${crypto.randomUUID()}`;
     const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
 
-    // Start epoch (adds epoch-begin)
-    {
-      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params:{ message: createMessage({ role:'user', parts:[], messageId: crypto.randomUUID() }) } }) });
-      for await (const _ of parseSse<any>(res.body!)) break;
-    }
+    // Start epoch by sending a first message (adds epoch-begin)
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m0', method:'message/send', params:{ message: createMessage({ parts:[{ kind:'text', text:'seed', metadata:{ } }], messageId: crypto.randomUUID() }) } }) });
 
     const initId = `init:${pairId}#1`;
     // Generate many events: each send produces a state + message event

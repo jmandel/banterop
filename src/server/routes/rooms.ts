@@ -140,8 +140,8 @@ export function createRoomsRoutes() {
           }
         } catch {} }, 15000)
         try {
-          const ensured = await (pairs as any).ensureEpochTasksForPair(pairId)
-          write({ type:'subscribe', pairId, epoch: ensured.epoch, taskId: ensured.responderTaskId, turn: 'initiator' })
+          // Do not pre-create epochs on connect; emit room-uninitialized marker instead
+          write({ type: 'room-uninitialized', pairId })
           const lastSeqArr = (events as any).listSince(pairId, 0)
           const lastSeq = Array.isArray(lastSeqArr) && lastSeqArr.length ? Number(lastSeqArr[lastSeqArr.length - 1].seq || 0) : 0
           for await (const ev of (events as any).stream(pairId, lastSeq)) {

@@ -17,11 +17,7 @@ describe("Recipient role projection", () => {
   it("labels messages as agent/user from responder's perspective", async () => {
     const { pairId, a2a } = await createPairA2A();
 
-    // ensure epoch exists
-    {
-      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params:{ message: createMessage({ role:'user', parts:[], messageId: crypto.randomUUID() }) } }) });
-      for await (const _ of parseSse<any>(res.body!)) break;
-    }
+    // Epoch will be created on first send
 
     const initId = `init:${pairId}#1`;
     const respId = `resp:${pairId}#1`;

@@ -18,11 +18,7 @@ describe("Initiator view projection", () => {
     const { pairId, a2a } = await createPairA2A();
     const initId = `init:${pairId}#1`;
 
-    // Start epoch
-    {
-      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params:{ message: createMessage({ role:'user', parts:[], messageId: crypto.randomUUID() }) } }) });
-      for await (const _ of parseSse<any>(res.body!)) break;
-    }
+    // Epoch will be created on first send below
 
     const m1 = crypto.randomUUID();
     await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m1', method:'message/send', params:{ configuration:{ historyLength: 10000 }, message: createMessage({ parts:[textPart('hello','turn')], taskId: initId, messageId: m1 }) } }) });

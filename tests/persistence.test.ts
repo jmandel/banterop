@@ -32,11 +32,8 @@ afterAll(async () => {
     await openBackend(S, pairId);
     const initTaskId = `init:${pairId}#1`;
 
-    // Create epoch #1 via a no-op stream
-    {
-      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start', method:'message/stream', params:{ message: createMessage({ role:'user', parts:[], messageId: crypto.randomUUID() }) } }) });
-      for await (const _ of parseSse<any>(res.body!)) break;
-    }
+    // Create epoch #1 by sending a first message
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m0', method:'message/send', params:{ message: createMessage({ parts:[{ kind:'text', text:'seed' }], messageId: crypto.randomUUID() }) } }) });
 
     // Restart server with same DB
     await stopServer(S);

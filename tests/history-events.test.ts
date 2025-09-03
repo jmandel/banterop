@@ -17,11 +17,7 @@ describe("Message events and history", () => {
   it("emits type:'message' events and builds history excluding current message", async () => {
     const { pairId, a2a } = await createPairA2A();
 
-    // Start epoch #1 with a no-op stream to ensure tasks exist
-    {
-      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start', method:'message/stream', params:{ message: createMessage({ role:'user', parts:[], messageId: crypto.randomUUID() }) } }) });
-      for await (const _ of parseSse<any>(res.body!)) break; // snapshot only
-    }
+    // Epoch will be created on first send below
 
     const initId = `init:${pairId}#1`;
 
@@ -80,11 +76,8 @@ describe("Message events and history", () => {
   it("history is per-epoch; epoch 2 history excludes epoch 1 messages", async () => {
     const { pairId, a2a } = await createPairA2A();
 
-    // Start epoch #1
-    {
-      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params:{ message: createMessage({ role:'user', parts:[], messageId: crypto.randomUUID() }) } }) });
-      for await (const _ of parseSse<any>(res.body!)) break;
-    }
+    // Start epoch #1 with a first message
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m0', method:'message/send', params:{ message: createMessage({ parts:[textPart('seed','working')], messageId: crypto.randomUUID() }) } }) });
 
     const init1 = `init:${pairId}#1`;
     const m1 = crypto.randomUUID();

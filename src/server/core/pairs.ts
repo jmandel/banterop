@@ -197,14 +197,16 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
     return state === 'completed' || state === 'canceled' || (state as any) === 'failed' || (state as any) === 'rejected'
   }
 
-  // NOTE: When sending without a taskId, we unconditionally bump to a new epoch.
-  // This ensures no more than one active task per room/channel/pair. Any time
-  // a new task is created, any existing tasks are ended. This is intentional.
+  // When sending without a taskId, begin a new epoch only if the current epoch already
+  // has messages; otherwise reuse the current epoch (or create #1 if needed).
   function ensureEpochForSend(pairId: string): { epoch: number } {
     const p = db.getPair(pairId)
     if (!p) return ensureEpoch(pairId)
     if (p.epoch === 0) return ensureEpoch(pairId)
-    const next = (p.epoch || 0) + 1
+    const current = p.epoch
+    const hasAnyInCurrent = !!db.lastMessage(pairId, current)
+    if (!hasAnyInCurrent) return { epoch: current }
+    const next = current + 1
     db.setPairEpoch(pairId, next)
     db.createEpochTasks(pairId, next)
     events.push(pairId, { type:'epoch-begin', epoch: next } as any)
@@ -384,20 +386,24 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
     messageStream(pairId: string, m?: any) {
       const self = this
       return (async function* () {
-        const { epoch } = ensureEpoch(pairId)
-        const senderId = m?.taskId ?? initTaskId(pairId, epoch)
-        const { role: viewerRole } = parseTaskId(senderId)
+        const p = db.getPair(pairId)
+        const currentEpoch = p && p.epoch > 0 ? p.epoch : 0
+        const hasParts = !!(m && Array.isArray(m.parts) && m.parts.length > 0)
+        const suppliedTaskId = String(m?.taskId || '') || undefined
+        const viewerRole: 'init'|'resp' = suppliedTaskId ? parseTaskId(suppliedTaskId).role : 'init'
 
         // If no message or empty parts, just return current state
-        if (!m || (Array.isArray(m.parts) && m.parts.length === 0)) {
-          const snap = db.getTask(senderId)!
+        if (!hasParts) {
+          const impliedId = suppliedTaskId
+            || (currentEpoch > 0 ? initTaskId(pairId, currentEpoch) : `init:${pairId}#1`)
+          const snap = db.getTask(impliedId)!
           const currentState = snap ? toSnapshot(snap).status.state : 'submitted'
           const isTerminalFlag = isTerminal(currentState)
           const needsInput = currentState === 'input-required'
           
           const statusMessage = snap ? toSnapshot(snap).status.message : undefined
           yield createStatusUpdateEvent({
-            taskId: senderId,
+            taskId: impliedId,
             pairId,
             state: currentState,
             message: statusMessage,
@@ -407,7 +413,8 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
         }
 
         // Send the message and get result
-        const result = await self.messageSend(pairId, { ...(m||{}), taskId: senderId }, m?.configuration)
+        const result = await self.messageSend(pairId, { ...(m||{}) }, m?.configuration)
+        const effectiveId = String((result as any)?.id || (suppliedTaskId || (currentEpoch > 0 ? initTaskId(pairId, currentEpoch) : `init:${pairId}#1`)))
         const state = (result as any)?.status?.state || 'submitted'
         const message = (result as any)?.status?.message
         const isTerminalState = isTerminal(state)
@@ -415,7 +422,7 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
         
         // Send TaskStatusUpdateEvent with all required fields
         yield createStatusUpdateEvent({
-          taskId: senderId,
+          taskId: effectiveId,
           pairId,
           state,
           message,

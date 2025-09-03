@@ -12,6 +12,10 @@ describe('events.log invariants', () => {
     const pairId = `t-${crypto.randomUUID()}`;
     await openBackend(S, pairId);
 
+    // Create an epoch to seed the log
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m0', method:'message/send', params:{ message: { kind:'message', role:'user', parts:[{ kind:'text', text:'seed' }], messageId: crypto.randomUUID() } } }) });
+
     // Read first event to get baseline seq
     let firstSeq = 0;
     {

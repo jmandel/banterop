@@ -102,12 +102,9 @@ export function pairsRoutes(includeNonApi = false) {
             }
           } catch {} }, 15000)
           try {
-            // On connect, emit subscribe for the current epoch only
-            try {
-              const ensured = await (pairs as any).ensureEpochTasksForPair(pairId)
-              write({ type:'subscribe', pairId, epoch: ensured.epoch, taskId: ensured.responderTaskId, turn: 'initiator' })
-            } catch {}
-            // Stream future events only (no backlog)
+            // Do not pre-create tasks/epochs on connect; emit a marker instead
+            try { write({ type:'room-uninitialized', pairId }) } catch {}
+            // Stream future events only (no backlog); subscribe only on epoch-begin
             const lastSeqArr = (events as any).listSince(pairId, 0)
             const lastSeq = Array.isArray(lastSeqArr) && lastSeqArr.length ? Number(lastSeqArr[lastSeqArr.length - 1].seq || 0) : 0
             for await (const ev of (events as any).stream(pairId, lastSeq)) {

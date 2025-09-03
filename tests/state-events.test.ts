@@ -14,10 +14,6 @@ describe('State events reflect correct turn semantics and include message text',
     await openBackend(S, pairId);
     
 
-    // Start epoch
-    const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'s', method:'message/stream', params:{ message: createMessage({ role:'user', parts:[], messageId: crypto.randomUUID() }) } }) });
-    for await (const _ of parseSse<any>(res.body!)) break;
-
     // Send handoff message (nextState=working)
     const send = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m', method:'message/send', params:{ message:{ parts:[textPart('hello-turn','working')], taskId: `init:${pairId}#1`, messageId: crypto.randomUUID() }, configuration:{ historyLength: 0 } } }) });
     expect(send.ok).toBeTrue();

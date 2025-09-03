@@ -12,29 +12,22 @@ describe("Control-plane event log", () => {
     const pairId = `t-${crypto.randomUUID()}`;
     await openBackend(S, pairId);
 
-    // Backlog replay from since=0 should include pair-created as first event
+    // Create an epoch by sending a first message
+    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m0', method:'message/send', params:{ message: createMessage({ parts:[{ kind:'text', text:'seed' }], messageId: crypto.randomUUID() }) } }) });
+
+    // Backlog replay from since=0 should include an epoch-begin event
     {
       const ac = new AbortController();
       const es = await fetch(S.base + `/api/rooms/${pairId}/events.log?since=0`, { headers:{ accept:'text/event-stream' }, signal: ac.signal });
       expect(es.ok).toBeTrue();
       let got = false;
       for await (const ev of parseSse<any>(es.body!)) {
-        expect(ev.pairId).toBe(pairId);
-        expect(typeof ev.seq).toBe('number');
-        expect(ev.type).toBe('epoch-begin');
-        got = true;
-        ac.abort();
-        break;
+        if (ev?.type === 'epoch-begin') { got = true; ac.abort(); break; }
       }
       expect(got).toBeTrue();
     }
 
-    // Start epoch by streaming a no-op message
-    const a2a = `${S.base}/api/rooms/${pairId}/a2a`;
-    {
-      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start', method:'message/stream', params:{ message: createMessage({ role:'user', parts:[], messageId: crypto.randomUUID() }) } }) });
-      for await (const _ of parseSse<any>(res.body!)) break;
-    }
 
     // Hard reset: keep same pair, log is cleared, tasks canceled
     const hr = await fetch(S.base + `/api/rooms/${pairId}/reset`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ type: 'hard' }) });
@@ -67,12 +60,12 @@ describe("Control-plane event log", () => {
     }
     const initTaskId2 = `init:${pairId}#${resetEpoch + 1}`;
     {
-      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start2', method:'message/stream', params:{ message: createMessage({ role:'user', parts:[], messageId: crypto.randomUUID() }) } }) });
-      for await (const _ of parseSse<any>(res.body!)) break;
+      // Start next epoch by sending a first message
+      await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m1', method:'message/send', params:{ message: createMessage({ parts:[{ kind:'text', text:'seed2' }], messageId: crypto.randomUUID() }) } }) });
       const rget = await fetch(a2a, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ jsonrpc:'2.0', id:'g', method:'tasks/get', params:{ id: initTaskId2 } }) });
       const jg = await rget.json();
       expect(jg.result.id).toBe(initTaskId2);
-      expect(jg.result.status.state).toBe('submitted');
+      expect(jg.result.status.state).toBe('working');
     }
   });
 });

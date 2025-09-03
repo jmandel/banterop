@@ -50,7 +50,7 @@ export function createPersistenceFromDb(db: Database): Persistence {
   const selLastMsg    = db.query<{ author:string; json:string }, [string, number]>(
     `SELECT author, json FROM messages WHERE pair_id = ? AND epoch = ? ORDER BY rowid DESC LIMIT 1`
   )
-  const selLastAny    = db.query<{ author:string; json:string; epoch:number; created_at:number|null }, [string]>(
+  const selLastAny    = db.query<{ author:string; json:string; epoch:number; created_at:any }, [string]>(
     `SELECT author, json, epoch, created_at FROM messages WHERE pair_id = ? ORDER BY rowid DESC LIMIT 1`
   )
   const cntAllByPair  = db.query<{ n:number }, [string]>(`SELECT COUNT(*) as n FROM messages WHERE pair_id = ?`)
@@ -87,12 +87,21 @@ export function createPersistenceFromDb(db: Database): Persistence {
     return r ? ({ pair_id: pairId, epoch, author: (r.author === 'resp' ? 'resp' : 'init') as any, json: r.json }) : null;
   }
   function lastMessageAny(pairId: string) {
-    const r = selLastAny.get(pairId);
-    return r ? ({ author: (r.author === 'resp' ? 'resp' : 'init') as any, json: r.json, epoch: r.epoch, created_at: (typeof r.created_at === 'number' ? r.created_at : null) }) : null;
+    const r = selLastAny.get(pairId) as any;
+    if (!r) return null;
+    const createdRaw = r.created_at;
+    const createdNum = Number(createdRaw);
+    const created_at = Number.isFinite(createdNum) ? createdNum : null;
+    return { author: (r.author === 'resp' ? 'resp' : 'init') as any, json: r.json, epoch: r.epoch, created_at };
   }
   function countMessages(pairId: string): number { const r = cntAllByPair.get(pairId) as any; return (r?.n ?? 0) as number }
   function countMessagesSince(pairId: string, sinceMs: number): number { const r = cntSinceByPair.get(pairId, sinceMs) as any; return (r?.n ?? 0) as number }
-  function lastActivityTs(pairId: string): number | null { const r = lastTsByPair.get(pairId) as any; return (typeof r?.ts === 'number' ? r.ts : null) }
+  function lastActivityTs(pairId: string): number | null {
+    const r = lastTsByPair.get(pairId) as any;
+    const v = (r && (r.ts ?? r.TS)) as any;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
   function listPairs(): PairRow[] { return listPairsStmt.all() }
 
   function close() { try { db.close() } catch {} }

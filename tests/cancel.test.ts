@@ -79,11 +79,8 @@ describe("Cancel semantics", () => {
     const initTaskId = `init:${pairId}#1`;
     const respTaskId = `resp:${pairId}#1`;
 
-    // Create tasks by sending a no-op stream start
-    {
-      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start', method:'message/stream', params:{ message: createMessage({ role:'user', parts: [], messageId: crypto.randomUUID() }) } }) });
-      for await (const _ of parseSse<any>(res.body!)) break;
-    }
+    // Create tasks by sending an initial message
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m0', method:'message/send', params:{ message: createMessage({ parts: [textPart('seed','working')], messageId: crypto.randomUUID() }) } }) });
 
     // First cancel
     const c1 = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'c1', method:'tasks/cancel', params:{ id: initTaskId } }) });
@@ -112,11 +109,8 @@ describe("Cancel semantics", () => {
     const initTaskId = `init:${pairId}#1`;
     const respTaskId = `resp:${pairId}#1`;
 
-    // Create tasks by sending a no-op stream
-    {
-      const res = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'start', method:'message/stream', params:{ message: createMessage({ role:'user', parts: [], messageId: crypto.randomUUID() }) } }) });
-      for await (const _ of parseSse<any>(res.body!)) break;
-    }
+    // Create tasks by sending an initial message
+    await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'m0', method:'message/send', params:{ message: createMessage({ parts: [textPart('seed','working')], messageId: crypto.randomUUID() }) } }) });
 
     // Cancel both sides via tasks/cancel
     await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'c', method:'tasks/cancel', params:{ id: initTaskId } }) });
