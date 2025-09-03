@@ -554,6 +554,7 @@ export const useAppStore = create<Store>((set, get) => ({
       composeApproved: new Set<string>(),
       inFlightSends: new Map<string,{composeId:string}>(),
       sendErrorByCompose: new Map<string,string>(),
+      pendingKickoff: false,
       hud: null,
       fetching: false,
       needsRefresh: false,

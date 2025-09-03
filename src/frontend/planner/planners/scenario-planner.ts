@@ -1092,29 +1092,38 @@ function formatAgentProfileAligned(a: any): string {
   ].join('\n');
 }
 
-function parseOracleResponseAligned(content: string): { reasoning: string; output: unknown } {
-  // Try ```json ... ```
+export function parseOracleResponseAligned(content: string): { reasoning: string; output: unknown } {
+  const parseWithRescue = (s: string): any => {
+    const obj = tryParseJson(s);
+    if (obj !== null) return obj;
+    const rescued = rescueJsonStructure(s);
+    const obj2 = tryParseJson(rescued);
+    if (obj2 !== null) return obj2;
+    throw new Error('Invalid JSON (after rescue attempt)');
+  };
+
+  // Prefer ```json fenced block
   const jsonBlock = content.match(/```json\s*([\s\S]*?)\s*```/);
   if (jsonBlock?.[1]) {
-    const obj = tryParseJson(jsonBlock[1]);
-    if (obj && typeof obj.reasoning === 'string' && 'output' in obj) return { reasoning: obj.reasoning, output: obj.output };
+    const obj = parseWithRescue(jsonBlock[1]);
+    if (obj && typeof obj.reasoning === 'string' && 'output' in obj) return { reasoning: obj.reasoning, output: (obj as any).output };
+    throw new Error('JSON block missing required keys { reasoning, output }');
   }
-  // Try generic ``` ... ```
+  // Generic ``` fenced block
   const codeBlock = content.match(/```\s*([\s\S]*?)\s*```/);
   if (codeBlock?.[1]) {
-    const obj = tryParseJson(codeBlock[1]);
-    if (obj && typeof obj.reasoning === 'string' && 'output' in obj) return { reasoning: obj.reasoning, output: obj.output };
+    const obj = parseWithRescue(codeBlock[1]);
+    if (obj && typeof obj.reasoning === 'string' && 'output' in obj) return { reasoning: obj.reasoning, output: (obj as any).output };
+    throw new Error('Code block missing required keys { reasoning, output }');
   }
-  // Try first bare JSON object
+  // First bare JSON object in the content
   const bare = extractFirstJsonObjectAligned(content);
   if (bare) {
-    const obj = tryParseJson(bare);
-    if (obj && typeof obj.reasoning === 'string' && 'output' in obj) return { reasoning: obj.reasoning, output: obj.output };
+    const obj = parseWithRescue(bare);
+    if (obj && typeof obj.reasoning === 'string' && 'output' in obj) return { reasoning: obj.reasoning, output: (obj as any).output };
+    throw new Error('Bare JSON missing required keys { reasoning, output }');
   }
-  // Heuristic fallback
-  const heuristic = heuristicParseAligned(content);
-  if (heuristic) return heuristic;
-  throw new Error('Oracle response was not valid JSON with required { reasoning, output } shape.');
+  throw new Error('No JSON object found in Oracle response');
 }
 
 function tryParseJson(s: string): any | null { try { return JSON.parse(s); } catch { return null; } }
@@ -1135,23 +1144,35 @@ function extractFirstJsonObjectAligned(text: string): string | null {
   return null;
 }
 
-function heuristicParseAligned(content: string): { reasoning: string; output: unknown } | null {
-  const r = content.match(/"reasoning"\s*:\s*"([^"]*)"/);
-  const reasoning = r?.[1] ?? 'No explicit reasoning found (heuristic parse).';
-  const idx = content.indexOf('"output"');
-  if (idx === -1) return null;
-  const after = content.slice(idx + '"output"'.length);
-  const colon = after.indexOf(':');
-  if (colon === -1) return null;
-  const valueStr = after.slice(colon + 1).trim();
-  let output: unknown = valueStr;
-  const first = valueStr[0];
-  if (first === '{' || first === '[' || first === '"') {
-    const candidate = extractFirstJsonObjectAligned(valueStr) ?? valueStr;
-    const parsed = tryParseJson(candidate);
-    if (parsed !== null) output = parsed;
+function heuristicParseAligned(_content: string): { reasoning: string; output: unknown } | null { return null; }
+
+function rescueJsonStructure(s: string): string {
+  const out: string[] = [];
+  const stack: string[] = [];
+  let inString = false;
+  let esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    out.push(ch);
+    if (esc) { esc = false; continue; }
+    if (ch === '\\') { if (inString) esc = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{' || ch === '[') { stack.push(ch); continue; }
+    if (ch === '}' || ch === ']') {
+      const need = ch === '}' ? '{' : '[';
+      while (stack.length && stack[stack.length - 1] !== need) {
+        const top = stack.pop()!;
+        out.splice(out.length - 1, 0, top === '[' ? ']' : '}');
+      }
+      if (stack.length && stack[stack.length - 1] === need) stack.pop();
+    }
   }
-  return { reasoning, output };
+  while (stack.length) {
+    const top = stack.pop()!;
+    out.push(top === '[' ? ']' : '}');
+  }
+  return out.join('');
 }
 
 async function extractAttachmentsFromOutput(

@@ -26,7 +26,7 @@ export class PlannerHarness<Cfg = unknown> {
     private hud: (phase: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting', label?: string, p?: number) => void,
     private planner: Planner<Cfg>,
     private cfg: Cfg,
-    private ids: { otherAgentId?: string; model?: string } = {},
+    private ids: { otherAgentId?: string; model?: string; allowBootstrap?: () => boolean } = {},
     private llmProvider?: LlmProvider,
   ) {}
 
@@ -72,7 +72,8 @@ export class PlannerHarness<Cfg = unknown> {
     // Bootstrap trigger: allow a single planning pass when journal is empty.
     // This avoids needing a synthetic status fact for the first proposal.
     const hasExistingTask = !!(this.ids as any)?.existingTask;
-    const bootstrap = facts.length === 0 && !hasExistingTask;
+    const allowBootstrap = typeof (this.ids as any)?.allowBootstrap === 'function' ? !!(this.ids as any).allowBootstrap() : false;
+    const bootstrap = facts.length === 0 && !hasExistingTask && allowBootstrap;
     try { console.debug('[planner/harness] pass begin', { facts: facts.length, head: headNow, bootstrap }); } catch {}
     if (!bootstrap && runawayGuardActive(facts.length)) {
       try {

@@ -88,7 +88,7 @@ export function startPlannerController() {
       hud,
       planner as any,
       cfg as any,
-      { otherAgentId:'counterpart', model, existingTask: !!s.taskId } as any,
+      { otherAgentId:'counterpart', model, existingTask: !!s.taskId, allowBootstrap: () => !!useAppStore.getState().pendingKickoff } as any,
       provider
     );
     // Don't auto-plan on rebuild - let explicit requests handle it
