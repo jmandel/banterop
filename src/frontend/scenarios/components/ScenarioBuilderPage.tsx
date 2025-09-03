@@ -659,6 +659,7 @@ export function ScenarioBuilderPage() {
                       selectedModel={state.selectedModel}
                       initialInput={initialInput}
                       disabled={isLocked}
+                      schemaText={state.schemaText}
                       onModelChange={(model) => {
                         // Save to localStorage
                         try {

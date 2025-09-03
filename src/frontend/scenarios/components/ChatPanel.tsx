@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Button } from '../../ui';
+import { Copy, Check } from 'lucide-react';
 
 interface ChatMessage { id: string; role: 'user' | 'assistant'; content: string; timestamp: number; }
 
@@ -15,6 +16,7 @@ export function ChatPanel({
   availableProviders,
   initialInput,
   disabled,
+  schemaText,
 }: {
   messages: ChatMessage[];
   onSendMessage: (m: string) => void;
@@ -27,8 +29,10 @@ export function ChatPanel({
   availableProviders: Array<{ name: string; models: string[] }>;
   initialInput?: string;
   disabled?: boolean;
+  schemaText?: string;
 }) {
   const [input, setInput] = useState(initialInput || '');
+  const [copied, setCopied] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'instant' }); }, [messages]);
   useEffect(() => {
@@ -88,6 +92,35 @@ export function ChatPanel({
           <div className="text-left"><span className="inline-block rounded-2xl px-3 py-2 bg-panel border border-border text-text text-sm"><span className="animate-pulse">Thinking...</span></span></div>
         )}
         <div ref={endRef} />
+      </div>
+      {/* Copy-to-frontier helper */}
+      <div className="border-t border-border px-3 py-2 text-[12px] text-muted flex items-center justify-between gap-2">
+        <span>For best results, copy this prompt into a frontier model</span>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 px-2 py-1 rounded-2xl border border-border text-xs bg-panel hover:bg-gray-50"
+          title="Copy schema + target output prompt"
+          onClick={() => {
+            const schema = String(schemaText || '').trim();
+            const user = String(input || '').trim();
+            const parts: string[] = [];
+            if (schema) parts.push(schema);
+            // Header with newline; do not close the code fence at the end
+            parts.push(''); // blank line between schema and header
+            parts.push('Target output: ```json');
+            if (user) parts.push(user);
+            // Ensure a trailing newline is present after the code fence header/user block
+            parts.push('');
+            const payload = parts.join('\n');
+            try {
+              navigator.clipboard.writeText(payload);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 500);
+            } catch {}
+          }}
+        >
+          {copied ? (<><Check size={14} /> Copied</>) : (<><Copy size={14} /> Copy</>)}
+        </button>
       </div>
       <form onSubmit={submit} className="border-t border-border p-2 flex gap-2">
         <input
