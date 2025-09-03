@@ -253,6 +253,13 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
       const respId = respTaskId(pid, epoch)
       if (!db.getTask(initId)) db.upsertTask({ task_id:initId, pair_id:pid, epoch })
       if (!db.getTask(respId)) db.upsertTask({ task_id:respId, pair_id:pid, epoch })
+      // If task is already in a terminal state, do not override it with canceled
+      try {
+        const current = currentStateForEpoch(pid, epoch, 'init')
+        if (isTerminal(current)) {
+          return toSnapshot(db.getTask(initId)!)
+        }
+      } catch {}
       // persist a control message with nextState=canceled so restart is deterministic
       const control = { messageId: crypto.randomUUID(), parts: [], kind:'message', taskId: id, contextId: pid, metadata: { [A2A_EXT_URL]: { nextState: 'canceled' } } }
       try {
