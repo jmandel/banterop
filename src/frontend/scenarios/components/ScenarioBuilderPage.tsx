@@ -660,6 +660,7 @@ export function ScenarioBuilderPage() {
                       initialInput={initialInput}
                       disabled={isLocked}
                       schemaText={state.schemaText}
+                      showCopyHelper={isCreateMode}
                       onModelChange={(model) => {
                         // Save to localStorage
                         try {

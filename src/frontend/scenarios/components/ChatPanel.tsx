@@ -17,6 +17,7 @@ export function ChatPanel({
   initialInput,
   disabled,
   schemaText,
+  showCopyHelper,
 }: {
   messages: ChatMessage[];
   onSendMessage: (m: string) => void;
@@ -30,6 +31,7 @@ export function ChatPanel({
   initialInput?: string;
   disabled?: boolean;
   schemaText?: string;
+  showCopyHelper?: boolean;
 }) {
   const [input, setInput] = useState(initialInput || '');
   const [copied, setCopied] = useState(false);
@@ -93,7 +95,8 @@ export function ChatPanel({
         )}
         <div ref={endRef} />
       </div>
-      {/* Copy-to-frontier helper */}
+      {/* Copy-to-frontier helper (only in create flow) */}
+      {showCopyHelper && (
       <div className="border-t border-border px-3 py-2 text-[12px] text-muted flex items-center justify-between gap-2">
         <span>For best results, copy this prompt into a frontier model</span>
         <button
@@ -122,6 +125,7 @@ export function ChatPanel({
           {copied ? (<><Check size={14} /> Copied</>) : (<><Copy size={14} /> Copy</>)}
         </button>
       </div>
+      )}
       <form onSubmit={submit} className="border-t border-border p-2 flex gap-2">
         <input
           className="flex-1 border border-border rounded-2xl px-3 py-2 text-sm bg-panel text-text focus:outline-none disabled:opacity-60"
