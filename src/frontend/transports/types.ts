@@ -11,6 +11,8 @@ export type SendOptions = {
   taskId?: string;
   messageId?: string;
   nextState?: A2ANextState;
+  // Optional extension payload to merge under metadata[A2A_EXT_URL]
+  extension?: Record<string, any>;
 };
 
 export interface TransportAdapter {

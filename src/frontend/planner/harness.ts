@@ -23,7 +23,7 @@ export class PlannerHarness<Cfg = unknown> {
     private getFacts: () => ReadonlyArray<Fact>,
     private getHead: () => number,
     private append: (batch: ProposedFact[], opts?: { casBaseSeq?: number }) => boolean,
-    private hud: (phase: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting', label?: string, p?: number) => void,
+    private hud: (phase?: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting', title?: string, body?: any) => void,
     private planner: Planner<Cfg>,
     private cfg: Cfg,
     private ids: { otherAgentId?: string; model?: string; allowBootstrap?: () => boolean } = {},
@@ -76,10 +76,7 @@ export class PlannerHarness<Cfg = unknown> {
     const bootstrap = facts.length === 0 && !hasExistingTask && allowBootstrap;
     try { console.debug('[planner/harness] pass begin', { facts: facts.length, head: headNow, bootstrap }); } catch {}
     if (!bootstrap && runawayGuardActive(facts.length)) {
-      try {
-        const msg = `🧊 Runaway guard: planner frozen (entries=${facts.length} ≥ cap=${JOURNAL_HARD_CAP})`;
-        this.hud('waiting', msg);
-      } catch {}
+      try { this.hud('waiting', 'Runaway guard', `🧊 planner frozen (entries=${facts.length} ≥ cap=${JOURNAL_HARD_CAP})`); } catch {}
       return;
     }
     const cut = { seq: headNow };
@@ -192,7 +189,7 @@ export class PlannerHarness<Cfg = unknown> {
 
     const ctx: PlanContext<any> = {
       signal: undefined,
-      hud: (phase, label, p) => this.hud(phase, label, p),
+      hud: (phase?: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting', title?: string, body?: any) => this.hud(phase, title, body),
       newId: (prefix?: string) => rid(prefix || 'id'),
       readAttachment: (name: string) => this.readAttachment(name),
       config: this.cfg,
@@ -228,7 +225,7 @@ export class PlannerHarness<Cfg = unknown> {
       if (whisperTriggered) this.lastWhisperPlannedSeq = lastWhisperSeq;
       if (userAnswerTriggered) this.lastUserAnswerPlannedSeq = lastUserAnswerSeq;
     }
-    try { this.hud('idle'); } catch {}
+    try { this.hud(undefined); } catch {}
   }
 }
 

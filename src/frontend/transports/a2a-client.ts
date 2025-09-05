@@ -47,7 +47,7 @@ export class A2AClient {
   }
 
   async *messageStreamParts(parts: A2APart[], opts:{ taskId?:string; messageId?:string; metadata?: any; signal?:AbortSignal }={}) {
-    const msg: any = { messageId: opts.messageId || crypto.randomUUID(), ...(opts.taskId ? { taskId: opts.taskId } : {}), parts };
+    const msg: any = { kind:'message', role:'user', messageId: opts.messageId || crypto.randomUUID(), ...(opts.taskId ? { taskId: opts.taskId } : {}), parts };
     if (opts.metadata) msg.metadata = opts.metadata;
     const body = { jsonrpc: '2.0', id: crypto.randomUUID(), method: 'message/stream', params: { message: msg } };
     const baseHeaders: Record<string,string> = { 'content-type':'application/json', 'accept':'text/event-stream' };
@@ -146,7 +146,7 @@ export class A2AClient {
     await fetch(this.ep(), { method:'POST', headers: { ...baseHeaders, ...extra }, body: JSON.stringify(body) });
   }
   async messageSend(parts: A2APart[], opts:{ taskId?:string; messageId?:string; metadata?: any }): Promise<A2ATask> {
-    const msg: any = { taskId: opts.taskId, messageId: opts.messageId || crypto.randomUUID(), parts };
+    const msg: any = { kind:'message', role:'user', taskId: opts.taskId, messageId: opts.messageId || crypto.randomUUID(), parts };
     if (opts.metadata) msg.metadata = opts.metadata;
     const body = { jsonrpc:'2.0', id: crypto.randomUUID(), method: 'message/send', params: { message: msg } };
     const baseHeaders: Record<string,string> = { 'content-type':'application/json' };

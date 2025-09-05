@@ -92,6 +92,12 @@ export type Store = {
   composeApproved: Set<string>;
   inFlightSends: Map<string,{ composeId: string }>;
   sendErrorByCompose: Map<string,string>;
+  // planner journal stash keyed by composeId (for stamping on send)
+  journalByCompose: Map<string, ProposedFact[]>;
+  // snapshot-backed message cache (authoritative stamped messages)
+  messagesById: Map<string, any>;
+  cacheMessagesFromTask(task: any): void;
+  getMessageById(id: string): any | undefined;
   // actions
   init(role: Role, adapter: TransportAdapter, initialTaskId?: string): void;
   setTaskId(taskId?: string): void;
@@ -131,8 +137,8 @@ export type Store = {
   // selectors (as functions for convenience)
   uiStatus(): string;
   // HUD
-  setHud(phase: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting', label?: string, p?: number): void;
-  hud: { phase: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting'; label?: string; p?: number } | null;
+  setHud(phase?: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting', title?: string, body?: any): void;
+  hud: { phase?: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting'; title?: string; body?: any } | null;
 
   // planning baton
   planNonce: number;
@@ -196,12 +202,30 @@ export const useAppStore = create<Store>((set, get) => ({
   composeApproved: new Set<string>(),
   inFlightSends: new Map(),
   sendErrorByCompose: new Map(),
+  journalByCompose: new Map(),
+  messagesById: new Map(),
 
   init(role, adapter, initialTaskId) {
     set({ role, adapter, taskId: initialTaskId, currentEpoch: undefined });
     if (initialTaskId) {
       try { get().setTaskId(initialTaskId); } catch {}
     }
+  },
+
+  // Global authoritative message cache (from snapshots)
+  cacheMessagesFromTask(task: any) {
+    try {
+      if (!task || typeof task !== 'object') return;
+      const midx = new Map<string, any>(get().messagesById as Map<string, any>);
+      const add = (m:any) => { if (m && typeof m === 'object' && m.messageId) midx.set(String(m.messageId), m); };
+      const hist = Array.isArray(task.history) ? task.history : [];
+      for (const m of hist) add(m);
+      if (task.status && (task.status as any).message) add((task.status as any).message);
+      set({ messagesById: midx });
+    } catch {}
+  },
+  getMessageById(id: string) {
+    try { return (get().messagesById as Map<string, any>).get(String(id)); } catch { return undefined }
   },
 
   setPlanner(id) { set({ plannerId: id }); },
@@ -371,10 +395,14 @@ export const useAppStore = create<Store>((set, get) => ({
     }
     // Apply FullConfig
     get().setPlannerConfig(config, ready);
-    // Nudge planner controller; harness will also rebuild on seq change
-    try { get().kickoffConversationWithPlanner(); } catch {}
-    // Explicitly request a single replan after apply (exact, non-heuristic)
-    try { get().requestReplan('apply'); } catch {}
+    // Only kick off planning when eligible: either an existing task is active,
+    // or the user has explicitly requested a kickoff (pendingKickoff gate).
+    const hasTask = !!get().taskId;
+    const gateOpen = !!get().pendingKickoff;
+    if (hasTask || gateOpen) {
+      try { get().kickoffConversationWithPlanner(); } catch {}
+      try { get().requestReplan('apply'); } catch {}
+    }
   },
 
   setTaskId(taskId) {
@@ -479,10 +507,25 @@ export const useAppStore = create<Store>((set, get) => ({
       sendErrorByCompose: (()=>{ const m = new Map<string,string>(s.sendErrorByCompose as Map<string,string>); m.delete(composeId); return m; })(),
     }));
     const ns = (nextState || (ci as any).nextStateHint || 'working') as A2ANextState;
+    // Build plannerTrace extension
+    const plannerType = get().plannerId || 'off';
+    const plannerMode = get().plannerMode as any;
+    let plannerSeed: any = null;
+    try {
+      if (plannerType !== 'off') {
+        const cfg = (get().configByPlanner || ({} as any))[plannerType];
+        const planner: any = resolvePlanner(plannerType as any);
+        if (planner && typeof planner.dehydrate === 'function') plannerSeed = planner.dehydrate(cfg);
+        else plannerSeed = cfg ?? null;
+      }
+    } catch {}
+    const journal = (get().journalByCompose as Map<string, ProposedFact[]>).get(composeId) || [];
+    const extension = { plannerTrace: { plannerType, plannerSeed, plannerMode, journal } } as any;
+
     let lastErr: any;
     let result: { taskId: string; snapshot: any } | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
-      try { result = await adapter.send(parts, { taskId, messageId, nextState: ns }); lastErr = null; break; }
+      try { result = await adapter.send(parts, { taskId, messageId, nextState: ns, extension }); lastErr = null; break; }
       catch (e) { lastErr = e; await new Promise(r => setTimeout(r, 200 * (2 ** attempt) + Math.random() * 100)); }
     }
     if (lastErr) {
@@ -602,6 +645,24 @@ export const useAppStore = create<Store>((set, get) => ({
     const baseSeq = typeof opts?.casBaseSeq === 'number' ? opts!.casBaseSeq : get().seq;
     try { console.debug('[store] append called', { baseSeq, head:get().seq, count: batch.length, types: batch.map(b=>b.type) }); } catch {}
     if ((get().seq || 0) !== baseSeq) return false;
+    // If this is a planner-produced batch with a compose intent, stash a filtered journal for stamping later
+    try {
+      const hasCompose = Array.isArray(batch) && batch.some(p => p && (p as any).type === 'compose_intent');
+      if (hasCompose) {
+        const KEEP = new Set(['tool_call','tool_result','planner_error','sleep','agent_question','user_answer']);
+        const filtered = batch.filter(p => KEEP.has(((p as any).type || '')));
+        for (const p of batch) {
+          if ((p as any).type === 'compose_intent') {
+            const cid = String((p as any).composeId || '');
+            if (cid) {
+              const m = new Map<string, ProposedFact[]>(get().journalByCompose as Map<string, ProposedFact[]>);
+              m.set(cid, filtered);
+              set({ journalByCompose: m });
+            }
+          }
+        }
+      }
+    } catch {}
     stampAndAppend(set, get, batch);
     try { get().ackKickoffIfPending(); } catch {}
     try {
@@ -622,7 +683,10 @@ export const useAppStore = create<Store>((set, get) => ({
     return true;
   },
   head() { return get().seq || 0; },
-  setHud(phase, label, p) { set({ hud: { phase, label, p } }); },
+  setHud(phase?: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting', title?: string, body?: any) {
+    if (!phase && !title) { set({ hud: null }); return; }
+    set({ hud: { ...(phase ? { phase } : {}), ...(title ? { title:String(title) } : {}), ...(typeof body !== 'undefined' ? { body } : {}) } });
+  },
   requestReplan(_reason) { set(s => ({ planNonce: (s.planNonce || 0) + 1 })); },
   requestKickoff(reason) {
     try { console.debug('[store] requestKickoff', { reason }); } catch {}
@@ -659,6 +723,8 @@ export const useAppStore = create<Store>((set, get) => ({
   onApplyClicked() {
     set(s => ({ setupUi: { ...s.setupUi, panel: 'collapsed' } }));
   },
+
+  
 
   // Rooms slice implementation
   rooms: {

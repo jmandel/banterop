@@ -620,16 +620,16 @@ export function ScenarioBuilderPage() {
                   onConfigChange={updateConfigFromEditor}
                   scenarioName={activeScenario?.name || 'New Scenario'}
                   scenarioId={isCreateMode ? undefined : (state.activeScenarioId || undefined)}
-                  isViewMode={isViewMode || isLocked}
-                  isEditMode={isEditMode}
-                  isLocked={isLocked}
-                  isDeleted={deleted}
+                  isViewMode={!!(isViewMode || isLocked)}
+                  isEditMode={!!isEditMode}
+                  isLocked={!!isLocked}
+                  isDeleted={!!deleted}
                   onDelete={(!deleted && !isCreateMode && state.activeScenarioId) ? () => deleteScenario(state.activeScenarioId!) : undefined}
                   onRestore={(deleted && !isCreateMode && state.activeScenarioId) ? () => restoreScenario(state.activeScenarioId!) : undefined}
                   onSave={(!isLocked && canSaveNow) ? saveChanges : undefined}
                   onDiscard={(!isLocked && hasUnsavedChanges) ? discardChanges : undefined}
-                  canSave={canSaveNow}
-                  isSaving={state.isSaving}
+                  canSave={!!canSaveNow}
+                  isSaving={!!state.isSaving}
                   saveLabel={isCreateMode ? 'Create' : 'Save'}
                   configRevision={state.configRevision}
                 />

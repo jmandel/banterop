@@ -1,6 +1,7 @@
 import type { TransportAdapter, TransportSnapshot, SendOptions } from "./types";
 import type { A2APart, A2ATask } from "../../shared/a2a-types";
 import { A2AClient } from "./a2a-client";
+import { useAppStore } from "../state/store";
 import { A2A_EXT_URL } from "../../shared/core";
 
 function toSnap(t: A2ATask | null): TransportSnapshot | null {
@@ -29,16 +30,19 @@ export class A2AAdapter implements TransportAdapter {
   setBackendLease(leaseId: string | null) { this.leaseId = leaseId; }
   kind(): 'a2a' { return 'a2a'; }
   async send(parts: A2APart[], opts: SendOptions): Promise<{ taskId: string; snapshot: TransportSnapshot }> {
-    const metadata = opts.nextState ? { [A2A_EXT_URL]: { nextState: opts.nextState } } as any : undefined;
+    const ext = (opts.extension && typeof opts.extension === 'object') ? opts.extension : {};
+    const metadata = { [A2A_EXT_URL]: { ...(opts.nextState ? { nextState: opts.nextState } : {}), ...ext } } as any;
     try {
-      const msg = { role:'user', parts, messageId: opts.messageId || '', kind:'message' };
+      const msg = { role:'user', parts, messageId: opts.messageId || '', kind:'message', metadata } as any;
       this.onWire && this.onWire({ protocol:'a2a', dir:'outbound', method:'message/send', kind:'message', roomId:this.roomId, taskId:opts.taskId, messageId:opts.messageId, payload: msg });
     } catch {}
     const snap = await this.client.messageSend(parts, { taskId: opts.taskId, messageId: opts.messageId, metadata });
+    try { useAppStore.getState().cacheMessagesFromTask(snap as any) } catch {}
     return { taskId: snap.id, snapshot: toSnap(snap)! };
   }
   async snapshot(taskId: string): Promise<TransportSnapshot | null> {
     const t = await this.client.tasksGet(taskId);
+    try { useAppStore.getState().cacheMessagesFromTask(t as any) } catch {}
     // Log inbound wire messages from snapshot exactly once per messageId
     try {
       if (t) {

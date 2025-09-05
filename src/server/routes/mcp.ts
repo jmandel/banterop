@@ -100,7 +100,8 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
     const messageId = `m:${crypto.randomUUID()}`
     const raw = { conversationId, message, attachments };
     const b64 = utf8ToB64(JSON.stringify(raw));
-    const m = { parts, taskId: ensured.initiatorTaskId, messageId } as any
+    // Build a schema-compliant A2A Message for pairs.messageSend
+    const m = { kind: 'message', role: 'user', parts, taskId: ensured.initiatorTaskId, messageId } as any
     await pairs.messageSend(pairId, m)
     const obj = { guidance: 'Message sent. Call check_replies to fetch replies.', status: 'working' as const }
     const res = { content: [{ type:'text', text: JSON.stringify(obj) }], structuredContent: obj } as any
@@ -169,7 +170,7 @@ async function buildMcpServerForPair(c: any, pairId: string): Promise<McpServer>
       const guidance = completed
         ? 'Conversation ended. No further input is expected.'
         : (status==='input-required'
-            ? 'It’s your turn to respond as initiator. You can send a message now.'
+            ? 'It’s your turn to respond. You can send a message now.'
             : 'Waiting for the responder to finish or reply. Call check_replies again.')
       const out = { messages, guidance, status, ended: completed }
       try {

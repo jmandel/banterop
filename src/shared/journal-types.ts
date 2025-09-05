@@ -101,7 +101,7 @@ export type TerminalFact = ProposedFact;
 
 export type PlanContext<Cfg = unknown> = {
   signal?: AbortSignal;
-  hud: (phase: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting', label?: string, p?: number) => void;
+  hud: (phase?: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting', title?: string, body?: any) => void;
   newId: (prefix?: string) => string;
   readAttachment: (name: string) => Promise<{ mimeType: string; bytes: string } | null>;
   config?: Cfg;

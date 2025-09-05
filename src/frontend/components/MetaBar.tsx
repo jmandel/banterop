@@ -13,7 +13,7 @@ function chipClass(tone?: Chip['tone']): string {
   }
 }
 
-export function MetaBar({ left, chips, right, elRef, offset = 48 }:{ left: React.ReactNode; chips: Chip[]; right?: React.ReactNode; elRef?: React.Ref<HTMLDivElement>; offset?: number }) {
+export function MetaBar({ left, chips, right, trail, elRef, offset = 48 }:{ left: React.ReactNode; chips: Chip[]; right?: React.ReactNode; trail?: React.ReactNode; elRef?: React.Ref<HTMLDivElement>; offset?: number }) {
   return (
     <div ref={elRef as any} className="lg:sticky z-20" style={{ top: offset }}>
       <div className="bg-white">
@@ -28,6 +28,7 @@ export function MetaBar({ left, chips, right, elRef, offset = 48 }:{ left: React
                   <span>{c.text}</span>
                 </span>
               ))}
+              {trail && <div className="ml-1">{trail}</div>}
             </div>
             {right && <div className="row compact" style={{ marginLeft:'auto' }}>{right}</div>}
           </div>

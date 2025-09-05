@@ -26,5 +26,5 @@ export function Markdown({ text, className }:{ text?: string; className?: string
       return ensureLinksOpenInNewTab(raw);
     } catch { return String(text ?? ''); }
   }, [text]);
-  return <div className={className || 'text'} dangerouslySetInnerHTML={{ __html: html }} />;
+  return <div className={className || 'markdown'} dangerouslySetInnerHTML={{ __html: html }} />;
 }

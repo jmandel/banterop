@@ -59,6 +59,12 @@
   .pill.warn { @apply bg-amber-50 text-amber-800; }
   .pill.info { @apply bg-primary-50 text-primary-800; }
   .pill.danger { @apply bg-rose-50 text-rose-800; }
+  @keyframes pulse-soft {
+    0% { opacity: 1; }
+    50% { opacity: 0.65; }
+    100% { opacity: 1; }
+  }
+  .pill.pulse { animation: pulse-soft 2s ease-in-out infinite; }
   .btn { @apply bg-primary text-primary-foreground border border-primary rounded-lg px-2.5 py-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed hover:opacity-90; }
   .btn.ghost { @apply bg-transparent text-primary border border-primary; }
   .btn.secondary { @apply bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200; }
@@ -69,8 +75,9 @@
   .sticky { @apply sticky z-20 bg-white; }
 
   /* Transcript + bubbles */
-  .transcript { @apply flex flex-col gap-2.5; }
-  .bubble { @apply max-w-[88%] p-2.5 rounded-xl; }
+  .transcript { @apply flex flex-col gap-2.5 min-w-0; }
+  /* Ensure bubbles never extend beyond container; allow internal scroll for wide content */
+  .bubble { @apply w-full max-w-full p-2.5 rounded-xl overflow-hidden; }
   /* DM-style alignment: our messages on the right, other side on the left */
   .me { @apply self-end bg-primary-50; }
   .them { @apply self-start bg-white border border-gray-200; }
@@ -101,3 +108,8 @@
   .debug-pre { @apply whitespace-pre font-mono text-[12px] leading-snug; }
   .debug-btn { @apply bg-primary text-primary-foreground border border-primary px-2 py-1 rounded-md cursor-pointer hover:opacity-90; }
 }
+  /* Markdown content default styling for code blocks to avoid layout overflow */
+  .markdown { @apply max-w-full overflow-hidden; }
+  .markdown pre { @apply max-w-full overflow-auto; }
+  .markdown code { word-break: normal; }
+  .markdown p { @apply break-words; }

@@ -30,7 +30,7 @@ export const SimpleDemoPlanner: Planner<{ mode:'off'|'suggest'|'auto' }> = {
   async plan(input, ctx) {
     const mode = (ctx.config?.mode || 'suggest') as 'off'|'suggest'|'auto';
     if (mode === 'off') return [];
-    ctx.hud('reading', 'Scanning latest message…', 0.2);
+    ctx.hud('reading','Scanning latest message…');
 
     // Harness guarantees turn/draft gating; keep planner focused on domain
 
@@ -43,17 +43,17 @@ export const SimpleDemoPlanner: Planner<{ mode:'off'|'suggest'|'auto' }> = {
       return null as ("message_received" | "message_sent" | null);
     })();
     if (lastPublic === 'message_sent') {
-      ctx.hud('waiting', 'Already responded');
+      ctx.hud('waiting','Already responded');
       return [{ type:'sleep', reason:'Already responded' }];
     }
 
     const rr = lastRemoteReceived(input);
-    if (!rr) { ctx.hud('waiting', 'No inbound yet'); return [{ type:'sleep', reason:'Awaiting inbound' }]; }
+    if (!rr) { ctx.hud('waiting','No inbound yet'); return [{ type:'sleep', reason:'Awaiting inbound' }]; }
 
     const t = rr.text.toLowerCase();
     // Branch: Ask availability for peer-to-peer
     if (t.includes('peer-to-peer') || t.includes('peer to peer') || t.includes('callback availability')) {
-      ctx.hud('planning', 'Need user availability');
+      ctx.hud('planning','Need user availability');
       const qid = ctx.newId('q');
       return [{
         type:'agent_question', qid, prompt:'What time windows work for a peer-to-peer call?', required:true, placeholder:'e.g., Thu 2–4pm CT',
@@ -63,7 +63,7 @@ export const SimpleDemoPlanner: Planner<{ mode:'off'|'suggest'|'auto' }> = {
 
     // Branch: prior auth request → propose compose with synthesized notes
     if (t.includes('prior auth') || t.includes('prior authorization') || t.includes('cpt')) {
-      ctx.hud('tool', 'Fetching chart notes', 0.3);
+      ctx.hud('tool','fetchChart', { patientId:'PAT-009', lastDays:90 });
       const callId = ctx.newId('tool:ehr');
       const attName = 'clinical_notes.txt';
       const facts: ProposedFact[] = [
@@ -84,7 +84,7 @@ Clinical notes attached. Requesting MRI knee per guideline after failed conserva
     }
 
     // Default: propose a short acknowledgement
-    ctx.hud('drafting', 'Composing acknowledgement', 0.6);
+    ctx.hud('drafting','Composing acknowledgement');
     return [{
       type:'compose_intent', composeId: ctx.newId('c'), text:'Acknowledged. We are reviewing and will respond shortly.',
       nextStateHint: 'working',

@@ -30,6 +30,9 @@ import { Settings } from 'lucide-react';
 import { Copy } from 'lucide-react';
 import { AppLayout as SharedAppLayout } from '../ui';
 import { deriveChatLabels } from '../components/chat-labels';
+import { A2A_EXT_URL } from '../../shared/core';
+import { TraceView } from '../components/TraceView';
+
 
 function pickA2AEndpointFromCard(card: any, cardUrl: string): string {
   const candidates = [
@@ -214,6 +217,7 @@ function App() {
   // No backchannel: client page is always the initiator
 
   const facts = useAppStore(s => s.facts);
+  const [showTrace, setShowTrace] = useState(false);
   const taskId = useAppStore(s => s.taskId);
   const uiStatus = useAppStore(s => s.uiStatus());
   const [autoScroll, setAutoScroll] = useState(true);
@@ -237,6 +241,18 @@ function App() {
   const plannerId = useAppStore(s => s.plannerId);
   const plannerConfig = useAppStore(s => s.configByPlanner[s.plannerId]);
   const { usLabel, otherLabel } = React.useMemo(() => deriveChatLabels(plannerId, plannerConfig), [plannerId, plannerConfig]);
+
+  // Keyboard shortcuts: Alt+S toggles Auto scroll, Alt+T toggles Show tool calls
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      const k = String(e.key || '').toLowerCase();
+      if (k === 's') { setAutoScroll(v => !v); e.preventDefault(); }
+      else if (k === 't') { setShowTrace(v => !v); e.preventDefault(); }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // Actions
   async function handleManualSend(text: string, nextState: A2ANextState) {
@@ -349,7 +365,13 @@ function App() {
         }
         return (
           <>
-            <MetaBar elRef={metaRef} offset={48} left={<span />} chips={chips} right={<button className="btn secondary" onClick={clearTask} disabled={!taskId}>Clear task</button>} />
+            <MetaBar
+              elRef={metaRef}
+              offset={48}
+              left={<span />}
+              chips={chips}
+              right={<button className="btn secondary" onClick={clearTask} disabled={!taskId}>Clear task</button>}
+            />
             {!taskId && (
               <div className="text-sm text-gray-500 mt-2">Send a message to begin a new task</div>
             )}
@@ -360,17 +382,22 @@ function App() {
       {showDebug && <DebugPanel />}
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-3" ref={gridRef}>
-        <div className="flex flex-col gap-3 order-2 lg:order-none">
+        <div className="flex flex-col gap-3 order-2 lg:order-none min-w-0">
           {hasTranscript && (
             <div className="card">
               <div className={`transcript ${['completed','canceled','failed','rejected'].includes(uiStatus) ? 'faded' : ''}`} aria-live="polite" ref={transcriptRef}>
                 {facts.map((f) => {
-              if (f.type === 'message_received' || f.type === 'message_sent') {
-                const isMe = f.type === 'message_sent';
-                return (
-                  <div key={f.id} className={'bubble ' + (isMe ? 'me' : 'them')}>
-                    <div className="small muted">{isMe ? usLabel : otherLabel}</div>
-                    <Markdown text={f.text} />
+                  if (f.type === 'message_received' || f.type === 'message_sent') {
+                    const isMe = f.type === 'message_sent';
+                    const mid = String((f as any)?.messageId || '');
+                    const orig = mid ? useAppStore.getState().getMessageById(mid) : null;
+                    const ext = orig && (orig as any).metadata ? (orig as any).metadata : null;
+                    const trace = ext && (ext as any)[A2A_EXT_URL]?.plannerTrace;
+                    return (
+                      <div key={f.id} className={'bubble ' + (isMe ? 'me' : 'them')}>
+                        <div className="small muted">{isMe ? usLabel : otherLabel}</div>
+                        {showTrace && trace && <TraceView trace={trace} />}
+                        <Markdown text={f.text} />
                     {Array.isArray(f.attachments) && f.attachments.length > 0 && (
                       <div className="attachments small">
                         {f.attachments.map((a:AttachmentMeta) => {
@@ -441,9 +468,16 @@ function App() {
             })}
               </div>
               {plannerId !== 'off' && (
-                <div className="transcript-bar">
-                  <label className="small"><input type="checkbox" checked={autoScroll} onChange={(e)=>setAutoScroll(e.target.checked)} /> Auto scroll</label>
-                </div>
+              <div className="transcript-bar">
+                <label className="small" title="Alt+S">
+                  <input type="checkbox" checked={autoScroll} onChange={(e)=>setAutoScroll(e.target.checked)} />
+                  {' '}Auto <u>s</u>croll
+                </label>
+                <label className="small" style={{ marginLeft: 12 }} title="Alt+T">
+                  <input type="checkbox" checked={showTrace} onChange={(e)=>setShowTrace(e.target.checked)} />
+                  {' '}Show <u>t</u>ool calls
+                </label>
+              </div>
               )}
             </div>
           )}
@@ -514,15 +548,23 @@ function App() {
 function HudBar() {
   const hud = useAppStore(s => s.hud);
   if (!hud) return null;
-  const pct = typeof hud.p === 'number' ? Math.max(0, Math.min(1, hud.p)) : null;
   return (
     <div className="row mt-2" style={{ alignItems:'center' }}>
       <span className="small muted">HUD:</span>
-      <span className="pill">{hud.phase}{hud.label ? ` — ${hud.label}` : ''}</span>
-      {pct !== null && (
-        <div className="flex-1" style={{ maxWidth: 200, height: 6, background: '#eef1f7', borderRadius: 4 }}>
-          <div style={{ width: `${Math.round(pct*100)}%`, height: '100%', background:'#5b7cff', borderRadius: 4 }} />
-        </div>
+      {hud.phase && (() => {
+        const pc = hud.phase as any;
+        const color = pc === 'planning' ? 'info'
+          : pc === 'tool' ? 'warn'
+          : pc === 'drafting' ? 'ok'
+          : pc === 'reading' ? 'info'
+          : pc === 'waiting' ? 'warn'
+          : '';
+        const pulse = (pc === 'planning' || pc === 'tool') ? 'pulse' : '';
+        return <span className={`pill ${color} ${pulse}`}>{pc}</span>;
+      })()}
+      <span className="pill">{String(hud.title || '')}</span>
+      {typeof hud.body !== 'undefined' && (
+        <pre className="code small whitespace-pre-wrap break-words max-w-full overflow-auto" style={{ marginLeft: 8 }}>{(() => { if (typeof hud.body === 'string') return hud.body; try { return JSON.stringify(hud.body, null, 2) } catch { return String(hud.body) } })()}</pre>
       )}
     </div>
   );

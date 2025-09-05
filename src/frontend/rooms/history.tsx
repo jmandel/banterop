@@ -4,6 +4,8 @@ import { AppLayout as SharedAppLayout } from '../ui'
 import { MetaBar } from '../components/MetaBar'
 import { ArrowLeft } from 'lucide-react'
 import { Markdown } from '../components/Markdown'
+import { A2A_EXT_URL } from '../../shared/core'
+import { TraceView } from '../components/TraceView'
 import { attachmentHrefFromBase64 } from '../components/attachments'
 import type { A2ATask } from '../../shared/a2a-types'
 import { a2aToFacts } from '../../shared/a2a-translator'
@@ -144,10 +146,23 @@ function HistoryApp() {
     return f
   }, [snap])
 
+  const messageById = React.useMemo(() => {
+    const m = new Map<string, any>()
+    if (snap && (snap as any).kind === 'task') {
+      for (const mm of (snap.history || [])) {
+        const mid = (mm as any)?.messageId; if (mid) m.set(String(mid), mm)
+      }
+      const last = snap.status?.message as any
+      if (last && last.messageId) m.set(String(last.messageId), last)
+    }
+    return m
+  }, [snap])
+
+  const [showTrace, setShowTrace] = React.useState(false)
+
   return (
     <SharedAppLayout
       title="Banterop"
-      fullWidth
       breadcrumbs={(
         <div className="flex items-baseline gap-3 min-w-0">
           <span className="truncate text-xl font-semibold text-gray-900">Room History</span>
@@ -170,7 +185,12 @@ function HistoryApp() {
             const total = Array.isArray(list) ? list.length : 0;
             chips.push({ text: `Tasks ${total}`, tone:'gray', icon: React.createElement(List, { size:14, strokeWidth:1.75 }) });
             if (selected != null) chips.push({ text: `Viewing #${selected} (${viewer==='init'?'Initiator':'Responder'})`, tone:'gray', icon: React.createElement(Eye, { size:14, strokeWidth:1.75 }) });
-            return <MetaBar left={<span />} chips={chips} offset={48} />
+            const trail = (
+              <label className="small row items-center gap-1">
+                <input type="checkbox" checked={showTrace} onChange={e=>setShowTrace(e.target.checked)} /> Show tool calls
+              </label>
+            );
+            return <MetaBar left={<span />} chips={chips} trail={trail} offset={48} />
           })()}
         </div>
         {error && (
@@ -207,26 +227,31 @@ function HistoryApp() {
           </div>
 
           {/* Right: Transcript (wide) */}
-          <div className="flex flex-col gap-3 order-2 lg:order-none">
+          <div className="flex flex-col gap-3 order-2 lg:order-none min-w-0">
             <div className="card">
               <div className="small muted mb-1.5">Transcript</div>
               {loadingSnap && <div className="small muted">Loading transcript…</div>}
               {!loadingSnap && !snap && <div className="small muted">Select a task from the list.</div>}
               {!loadingSnap && snap && (
                 <div className="transcript faded" aria-live="polite">
-                  {facts.map((f:any) => {
+                  {facts.map((f:any, idx:number) => {
                     if (f.type === 'message_received' || f.type === 'message_sent') {
                       const isMe = f.type === 'message_sent'
                       const who = isMe ? 'Initiator' : 'Responder'
                       const ts = (f as any).ts;
                       const d = typeof ts === 'string' ? new Date(ts) : null;
                       const time = (d && !isNaN(d.getTime())) ? d.toLocaleTimeString() : '';
+                      const mid = String((f as any)?.messageId || '')
+                      const orig = mid ? (messageById.get(mid) as any) : null
+                      const ext = orig && orig.metadata ? (orig.metadata as any)[A2A_EXT_URL] : null
+                      const trace = ext && (ext as any).plannerTrace ? (ext as any).plannerTrace : null
                       return (
-                        <div key={f.id} className={'bubble ' + (isMe ? 'me' : 'them')}>
+                        <div key={`${f.id}:${(f as any).seq ?? idx}`} className={'bubble ' + (isMe ? 'me' : 'them')}>
                           <div className="row items-center small muted mb-1">
                             <span className={`pill ${isMe ? 'bg-primary-100 text-primary-800' : 'bg-gray-100 text-gray-800'}`}>{who}</span>
                             <span className="muted">{time}</span>
                           </div>
+                          {showTrace && trace && <TraceView trace={trace} />}
                           <Markdown text={f.text} />
                           {Array.isArray(f.attachments) && f.attachments.length > 0 && (
                             <div className="attachments small">

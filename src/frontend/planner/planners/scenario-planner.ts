@@ -67,7 +67,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
     const includeWhy = true;
 
     // --- HUD: planning lifecycle
-    try { ctx.hud('planning', 'Thinking…', 0.1); } catch {}
+    try { ctx.hud('planning','Thinking…'); } catch {}
 
     // Harness centrally gates unanswered agent_question; planner assumes preconditions are satisfied
 
@@ -101,7 +101,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
     }
 
     // 4) Multi-step loop with single-batch output
-    try { ctx.hud('reading', 'Preparing prompt', 0.2); } catch {}
+    try { ctx.hud('reading','Preparing prompt'); } catch {}
     const scenario = cfg.scenario;
     const myId = cfg.myAgentId || scenario?.agents?.[0]?.agentId || 'planner';
     const counterpartId = (scenario?.agents?.find(a => a.agentId !== myId)?.agentId) || (scenario?.agents?.[1]?.agentId) || 'counterpart';
@@ -140,8 +140,11 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       }
 
     try {
-      const label = buildThinkingHudLabel(workingFacts as any);
-      ctx.hud('planning', label || 'Thinking…', 0.5);
+      let lastCallId: string | null = null; let whyBody: string | undefined; let tName: string | undefined;
+      for (let i = (workingFacts as any[]).length - 1; i >= 0; i--) { const f:any = workingFacts[i]; if (f?.type === 'tool_result') { lastCallId = String(f.callId||''); if (typeof f.why === 'string' && f.why.trim()) whyBody = f.why.trim(); break; } }
+      if (lastCallId) { for (let j = (workingFacts as any[]).length - 1; j >= 0; j--) { const f:any = workingFacts[j]; if (f?.type === 'tool_call' && String(f.callId||'') === lastCallId) { tName = String(f.name||'tool'); break; } } }
+      if (tName) ctx.hud('planning', `Thinking about ${tName} result`, whyBody);
+      else ctx.hud('planning', buildThinkingHudLabel(facts as any) || 'Thinking…');
     } catch {}
       let decision: ParsedDecision;
       try {
@@ -227,7 +230,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
         if (!coreAllowed.has('readAttachment')) { out.push(sleepFact('Core tool disabled: readAttachment', includeWhy)); break; }
         const name = String(decision.args?.name || '').trim();
         const callId = ctx.newId('call:read');
-        try { ctx.hud('tool', `Tool: read_attachment(name=${name || '?'})`, 0.7); } catch {}
+        try { ctx.hud('tool', 'read_attachment', { name: name || '?' }); } catch {}
         out.push(({ type:'tool_call', callId, name:'read_attachment', args:{ name }, ...(includeWhy ? { why: reasoning } : {}) } as ProposedFact));
         if (name) {
           const rec = await ctx.readAttachment(name);
@@ -272,7 +275,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
         const text = String(decision.args?.text || '').trim() || defaultComposeFromScenario(scenario, myId);
         const metaList: AttachmentMeta[] = attList.map((a:any)=>String(a?.name||'')).filter(Boolean).map((name:string)=>({ name, mimeType: filesNow.find(x=>x.name===name)?.mimeType || 'application/octet-stream' }));
           out.push(({ type:'compose_intent', composeId, text, attachments: metaList.length ? metaList : undefined, ...(includeWhy ? { why: reasoning } : {}), nextStateHint: (buildFinalizationReminder(workingFacts as any, scenario, myId) ? 'completed' : 'working') } as ProposedFact));
-        try { ctx.hud('drafting', 'Prepared draft', 0.8); } catch {}
+        try { ctx.hud('drafting', 'Prepared draft'); } catch {}
         break;
       }
 
@@ -282,7 +285,7 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       if (!tdef) { out.push(({ type:'planner_error', code:'TOOL_UNKNOWN', message:`Unknown tool: ${decision.tool}`, stage:'decision', attempts:3, announce:true } as any)); out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered a drafting error and couldn’t proceed. Please respond so we can continue.', nextStateHint:'working' } as ProposedFact)); break; }
 
       const callId = ctx.newId(`call:${decision.tool}:`);
-      try { ctx.hud('tool', `Tool: ${decision.tool}(${shortArgs(decision.args || {})})`, 0.7); } catch {}
+      try { ctx.hud('tool', String(decision.tool), decision.args || {}); } catch {}
       out.push(({ type:'tool_call', callId, name: decision.tool, args: decision.args || {}, ...(includeWhy ? { why: reasoning } : {}) } as ProposedFact));
       const existingNamesAtCallStart = (() => {
         const s = new Set<string>();
@@ -292,12 +295,14 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       })();
       const exec = await runToolOracle({ tool: tdef, args: decision.args || {}, scenario, myAgentId: myId, conversationHistory: xmlHistory, leadingThought: reasoning, llm: ctx.llm, model, existingNames: existingNamesAtCallStart });
       if (!exec.ok) {
-        out.push(({ type:'tool_result', callId, ok:false, error: exec.error || 'Tool failed', ...(includeWhy ? { why:'Tool execution error.' } : {}) } as ProposedFact));
-        out.push(({ type:'planner_error', code:'TOOL_EXEC_FAILED', message:'Tool execution failed after retries', stage:'tool', attempts:3, announce:true, relatesTo:{ callId, tool: tdef.toolName } } as any));
+        const emsg = String(exec.error || 'Tool failed');
+        out.push(({ type:'tool_result', callId, ok:false, error: emsg, ...(includeWhy ? { why:'Tool execution error.' } : {}) } as ProposedFact));
+        out.push(({ type:'planner_error', code:'TOOL_EXEC_FAILED', message:`Tool execution error: ${emsg}`, stage:'tool', attempts:3, announce:true, relatesTo:{ callId, tool: tdef.toolName }, detail: { error: emsg } } as any));
         out.push(({ type:'compose_intent', composeId: ctx.newId('c:'), text:'We encountered an error while running a tool. Please respond so we can continue.', nextStateHint:'working' } as ProposedFact));
         break;
       }
-      out.push(({ type:'tool_result', callId, ok:true, result: exec.result ?? null, ...(includeWhy ? { why:'Tool execution succeeded.' } : {}) } as ProposedFact));
+      // Stamp the oracle's reasoning onto the tool_result so downstream UI and HUD can reflect it
+      out.push(({ type:'tool_result', callId, ok:true, result: exec.result ?? null, ...(includeWhy ? { why: exec.reasoning || 'Tool execution succeeded.' } : {}) } as ProposedFact));
       // Filter duplicate attachments by name to keep the journal clean
       const existingNames = new Set<string>();
       for (const f of workingFacts as any[]) { if (f?.type === 'attachment_added' && f.name) existingNames.add(String(f.name)); }
@@ -309,7 +314,17 @@ export const ScenarioPlannerV03: Planner<ScenarioPlannerConfig> = {
       }
       // Update working facts
       workingFacts.push({ type:'tool_call', callId, name: decision.tool, args: decision.args || {} } as any);
-      workingFacts.push({ type:'tool_result', callId, ok:true, result: exec.result ?? null } as any);
+      // Also carry reasoning into the ephemeral working facts to drive HUD between steps
+      workingFacts.push({ type:'tool_result', callId, ok:true, result: exec.result ?? null, why: exec.reasoning } as any);
+      // After recording the working fact, set HUD for the follow-up planning step
+      try {
+        let why = '';
+        for (let i = workingFacts.length - 1; i >= 0; i--) {
+          const f: any = workingFacts[i];
+          if (f && f.type === 'tool_result' && String(f.callId||'') === callId) { if (typeof f.why === 'string' && f.why.trim()) why = f.why.trim(); break; }
+        }
+        if (why) ctx.hud('planning', `Thinking about ${tdef.toolName} result`, why);
+      } catch {}
       for (const doc of newAttachments) workingFacts.push({ type:'attachment_added', name: doc.name, mimeType: doc.mimeType, bytes: doc.bytesBase64, origin:'synthesized', producedBy:{ callId, name: tdef.toolName } } as any);
       // continue loop (if terminal, next iteration will finalize via FINALIZATION_REMINDER)
     }
@@ -333,9 +348,8 @@ type ParsedDecision = { reasoning: string; tool: string; args: any };
 
 function shortArgs(a: any): string {
   try {
-    const s = JSON.stringify(a ?? {});
-    if (s.length <= 80) return s;
-    return s.slice(0, 77) + '…';
+    // Return full JSON so the HUD can parse and pretty-print below; no truncation/ellipsis.
+    return JSON.stringify(a ?? {});
   } catch { return ''; }
 }
 
@@ -837,6 +851,7 @@ type OracleExec = {
   error?: string;
   result?: unknown;
   attachments: Array<{ name: string; mimeType: string; bytesBase64: string }>;
+  reasoning?: string;
 };
 
 async function runToolOracle(opts: {
@@ -854,9 +869,9 @@ async function runToolOracle(opts: {
   try {
     const req = { model: opts.model, messages: [{ role: 'user', content: prompt }], temperature: 0.6 } as const;
     const parsed = await chatWithValidationRetry(opts.llm, req as any, (text) => parseOracleResponseAligned(text), { attempts: 3 });
-    const { output } = parsed;
+    const { output, reasoning } = parsed;
     const { attachments, result } = await extractAttachmentsFromOutput(output, opts.tool.toolName, opts.args, new Set(opts.existingNames || []));
-    return { ok: true, result, attachments };
+    return { ok: true, result, attachments, reasoning };
   } catch (e:any) {
     return { ok: false, error: String(e?.message || 'oracle failed'), attachments: [] };
   }
@@ -1313,7 +1328,7 @@ function buildThinkingHudLabel(facts: ReadonlyArray<Fact>): string | null {
   const why = lastReasoning(facts);
   const whyShort = why ? truncateText(oneLine(why), 80) : '';
   // If we have explicit reasoning, show that alone.
-  if (whyShort) return `Thinking: ${whyShort}`;
+  if (whyShort) return `Thinking about: ${whyShort}`;
   const tool = describeLastToolContext(facts);
   if (tool) return `Thinking: ${truncateText(tool, 80)}`;
   // Fallback to last inbound/outbound line
@@ -1321,6 +1336,7 @@ function buildThinkingHudLabel(facts: ReadonlyArray<Fact>): string | null {
   if (msg) return `Thinking about: ${truncateText(msg, 80)}`;
   return null;
 }
+
 
 function describeLastToolContext(facts: ReadonlyArray<Fact>): string | null {
   // Find latest tool_result

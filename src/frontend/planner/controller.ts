@@ -47,7 +47,7 @@ export function startPlannerController() {
     const getFacts = () => useAppStore.getState().facts;
     const getHead  = () => useAppStore.getState().head();
     const append   = (batch:any, opts?:{casBaseSeq?:number}) => useAppStore.getState().append(batch, opts);
-    const hud      = (phase:any, label?:string, p?:number) => useAppStore.getState().setHud(phase, label, p);
+    const hud      = (phase?: 'idle'|'reading'|'planning'|'tool'|'drafting'|'waiting', title?: string, body?: any) => useAppStore.getState().setHud(phase, title, body);
     // Choose LLM provider + model from session settings (if present)
     let modelFromSession: string | undefined;
     let provider = defaultLlmProvider;

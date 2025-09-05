@@ -26,6 +26,8 @@ import { AutomationCard } from '../components/AutomationCard'
 import { LogCard } from '../components/LogCard'
 import { WireLogCard } from '../components/WireLogCard'
 import { Settings, Copy, Eye } from 'lucide-react'
+import { A2A_EXT_URL } from '../../shared/core'
+import { TraceView } from '../components/TraceView'
 import { AppLayout as SharedAppLayout } from '../ui'
 import { CollapsibleCard } from '../components/CollapsibleCard'
 
@@ -89,7 +91,19 @@ function App() {
   const [sending, setSending] = useState(false)
   const [showDebug, setShowDebug] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
-
+  const [showTrace, setShowTrace] = useState(false)
+  
+  // Keyboard shortcuts for transcript bar: Alt+S = toggle auto scroll; Alt+T = toggle tool calls
+  React.useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      const k = String(e.key || '').toLowerCase();
+      if (k === 's') { setAutoScroll(v => !v); e.preventDefault(); }
+      else if (k === 't') { setShowTrace(v => !v); e.preventDefault(); }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   // Update document title using optional roomTitle from readable hash; always include roomId
   useEffect(() => {
     function parseRoomTitle(): string | null {
@@ -401,26 +415,31 @@ function App() {
       {showDebug && <DebugPanel />}
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-3" ref={gridRef}>
-        <div className="flex flex-col gap-3 order-2 lg:order-none">
+        <div className="flex flex-col gap-3 order-2 lg:order-none min-w-0">
           <div className="card">
             <div className="small muted mb-1.5">Conversation</div>
             <div className={`transcript ${(observing || isFinal) ? 'faded' : ''}`} aria-live="polite" ref={transcriptRef}>
-            {facts.map((f:any) => {
-            if (f.type === 'message_received' || f.type === 'message_sent') {
-              const isMe = f.type === 'message_sent'
-              const who = isMe ? usLabel : otherLabel
-              const ts = (f as any).ts;
-              const d = typeof ts === 'string' ? new Date(ts) : null;
-              const time = (d && !isNaN(d.getTime())) ? d.toLocaleTimeString() : '';
-              return (
-                <div key={f.id} className={'bubble ' + (isMe ? 'me' : 'them')}>
-                  <div className="row items-center small muted mb-1">
-                    <span className={`pill ${isMe ? 'bg-primary-100 text-primary-800' : 'bg-gray-100 text-gray-800'}`}>{who}</span>
-                    <span className="muted">{time}</span>
-                  </div>
-                  <Markdown text={f.text} />
-                  {Array.isArray(f.attachments) && f.attachments.length > 0 && (
-                    <div className="attachments small">
+              {facts.map((f:any) => {
+              if (f.type === 'message_received' || f.type === 'message_sent') {
+                const isMe = f.type === 'message_sent'
+                const who = isMe ? usLabel : otherLabel
+                const ts = (f as any).ts;
+                const d = typeof ts === 'string' ? new Date(ts) : null;
+                const time = (d && !isNaN(d.getTime())) ? d.toLocaleTimeString() : '';
+                const mid = String((f as any)?.messageId || '')
+                const orig = mid ? useAppStore.getState().getMessageById(mid) : null
+                const ext = orig && (orig as any).metadata ? (orig as any).metadata : null
+                const trace = ext && (ext as any)[A2A_EXT_URL]?.plannerTrace
+                return (
+                  <div key={f.id} className={'bubble ' + (isMe ? 'me' : 'them')}>
+                    <div className="row items-center small muted mb-1">
+                      <span className={`pill ${isMe ? 'bg-primary-100 text-primary-800' : 'bg-gray-100 text-gray-800'}`}>{who}</span>
+                      <span className="muted">{time}</span>
+                    </div>
+                    {showTrace && trace && <TraceView trace={trace} />}
+                    <Markdown text={f.text} />
+                    {Array.isArray(f.attachments) && f.attachments.length > 0 && (
+                      <div className="attachments small">
                       {f.attachments.map((a:AttachmentMeta) => {
                         const added = facts.find((x:any) => x.type === 'attachment_added' && (x as any).name === a.name)
                         const href = added && added.type === 'attachment_added' ? attachmentHrefFromBase64(a.name, (added as any).mimeType, (added as any).bytes) : null
@@ -480,11 +499,16 @@ function App() {
             return <div key={f.id} />
             })}
           </div>
-            {(observing || plannerId !== 'off') && (
-              <div className="transcript-bar">
-                <label className="small"><input type="checkbox" checked={autoScroll} onChange={(e)=>setAutoScroll(e.target.checked)} /> Auto scroll</label>
-              </div>
-            )}
+            <div className="transcript-bar">
+              <label className="small" title="Alt+S">
+                <input type="checkbox" checked={autoScroll} onChange={(e)=>setAutoScroll(e.target.checked)} />
+                {' '}Auto <u>s</u>croll
+              </label>
+              <label className="small" style={{ marginLeft: 12 }} title="Alt+T">
+                <input type="checkbox" checked={showTrace} onChange={e=>setShowTrace(e.target.checked)} />
+                {' '}Show <u>t</u>ool calls
+              </label>
+            </div>
           </div>
           {!observing && plannerId === 'off' && !isFinal && (
             <ManualComposer
