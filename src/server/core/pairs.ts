@@ -399,23 +399,46 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
         const suppliedTaskId = String(m?.taskId || '') || undefined
         const viewerRole: 'init'|'resp' = suppliedTaskId ? parseTaskId(suppliedTaskId).role : 'init'
 
-        // If no message or empty parts, just return current state
+        // Helper to compute current state for a given taskId from DB
+        const currentStateForTask = (taskId: string): TaskState => {
+          const { epoch } = parseTaskId(taskId)
+          return currentStateForEpoch(pairId, epoch, viewerRole)
+        }
+
+        // If no message or empty parts, stream like resubscribe
         if (!hasParts) {
           const impliedId = suppliedTaskId
             || (currentEpoch > 0 ? initTaskId(pairId, currentEpoch) : `init:${pairId}#1`)
-          const snap = db.getTask(impliedId)!
-          const currentState = snap ? toSnapshot(snap).status.state : 'submitted'
-          const isTerminalFlag = isTerminal(currentState)
-          const needsInput = currentState === 'input-required'
-          
-          const statusMessage = snap ? toSnapshot(snap).status.message : undefined
+          const row = db.getTask(impliedId)
+          const initialState: TaskState = row ? toSnapshot(row).status.state : 'submitted'
+          const statusMessage = row ? toSnapshot(row).status.message : undefined
+          const isInitialTerminal = isTerminal(initialState)
+          const isInitialNeedsInput = initialState === 'input-required'
+          const targetEpoch = parseTaskId(impliedId).epoch
+
+          // Emit initial snapshot
           yield createStatusUpdateEvent({
             taskId: impliedId,
             pairId,
-            state: currentState,
+            state: initialState,
             message: statusMessage,
-            isFinal: isTerminalFlag || needsInput
+            isFinal: isInitialTerminal || isInitialNeedsInput
           })
+
+          // If already final, end stream
+          if (isInitialTerminal || isInitialNeedsInput) return
+
+          // Stream subsequent state changes until final
+          const since = (() => { try { const arr = (events as any).listSince(pairId, 0) || []; return arr.length ? (arr[arr.length - 1].seq || 0) : 0 } catch { return 0 } })()
+          for await (const ev of (events as any).stream(pairId, since)) {
+            const e = ev.result
+            if (e.type === 'state' && e.epoch === targetEpoch) {
+              const st = currentStateForTask(impliedId)
+              const fin = isTerminal(st) || st === 'input-required'
+              yield createStatusUpdateEvent({ taskId: impliedId, pairId, state: st, message: e.status?.message, isFinal: fin })
+              if (fin) break
+            }
+          }
           return
         }
 
@@ -426,8 +449,8 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
         const message = (result as any)?.status?.message
         const isTerminalState = isTerminal(state)
         const needsInput = state === 'input-required'
-        
-        // Send TaskStatusUpdateEvent with all required fields
+
+        // Emit immediate status update from send result
         yield createStatusUpdateEvent({
           taskId: effectiveId,
           pairId,
@@ -435,6 +458,22 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
           message,
           isFinal: isTerminalState || needsInput
         })
+
+        // If final already, end stream now
+        if (isTerminalState || needsInput) return
+
+        // Otherwise, continue streaming state changes until final
+        const targetEpoch = parseTaskId(effectiveId).epoch
+        const since = (() => { try { const arr = (events as any).listSince(pairId, 0) || []; return arr.length ? (arr[arr.length - 1].seq || 0) : 0 } catch { return 0 } })()
+        for await (const ev of (events as any).stream(pairId, since)) {
+          const e = ev.result
+          if (e.type === 'state' && e.epoch === targetEpoch) {
+            const st = currentStateForTask(effectiveId)
+            const fin = isTerminal(st) || st === 'input-required'
+            yield createStatusUpdateEvent({ taskId: effectiveId, pairId, state: st, message: e.status?.message, isFinal: fin })
+            if (fin) break
+          }
+        }
       })()
     },
 
@@ -447,39 +486,43 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
         const initialSnapshot: TaskSnapshot = row ? toSnapshot(row) : { id: id, contextId: pairId, kind:'task', status: { state: 'submitted' as TaskState }, history: [] }
         const initialState = initialSnapshot.status.state
         const isInitialTerminal = isTerminal(initialState)
+        const isInitialNeedsInput = initialState === 'input-required'
         
         yield createStatusUpdateEvent({
           taskId: id,
           pairId,
           state: initialState,
           message: initialSnapshot.status.message,
-          isFinal: isInitialTerminal
+          isFinal: isInitialTerminal || isInitialNeedsInput
         })
         
-        // If already terminal, don't continue streaming
-        if (isInitialTerminal) {
+        // If already terminal or needs input, don't continue streaming
+        if (isInitialTerminal || isInitialNeedsInput) {
           return
         }
         
-        // Stream subsequent state changes
-        for await (const ev of (events as any).stream(pairId, 0)) {
+        // Stream subsequent state changes (only for this epoch; no backlog)
+        const targetEpoch = parseTaskId(id).epoch
+        const since = (() => { try { const arr = (events as any).listSince(pairId, 0) || []; return arr.length ? (arr[arr.length - 1].seq || 0) : 0 } catch { return 0 } })()
+        for await (const ev of (events as any).stream(pairId, since)) {
           const e = ev.result
-          if (e.type === 'state') {
+          if (e.type === 'state' && e.epoch === targetEpoch) {
             const now = db.getTask(id)
             if (now) {
               const st = currentStateForEpoch(pairId, parseTaskId(id).epoch, viewerRole)
               const isTerminalState = isTerminal(st)
+              const needsInput = st === 'input-required'
               
               yield createStatusUpdateEvent({
                 taskId: id,
                 pairId,
                 state: st,
                 message: e.status?.message,
-                isFinal: isTerminalState
+                isFinal: isTerminalState || needsInput
               })
               
-              // Close stream only if terminal
-              if (isTerminalState) {
+              // Close stream if terminal or needs input
+              if (isTerminalState || needsInput) {
                 break
               }
             }

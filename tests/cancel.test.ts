@@ -22,30 +22,23 @@ describe("Cancel semantics", () => {
       for await (const _ of parseSse<any>(res.body!)) break; // initial snapshot
     }
 
-    // Start responder resubscribe stream
-    const acSub = new AbortController();
-    const sub = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, signal: acSub.signal, body: JSON.stringify({ jsonrpc:'2.0', id:'sub', method:'tasks/resubscribe', params:{ id: respTaskId } }) });
-    expect(sub.ok).toBeTrue();
-
-    // Kick off cancel on initiator task after we consume the first snapshot
-    let sawCanceledUpdate = false;
-    const reader = (async () => {
-      let seenFirst = false;
-    for await (const frame of parseSse<any>(sub.body!)) {
-      if (!seenFirst) { seenFirst = true; continue; }
-      if (frame?.kind === 'status-update' && frame?.status?.state === 'canceled') { sawCanceledUpdate = true; acSub.abort(); break; }
-    }
-    })();
-
     // Issue cancel from initiator
     const cancelRes = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id:'cancel', method:'tasks/cancel', params:{ id: initTaskId } }) });
     expect(cancelRes.ok).toBeTrue();
     const cancelJson = await cancelRes.json();
     expect(cancelJson.result?.status?.state).toBe('canceled');
 
-    // Wait for responder stream to observe canceled status
-    await reader;
-    expect(sawCanceledUpdate).toBeTrue();
+    // Open responder resubscribe AFTER cancel; expect one final canceled snapshot
+    {
+      const sub2 = await fetch(a2a, { method:'POST', headers:{ 'content-type':'application/json','accept':'text/event-stream' }, body: JSON.stringify({ jsonrpc:'2.0', id:'sub2', method:'tasks/resubscribe', params:{ id: respTaskId } }) });
+      expect(sub2.ok).toBeTrue();
+      const frames: any[] = [];
+      for await (const f of parseSse<any>(sub2.body!)) frames.push(f);
+      expect(frames.length).toBe(1);
+      expect(frames[0]?.kind).toBe('status-update');
+      expect(frames[0]?.status?.state).toBe('canceled');
+      expect(frames[0]?.final).toBeTrue();
+    }
 
     // Verify events.log shows unsubscribe and combined canceled state
     {
