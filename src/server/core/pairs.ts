@@ -390,7 +390,7 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
       return toSnapshot(snapRow, limit)
     },
 
-    messageStream(pairId: string, m?: any) {
+    messageStream(pairId: string, m?: any, viewerLeaseId?: string | null) {
       const self = this
       return (async function* () {
         const p = db.getPair(pairId)
@@ -435,7 +435,9 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
             if (e.type === 'state' && e.epoch === targetEpoch) {
               const st = currentStateForTask(impliedId)
               const fin = isTerminal(st) || st === 'input-required'
-              yield createStatusUpdateEvent({ taskId: impliedId, pairId, state: st, message: e.status?.message, isFinal: fin })
+              // Project embedded message for viewer (stamp taskId/contextId/role)
+              const projMsg = e.status?.message ? projectForViewer(e.status.message, impliedId, viewerRole, undefined, viewerLeaseId) : undefined
+              yield createStatusUpdateEvent({ taskId: impliedId, pairId, state: st, message: projMsg, isFinal: fin })
               if (fin) break
             }
           }
@@ -443,7 +445,7 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
         }
 
         // Send the message and get result
-        const result = await self.messageSend(pairId, { ...(m||{}) }, m?.configuration)
+        const result = await self.messageSend(pairId, { ...(m||{}) }, m?.configuration, viewerLeaseId)
         const effectiveId = String((result as any)?.id || (suppliedTaskId || (currentEpoch > 0 ? initTaskId(pairId, currentEpoch) : `init:${pairId}#1`)))
         const state = (result as any)?.status?.state || 'submitted'
         const message = (result as any)?.status?.message
@@ -470,14 +472,15 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
           if (e.type === 'state' && e.epoch === targetEpoch) {
             const st = currentStateForTask(effectiveId)
             const fin = isTerminal(st) || st === 'input-required'
-            yield createStatusUpdateEvent({ taskId: effectiveId, pairId, state: st, message: e.status?.message, isFinal: fin })
+            const projMsg = e.status?.message ? projectForViewer(e.status.message, effectiveId, viewerRole, undefined, viewerLeaseId) : undefined
+            yield createStatusUpdateEvent({ taskId: effectiveId, pairId, state: st, message: projMsg, isFinal: fin })
             if (fin) break
           }
         }
       })()
     },
 
-    tasksResubscribe(pairId: string, id: string) {
+    tasksResubscribe(pairId: string, id: string, viewerLeaseId?: string | null) {
       const row = db.getTask(id)
       const { role: viewerRole } = parseTaskId(id)
       
@@ -513,11 +516,12 @@ export function createPairsService({ db, events, baseUrl }: Deps) {
               const isTerminalState = isTerminal(st)
               const needsInput = st === 'input-required'
               
+              const projMsg = e.status?.message ? projectForViewer(e.status.message, id, viewerRole, undefined, viewerLeaseId) : undefined
               yield createStatusUpdateEvent({
                 taskId: id,
                 pairId,
                 state: st,
-                message: e.status?.message,
+                message: projMsg,
                 isFinal: isTerminalState || needsInput
               })
               

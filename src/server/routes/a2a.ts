@@ -20,7 +20,8 @@ async function a2aHandler(c: Context<AppBindings>) {
   try {
     switch (method) {
       case 'message/stream': {
-        const stream = pairs.messageStream(pairId, params?.message)
+        const leaseHeader = c.req.header('x-banterop-backend-lease') || c.req.header('X-Banterop-Backend-Lease') || null
+        const stream = pairs.messageStream(pairId, params?.message, leaseHeader)
         return sse(c, stream, { rpcId: id })
       }
       case 'message/send': {
@@ -37,7 +38,9 @@ async function a2aHandler(c: Context<AppBindings>) {
         return c.json({ jsonrpc: '2.0', id, result: snap })
       }
       case 'tasks/resubscribe': {
-        const stream = pairs.tasksResubscribe(pairId, params?.id)
+        // Forward lease header if present for audience-scoped diagnostics
+        const leaseHeader = c.req.header('x-banterop-backend-lease') || c.req.header('X-Banterop-Backend-Lease') || null
+        const stream = pairs.tasksResubscribe(pairId, params?.id, leaseHeader)
         return sse(c, stream, { rpcId: id })
       }
       default:
