@@ -84,18 +84,26 @@ export class A2AClient {
     
     while (!signal?.aborted) {
       try {
-        for await (const event of this.tasksResubscribe(taskId, signal)) {
+        // Per-subscribe abort controller so we can end stream on input-required
+        const subscribeAbort = new AbortController();
+        const onOuterAbort = () => { try { subscribeAbort.abort((signal as any)?.reason) } catch {} };
+        try { signal?.addEventListener('abort', onOuterAbort, { once: true }); } catch {}
+        for await (const event of this.tasksResubscribe(taskId, subscribeAbort.signal)) {
           attempt = 0; // got data -> reset backoff
-          
-          // Check if this is a final status update
-          if (event && typeof event === 'object' && 'kind' in event) {
-            if (event.kind === 'status-update' && (event as A2AStatusUpdate).final === true) {
-              // Stop reconnecting after receiving final status
-              pauseReconnect = true;
-            }
+          let isFinal = false;
+          let isInputReq = false;
+          if (event && typeof event === 'object' && 'kind' in event && event.kind === 'status-update') {
+            isFinal = (event as A2AStatusUpdate).final === true;
+            isInputReq = String((event as any)?.status?.state || '') === 'input-required';
           }
-          
+          // Always yield the tick so the app can refresh
           yield;
+          // Then decide whether to end this subscribe cycle
+          if (isFinal || isInputReq) {
+            pauseReconnect = true;
+            if (isInputReq) { try { subscribeAbort.abort('input-required'); } catch {} }
+            break;
+          }
         }
         
         // Stream closed normally
