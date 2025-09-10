@@ -146,7 +146,8 @@ export function RunWizardPage() {
 
     // Choose who the platform will control vs. who the participant provides
     const myAgentForServer = simulatedAgentId || '';
-    const myAgentForClient = role || '';
+    // In server mode, the participant provides `role`; the client should play the counterpart
+    const myAgentForClient = simulatedAgentId || '';
 
     if (hasClient) {
       // Participant has a CLIENT → open /rooms/:roomId with scenario planner in auto mode
@@ -229,7 +230,8 @@ export function RunWizardPage() {
       const base = api.getBaseUrl();
       const scenarioUrl = `${base}/api/scenarios/${encodeURIComponent(String(sid))}`;
       const defaultSteps = 20;
-      const myAgentForClient = role || '';
+      // Participant provides a SERVER playing `role`; client must play the counterpart
+      const myAgentForClient = simulatedAgentId || '';
       const seed = {
         v: 2,
         scenarioUrl,
