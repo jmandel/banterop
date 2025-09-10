@@ -57,10 +57,24 @@ export class A2AClient {
     for await (const obj of parseSse<FrameResult>(res.body)) yield obj;
   }
   async *tasksResubscribe(taskId: string, signal?: AbortSignal) {
-    const body = { jsonrpc: '2.0', id: crypto.randomUUID(), method: 'tasks/resubscribe', params: { id: taskId } };
-    const res = await fetch(this.ep(), { method: 'POST', headers: { 'content-type':'application/json', 'accept':'text/event-stream' }, body: JSON.stringify(body), signal });
-    if (!res.ok || !res.body) throw new Error('resubscribe failed: ' + res.status);
-    for await (const obj of parseSse<FrameResult>(res.body)) yield obj;
+    const methods = ['tasks/resubscribe', 'tasks/subscribe'] as const;
+    const baseHeaders: Record<string,string> = { 'content-type':'application/json', 'accept':'text/event-stream' };
+    const extra = this.getHeaders ? (this.getHeaders() || {}) : {};
+
+    for (const method of methods) {
+      const body = { jsonrpc: '2.0', id: crypto.randomUUID(), method, params: { id: taskId } };
+      const res = await fetch(this.ep(), { method: 'POST', headers: { ...baseHeaders, ...extra }, body: JSON.stringify(body), signal });
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      const isSse = res.ok && ct.includes('text/event-stream');
+      if (!isSse || !res.body) {
+        // Not an SSE stream (e.g., JSON-RPC error like -32601). Try next alias.
+        try { res.body?.cancel(); } catch {}
+        continue;
+      }
+      for await (const obj of parseSse<FrameResult>(res.body)) yield obj;
+      return;
+    }
+    throw new Error('resubscribe failed: server did not provide SSE for tasks/resubscribe or tasks/subscribe');
   }
   // Resilient resubscribe ticks with backoff - pauses reconnect on final:true
   // Automatically resumes after the next message is sent for this task

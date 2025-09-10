@@ -37,7 +37,8 @@ async function a2aHandler(c: Context<AppBindings>) {
         const snap = await pairs.tasksCancel(pairId, params?.id)
         return c.json({ jsonrpc: '2.0', id, result: snap })
       }
-      case 'tasks/resubscribe': {
+      case 'tasks/resubscribe':
+      case 'tasks/subscribe': { // alias for spec compatibility
         // Forward lease header if present for audience-scoped diagnostics
         const leaseHeader = c.req.header('x-banterop-backend-lease') || c.req.header('X-Banterop-Backend-Lease') || null
         const stream = pairs.tasksResubscribe(pairId, params?.id, leaseHeader)
