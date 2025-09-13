@@ -116,29 +116,35 @@ export class A2AClient {
       for await (const obj of this.trySse(method, taskId, signal)) { handled = true; yield obj; }
       if (handled) return;
     }
-    yield* this.pollTask(taskId, 2000, signal);
+    // Fall back to periodic ticks with a minimal status probe to pause on terminal/input-required
+    yield* this.tickEvery(taskId, 2000, signal);
   }
 
-  private async *pollTask(taskId: string, intervalMs = 2000, signal?: AbortSignal): AsyncGenerator<A2AStatusUpdate> {
+  // Periodic tick generator for fallback mode that probes status to pause on
+  // terminal or input-required. It emits at most one status-update when a
+  // pause-worthy state is detected; otherwise it yields benign ticks.
+  private async *tickEvery(taskId: string, intervalMs = 2000, signal?: AbortSignal): AsyncGenerator<FrameResult> {
     while (!signal?.aborted) {
       try {
-        console.log(`[A2AClient] polling tasks/get id=${taskId}`);
         const t = await this.tasksGet(taskId);
-        if (t) {
-          const st = (t as any)?.status?.state as string | undefined;
+        const st = String((t as any)?.status?.state || '');
+        if (t && (this.isTerminal(st) || st.toLowerCase() === 'input-required')) {
           const ev: A2AStatusUpdate = {
             kind: 'status-update',
             taskId: t.id,
             contextId: t.contextId,
             status: t.status as any,
-            final: this.isTerminal(st),
+            // Treat input-required as final for pause semantics in fallback
+            final: true,
           };
           yield ev;
-          if (ev.final || String(st || '').toLowerCase() === 'input-required') return;
+          return; // pause reconnect; outer ticks() will wait for resume
         }
       } catch (e) {
         if (signal?.aborted) return;
       }
+      // Otherwise, yield a benign tick to drive downstream fetch
+      yield { kind:'message', role:'agent', parts:[] } as FrameResult;
       await sleep(intervalMs, signal);
     }
   }
