@@ -10,6 +10,59 @@ export class A2AClient {
   constructor(private endpoint: string, private getHeaders?: () => Record<string,string> | undefined) {}
   private ep() { return this.endpoint }
 
+  // Helpers for clarity
+  private makeHeaders(acceptSse: boolean): Record<string,string> {
+    const base: Record<string,string> = { 'content-type':'application/json' };
+    if (acceptSse) base['accept'] = 'text/event-stream';
+    const extra = this.getHeaders ? (this.getHeaders() || {}) : {};
+    return { ...base, ...extra };
+  }
+  private safeCancel(stream?: ReadableStream | null) {
+    try {
+      const s: any = stream as any;
+      if (!s) return;
+      if (typeof s.locked === 'boolean' && s.locked) return;
+      const p = s.cancel?.();
+      if (p && typeof p.then === 'function') { p.catch?.(() => {}); }
+    } catch {}
+  }
+  private isJson(ct: string) { return (ct || '').includes('application/json'); }
+  private isSse(ct: string) { return (ct || '').includes('text/event-stream'); }
+  private isTerminal(state?: string) {
+    const v = String(state || '').toLowerCase();
+    return v === 'completed' || v === 'canceled' || v === 'failed' || v === 'rejected';
+  }
+  private async *trySse(method: 'tasks/resubscribe'|'tasks/subscribe', taskId: string, signal?: AbortSignal): AsyncGenerator<FrameResult> {
+    console.log(`[A2AClient] SSE try ${method} id=${taskId}`);
+    const body = { jsonrpc: '2.0', id: crypto.randomUUID(), method, params: { id: taskId } };
+    const res = await fetch(this.ep(), { method: 'POST', headers: this.makeHeaders(true), body: JSON.stringify(body), signal });
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (!res.ok) { console.warn(`[A2AClient] SSE ${method} HTTP ${res.status} ${res.statusText || ''} → fallback`); this.safeCancel(res.body); return; }
+    if (this.isJson(ct)) {
+      try {
+        const j = await res.json();
+        if (j && j.error) {
+          const code = j.error?.code;
+          const msg = String(j.error?.message || '');
+          console.warn(`[A2AClient] SSE ${method} JSON-RPC error code=${code} msg=${msg} → fallback`);
+        } else {
+          console.warn(`[A2AClient] SSE ${method} JSON (not SSE) → fallback`);
+        }
+      } catch {
+        console.warn(`[A2AClient] SSE ${method} JSON parse error → fallback`);
+      }
+      return;
+    }
+    if (!this.isSse(ct) || !res.body) { console.warn(`[A2AClient] SSE ${method} unexpected content-type ct=${ct || '(none)'} → fallback`); this.safeCancel(res.body); return; }
+    let sawFrame = false;
+    try {
+      for await (const obj of parseSse<FrameResult>(res.body)) { sawFrame = true; yield obj; }
+    } catch {
+      // ignore parse errors, treat as failure if no frames
+    }
+    if (!sawFrame) { console.warn(`[A2AClient] SSE ${method} no frames → fallback`); this.safeCancel(res.body); return; }
+  }
+
   // Resume coordination: when messageSend is called for a task that had
   // paused reconnect (after final:true), notify ticks() to resume.
   private resumePending: Set<string> = new Set();
@@ -58,23 +111,36 @@ export class A2AClient {
   }
   async *tasksResubscribe(taskId: string, signal?: AbortSignal) {
     const methods = ['tasks/resubscribe', 'tasks/subscribe'] as const;
-    const baseHeaders: Record<string,string> = { 'content-type':'application/json', 'accept':'text/event-stream' };
-    const extra = this.getHeaders ? (this.getHeaders() || {}) : {};
-
     for (const method of methods) {
-      const body = { jsonrpc: '2.0', id: crypto.randomUUID(), method, params: { id: taskId } };
-      const res = await fetch(this.ep(), { method: 'POST', headers: { ...baseHeaders, ...extra }, body: JSON.stringify(body), signal });
-      const ct = (res.headers.get('content-type') || '').toLowerCase();
-      const isSse = res.ok && ct.includes('text/event-stream');
-      if (!isSse || !res.body) {
-        // Not an SSE stream (e.g., JSON-RPC error like -32601). Try next alias.
-        try { res.body?.cancel(); } catch {}
-        continue;
-      }
-      for await (const obj of parseSse<FrameResult>(res.body)) yield obj;
-      return;
+      let handled = false;
+      for await (const obj of this.trySse(method, taskId, signal)) { handled = true; yield obj; }
+      if (handled) return;
     }
-    throw new Error('resubscribe failed: server did not provide SSE for tasks/resubscribe or tasks/subscribe');
+    yield* this.pollTask(taskId, 2000, signal);
+  }
+
+  private async *pollTask(taskId: string, intervalMs = 2000, signal?: AbortSignal): AsyncGenerator<A2AStatusUpdate> {
+    while (!signal?.aborted) {
+      try {
+        console.log(`[A2AClient] polling tasks/get id=${taskId}`);
+        const t = await this.tasksGet(taskId);
+        if (t) {
+          const st = (t as any)?.status?.state as string | undefined;
+          const ev: A2AStatusUpdate = {
+            kind: 'status-update',
+            taskId: t.id,
+            contextId: t.contextId,
+            status: t.status as any,
+            final: this.isTerminal(st),
+          };
+          yield ev;
+          if (ev.final || String(st || '').toLowerCase() === 'input-required') return;
+        }
+      } catch (e) {
+        if (signal?.aborted) return;
+      }
+      await sleep(intervalMs, signal);
+    }
   }
   // Resilient resubscribe ticks with backoff - pauses reconnect on final:true
   // Automatically resumes after the next message is sent for this task
@@ -157,7 +223,9 @@ export class A2AClient {
   }
   async tasksGet(taskId: string): Promise<A2ATask | null> {
     const body = { jsonrpc:'2.0', id: crypto.randomUUID(), method: 'tasks/get', params: { id: taskId } };
-    const res = await fetch(this.ep(), { method:'POST', headers: { 'content-type':'application/json' }, body: JSON.stringify(body) });
+    const baseHeaders: Record<string,string> = { 'content-type':'application/json' };
+    const extra = this.getHeaders ? (this.getHeaders() || {}) : {};
+    const res = await fetch(this.ep(), { method:'POST', headers: { ...baseHeaders, ...extra }, body: JSON.stringify(body) });
     const j = await res.json();
     return j.result || null;
   }
